@@ -23,6 +23,13 @@ const _MA_SERVICES = [
         logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/tidal-light.png',
         connect: (pid) => `/auth/tidal?profile_id=${pid}`,
     },
+    {
+        id: 'listenbrainz', name: 'ListenBrainz', brand: '#eb743b', dark: true,
+        logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/listenbrainz.png',
+        type: 'token',
+        saveUrl: '/api/profiles/me/listenbrainz',
+        hint: 'Paste your token from listenbrainz.org/profile',
+    },
 ];
 
 function _maEsc(s) {
@@ -99,6 +106,11 @@ function _maRender(body, data) {
             action = `
                 <span class="ma-account">${_maEsc(c.account || 'Connected')}</span>
                 <button class="ma-btn ma-btn--ghost" onclick="disconnectMyAccount('${svc.id}')">Disconnect</button>`;
+        } else if (svc.type === 'token') {
+            action = `
+                <input type="password" class="ma-token-input" id="ma-token-${svc.id}" placeholder="Paste token"
+                       title="${_maEsc(svc.hint || '')}">
+                <button class="ma-btn ma-btn--connect" onclick="saveMyAccountToken('${svc.id}')">Save</button>`;
         } else {
             action = `<button class="ma-btn ma-btn--connect" onclick="connectMyAccount('${svc.id}')">Connect</button>`;
         }
@@ -133,6 +145,29 @@ function connectMyAccount(serviceId) {
             setTimeout(_maLoad, 600);  // give the callback a moment to persist
         }
     }, 800);
+}
+
+async function saveMyAccountToken(serviceId) {
+    const svc = _MA_SERVICES.find(s => s.id === serviceId);
+    if (!svc || !svc.saveUrl) return;
+    const input = document.getElementById(`ma-token-${serviceId}`);
+    const token = (input && input.value || '').trim();
+    if (!token) { if (typeof showToast === 'function') showToast('Paste a token first', 'info'); return; }
+    try {
+        const res = await fetch(svc.saveUrl, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            if (typeof showToast === 'function') showToast(`${svc.name} connected`, 'success');
+            _maLoad();
+        } else if (typeof showToast === 'function') {
+            showToast(data.error || 'Could not connect', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Could not connect', 'error');
+    }
 }
 
 async function disconnectMyAccount(serviceId) {

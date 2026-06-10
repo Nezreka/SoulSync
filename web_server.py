@@ -25430,6 +25430,19 @@ def _profile_tidal_connection(profile_id):
         return (False, None)
 
 
+def _profile_listenbrainz_connection(profile_id):
+    """(connected, username) for a profile's OWN ListenBrainz token."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    try:
+        s = get_database().get_profile_listenbrainz(profile_id) or {}
+        if s.get('token'):
+            return (True, s.get('username'))
+    except Exception as e:
+        logger.debug("profile %s listenbrainz connection check failed: %s", profile_id, e)
+    return (False, None)
+
+
 @app.route('/api/profiles/me/connections', methods=['GET'])
 def get_my_connections():
     """Per-profile playlist-service connection status for the My Accounts modal.
@@ -25438,12 +25451,14 @@ def get_my_connections():
         pid = get_current_profile_id()
         sp_connected, sp_account = _profile_spotify_connection(pid)
         td_connected, td_account = _profile_tidal_connection(pid)
+        lb_connected, lb_account = _profile_listenbrainz_connection(pid)
         return jsonify({
             'success': True,
             'is_admin': pid == 1,
             'connections': {
                 'spotify': {'connected': sp_connected, 'account': sp_account},
                 'tidal': {'connected': td_connected, 'account': td_account},
+                'listenbrainz': {'connected': lb_connected, 'account': lb_account},
             },
         })
     except Exception as e:
@@ -25472,9 +25487,17 @@ def _disconnect_profile_tidal(pid):
     clear_profile_tidal_client(pid)
 
 
+def _disconnect_profile_listenbrainz(pid):
+    try:
+        get_database().clear_profile_listenbrainz(pid)
+    except Exception as e:
+        logger.debug("could not clear profile listenbrainz: %s", e)
+
+
 _PROFILE_DISCONNECTORS = {
     'spotify': _disconnect_profile_spotify,
     'tidal': _disconnect_profile_tidal,
+    'listenbrainz': _disconnect_profile_listenbrainz,
 }
 
 

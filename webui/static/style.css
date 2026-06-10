@@ -67723,3 +67723,8 @@ body.em-scroll-lock { overflow: hidden; }
 .ma-btn--ghost { background: transparent; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.18); }
 .ma-btn--ghost:hover { background: rgba(255,255,255,0.06); color: #fff; }
 .ma-disc.ma-disc--dark { background: #1f2329; }
+.ma-token-input {
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.14); border-radius: 8px;
+    padding: 7px 11px; color: #fff; font-size: 0.82rem; width: 150px;
+}
+.ma-token-input:focus { outline: none; border-color: var(--ma-brand); }
