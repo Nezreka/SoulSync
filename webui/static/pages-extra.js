@@ -2342,6 +2342,26 @@ function _updateDlNavBadge(count) {
     }
 }
 
+function _adlVerifBadge(dl) {
+    // Verification badge for completed downloads — how this file passed
+    // verification (status comes from library_history / the live task):
+    // verified = clean AcoustID pass; unverified = imported but not
+    // hard-confirmed (cross-script/ambiguous/no fingerprint match);
+    // force_imported = accepted as best candidate after the retry budget was
+    // exhausted (version-mismatch fallback).
+    if (dl.status !== 'completed') return '';
+    if (dl.verification_status === 'force_imported') {
+        return ' <span class="verif-badge verif-force" title="Force-imported: accepted as best available candidate after repeated mismatches (version-mismatch fallback). Library AcoustID scans report these as informational.">⚑</span>';
+    }
+    if (dl.verification_status === 'unverified') {
+        return ' <span class="verif-badge verif-unverified" title="Imported but not hard-verified (AcoustID could not confirm — e.g. cross-script metadata or no fingerprint match).">⚠</span>';
+    }
+    if (dl.verification_status === 'verified') {
+        return ' <span class="verif-badge verif-ok" title="AcoustID verified: audio fingerprint matches the expected track.">✔</span>';
+    }
+    return '';
+}
+
 function _adlRender() {
     const list = document.getElementById('adl-list');
     const empty = document.getElementById('adl-empty');
@@ -2449,6 +2469,7 @@ function _adlRender() {
         for (const dl of section.items) {
             const statusClass = _adlStatusClass(dl.status);
             const statusLabel = _adlStatusLabel(dl.status);
+            // (verification badge appended next to the label via _adlVerifBadge)
             const title = _adlEsc(dl.title || 'Unknown Track');
             const artist = _adlEsc(dl.artist || '');
             const album = _adlEsc(dl.album || '');
@@ -2488,7 +2509,7 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}
+                    ${statusLabel}${_adlVerifBadge(dl)}
                 </div>
                 ${cancelBtnHtml}
             </div>`;

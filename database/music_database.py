@@ -636,7 +636,7 @@ class MusicDatabase:
             if 'download_source' not in lh_cols:
                 cursor.execute("ALTER TABLE library_history ADD COLUMN download_source TEXT")
                 logger.info("Added download_source column to library_history")
-            for _col in ['source_track_id', 'source_track_title', 'source_filename', 'acoustid_result', 'source_artist']:
+            for _col in ['source_track_id', 'source_track_title', 'source_filename', 'acoustid_result', 'source_artist', 'verification_status']:
                 if _col not in lh_cols:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
@@ -12811,7 +12811,7 @@ class MusicDatabase:
                                   quality=None, server_source=None, file_path=None, thumb_url=None,
                                   download_source=None, source_track_id=None, source_track_title=None,
                                   source_filename=None, acoustid_result=None, source_artist=None,
-                                  origin=None, origin_context=None):
+                                  origin=None, origin_context=None, verification_status=None):
         """Record a download or import event to the library history table.
 
         ``origin``/``origin_context`` record what TRIGGERED the download
@@ -12824,11 +12824,12 @@ class MusicDatabase:
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
                                              quality, server_source, file_path, thumb_url, download_source,
                                              source_track_id, source_track_title, source_filename,
-                                             acoustid_result, source_artist, origin, origin_context)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             acoustid_result, source_artist, origin, origin_context,
+                                             verification_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url,
                   download_source, source_track_id, source_track_title, source_filename,
-                  acoustid_result, source_artist, origin, origin_context))
+                  acoustid_result, source_artist, origin, origin_context, verification_status))
             conn.commit()
             return True
         except Exception as e:
