@@ -11163,14 +11163,18 @@ def _resolve_library_file_path(file_path):
     path_parts = file_path.replace('\\', '/').split('/')
 
     # Try progressively shorter path suffixes against each candidate directory
-    # (skip index 0 to avoid drive letter issues)
+    # (skip index 0 to avoid drive letter issues). find_on_disk matches each
+    # component exactly when present, else folds typographic confusables (#833:
+    # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
+    # matches always win, so paths that already resolved are unaffected.
+    from core.library.path_resolve import find_on_disk
     for base_dir in [transfer_dir, download_dir] + list(library_dirs):
         if not base_dir or not os.path.isdir(base_dir):
             continue
         for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
+            found = find_on_disk(base_dir, path_parts[i:])
+            if found:
+                return found
 
     return None
 
