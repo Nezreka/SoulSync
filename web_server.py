@@ -25952,9 +25952,14 @@ def start_watchlist_scan():
                     'current_track_name': '',
                     'tracks_found_this_scan': 0,
                     'tracks_added_this_scan': 0,
-                    'recent_wishlist_additions': []
+                    'recent_wishlist_additions': [],
+                    # #831: full per-run ledger of found tracks (added vs
+                    # skipped) so the completed-scan summary can list WHICH
+                    # tracks the "New tracks / Added to wishlist" counts mean.
+                    'scan_track_events': [],
+                    'scan_run_id': datetime.now().strftime('%Y%m%d-%H%M%S'),
                 })
-                
+
                 scan_results = []
 
                 # Pause enrichment workers during scan to reduce API contention
