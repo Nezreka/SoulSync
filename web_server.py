@@ -390,6 +390,41 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+# --- Launch PIN gate (before_request hook) ---
+@app.before_request
+def _enforce_launch_pin():
+    """Server-side enforcement of the launch PIN (#832).
+
+    The PIN was previously a client-only overlay — removing the div (Safari
+    "Hide Distracting Items", devtools, curl) gave full API access. This rejects
+    every request from an unverified session with 401 while the launch lock is
+    on, except the page shell + the unlock flow + the key-authed public API.
+    No-ops entirely when ``security.require_pin_on_launch`` is off (the default).
+    """
+    try:
+        require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+    except Exception:
+        require_pin = False
+    if not require_pin:
+        return
+    from core.security.launch_lock import request_is_locked, is_html_navigation
+    if request_is_locked(
+        request.path, request.method,
+        require_pin=require_pin,
+        pin_verified=bool(session.get('launch_pin_verified', False)),
+    ):
+        # A browser navigating to a sub-page (deep link / refresh) should land
+        # on the lock screen, not raw JSON — bounce it to the root, which serves
+        # the lock UI. Programmatic fetch/XHR get the JSON so the frontend reacts.
+        if is_html_navigation(
+            request.method,
+            request.headers.get('Accept', ''),
+            request.headers.get('Sec-Fetch-Mode', ''),
+        ):
+            return redirect('/')
+        return jsonify({"error": "locked", "launch_pin_required": True}), 401
+
+
 # --- Profile Context (before_request hook) ---
 @app.before_request
 def _set_profile_context():
@@ -25059,8 +25094,12 @@ def get_current_profile():
 
         # Check if launch PIN is required
         require_pin = config_manager.get('security.require_pin_on_launch', False) if config_manager else False
-        # Check if PIN was verified this page load, then consume the flag
-        pin_verified = session.pop('launch_pin_verified', False)
+        # #832: READ (don't pop) the verified flag — the server-side gate
+        # (_enforce_launch_pin) relies on it persisting for the whole session,
+        # so verified requests keep passing. Verification now lasts the session
+        # (until logout / cookie expiry) instead of one page load — which is
+        # both what an enforced gate requires and the correct security model.
+        pin_verified = session.get('launch_pin_verified', False)
 
         return jsonify({
             'success': True,
