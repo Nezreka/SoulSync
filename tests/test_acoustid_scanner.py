@@ -199,7 +199,11 @@ def test_scanner_still_flags_genuine_artist_mismatch():
             'best_score': 0.99,
             'recordings': [{
                 'title': 'Some Track',
-                'artist': 'Different Band, Other Person & Random Featuring',
+                # Clearly-different multi-value credit (artist sim < 0.30). The
+                # unified core gives 0.30-0.60 ("ambiguous") the benefit of the
+                # doubt, so a genuine-mismatch assertion needs an artist that's
+                # unambiguously different.
+                'artist': 'Metallica, Slayer & Anthrax',
             }],
         },
     )
@@ -468,7 +472,9 @@ def test_scanner_falls_back_to_db_when_file_tag_missing(monkeypatch):
             'best_score': 0.99,
             'recordings': [{
                 'title': 'Some Track',
-                'artist': 'Different Band',
+                # Unambiguously different artist (sim < 0.30) so the unified
+                # core flags it (0.30-0.60 would be treated as ambiguous).
+                'artist': 'Metallica',
             }],
         },
     )
@@ -779,3 +785,34 @@ def test_scanner_still_flags_when_duration_matches():
     )
 
     assert len(captured_findings) == 1
+
+
+def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
+    """Anime-OST track: AcoustID returns the kanji artist with a <Vocal: ...>
+    credit. With the MusicBrainz alias bridging 澤野弘之 ↔ Sawano Hiroyuki, the
+    unified verification core recognises the match, so the library scan must NOT
+    create a false 'Wrong download' finding (it did before, stripping all
+    non-ASCII and never consulting aliases)."""
+    import core.repair_jobs.acoustid_scanner as scanner_mod
+    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
+                        lambda name: ["澤野弘之"], raising=False)
+    job = AcoustIDScannerJob()
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("7", "Call Your Name", "Sawano Hiroyuki",
+                   "/music/cyn.flac", 15, "Attack on Titan OST", None, None),
+        captured=captured,
+    )
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.97,
+            'recordings': [{'title': 'call your name',
+                            'artist': '澤野弘之 <Vocal: mpi & CASG>'}],
+        },
+    )
+    result = JobResultStub()
+    job._scan_file('/music/cyn.flac', '7',
+                   {'title': 'Call Your Name', 'artist': 'Sawano Hiroyuki'},
+                   fake_acoustid, context, result,
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+    assert captured == [], f"cross-script track false-flagged: {captured}"
