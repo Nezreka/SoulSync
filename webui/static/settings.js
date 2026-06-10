@@ -1437,9 +1437,6 @@ async function loadSettingsData() {
         // sentinel, which the server treats as "keep existing").
         _wireRedactedSecrets();
 
-        // Admin "Connected Accounts" manager (no-op / empty for non-admins).
-        if (typeof loadCredentialSets === 'function') loadCredentialSets();
-
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
