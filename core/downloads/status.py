@@ -657,6 +657,7 @@ def _build_history_download_item(entry: dict) -> dict:
         'priority': _STATUS_PRIORITY['completed'],
         'quality': entry.get('quality') or '',
         'file_path': entry.get('file_path') or '',
+        'verification_status': entry.get('verification_status'),
         'is_persistent_history': True,
     }
 
