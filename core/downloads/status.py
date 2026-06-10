@@ -343,6 +343,9 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                 # 'verified' / 'unverified' / 'force_imported' — set by the
                 # import pipeline once post-processing finishes.
                 'verification_status': task.get('verification_status'),
+                # "2/5" while the quarantine-retry engine walks candidates.
+                'retry_info': task.get('retry_info'),
+                'retry_trigger': task.get('retry_trigger'),
             }
             _ti = task.get('track_info') if isinstance(task.get('track_info'), dict) else {}
             task_filename = task.get('filename') or _ti.get('filename')
@@ -742,6 +745,8 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'progress': progress,
                 'error': task.get('error_message'),
                 'verification_status': task.get('verification_status'),
+                'retry_info': task.get('retry_info'),
+                'retry_trigger': task.get('retry_trigger'),
                 'batch_id': batch_id,
                 'batch_name': batch.get('playlist_name') or batch.get('album_name') or '',
                 'batch_source': batch.get('source_page') or batch.get('initiated_from') or '',

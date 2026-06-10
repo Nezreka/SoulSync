@@ -67898,3 +67898,4 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-badge.verif-ok { color: #2ecc71; background: rgba(46,204,113,0.12); }
 .verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
 .verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }
+.adl-retry-info { margin-left: 6px; font-size: 11px; color: #e67e22; cursor: help; }
