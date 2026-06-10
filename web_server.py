@@ -25536,6 +25536,63 @@ def delete_service_credential_endpoint(credential_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/profiles/me/services', methods=['GET'])
+def get_my_service_selections():
+    """For the current profile: the available credential sets per service (id +
+    label, never secrets) and which one this profile has selected. Drives the
+    quick-switch modal's pills. Any profile may read this — it exposes no
+    secrets, only the admin-created set names. Stale-safe: a selection whose set
+    was deleted reports as None (fall back to the global/admin default)."""
+    try:
+        from core.credentials.store import SERVICE_CREDENTIAL_SCHEMA
+        db = get_database()
+        profile_id = get_current_profile_id()
+        out = {}
+        for service in SERVICE_CREDENTIAL_SCHEMA:
+            options = db.list_service_credentials(service)
+            selected = db.get_profile_service_credential_id(profile_id, service)
+            if selected not in {o['id'] for o in options}:
+                selected = None
+            out[service] = {
+                'options': [{'id': o['id'], 'label': o['label']} for o in options],
+                'selected_id': selected,
+            }
+        return jsonify({'success': True, 'services': out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/me/services/select', methods=['POST'])
+def select_my_service_credential():
+    """Set which admin-created credential set is active for the current profile
+    on a service. ``credential_id=null`` clears it (fall back to the global/admin
+    default). The caller can only pick an EXISTING set for that service — never
+    create one — so a non-admin can switch their account but not configure new
+    credentials. Not admin-gated by design: it only writes a per-profile pointer
+    and exposes no secrets."""
+    try:
+        from core.credentials.store import is_supported_service
+        data = request.json or {}
+        service = (data.get('service') or '').strip()
+        credential_id = data.get('credential_id')
+
+        if not is_supported_service(service):
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
+
+        db = get_database()
+        if credential_id is not None:
+            cred = db.get_service_credential(credential_id)
+            if not cred or cred['service'] != service:
+                return jsonify({'success': False, 'error': 'No such credential set for this service'}), 400
+
+        ok = db.set_profile_service_credential(get_current_profile_id(), service, credential_id)
+        if ok:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Failed to save selection'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])

@@ -106,3 +106,46 @@ def test_nonadmin_blocked_from_all_credential_writes(client, nonadmin_profile):
         'payload': {'base_url': 'http://p', 'token': 't'}}).status_code == 403
     assert client.put('/api/credentials/1', json={'label': 'x'}).status_code == 403
     assert client.delete('/api/credentials/1').status_code == 403
+
+
+# ── Phase 2: per-profile selection (any profile selects among existing sets) ──
+
+def test_profile_selects_among_existing_sets(client, nonadmin_profile):
+    # Admin creates two Spotify sets.
+    a = client.post('/api/credentials', json={'service': 'spotify', 'label': 'Acct A',
+                    'payload': {'client_id': 'a', 'client_secret': 's'}}).get_json()['id']
+    b = client.post('/api/credentials', json={'service': 'spotify', 'label': 'Acct B',
+                    'payload': {'client_id': 'b', 'client_secret': 's'}}).get_json()['id']
+
+    # Switch to a non-admin session — it can still READ options + SELECT.
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+
+    svc = client.get('/api/profiles/me/services').get_json()['services']['spotify']
+    assert {o['id'] for o in svc['options']} == {a, b}
+    assert svc['selected_id'] is None
+    assert 'secret' not in str(svc) and 's' not in [o.get('client_secret') for o in svc['options'] if 'client_secret' in o]
+
+    assert client.post('/api/profiles/me/services/select',
+                       json={'service': 'spotify', 'credential_id': b}).get_json()['success']
+    svc = client.get('/api/profiles/me/services').get_json()['services']['spotify']
+    assert svc['selected_id'] == b
+
+    # Clear → back to None
+    assert client.post('/api/profiles/me/services/select',
+                       json={'service': 'spotify', 'credential_id': None}).get_json()['success']
+    assert client.get('/api/profiles/me/services').get_json()['services']['spotify']['selected_id'] is None
+
+
+def test_select_rejects_wrong_service_or_missing_set(client):
+    sp = client.post('/api/credentials', json={'service': 'spotify', 'label': 'X',
+                     'payload': {'client_id': 'a', 'client_secret': 's'}}).get_json()['id']
+    # Selecting a spotify set under 'tidal' must be rejected.
+    assert client.post('/api/profiles/me/services/select',
+                       json={'service': 'tidal', 'credential_id': sp}).status_code == 400
+    # Nonexistent id rejected.
+    assert client.post('/api/profiles/me/services/select',
+                       json={'service': 'spotify', 'credential_id': 999999}).status_code == 400
+    # Unsupported service rejected.
+    assert client.post('/api/profiles/me/services/select',
+                       json={'service': 'itunes', 'credential_id': None}).status_code == 400
