@@ -44,6 +44,8 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
         'replaygain_track_peak': None,
         'replaygain_album_gain': None,
         'replaygain_album_peak': None,
+        # SoulSync verification status ('verified'/'unverified'/'force_imported')
+        'verification_status': None,
     }
 
     if not file_path or not os.path.exists(file_path):
@@ -80,6 +82,10 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
                 except (ValueError, TypeError):
                     pass
             result['has_cover_art'] = bool(audio.tags.getall('APIC'))
+            for fr in audio.tags.getall('TXXX'):
+                if getattr(fr, 'desc', '') == 'SOULSYNC_VERIFICATION' and fr.text:
+                    result['verification_status'] = str(fr.text[0])
+                    break
 
         elif isinstance(audio, (FLAC, OggVorbis)) or type(audio).__name__ == 'OggOpus':
             # FLAC / OGG
@@ -102,6 +108,7 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             else:
                 # OGG doesn't have a standard picture field we can easily check
                 result['has_cover_art'] = False
+            result['verification_status'] = _vorbis_first(audio, 'soulsync_verification')
 
         elif isinstance(audio, MP4):
             # MP4 / M4A
@@ -118,6 +125,12 @@ def read_file_tags(file_path: str) -> Dict[str, Any]:
             if disk:
                 result['disc_number'] = disk[0][0] if isinstance(disk[0], tuple) else None
             result['has_cover_art'] = bool(audio.tags.get('covr', [])) if audio.tags else False
+            vs = (audio.tags or {}).get('----:com.soulsync:VERIFICATION')
+            if vs:
+                raw = vs[0]
+                result['verification_status'] = (
+                    raw.decode('utf-8', 'ignore') if isinstance(raw, bytes) else str(raw)
+                )
 
     except Exception as e:
         result['error'] = str(e)
@@ -154,6 +167,39 @@ def is_placeholder_meta(value: Any) -> bool:
         return True
     s = str(value).strip().lower()
     return s == '' or s in _PLACEHOLDER_META_VALUES
+
+
+def write_verification_status(file_path: str, status: str) -> bool:
+    """Embed the SoulSync verification status into the file's tags.
+
+    Vorbis comment ``SOULSYNC_VERIFICATION`` (FLAC/OGG/Opus), ID3
+    ``TXXX:SOULSYNC_VERIFICATION`` (MP3), MP4 freeform
+    ``----:com.soulsync:VERIFICATION``. The tag travels with the file so the
+    status survives DB resets; the AcoustID scan reads it back via
+    ``read_file_tags`` to refresh the DB column and to mark force-imported
+    fallbacks in its findings. Never raises; returns success.
+    """
+    if not status or not file_path or not os.path.exists(file_path):
+        return False
+    try:
+        audio = MutagenFile(file_path)
+        if audio is None:
+            return False
+        if getattr(audio, 'tags', None) is None and hasattr(audio, 'add_tags'):
+            audio.add_tags()
+        if isinstance(audio.tags, ID3):
+            audio.tags.delall('TXXX:SOULSYNC_VERIFICATION')
+            audio.tags.add(TXXX(encoding=3, desc='SOULSYNC_VERIFICATION', text=[status]))
+        elif isinstance(audio, MP4):
+            audio.tags['----:com.soulsync:VERIFICATION'] = [status.encode('utf-8')]
+        else:
+            # Vorbis-comment family (FLAC / OggVorbis / OggOpus)
+            audio['SOULSYNC_VERIFICATION'] = [status]
+        audio.save()
+        return True
+    except Exception as e:
+        logger.debug("write_verification_status failed for %s: %s", file_path, e)
+        return False
 
 
 def guard_placeholder_overwrite(db_val: Any, file_val: Any) -> Any:

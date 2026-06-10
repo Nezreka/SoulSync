@@ -22,10 +22,11 @@ from core.musicbrainz_client import MusicBrainzClient
 
 logger = get_logger("acoustid.verification")
 
-# Thresholds
-MIN_ACOUSTID_SCORE = 0.80       # Minimum AcoustID fingerprint score to trust
-TITLE_MATCH_THRESHOLD = 0.70    # Title similarity needed to consider a match
-ARTIST_MATCH_THRESHOLD = 0.60   # Artist similarity needed to consider a match
+# Thresholds — single definition lives in the shared core; re-exported here so
+# existing importers keep working and the values can't drift between paths.
+from core.matching.audio_verification import (  # noqa: E402
+    MIN_ACOUSTID_SCORE, TITLE_MATCH_THRESHOLD, ARTIST_MATCH_THRESHOLD,
+)
 
 # Single matching-engine instance so version detection reuses the same patterns
 # used by the pre-download Soulseek matcher (remix / live / acoustic /

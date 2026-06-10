@@ -2409,6 +2409,11 @@ class MusicDatabase:
             if 'musicbrainz_match_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_match_status TEXT")
                 added_tracks = True
+            if 'verification_status' not in tracks_columns:
+                # 'verified' / 'unverified' / 'force_imported' — set at import,
+                # refreshed by the AcoustID scan (which reads the file tag).
+                cursor.execute("ALTER TABLE tracks ADD COLUMN verification_status TEXT")
+                added_tracks = True
             if added_tracks:
                 columns_added = True
                 logger.info("Added MusicBrainz columns to tracks table")
