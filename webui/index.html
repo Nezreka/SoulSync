@@ -283,8 +283,8 @@
             </div>
 
             <!-- Status Section -->
-            <div class="status-section">
-                <h4 class="status-title">Service Status</h4>
+            <div class="status-section status-section--clickable" onclick="openServiceSwitchModal()" title="Switch which account each service uses" role="button" tabindex="0">
+                <h4 class="status-title">Service Status <span class="status-switch-hint">switch ▸</span></h4>
                 <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="metadata-source-name">Metadata Source</span>
@@ -4280,6 +4280,13 @@
                                 </div>
                             </div>
 
+                            <!-- Connected Accounts (admin-managed named credential sets) -->
+                            <div class="settings-group" data-stg="connections">
+                                <h3>Connected Accounts</h3>
+                                <p class="settings-hint">Save multiple named logins per service. Each profile can switch between them from the sidebar's Service Status panel. Secrets are stored encrypted and never shown again.</p>
+                                <div id="credential-sets-container" class="credential-sets-container"></div>
+                            </div>
+
                             <!-- Server Connections -->
                             <div class="settings-group" data-stg="connections">
                                 <h3>Server Connections</h3>
@@ -8190,6 +8197,7 @@
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='credential-sets.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
