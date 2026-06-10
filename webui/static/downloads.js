@@ -3060,8 +3060,19 @@ function _candidatesFmtDur(ms) {
 // rows (different click binding scope). ``showSourceBadge`` adds a small
 // per-row source pill — used in hybrid "All sources" mode where the user
 // otherwise can't tell which source a row came from.
+// Display label for a candidate's filename. Encoded ``id||title`` sources
+// (youtube/tidal/qobuz/hifi) carry the title after ``||`` — a '/' in that title
+// is part of the name, NOT a path separator, so it must not be basename-split
+// (issue #835: "YouSeeBIGGIRL/T:T" was showing as just "T:T"). Real file paths
+// (Soulseek) keep the rightmost-segment basename.
+function _ssShortFileLabel(filename) {
+    if (!filename) return '-';
+    if (filename.includes('||')) return filename.split('||').slice(1).join('||');
+    return filename.split(/[/\\]/).pop();
+}
+
 function _renderCandidateRow(c, index, rowClass, showSourceBadge) {
-    const shortFile = c.filename ? c.filename.split(/[/\\]/).pop() : '-';
+    const shortFile = _ssShortFileLabel(c.filename);
     const qBadge = c.quality
         ? `<span class="candidates-quality-badge candidates-quality-${c.quality.toLowerCase()}">${c.quality.toUpperCase()}</span>`
         : '';
