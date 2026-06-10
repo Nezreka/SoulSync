@@ -3665,8 +3665,16 @@ function processModalStatusUpdate(playlistId, data) {
             } else {
                 switch (task.status) {
                     case 'pending': statusText = '⏸️ Pending'; break;
-                    case 'searching': statusText = '🔍 Searching...'; break;
-                    case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                    case 'searching':
+                        statusText = '🔍 Searching...';
+                        // Quarantine-retry engine: show which attempt we're on
+                        // ("retry 2/5") while it walks the next-best candidates.
+                        if (task.retry_info) statusText += ` 🔁 retry ${task.retry_info}`;
+                        break;
+                    case 'downloading':
+                        statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`;
+                        if (task.retry_info) statusText += ` 🔁 retry ${task.retry_info}`;
+                        break;
                     case 'post_processing': statusText = '⌛ Processing...'; break;
                     case 'completed': {
                         statusText = '✅ Completed';

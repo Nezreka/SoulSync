@@ -250,6 +250,11 @@ def requeue_quarantined_task_for_retry(task_id, batch_id, trigger):
         task.pop('quarantine_entry_id', None)
         task['status'] = 'searching'
         task['status_change_time'] = time.time()
+        # Surface the retry progress to the UI ("attempt 2/5" next to the
+        # status while the task goes around again). Cleared implicitly on
+        # completion (UI only renders it for active/queued states).
+        task['retry_info'] = attempt_desc
+        task['retry_trigger'] = trigger
 
     logger.info(
         f"[Retry:{trigger}] Re-queuing task {task_id} for next-best candidate "

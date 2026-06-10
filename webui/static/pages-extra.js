@@ -2384,6 +2384,9 @@ function _adlRender() {
     if (_adlFilter === 'active') filtered = filtered.filter(d => activeStatuses.includes(d.status));
     else if (_adlFilter === 'queued') filtered = filtered.filter(d => queuedStatuses.includes(d.status));
     else if (_adlFilter === 'completed') filtered = filtered.filter(d => completedStatuses.includes(d.status));
+    else if (_adlFilter === 'unverified') filtered = filtered.filter(d =>
+        completedStatuses.includes(d.status) &&
+        (d.verification_status === 'unverified' || d.verification_status === 'force_imported'));
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
     const completedN = _adlData.filter(d =>
@@ -2509,7 +2512,7 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}${_adlVerifBadge(dl)}
+                    ${statusLabel}${_adlVerifBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
                 </div>
                 ${cancelBtnHtml}
             </div>`;
