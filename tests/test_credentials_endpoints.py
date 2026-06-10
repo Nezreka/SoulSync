@@ -322,17 +322,22 @@ def test_real_session_still_wins_over_background(client, nonadmin_profile):
 # client_getter; these prove that composition resolves per the current profile
 # context and stays on the global client for admin (the existing pipelines).
 
-def test_spotify_source_adapter_resolves_per_profile():
+def test_spotify_source_adapter_resolves_per_profile(monkeypatch):
     from core.playlists.sources.spotify import SpotifyPlaylistSource
+    from core.metadata import registry
+    # The real global Spotify client isn't a stable singleton across the suite,
+    # so pin it to a sentinel for an order-independent identity check.
+    sentinel = object()
+    monkeypatch.setattr(registry, 'get_spotify_client', lambda *a, **k: sentinel)
+    registry.register_profile_spotify_credentials_provider(lambda pid: None)
     src = SpotifyPlaylistSource(web_server.get_spotify_client_for_profile)
-    # admin / no override -> the global client (admin pipelines unchanged)
-    assert src._client() is web_server.spotify_client
-    # a background owner override flows through the resolver, re-resolved per
-    # call (unconnected profile -> safe global fallback, never a frozen client)
+    # admin / no override -> the global resolver (the sentinel)
+    assert src._client() is sentinel
+    # unconnected background owner override -> safe global fallback, re-resolved per call
     from core.profile_context import set_background_profile, reset_background_profile
     tok = set_background_profile(424242)
     try:
-        assert src._client() is web_server.spotify_client
+        assert src._client() is sentinel
     finally:
         reset_background_profile(tok)
 
