@@ -1400,10 +1400,47 @@ async function loadSettingsData() {
             console.error('Error checking dev mode:', error);
         }
 
+        // Secret fields now arrive masked as REDACTED_SECRET_SENTINEL (#832
+        // follow-up) — wire them so editing replaces the mask instead of typing
+        // on top of it, and an untouched field re-masks on blur (round-trips the
+        // sentinel, which the server treats as "keep existing").
+        _wireRedactedSecrets();
+
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
     }
+}
+
+// Mirrors ConfigManager.REDACTED_SENTINEL — secrets are never sent to the
+// browser; configured ones come back as this placeholder (rendered as dots in
+// the password inputs).
+const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
+
+function _wireRedactedSecrets() {
+    document.querySelectorAll('input[type="password"]').forEach(el => {
+        if (el.dataset.redactWired === '1') return;
+        el.dataset.redactWired = '1';
+        // Clear the mask on focus so the user types a fresh value, not on top
+        // of the sentinel.
+        el.addEventListener('focus', () => {
+            if (el.value === REDACTED_SECRET_SENTINEL) {
+                el.value = '';
+                el.dataset.wasRedacted = '1';
+            }
+        });
+        // Untouched (focused but not edited, left empty) → restore the mask so
+        // save round-trips the sentinel and the real secret is kept.
+        el.addEventListener('blur', () => {
+            if (el.dataset.wasRedacted === '1' && el.value === '') {
+                el.value = REDACTED_SECRET_SENTINEL;
+                el.dataset.wasRedacted = '';
+            }
+        });
+        // Real typing means a genuine change/clear — drop the redacted mark so
+        // blur won't re-mask (an emptied field then saves as a real clear).
+        el.addEventListener('input', () => { el.dataset.wasRedacted = ''; });
+    });
 }
 
 async function changeLogLevel() {
