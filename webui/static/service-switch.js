@@ -61,6 +61,16 @@ function _ssDownloadInfo(id) {
 }
 
 function openServiceSwitchModal(tab) {
+    // Admin-only: active metadata source / media server / download source are
+    // app-wide infrastructure. Non-admins manage their own playlist accounts
+    // elsewhere (per-profile), not here.
+    try {
+        const ctx = (typeof getCurrentProfileContext === 'function') ? getCurrentProfileContext() : null;
+        if (ctx && !ctx.isAdmin) {
+            if (typeof showToast === 'function') showToast('Only the admin can change the active sources', 'info');
+            return;
+        }
+    } catch (_e) { /* if context unknown, fall through (defaults to admin) */ }
     _ssState.tab = _SS_TABS.some(t => t.id === tab) ? tab : 'metadata';
     let overlay = document.getElementById('service-switch-overlay');
     if (!overlay) {

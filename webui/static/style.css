@@ -67764,3 +67764,7 @@ body.em-scroll-lock { overflow: hidden; }
 }
 .ss-hybrid-logo { width: 26px; height: 26px; object-fit: contain; }
 .ss-hybrid-name { font-size: 0.9rem; }
+
+/* Service Status is admin-only — non-admins get no clickable affordance. */
+.status-section--locked { cursor: default; }
+.status-section--locked:hover { background: transparent; }
