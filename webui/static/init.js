@@ -863,6 +863,11 @@ function updateProfileIndicator() {
     name.textContent = currentProfile.name;
     indicator.style.display = 'flex';
 
+    // Service Status quick-switch is admin-only — drop the clickable affordance
+    // for non-admins so it doesn't look interactive.
+    const statusSection = document.querySelector('.status-section--clickable');
+    if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
+
     indicator.onclick = async () => {
         const res = await fetch('/api/profiles');
         const data = await res.json();
