@@ -42,10 +42,17 @@ def status_from_acoustid_result(result_value):
 def status_for_import(context: dict):
     """Status for a just-imported file from its pipeline context.
 
-    The version-mismatch fallback flag wins: a force-accepted file is
-    ``force_imported`` regardless of what the (earlier, failed) verification
-    said about the candidate.
+    Priority order:
+    1. A quarantine entry the user explicitly approved ("yes, import this
+       exact file") is a human decision — ``human_verified``, outranking
+       whatever the machine said about the candidate earlier.
+    2. The version-mismatch fallback flag: a force-accepted file is
+       ``force_imported`` regardless of what the (earlier, failed)
+       verification said.
+    3. The AcoustID result of this pipeline run.
     """
+    if context.get('_approved_quarantine_trigger'):
+        return HUMAN_VERIFIED
     if context.get('_version_mismatch_fallback'):
         return FORCE_IMPORTED
     return status_from_acoustid_result(context.get('_acoustid_result'))

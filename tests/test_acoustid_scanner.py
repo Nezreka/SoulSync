@@ -818,7 +818,7 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
     assert captured == [], f"cross-script track false-flagged: {captured}"
 
 
-def _force_imported_scan(monkeypatch, *, skip_setting):
+def _force_imported_scan(monkeypatch):
     """Drive a scan over a force-imported file whose fingerprint clearly
     mismatches. Returns the captured findings."""
     import core.repair_jobs.acoustid_scanner as scanner_mod
@@ -829,10 +829,6 @@ def _force_imported_scan(monkeypatch, *, skip_setting):
         lambda fpath: {'artist': None, 'verification_status': 'force_imported'},
     )
     job = AcoustIDScannerJob()
-    if skip_setting:
-        monkeypatch.setattr(job, '_get_settings',
-                            lambda ctx: {**job.default_settings,
-                                         'skip_force_imported': True})
     captured = []
     context = _make_finding_capturing_context(
         track_row=("42", "Wanted Song", "Real Artist",
@@ -857,17 +853,12 @@ def _force_imported_scan(monkeypatch, *, skip_setting):
 def test_force_imported_mismatch_is_reported_as_informational(monkeypatch):
     # The user opted into the fallback, so the scan must still TELL them the
     # file is e.g. an instrumental — but as 'info', clearly marked, not as a
-    # red Wrong-download warning.
-    captured = _force_imported_scan(monkeypatch, skip_setting=False)
+    # red Wrong-download warning. Only human_verified short-circuits the scan.
+    captured = _force_imported_scan(monkeypatch)
     assert len(captured) == 1
     assert captured[0]['severity'] == 'info'
     assert captured[0]['details'].get('force_imported') is True
     assert 'Force-imported' in captured[0]['title']
-
-
-def test_force_imported_can_be_skipped_via_setting(monkeypatch):
-    captured = _force_imported_scan(monkeypatch, skip_setting=True)
-    assert captured == []
 
 
 def test_human_verified_files_are_never_scanned(monkeypatch):
@@ -888,3 +879,79 @@ def test_human_verified_files_are_never_scanned(monkeypatch):
                    fake, context, JobResultStub(),
                    fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
     assert captured == []
+
+
+# ---------------------------------------------------------------------------
+# Scan-outcome persistence — the scan feeds the same review pipeline as
+# import-time verification (tag + tracks row + library_history rows).
+# ---------------------------------------------------------------------------
+
+
+def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_artist):
+    """Drive one _scan_file call and return (status_updates, tag_writes) where
+    status_updates is the list of (query, params) UPDATEs the scanner ran."""
+    import core.repair_jobs.acoustid_scanner as scanner_mod
+    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
+                        lambda name: [], raising=False)
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': None, 'verification_status': file_status})
+    tag_writes = []
+    monkeypatch.setattr(
+        'core.tag_writer.write_verification_status',
+        lambda fpath, status: tag_writes.append((fpath, status)) or True)
+    job = AcoustIDScannerJob()
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("9", "Call Your Name", expected_artist,
+                   "/music/cyn.flac", 1, "Album", None, None),
+        captured=captured)
+    fake = SimpleNamespace(fingerprint_and_lookup=lambda f: {
+        'best_score': 0.97,
+        'recordings': [{'title': 'Call Your Name', 'artist': aid_artist}]})
+    job._scan_file('/music/cyn.flac', '9',
+                   {'title': 'Call Your Name', 'artist': expected_artist},
+                   fake, context, JobResultStub(),
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+    conn = context.db._get_connection()
+    updates = [(q, p) for q, p in conn.cursor().executed
+               if 'verification_status' in q]
+    return updates, tag_writes, captured
+
+
+def test_scan_pass_backfills_verified_status(monkeypatch):
+    # Untagged file + clean fingerprint PASS → the scan backfills 'verified'
+    # into the tag, the tracks row AND library_history (review-queue feed).
+    updates, tag_writes, captured = _run_persistence_scan(
+        monkeypatch, file_status=None,
+        aid_artist='Sawano Hiroyuki', expected_artist='Sawano Hiroyuki')
+    assert captured == []
+    assert tag_writes == [('/music/cyn.flac', 'verified')]
+    assert any('tracks' in q and p == ('verified', '9') for q, p in updates)
+    assert any('library_history' in q and p == ('verified', '/music/cyn.flac')
+               for q, p in updates)
+
+
+def test_scan_skip_marks_untagged_file_unverified(monkeypatch):
+    # Title matches but the artist is ambiguous (cover/collab band?) → SKIP.
+    # An untagged file gets 'unverified' so it surfaces in the Downloads-page
+    # review queue instead of silently passing or being deleted.
+    updates, tag_writes, captured = _run_persistence_scan(
+        monkeypatch, file_status=None,
+        aid_artist='Mantilla', expected_artist='Metallica')
+    assert captured == []
+    assert tag_writes == [('/music/cyn.flac', 'unverified')]
+    assert any('tracks' in q and p == ('unverified', '9') for q, p in updates)
+    assert any('library_history' in q and p == ('unverified', '/music/cyn.flac')
+               for q, p in updates)
+
+
+def test_scan_skip_does_not_downgrade_verified(monkeypatch):
+    # A SKIP must not downgrade an import-time 'verified' (that check ran with
+    # richer candidate metadata). Status is refreshed, tag untouched.
+    updates, tag_writes, captured = _run_persistence_scan(
+        monkeypatch, file_status='verified',
+        aid_artist='Mantilla', expected_artist='Metallica')
+    assert captured == []
+    assert tag_writes == []
+    assert any('tracks' in q and p == ('verified', '9') for q, p in updates)
