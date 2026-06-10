@@ -25996,6 +25996,29 @@ def start_watchlist_scan():
                 else:
                     logger.warning("Watchlist scan cancelled — skipping post-scan steps")
 
+                # #831 round 2: persist this run + its track ledger so the
+                # Watchlist History modal can show what every past scan did.
+                try:
+                    _state = watchlist_scan_state
+                    get_database().save_watchlist_scan_run(
+                        run_id=_state.get('scan_run_id') or datetime.now().strftime('%Y%m%d-%H%M%S'),
+                        profile_id=scan_profile_id,
+                        status='cancelled' if was_cancelled else 'completed',
+                        started_at=(_state.get('started_at').isoformat()
+                                    if _state.get('started_at') else None),
+                        completed_at=(_state.get('completed_at') or datetime.now()).isoformat()
+                                     if not isinstance(_state.get('completed_at'), str)
+                                     else _state.get('completed_at'),
+                        total_artists=(_state.get('summary') or {}).get('total_artists',
+                                                                        _state.get('total_artists', 0)),
+                        artists_scanned=(_state.get('summary') or {}).get('successful_scans', 0),
+                        tracks_found=_state.get('tracks_found_this_scan', 0),
+                        tracks_added=_state.get('tracks_added_this_scan', 0),
+                        track_events=_state.get('scan_track_events') or [],
+                    )
+                except Exception as _hist_err:
+                    logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
+
                 # Post-scan steps — skip if cancelled
                 if not was_cancelled:
                     # Populate discovery pool from similar artists
@@ -26151,6 +26174,29 @@ def get_watchlist_scan_status():
     except Exception as e:
         logger.error(f"Error getting watchlist scan status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/scan/history', methods=['GET'])
+def get_watchlist_scan_history():
+    """Recent watchlist scan runs (counts only — ledgers fetched per run)."""
+    try:
+        limit = min(int(request.args.get('limit', 30) or 30), 100)
+        runs = get_database().get_watchlist_scan_runs(limit=limit)
+        return jsonify({"success": True, "runs": runs})
+    except Exception as e:
+        logger.error(f"Error getting watchlist scan history: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/watchlist/scan/history/<run_id>/tracks', methods=['GET'])
+def get_watchlist_scan_history_tracks(run_id):
+    """The track ledger (added/skipped) for one past scan run."""
+    try:
+        events = get_database().get_watchlist_scan_run_events(run_id)
+        return jsonify({"success": True, "events": events})
+    except Exception as e:
+        logger.error(f"Error getting watchlist scan history tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/watchlist/scan/cancel', methods=['POST'])
 def cancel_watchlist_scan():

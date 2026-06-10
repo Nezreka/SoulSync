@@ -19950,6 +19950,337 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #999;
 }
 
+/* ── #831 round 2: full-width live scan deck ───────────────────────────── */
+
+.wl-scan-deck {
+    width: 100%;
+    margin-top: 15px;
+    padding: 18px 20px 16px;
+    background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.07), rgba(255, 255, 255, 0.02) 55%);
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    border-radius: 14px;
+    backdrop-filter: blur(8px);
+    text-align: left;
+}
+
+.wl-scan-deck-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.wl-scan-live-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: rgb(var(--accent-rgb));
+    box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55);
+    animation: wl-live-pulse 1.6s ease-out infinite;
+}
+
+@keyframes wl-live-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0.55); }
+    70% { box-shadow: 0 0 0 9px rgba(var(--accent-rgb), 0); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0); }
+}
+
+.wl-scan-live-label {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.wl-scan-progress-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.wl-scan-counters {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+}
+
+.wl-scan-counter {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wl-scan-counter.added {
+    background: rgba(80, 200, 120, 0.1);
+    border-color: rgba(80, 200, 120, 0.25);
+}
+
+.wl-scan-counter-num {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    display: inline-block;
+}
+
+.wl-scan-counter.added .wl-scan-counter-num {
+    color: #6fd99a;
+}
+
+.wl-scan-counter-num.pop {
+    animation: wl-counter-pop 0.35s ease;
+}
+
+@keyframes wl-counter-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.35); }
+    100% { transform: scale(1); }
+}
+
+.wl-scan-counter-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.wl-scan-progress {
+    margin: 12px 0 14px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+}
+
+.wl-scan-progress-bar {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    position: relative;
+    transition: width 0.6s ease;
+}
+
+.wl-scan-progress-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    animation: wl-progress-shimmer 1.8s linear infinite;
+}
+
+@keyframes wl-progress-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+.wl-scan-deck-body {
+    display: grid;
+    grid-template-columns: minmax(260px, 1fr) minmax(280px, 1.2fr);
+    gap: 20px;
+}
+
+@media (max-width: 760px) {
+    .wl-scan-deck-body { grid-template-columns: 1fr; }
+}
+
+.wl-scan-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+}
+
+.wl-scan-stage-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+
+.wl-scan-artist-img {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: 2px solid rgb(var(--accent-rgb));
+    box-shadow: 0 0 18px rgba(var(--accent-rgb), 0.3);
+    object-fit: cover;
+    background: #1a1a1a;
+    flex-shrink: 0;
+}
+
+.wl-scan-album-img {
+    width: 64px;
+    height: 64px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    object-fit: cover;
+    background: #1a1a1a;
+    flex-shrink: 0;
+    transition: opacity 0.3s ease;
+}
+
+.wl-scan-stage-text {
+    min-width: 0;
+}
+
+.wl-scan-artist-name {
+    font-size: 16px;
+    font-weight: 700;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-scan-phase {
+    font-size: 12px;
+    color: rgba(var(--accent-light-rgb), 0.85);
+    margin-top: 2px;
+}
+
+.wl-scan-album-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-scan-track-name {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wl-scan-feed {
+    min-width: 0;
+}
+
+.wl-scan-feed-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #6fd99a;
+    margin-bottom: 6px;
+}
+
+.wl-scan-feed-list {
+    max-height: 176px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item {
+    padding: 5px 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item img {
+    width: 34px;
+    height: 34px;
+    border-radius: 5px;
+}
+
+.wl-scan-feed-list .watchlist-live-addition-item.is-new {
+    animation: wl-feed-slide-in 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes wl-feed-slide-in {
+    0% { opacity: 0; transform: translateY(-10px) scale(0.96); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── #831 round 2: scan history modal run cards ────────────────────────── */
+
+.wlh-run {
+    margin-bottom: 6px;
+}
+
+.wlh-run-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.wlh-run-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.wlh-run-when {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fff;
+}
+
+.wlh-run-status.cancelled {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: rgba(248, 113, 113, 0.12);
+    color: #f87171;
+}
+
+.wlh-run-stats {
+    margin-left: auto;
+    display: flex;
+    gap: 14px;
+}
+
+.wlh-run-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    font-size: 14px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.wlh-run-stat.added {
+    color: #6fd99a;
+}
+
+.wlh-run-stat i {
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.wlh-run-body {
+    padding: 8px 6px 4px 14px;
+}
+
+.wlh-run-body .origin-modal-loading,
+.wlh-empty {
+    padding: 16px;
+}
+
+.wlh-run-body .watchlist-live-addition-item {
+    margin-bottom: 4px;
+}
+
 /* Watchlist Search */
 
 .watchlist-search-input {
