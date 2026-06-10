@@ -182,6 +182,26 @@ def build_import_pipeline_runtime(
     )
 
 
+
+def _persist_verification_status(context, final_path):
+    """Compute + persist the verification status (verified / unverified /
+    force_imported) for a finished import: embedded tag on the file, plus
+    context['_verification_status'] for the history row and the Downloads UI.
+    MUST be called on EVERY success exit of post-processing (main, playlist
+    folder mode, simple download) — a missed exit means no badge and no tag.
+    Never raises."""
+    try:
+        from core.matching.verification_status import status_for_import
+        from core.tag_writer import write_verification_status
+        status = status_for_import(context)
+        if status:
+            context['_verification_status'] = status
+            if final_path:
+                write_verification_status(str(final_path), status)
+    except Exception as _vs_err:
+        logger.debug(f"verification-status persist skipped: {_vs_err}")
+
+
 def post_process_matched_download(context_key, context, file_path, runtime, metadata_runtime=None):
     on_download_completed = getattr(runtime, "on_download_completed", None)
     automation_engine = getattr(runtime, "automation_engine", None)
@@ -450,6 +470,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             logger.info(f"Simple download post-processing complete: {activity_target}")
             context['_simple_download_completed'] = True
             context['_final_path'] = str(destination)
+            _persist_verification_status(context, destination)
             emit_track_downloaded(context, automation_engine)
             record_library_history_download(context)
             record_download_provenance(context)
@@ -626,6 +647,8 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             if downsampled_path:
                 final_path = downsampled_path
                 context['_final_processed_path'] = final_path
+
+            _persist_verification_status(context, final_path)
 
             blasphemy_path = create_lossy_copy(final_path)
             if blasphemy_path:
@@ -944,19 +967,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             final_path = downsampled_path
             context['_final_processed_path'] = final_path
 
-        # Persist the verification status (verified / unverified / force_imported)
-        # as an embedded tag so it travels with the file and survives DB resets.
-        # Written BEFORE the lossy copy so the copy inherits it. Also stashed on
-        # the context so the wrapper can surface it on the Downloads page.
-        try:
-            from core.matching.verification_status import status_for_import
-            from core.tag_writer import write_verification_status
-            _verif_status = status_for_import(context)
-            if _verif_status:
-                context['_verification_status'] = _verif_status
-                write_verification_status(final_path, _verif_status)
-        except Exception as _vs_err:
-            logger.debug(f"verification-status persist skipped: {_vs_err}")
+        _persist_verification_status(context, final_path)
 
         blasphemy_path = create_lossy_copy(final_path)
         if blasphemy_path:
