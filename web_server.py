@@ -25595,6 +25595,126 @@ def select_my_service_credential():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+# ==================================================================================
+# QUICK-SWITCH: active metadata source / media server / download source
+# ----------------------------------------------------------------------------------
+# The read is open to any profile (so the sidebar modal renders). Setting is
+# admin-only and writes the GLOBAL config (same as the Settings page) — the
+# per-profile override for non-admins is a separate, later layer. `editable`
+# tells the UI whether to allow changes for the current profile.
+# ==================================================================================
+
+# Selectable metadata sources (mirrors the Settings <select>).
+_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+_QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
+# Single download sources (everything the mode accepts except 'hybrid').
+_QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
+
+
+def _qs_metadata_available(source):
+    try:
+        if source == 'spotify':
+            return bool(spotify_client and spotify_client.is_spotify_authenticated())
+        if source == 'discogs':
+            return bool(config_manager.get('discogs.token'))
+        return True
+    except Exception:
+        return True
+
+
+def _qs_server_available(server):
+    try:
+        if server == 'soulsync':
+            return True
+        if server == 'plex':
+            return bool(config_manager.get('plex.base_url') or config_manager.get('plex.token'))
+        return bool(config_manager.get(f'{server}.base_url'))
+    except Exception:
+        return True
+
+
+@app.route('/api/profiles/me/active-sources', methods=['GET'])
+def get_active_sources():
+    """Current active metadata source / media server / download source + the
+    available options, for the quick-switch modal. Readable by any profile;
+    reflects the global config (per-profile override is a later layer)."""
+    try:
+        mode = config_manager.get('download_source.mode', 'soulseek') or 'soulseek'
+        hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+        return jsonify({
+            'success': True,
+            'editable': get_current_profile_id() == 1,  # admin writes the global default
+            'metadata': {
+                'active': config_manager.get('metadata.fallback_source', 'deezer') or 'deezer',
+                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
+            },
+            'server': {
+                'active': config_manager.get_active_media_server(),
+                'options': [{'id': s, 'available': _qs_server_available(s)} for s in _QS_MEDIA_SERVERS],
+            },
+            'download': {
+                'mode': mode,
+                'hybrid_order': hybrid_order,
+                'options': [{'id': s} for s in _QS_DOWNLOAD_SOURCES],
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/active-sources', methods=['POST'])
+@admin_only
+def set_active_sources():
+    """Set the GLOBAL active metadata source / media server / download mode +
+    hybrid order (whichever fields are present). Admin-only; reuses the same
+    setters + client reloads the Settings save performs so changes take effect
+    immediately."""
+    try:
+        data = request.json or {}
+        changed = []
+
+        if 'metadata_source' in data:
+            src = data['metadata_source']
+            if src not in _QS_METADATA_SOURCES:
+                return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
+            config_manager.set('metadata.fallback_source', src)
+            invalidate_metadata_status_caches()
+            changed.append('metadata')
+
+        if 'media_server' in data:
+            srv = data['media_server']
+            if srv not in _QS_MEDIA_SERVERS:
+                return jsonify({'success': False, 'error': 'Unknown media server'}), 400
+            config_manager.set_active_media_server(srv)
+            for s in ('plex', 'jellyfin', 'navidrome'):
+                c = media_server_engine.client(s)
+                if c:
+                    if s == 'plex':
+                        c.server = None
+                    else:
+                        c.reload_config()
+            changed.append('server')
+
+        if 'download_mode' in data:
+            mode = data['download_mode']
+            if mode not in (_QS_DOWNLOAD_SOURCES + ['hybrid']):
+                return jsonify({'success': False, 'error': 'Unknown download mode'}), 400
+            config_manager.set('download_source.mode', mode)
+            changed.append('download')
+
+        if 'hybrid_order' in data and isinstance(data['hybrid_order'], list):
+            clean = [s for s in data['hybrid_order'] if s in _QS_DOWNLOAD_SOURCES]
+            config_manager.set('download_source.hybrid_order', clean)
+            changed.append('download')
+
+        if 'download' in changed and download_orchestrator:
+            download_orchestrator.reload_settings()
+
+        return jsonify({'success': True, 'changed': sorted(set(changed))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])

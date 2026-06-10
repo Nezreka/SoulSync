@@ -149,3 +149,35 @@ def test_select_rejects_wrong_service_or_missing_set(client):
     # Unsupported service rejected.
     assert client.post('/api/profiles/me/services/select',
                        json={'service': 'itunes', 'credential_id': None}).status_code == 400
+
+
+# ── Quick-switch: active source/server/download (admin=global, non-admin read-only) ──
+
+def test_active_sources_read_shape(client):
+    a = client.get('/api/profiles/me/active-sources').get_json()
+    assert a['success'] and a['editable'] is True   # default session = admin
+    assert a['metadata']['active'] and len(a['metadata']['options']) == 6
+    assert len(a['server']['options']) == 4
+    assert 'mode' in a['download'] and isinstance(a['download']['hybrid_order'], list)
+
+
+def test_admin_sets_global_active_sources(client):
+    assert client.post('/api/profiles/active-sources', json={'metadata_source': 'itunes'}).get_json()['success']
+    assert client.get('/api/profiles/me/active-sources').get_json()['metadata']['active'] == 'itunes'
+    # hybrid + order round-trips
+    client.post('/api/profiles/active-sources', json={'download_mode': 'hybrid', 'hybrid_order': ['hifi', 'soulseek']})
+    dl = client.get('/api/profiles/me/active-sources').get_json()['download']
+    assert dl['mode'] == 'hybrid' and dl['hybrid_order'] == ['hifi', 'soulseek']
+
+
+def test_active_sources_rejects_bad_values(client):
+    assert client.post('/api/profiles/active-sources', json={'metadata_source': 'nope'}).status_code == 400
+    assert client.post('/api/profiles/active-sources', json={'media_server': 'nope'}).status_code == 400
+    assert client.post('/api/profiles/active-sources', json={'download_mode': 'nope'}).status_code == 400
+
+
+def test_active_sources_nonadmin_readonly_and_blocked(client, nonadmin_profile):
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is False
+    assert client.post('/api/profiles/active-sources', json={'metadata_source': 'deezer'}).status_code == 403
