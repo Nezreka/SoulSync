@@ -67643,45 +67643,64 @@ body.em-scroll-lock { overflow: hidden; }
 
 .ss-body { display: flex; min-height: 320px; max-height: calc(86vh - 78px); }
 .ss-rail {
-    width: 168px; flex-shrink: 0; padding: 14px 10px; display: flex; flex-direction: column; gap: 6px;
-    border-right: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.18);
+    width: 196px; flex-shrink: 0; padding: 14px 10px; display: flex; flex-direction: column; gap: 8px;
+    border-right: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.22);
 }
 .ss-tab {
-    display: flex; align-items: center; gap: 10px; padding: 11px 14px;
-    background: transparent; border: none; border-radius: 10px; cursor: pointer;
-    color: rgba(255, 255, 255, 0.65); font-size: 0.92rem; text-align: left; transition: all 0.15s;
+    position: relative; display: flex; align-items: center; gap: 12px; padding: 11px 12px;
+    background: rgba(255, 255, 255, 0.02); border: 1px solid transparent; border-radius: 12px; cursor: pointer;
+    color: rgba(255, 255, 255, 0.7); text-align: left; transition: all 0.18s; overflow: hidden;
 }
 .ss-tab:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
 .ss-tab.active {
-    background: rgba(var(--accent-light-rgb), 0.16);
-    color: rgb(var(--accent-light-rgb)); font-weight: 600;
-    box-shadow: inset 2px 0 0 rgb(var(--accent-light-rgb));
+    background: linear-gradient(100deg, color-mix(in srgb, var(--ss-brand) 22%, transparent), rgba(255,255,255,0.02));
+    border-color: color-mix(in srgb, var(--ss-brand) 55%, transparent); color: #fff;
 }
-.ss-tab-emoji { font-size: 1.1rem; }
+.ss-tab.active::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 3px; background: var(--ss-brand); }
+.ss-tab-disc {
+    width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: #fff; box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-brand) 60%, transparent);
+}
+.ss-tab-logo { width: 24px; height: 24px; object-fit: contain; }
+.ss-tab-disc .ss-tab-emoji { font-size: 1.2rem; }
+.ss-tab-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.ss-tab-cat { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255,255,255,0.45); }
+.ss-tab.active .ss-tab-cat { color: color-mix(in srgb, var(--ss-brand) 75%, white); }
+.ss-tab-cur { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.ss-panel { flex: 1; padding: 20px 22px; overflow-y: auto; }
-.ss-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.45); margin-bottom: 14px; }
+.ss-panel { flex: 1; padding: 22px 24px; overflow-y: auto; }
+.ss-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.45); margin-bottom: 16px; }
 .ss-hint { color: rgba(255, 255, 255, 0.5); font-size: 0.82rem; margin-bottom: 12px; }
 .ss-empty { color: rgba(255, 255, 255, 0.4); font-style: italic; padding: 30px 0; text-align: center; }
+.ss-effective-note {
+    background: rgba(255, 180, 60, 0.1); border: 1px solid rgba(255, 180, 60, 0.3);
+    color: #ffcf8a; border-radius: 10px; padding: 9px 13px; font-size: 0.82rem; margin-bottom: 16px;
+}
 
-.ss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.ss-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 14px; }
 .ss-card {
-    position: relative; display: flex; flex-direction: column; align-items: center; gap: 10px;
-    padding: 18px 12px; background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px;
-    cursor: pointer; transition: all 0.16s; color: #fff;
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 12px;
+    padding: 20px 12px 16px; background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px;
+    cursor: pointer; transition: transform 0.16s, box-shadow 0.16s, border-color 0.16s, background 0.16s; color: #fff;
 }
-.ss-card:hover:not([disabled]) { background: rgba(255, 255, 255, 0.07); transform: translateY(-2px); border-color: rgba(var(--accent-light-rgb), 0.4); }
+.ss-card:hover:not([disabled]) { transform: translateY(-3px); border-color: color-mix(in srgb, var(--ss-brand) 50%, transparent); }
 .ss-card.active {
-    border-color: rgb(var(--accent-light-rgb));
-    background: rgba(var(--accent-light-rgb), 0.12);
-    box-shadow: 0 0 0 1px rgb(var(--accent-light-rgb)), 0 8px 24px rgba(var(--accent-light-rgb), 0.18);
+    border-color: var(--ss-brand);
+    background: linear-gradient(160deg, color-mix(in srgb, var(--ss-brand) 16%, transparent), rgba(255,255,255,0.02));
+    box-shadow: 0 0 0 1px var(--ss-brand), 0 10px 30px color-mix(in srgb, var(--ss-brand) 30%, transparent);
 }
-.ss-card--locked { opacity: 0.4; cursor: not-allowed; }
+.ss-card-disc {
+    width: 58px; height: 58px; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-brand) 45%, transparent); transition: box-shadow 0.16s;
+}
+.ss-card.active .ss-card-disc { box-shadow: 0 0 0 3px var(--ss-brand), 0 0 22px color-mix(in srgb, var(--ss-brand) 55%, transparent); }
+.ss-card--locked { opacity: 0.38; cursor: not-allowed; }
 .ss-card[disabled] { cursor: default; }
-.ss-card-logo { width: 42px; height: 42px; object-fit: contain; }
-.ss-card-emoji { font-size: 2rem; line-height: 1; }
-.ss-card-label { font-size: 0.85rem; text-align: center; }
+.ss-card-logo { width: 34px; height: 34px; object-fit: contain; }
+.ss-card-emoji { font-size: 1.7rem; line-height: 1; }
+.ss-card-label { font-size: 0.85rem; text-align: center; font-weight: 500; }
 .ss-card-badge {
     position: absolute; top: 6px; left: 6px; font-size: 0.62rem; padding: 2px 6px;
     background: rgba(0, 0, 0, 0.5); border-radius: 6px; color: rgba(255, 255, 255, 0.7);

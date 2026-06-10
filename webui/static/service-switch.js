@@ -27,6 +27,15 @@ const _SS_SERVER_INFO = {
 const _SS_META_FALLBACK = {
     spotify_free: { text: 'Spotify (no auth)', icon: '🆓', logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png' },
 };
+// Brand colors drive each card's logo ring + active glow (the Manage-Workers feel).
+const _SS_BRAND = {
+    spotify: '#1db954', spotify_free: '#1db954', itunes: '#fc5c7d', deezer: '#a238ff',
+    discogs: '#ff5500', musicbrainz: '#ba478f', amazon: '#ff9900',
+    plex: '#e5a00d', jellyfin: '#aa5cc3', navidrome: '#3b6cf6', soulsync: '#7c5cff',
+    soulseek: '#22a7f0', youtube: '#ff0000', tidal: '#00cfe8', qobuz: '#0a6e9e',
+    hifi: '#16c79a', torrent: '#8a2be2', usenet: '#e67e22',
+};
+function _ssBrand(id) { return _SS_BRAND[id] || 'var(--accent-light-rgb-hex, #7c5cff)'; }
 
 let _ssState = { tab: 'metadata', data: null };
 
@@ -99,17 +108,48 @@ async function _ssLoad() {
     } catch (e) {
         _ssState.data = null;
     }
+    _ssRenderRail();   // re-render now that we know each tab's active choice
     _ssRenderPanel();
+}
+
+function _ssRailCurrent(tabId) {
+    // The active choice for a tab → {logo/emoji, label, brand} for the rail chip.
+    const d = _ssState.data;
+    if (!d || !d.success) return null;
+    if (tabId === 'metadata') {
+        const id = d.metadata.active; const info = _ssMetaInfo(id);
+        return { logo: info.logo, emoji: info.icon, label: info.text || id, brand: _ssBrand(id) };
+    }
+    if (tabId === 'server') {
+        const id = d.server.active; const info = _SS_SERVER_INFO[id] || { name: id };
+        return { logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(id) };
+    }
+    const id = d.download.mode;
+    if (id === 'hybrid') return { emoji: '🔀', label: 'Hybrid', brand: 'var(--accent-light-rgb-hex,#7c5cff)' };
+    const info = _ssDownloadInfo(id);
+    return { logo: info.logo, emoji: info.emoji, label: info.name, brand: _ssBrand(id) };
 }
 
 function _ssRenderRail() {
     const rail = document.getElementById('ss-rail');
     if (!rail) return;
-    rail.innerHTML = _SS_TABS.map(t => `
-        <button class="ss-tab${t.id === _ssState.tab ? ' active' : ''}" onclick="switchServiceSwitchTab('${t.id}')">
-            <span class="ss-tab-emoji">${t.emoji}</span>
-            <span class="ss-tab-label">${t.name}</span>
-        </button>`).join('');
+    rail.innerHTML = _SS_TABS.map(t => {
+        const cur = _ssRailCurrent(t.id);
+        const media = cur
+            ? (cur.logo
+                ? `<img class="ss-tab-logo" src="${cur.logo}" onerror="this.outerHTML='<span class=\\'ss-tab-emoji\\'>${cur.emoji}</span>'">`
+                : `<span class="ss-tab-emoji">${cur.emoji}</span>`)
+            : `<span class="ss-tab-emoji">${t.emoji}</span>`;
+        return `
+            <button class="ss-tab${t.id === _ssState.tab ? ' active' : ''}" style="--ss-brand:${cur ? cur.brand : '#7c5cff'}"
+                    onclick="switchServiceSwitchTab('${t.id}')">
+                <span class="ss-tab-disc">${media}</span>
+                <span class="ss-tab-text">
+                    <span class="ss-tab-cat">${t.name}</span>
+                    <span class="ss-tab-cur">${cur ? _ssEsc(cur.label) : '…'}</span>
+                </span>
+            </button>`;
+    }).join('');
 }
 
 function switchServiceSwitchTab(tab) {
@@ -118,15 +158,15 @@ function switchServiceSwitchTab(tab) {
     _ssRenderPanel();
 }
 
-function _ssCard({ logo, emoji, label, active, available, onclick, badge }) {
+function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand }) {
     const dim = available === false ? ' ss-card--locked' : '';
     const act = active ? ' active' : '';
     const media = logo
         ? `<img class="ss-card-logo" src="${logo}" alt="" onerror="this.outerHTML='<span class=\\'ss-card-emoji\\'>${emoji || '🎵'}</span>'">`
         : `<span class="ss-card-emoji">${emoji || '🎵'}</span>`;
     return `
-        <button class="ss-card${act}${dim}" ${onclick ? `onclick="${onclick}"` : 'disabled'}>
-            ${media}
+        <button class="ss-card${act}${dim}" style="--ss-brand:${brand || '#7c5cff'}" ${onclick ? `onclick="${onclick}"` : 'disabled'}>
+            <span class="ss-card-disc">${media}</span>
             <span class="ss-card-label">${_ssEsc(label)}</span>
             ${badge ? `<span class="ss-card-badge">${_ssEsc(badge)}</span>` : ''}
             ${active ? '<span class="ss-card-check">✓</span>' : ''}
@@ -148,17 +188,23 @@ function _ssRenderPanel() {
         const cards = d.metadata.options.map(o => {
             const info = _ssMetaInfo(o.id);
             return _ssCard({
-                logo: info.logo, emoji: info.icon, label: info.text || o.id,
+                logo: info.logo, emoji: info.icon, label: info.text || o.id, brand: _ssBrand(o.id),
                 active: d.metadata.active === o.id, available: o.available,
                 onclick: (editable && o.available) ? `setActiveSource('metadata','${o.id}')` : null,
             });
         }).join('');
-        panel.innerHTML = `<div class="ss-section-title">Metadata source</div><div class="ss-grid">${cards}</div>`;
+        // Surface the EFFECTIVE source when it differs from the configured one
+        // (e.g. configured Spotify but not authenticated → running on a fallback).
+        const eff = d.metadata.effective;
+        const note = (eff && eff !== d.metadata.active)
+            ? `<div class="ss-effective-note">Configured source isn't connected — actually using <b>${_ssEsc((_ssMetaInfo(eff).text) || eff)}</b> right now.</div>`
+            : '';
+        panel.innerHTML = `<div class="ss-section-title">Metadata source</div>${note}<div class="ss-grid">${cards}</div>`;
     } else if (_ssState.tab === 'server') {
         const cards = d.server.options.map(o => {
             const info = _SS_SERVER_INFO[o.id] || { name: o.id };
             return _ssCard({
-                logo: info.logo, emoji: '🖥️', label: info.name,
+                logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(o.id),
                 active: d.server.active === o.id, available: o.available,
                 onclick: (editable && o.available) ? `setActiveSource('server','${o.id}')` : null,
             });
@@ -196,7 +242,7 @@ function _ssRenderDownloadPanel(panel, d, editable) {
         const cards = d.download.options.map(o => {
             const info = _ssDownloadInfo(o.id);
             return _ssCard({
-                logo: info.logo, emoji: info.emoji, label: info.name,
+                logo: info.logo, emoji: info.emoji, label: info.name, brand: _ssBrand(o.id),
                 active: d.download.mode === o.id, available: true,
                 onclick: editable ? `setActiveSource('download','${o.id}')` : null,
             });
