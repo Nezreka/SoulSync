@@ -34,12 +34,14 @@ GATED = [
     ('DELETE', '/api/library/album/123'),
     ('POST', '/api/library/tracks/delete-batch'),
     ('POST', '/api/database/update'),
+    ('POST', '/api/database/update/stop'),
     ('POST', '/api/database/backup'),
     ('DELETE', '/api/database/backups/x.db'),
     ('POST', '/api/database/backups/x.db/restore'),
     ('POST', '/api/database/maintenance/vacuum'),
     ('DELETE', '/api/metadata-cache/clear'),
     ('DELETE', '/api/metadata-cache/clear-musicbrainz'),
+    ('POST', '/api/metadata-cache/evict'),
 ]
 
 

@@ -49,7 +49,13 @@ def validate_credential_payload(service: str, payload):
         return False, []
     if not isinstance(payload, dict):
         return False, list(required)
-    missing = [k for k in required if not payload.get(k)]
+
+    def _present(v):
+        # Whitespace-only strings count as missing — they'd otherwise save a
+        # blank secret that fails confusingly at the real service later.
+        return bool(v.strip()) if isinstance(v, str) else bool(v)
+
+    missing = [k for k in required if not _present(payload.get(k))]
     return (not missing), missing
 
 

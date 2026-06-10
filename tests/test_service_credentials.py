@@ -51,6 +51,13 @@ def test_validate_treats_empty_string_as_missing():
     assert not ok and missing == ['username']
 
 
+def test_validate_treats_whitespace_only_as_missing():
+    # A blank-but-spacey secret must be rejected, not saved to fail later.
+    ok, missing = validate_credential_payload('navidrome',
+                                              {'base_url': 'http://x', 'username': '   ', 'password': 'p'})
+    assert not ok and missing == ['username']
+
+
 # ── pure: active-set selection (stale-safe) ──────────────────────────────────
 
 def test_pick_active_credential_match_and_misses():
