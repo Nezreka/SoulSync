@@ -173,9 +173,16 @@ def evaluate(expected_title: str, expected_artist: str,
     from core.matching.script_compat import is_cross_script_mismatch
     from core.matching.version_mismatch import is_acceptable_version_mismatch
 
+    # No expected artist on record (legacy/compilation rows): compare on title
+    # only — the old scanner treated this as artist-match=1.0 and a missing DB
+    # value is no evidence the file is wrong.
+    no_expected_artist = not normalize(expected_artist or '')
+
     best_rec, title_sim, artist_sim = _find_best_title_artist_match(
         recordings, expected_title, expected_artist, aliases_provider,
     )
+    if no_expected_artist:
+        artist_sim = 1.0
     if not best_rec:
         return Outcome(Decision.SKIP, reason="No recordings with title/artist info")
 

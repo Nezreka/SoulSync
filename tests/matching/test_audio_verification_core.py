@@ -72,3 +72,12 @@ def test_normalize_strips_version_and_featuring():
 
 def test_normalize_keeps_plain_text():
     assert normalize("Sawano Hiroyuki") == "sawano hiroyuki"
+
+
+def test_empty_expected_artist_does_not_fail():
+    # Old scanner treated a missing expected artist as artist-match=1.0
+    # (compare title only). The unified core must not FAIL a track just
+    # because the DB has no artist value.
+    out = evaluate("Some Track", "", [_rec("Some Track", "Whoever")],
+                   fingerprint_score=0.95)
+    assert out.decision == Decision.PASS
