@@ -129,30 +129,36 @@ def get_import_search_result(context: Optional[Dict[str, Any]]) -> Dict[str, Any
 
 
 def get_import_source(context: Optional[Dict[str, Any]]) -> str:
+    # Several track payloads carry the metadata source under "_source" rather
+    # than "source" (the discography/wishlist dicts, frontend search results).
+    # Only the context-level "_source" was honored (normalize_import_context);
+    # the nested dicts were checked for "source" alone, so a Deezer-sourced
+    # Download Now resolved to '' and source-specific metadata logic (the
+    # Deezer contributors upgrade for multi-artist tags) never ran (Netti93).
     if not isinstance(context, dict):
         return ""
 
-    source = context.get("source")
+    source = context.get("source") or context.get("_source")
     if source:
         return str(source)
 
     track_info = get_import_track_info(context)
-    source = _first_value(track_info, "source", default="")
+    source = _first_value(track_info, "source", "_source", default="")
     if source:
         return str(source)
 
     original_search = get_import_original_search(context)
-    source = _first_value(original_search, "source", default="")
+    source = _first_value(original_search, "source", "_source", default="")
     if source:
         return str(source)
 
     album = get_import_context_album(context)
-    source = _first_value(album, "source", default="")
+    source = _first_value(album, "source", "_source", default="")
     if source:
         return str(source)
 
     artist = get_import_context_artist(context)
-    source = _first_value(artist, "source", default="")
+    source = _first_value(artist, "source", "_source", default="")
     return str(source) if source else ""
 
 
