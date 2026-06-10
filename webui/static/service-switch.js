@@ -20,8 +20,8 @@ const _SS_TABS = [
 // available; server + download have their own small maps.
 const _SS_SERVER_INFO = {
     plex:      { name: 'Plex',      logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg' },
-    jellyfin:  { name: 'Jellyfin',  logo: 'https://jellyfin.org/images/logo.svg' },
-    navidrome: { name: 'Navidrome', logo: 'https://www.navidrome.org/images/navidrome-logo-200x150.png' },
+    jellyfin:  { name: 'Jellyfin',  logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png' },
+    navidrome: { name: 'Navidrome', logo: 'https://tweakers.net/ext/i/2007323764.png' },
     soulsync:  { name: 'SoulSync',  logo: '/static/trans2.png' },
 };
 const _SS_META_FALLBACK = {
