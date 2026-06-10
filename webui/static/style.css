@@ -67892,3 +67892,9 @@ body.em-scroll-lock { overflow: hidden; }
     padding: 7px 11px; color: #fff; font-size: 0.82rem; width: 150px;
 }
 .ma-token-input:focus { outline: none; border-color: var(--ma-brand); }
+
+/* Verification badge on completed downloads (verified / unverified / force-imported) */
+.verif-badge { display: inline-block; margin-left: 4px; font-size: 11px; cursor: help; border-radius: 999px; padding: 0 5px; line-height: 16px; }
+.verif-badge.verif-ok { color: #2ecc71; background: rgba(46,204,113,0.12); }
+.verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
+.verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }

@@ -6201,6 +6201,22 @@
                                     (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
                                     If disabled, existing tracks are always kept and the import file is skipped.
                                 </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-folder-artist-override">
+                                        Use the top Staging folder as the artist
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    On by default (legacy behaviour). When enabled, files staged as
+                                    <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
+                                    folder as the album artist — handy for mixtapes/compilations whose embedded tags
+                                    carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
+                                    under one container folder: otherwise every file's artist gets overwritten with
+                                    that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
+                                    metadata-identified artist is always kept.
+                                </div>
                             </div>
 
 

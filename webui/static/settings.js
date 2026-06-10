@@ -1297,6 +1297,8 @@ async function loadSettingsData() {
 
         // Populate Import settings
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
+        const _folderArtistEl = document.getElementById('import-folder-artist-override');
+        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -3114,6 +3116,7 @@ async function saveSettings(quiet = false) {
         },
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
+            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         lossy_copy: {
