@@ -19,10 +19,12 @@ const _SS_TABS = [
 // Brand logos. Metadata pulls from SOURCE_LABELS (shared-helpers.js) when
 // available; server + download have their own small maps.
 const _SS_SERVER_INFO = {
-    plex:      { name: 'Plex',      logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg' },
+    // `dark`: the logo is a white/light wordmark, so it needs a dark disc to be
+    // visible (it'd vanish on the default white disc).
+    plex:      { name: 'Plex',      logo: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg', dark: true },
     jellyfin:  { name: 'Jellyfin',  logo: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png' },
     navidrome: { name: 'Navidrome', logo: 'https://tweakers.net/ext/i/2007323764.png' },
-    soulsync:  { name: 'SoulSync',  logo: '/static/trans2.png' },
+    soulsync:  { name: 'SoulSync',  logo: '/static/trans2.png', dark: true },
 };
 const _SS_META_FALLBACK = {
     spotify_free: { text: 'Spotify (no auth)', icon: '🆓', logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png' },
@@ -122,7 +124,7 @@ function _ssRailCurrent(tabId) {
     }
     if (tabId === 'server') {
         const id = d.server.active; const info = _SS_SERVER_INFO[id] || { name: id };
-        return { logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(id) };
+        return { logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(id), dark: info.dark };
     }
     const id = d.download.mode;
     if (id === 'hybrid') return { emoji: '🔀', label: 'Hybrid', brand: 'var(--accent-light-rgb-hex,#7c5cff)' };
@@ -143,7 +145,7 @@ function _ssRenderRail() {
         return `
             <button class="ss-tab${t.id === _ssState.tab ? ' active' : ''}" style="--ss-brand:${cur ? cur.brand : '#7c5cff'}"
                     onclick="switchServiceSwitchTab('${t.id}')">
-                <span class="ss-tab-disc">${media}</span>
+                <span class="ss-tab-disc${cur && cur.dark ? ' ss-disc--dark' : ''}">${media}</span>
                 <span class="ss-tab-text">
                     <span class="ss-tab-cat">${t.name}</span>
                     <span class="ss-tab-cur">${cur ? _ssEsc(cur.label) : '…'}</span>
@@ -158,7 +160,7 @@ function switchServiceSwitchTab(tab) {
     _ssRenderPanel();
 }
 
-function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand }) {
+function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand, dark }) {
     const dim = available === false ? ' ss-card--locked' : '';
     const act = active ? ' active' : '';
     const media = logo
@@ -166,7 +168,7 @@ function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand 
         : `<span class="ss-card-emoji">${emoji || '🎵'}</span>`;
     return `
         <button class="ss-card${act}${dim}" style="--ss-brand:${brand || '#7c5cff'}" ${onclick ? `onclick="${onclick}"` : 'disabled'}>
-            <span class="ss-card-disc">${media}</span>
+            <span class="ss-card-disc${dark ? ' ss-disc--dark' : ''}">${media}</span>
             <span class="ss-card-label">${_ssEsc(label)}</span>
             ${badge ? `<span class="ss-card-badge">${_ssEsc(badge)}</span>` : ''}
             ${active ? '<span class="ss-card-check">✓</span>' : ''}
@@ -189,7 +191,7 @@ function _ssHero(kind) {
         : kind === 'server' ? 'Active media server' : 'Active download source';
     return `
         <div class="ss-hero" style="--ss-brand:${cur.brand}">
-            <div class="ss-hero-disc">${media}</div>
+            <div class="ss-hero-disc${cur.dark ? ' ss-disc--dark' : ''}">${media}</div>
             <div class="ss-hero-info">
                 <div class="ss-hero-eyebrow">${eyebrow}</div>
                 <div class="ss-hero-name">${_ssEsc(cur.label)}</div>
@@ -231,7 +233,7 @@ function _ssRenderPanel() {
         const cards = d.server.options.map(o => {
             const info = _SS_SERVER_INFO[o.id] || { name: o.id };
             return _ssCard({
-                logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(o.id),
+                logo: info.logo, emoji: '🖥️', label: info.name, brand: _ssBrand(o.id), dark: info.dark,
                 active: d.server.active === o.id, available: o.available,
                 onclick: (editable && o.available) ? `setActiveSource('server','${o.id}')` : null,
             });
