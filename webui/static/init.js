@@ -914,56 +914,16 @@ async function openPersonalSettings() {
     body.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4);">Loading...</div>';
 
     try {
-        // Load all per-profile service data in parallel
-        const [lbRes, spotifyRes] = await Promise.all([
-            fetch('/api/profiles/me/listenbrainz'),
-            fetch('/api/profiles/me/spotify'),
-        ]);
-        const lbData = await lbRes.json();
-        const spotifyData = await spotifyRes.json();
-
         body.innerHTML = '';
         const isNonAdmin = currentProfile && !currentProfile.is_admin;
 
+        // Streaming-account connections now live in the My Accounts modal (the ♫
+        // button). Personal Settings keeps only the per-profile server library.
         if (isNonAdmin) {
-            // Tabbed layout for non-admin with multiple sections
-            const tabs = [
-                { id: 'music', label: 'Music Services' },
-                { id: 'server', label: 'Server' },
-                { id: 'scrobble', label: 'Scrobbling' },
-            ];
-            const tabBar = document.createElement('div');
-            tabBar.className = 'ps-tabbar';
-            tabs.forEach((t, i) => {
-                const btn = document.createElement('button');
-                btn.className = 'ps-tab' + (i === 0 ? ' active' : '');
-                btn.textContent = t.label;
-                btn.onclick = () => {
-                    tabBar.querySelectorAll('.ps-tab').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    body.querySelectorAll('.ps-tab-content').forEach(c => c.classList.remove('active'));
-                    const target = document.getElementById(`ps-tab-${t.id}`);
-                    if (target) target.classList.add('active');
-                };
-                tabBar.appendChild(btn);
-            });
-            body.appendChild(tabBar);
-
-            // Music Services tab
-            const musicTab = document.createElement('div');
-            musicTab.id = 'ps-tab-music';
-            musicTab.className = 'ps-tab-content active';
-            renderPersonalSettingsSpotify(musicTab, spotifyData);
-            renderPersonalSettingsTidal(musicTab);
-            body.appendChild(musicTab);
-
-            // Server tab
             const serverTab = document.createElement('div');
-            serverTab.id = 'ps-tab-server';
-            serverTab.className = 'ps-tab-content';
+            serverTab.style.padding = '18px 22px 22px';
             serverTab.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.3);">Loading libraries...</div>';
             body.appendChild(serverTab);
-            // Load server libraries async (don't block modal)
             fetch('/api/profiles/me/server-library').then(r => r.json()).then(libData => {
                 serverTab.innerHTML = '';
                 renderPersonalSettingsServerLibrary(serverTab, libData);
@@ -971,21 +931,13 @@ async function openPersonalSettings() {
                 serverTab.innerHTML = '';
                 renderPersonalSettingsServerLibrary(serverTab, {});
             });
-
-            // Scrobbling tab
-            const scrobbleTab = document.createElement('div');
-            scrobbleTab.id = 'ps-tab-scrobble';
-            scrobbleTab.className = 'ps-tab-content';
-            body.appendChild(scrobbleTab);
-            // Render LB into the scrobble tab
-            const origBody = body;
-            renderPersonalSettingsLB(lbData, scrobbleTab);
         } else {
-            // Admin: just ListenBrainz, no tabs
             const content = document.createElement('div');
-            content.style.padding = '18px 22px 22px';
+            content.style.padding = '24px';
+            content.innerHTML = '<div style="color:rgba(255,255,255,0.55);font-size:0.9rem;line-height:1.7;">'
+                + 'Your streaming accounts are in <b>My Accounts</b> (the ♫ button next to your profile).<br>'
+                + 'Global service setup lives in <b>Settings</b>.</div>';
             body.appendChild(content);
-            renderPersonalSettingsLB(lbData, content);
         }
     } catch (e) {
         body.innerHTML = '<div style="color:#ef4444;padding:16px;">Failed to load settings</div>';

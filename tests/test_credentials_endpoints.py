@@ -266,3 +266,23 @@ def test_tidal_admin_and_unconnected_use_global_client(client):
     assert web_server.get_tidal_client_for_profile(1) is web_server.tidal_client
     assert web_server.get_tidal_client_for_profile(None) is web_server.tidal_client
     assert web_server.get_tidal_client_for_profile(987654) is web_server.tidal_client
+
+
+# ── ListenBrainz: per-profile connect status + disconnect (token-paste) ───────
+
+def test_listenbrainz_connection_status_and_disconnect(client, nonadmin_profile):
+    db = web_server.get_database()
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    # unconnected
+    conns = client.get('/api/profiles/me/connections').get_json()['connections']
+    assert 'listenbrainz' in conns and conns['listenbrainz']['connected'] is False
+    # seed a token directly (POST validates against the live API; this tests the
+    # status + disconnect wiring without a network call)
+    db.set_profile_listenbrainz(nonadmin_profile, 'lb-token', '', 'lbuser')
+    conns = client.get('/api/profiles/me/connections').get_json()['connections']
+    assert conns['listenbrainz']['connected'] is True
+    assert conns['listenbrainz']['account'] == 'lbuser'
+    # disconnect via the generic endpoint
+    assert client.post('/api/profiles/me/connections/listenbrainz/disconnect').get_json()['success']
+    assert client.get('/api/profiles/me/connections').get_json()['connections']['listenbrainz']['connected'] is False
