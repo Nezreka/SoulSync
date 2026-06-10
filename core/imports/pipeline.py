@@ -944,6 +944,20 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             final_path = downsampled_path
             context['_final_processed_path'] = final_path
 
+        # Persist the verification status (verified / unverified / force_imported)
+        # as an embedded tag so it travels with the file and survives DB resets.
+        # Written BEFORE the lossy copy so the copy inherits it. Also stashed on
+        # the context so the wrapper can surface it on the Downloads page.
+        try:
+            from core.matching.verification_status import status_for_import
+            from core.tag_writer import write_verification_status
+            _verif_status = status_for_import(context)
+            if _verif_status:
+                context['_verification_status'] = _verif_status
+                write_verification_status(final_path, _verif_status)
+        except Exception as _vs_err:
+            logger.debug(f"verification-status persist skipped: {_vs_err}")
+
         blasphemy_path = create_lossy_copy(final_path)
         if blasphemy_path:
             context['_final_processed_path'] = blasphemy_path
@@ -1219,6 +1233,8 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             with tasks_lock:
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
+                    if context.get('_verification_status'):
+                        download_tasks[task_id]['verification_status'] = context['_verification_status']
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
@@ -1231,6 +1247,8 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                 if task_id in download_tasks:
                     _mark_task_completed(task_id, context.get('track_info'))
                     download_tasks[task_id]['metadata_enhanced'] = True
+                    if context.get('_verification_status'):
+                        download_tasks[task_id]['verification_status'] = context['_verification_status']
                     redownload_ctx = download_tasks[task_id].get('_redownload_context')
 
             with matched_context_lock:

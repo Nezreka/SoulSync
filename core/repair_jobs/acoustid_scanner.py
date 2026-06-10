@@ -53,6 +53,10 @@ class AcoustIDScannerJob(RepairJob):
         'title_similarity': 0.70,
         'artist_similarity': 0.60,
         'batch_size': 200,
+        # Skip tracks the user force-imported via the version-mismatch
+        # fallback (they are expected to mismatch; default: still scan them
+        # but report as informational).
+        'skip_force_imported': False,
     }
     auto_fix = False  # User chooses fix action per finding
 
@@ -223,6 +227,24 @@ class AcoustIDScannerJob(RepairJob):
                 or expected['artist']
             )
 
+        # Verification status from the embedded SOULSYNC_VERIFICATION tag.
+        # force_imported = user accepted this file as best candidate after the
+        # retry budget was exhausted — a mismatch here is EXPECTED. Either skip
+        # (job setting) or downgrade the finding to informational below.
+        file_verif_status = None
+        try:
+            from core.tag_writer import read_file_tags as _rft
+            file_verif_status = (_rft(fpath) or {}).get('verification_status')
+        except Exception:
+            pass
+        if file_verif_status == 'force_imported' and \
+                self._get_settings(context).get('skip_force_imported', False):
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'Skipped (force-imported fallback): {fname}',
+                    log_type='skip')
+            return
+
         # Fingerprint-collision guard: when the TOP recording's length is wildly
         # different from the file, the fingerprint hit is a hash collision (the
         # 17-min mashup → 5-min track case), not a real match — skip BEFORE any
@@ -260,6 +282,18 @@ class AcoustIDScannerJob(RepairJob):
             aliases_provider=_aliases,
         )
 
+        # Refresh the DB column from the file tag (the tag travels with the
+        # file and survives DB resets; the tracks row is the UI-facing cache).
+        if file_verif_status:
+            try:
+                conn = context.db._get_connection()
+                conn.cursor().execute(
+                    "UPDATE tracks SET verification_status = ? WHERE id = ?",
+                    (file_verif_status, track_id))
+                getattr(conn, 'commit', lambda: None)()
+            except Exception as e:
+                logger.debug("verification_status refresh failed for %s: %s", track_id, e)
+
         if outcome.decision != Decision.FAIL:
             if context.report_progress:
                 context.report_progress(
@@ -280,7 +314,13 @@ class AcoustIDScannerJob(RepairJob):
                 log_type='error'
             )
         if context.create_finding:
-            severity = 'warning' if best_score >= 0.90 else 'info'
+            _is_force = file_verif_status == 'force_imported'
+            severity = 'info' if _is_force else ('warning' if best_score >= 0.90 else 'info')
+            _title = (
+                f'Force-imported (fallback): "{expected["title"]}" is actually "{matched_title}"'
+                if _is_force else
+                f'Wrong download: "{expected["title"]}" is actually "{matched_title}"'
+            )
             inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
@@ -288,7 +328,7 @@ class AcoustIDScannerJob(RepairJob):
                 entity_type='track',
                 entity_id=str(track_id),
                 file_path=fpath,
-                title=f'Wrong download: "{expected["title"]}" is actually "{matched_title}"',
+                title=_title,
                 description=(
                     f'Expected "{expected["title"]}" by {expected_artist}, '
                     f'but audio fingerprint matches "{matched_title}" by {matched_artist} '
@@ -307,6 +347,7 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_thumb_url': expected.get('artist_thumb_url'),
                     'album_title': expected.get('album_title', ''),
                     'track_number': expected.get('track_number'),
+                    'force_imported': file_verif_status == 'force_imported',
                 }
             )
             if inserted:

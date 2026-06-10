@@ -816,3 +816,55 @@ def test_scanner_does_not_flag_cross_script_when_alias_bridges(monkeypatch):
                    fake_acoustid, context, result,
                    fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
     assert captured == [], f"cross-script track false-flagged: {captured}"
+
+
+def _force_imported_scan(monkeypatch, *, skip_setting):
+    """Drive a scan over a force-imported file whose fingerprint clearly
+    mismatches. Returns the captured findings."""
+    import core.repair_jobs.acoustid_scanner as scanner_mod
+    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
+                        lambda name: [], raising=False)
+    monkeypatch.setattr(
+        'core.tag_writer.read_file_tags',
+        lambda fpath: {'artist': None, 'verification_status': 'force_imported'},
+    )
+    job = AcoustIDScannerJob()
+    if skip_setting:
+        monkeypatch.setattr(job, '_get_settings',
+                            lambda ctx: {**job.default_settings,
+                                         'skip_force_imported': True})
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("42", "Wanted Song", "Real Artist",
+                   "/music/ws.flac", 1, "Album", None, None),
+        captured=captured,
+    )
+    fake_acoustid = SimpleNamespace(
+        fingerprint_and_lookup=lambda fpath: {
+            'best_score': 0.99,
+            'recordings': [{'title': 'Wanted Song - Instrumental',
+                            'artist': 'Real Artist'}],
+        },
+    )
+    result = JobResultStub()
+    job._scan_file('/music/ws.flac', '42',
+                   {'title': 'Wanted Song', 'artist': 'Real Artist'},
+                   fake_acoustid, context, result,
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+    return captured
+
+
+def test_force_imported_mismatch_is_reported_as_informational(monkeypatch):
+    # The user opted into the fallback, so the scan must still TELL them the
+    # file is e.g. an instrumental — but as 'info', clearly marked, not as a
+    # red Wrong-download warning.
+    captured = _force_imported_scan(monkeypatch, skip_setting=False)
+    assert len(captured) == 1
+    assert captured[0]['severity'] == 'info'
+    assert captured[0]['details'].get('force_imported') is True
+    assert 'Force-imported' in captured[0]['title']
+
+
+def test_force_imported_can_be_skipped_via_setting(monkeypatch):
+    captured = _force_imported_scan(monkeypatch, skip_setting=True)
+    assert captured == []
