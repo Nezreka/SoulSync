@@ -20357,6 +20357,185 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 4px;
 }
 
+/* ── #831 round 3: watchlist action chips (artist-page button language) ── */
+
+.wl-chip {
+    --chip-rgb: 148, 163, 184;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-family: inherit;
+    color: rgba(var(--chip-rgb), 1);
+    background: linear-gradient(135deg, rgba(var(--chip-rgb), 0.15) 0%, rgba(var(--chip-rgb), 0.05) 100%);
+    border: 1px solid rgba(var(--chip-rgb), 0.3);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    outline: none;
+    overflow: hidden;
+}
+
+.wl-chip:hover {
+    background: linear-gradient(135deg, rgba(var(--chip-rgb), 0.25) 0%, rgba(var(--chip-rgb), 0.12) 100%);
+    border-color: rgba(var(--chip-rgb), 0.5);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(var(--chip-rgb), 0.25);
+}
+
+.wl-chip:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.wl-chip svg {
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+}
+
+.wl-chip:hover svg {
+    transform: scale(1.12);
+}
+
+.wl-chip--blue   { --chip-rgb: 96, 165, 250; }
+.wl-chip--green  { --chip-rgb: 111, 217, 154; }
+.wl-chip--amber  { --chip-rgb: 251, 191, 36; }
+.wl-chip--red    { --chip-rgb: 248, 113, 113; }
+.wl-chip--slate  { --chip-rgb: 165, 180, 203; }
+
+/* Primary CTA — solid accent gradient + shimmer sweep */
+.wl-chip--cta {
+    color: #fff;
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    border: 1px solid rgba(var(--accent-light-rgb), 0.6);
+    box-shadow: 0 4px 18px rgba(var(--accent-rgb), 0.35);
+}
+
+.wl-chip--cta:hover {
+    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
+    border-color: rgba(var(--accent-light-rgb), 0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.5);
+}
+
+.wl-chip-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.25) 50%, transparent 60%);
+    transform: translateX(-100%);
+    animation: wl-chip-shimmer 3.2s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes wl-chip-shimmer {
+    0% { transform: translateX(-100%); }
+    55% { transform: translateX(100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* Header meta chips */
+.wl-meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wl-meta-chip--accent {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+/* ── #831 round 3: Global Settings modal reskin ───────────────────────── */
+
+.wl-global-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 22px 28px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.wl-global-modal-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.2px;
+    color: #fff;
+}
+
+.wl-global-modal-sub {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.wl-global-modal-close {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.wl-global-modal-close:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+/* Option cards: live checked-state feedback (applies to the per-artist config
+   modal too — same components, same standard). */
+.config-option:has(input[type="checkbox"]:checked) {
+    border-color: rgba(var(--accent-rgb), 0.45);
+    background: rgba(var(--accent-rgb), 0.07);
+}
+
+.config-option:has(input[type="checkbox"]:checked) .config-option-icon {
+    filter: none;
+    opacity: 1;
+}
+
+.config-option:not(:has(input[type="checkbox"]:checked)) .config-option-icon {
+    filter: grayscale(0.7);
+    opacity: 0.55;
+}
+
+/* The global-override master toggle gets a stronger enabled treatment */
+.global-override-toggle.enabled {
+    border-color: rgba(var(--accent-rgb), 0.6) !important;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.12), rgba(var(--accent-rgb), 0.04)) !important;
+    box-shadow: 0 0 22px rgba(var(--accent-rgb), 0.12);
+}
+
+.wl-global-modal .config-section-title {
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: rgb(var(--accent-light-rgb));
+}
+
 /* Watchlist Search */
 
 .watchlist-search-input {

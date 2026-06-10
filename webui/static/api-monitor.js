@@ -2830,12 +2830,10 @@ async function openWatchlistGlobalSettingsModal() {
         // Update options visibility based on toggle state
         toggleGlobalOverrideOptions();
 
-        // Update toggle label border
+        // Reflect enabled state on the toggle card (styled in CSS)
         const toggleLabel = document.getElementById('global-override-toggle-label');
         if (toggleLabel) {
-            toggleLabel.style.border = config.global_override_enabled
-                ? '2px solid rgba(29, 185, 84, 0.5)'
-                : '2px solid rgba(255, 255, 255, 0.1)';
+            toggleLabel.classList.toggle('enabled', !!config.global_override_enabled);
         }
 
         // Show modal
@@ -2867,12 +2865,10 @@ function toggleGlobalOverrideOptions() {
         options.style.pointerEvents = enabled ? 'auto' : 'none';
     }
 
-    // Update toggle label border
+    // Reflect enabled state on the toggle card (styled in CSS)
     const toggleLabel = document.getElementById('global-override-toggle-label');
     if (toggleLabel) {
-        toggleLabel.style.border = enabled
-            ? '2px solid rgba(29, 185, 84, 0.5)'
-            : '2px solid rgba(255, 255, 255, 0.1)';
+        toggleLabel.classList.toggle('enabled', enabled);
     }
 }
 
@@ -3144,7 +3140,7 @@ async function startWatchlistScan() {
     try {
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = true;
-        button.textContent = 'Starting scan...';
+        _wlSetChipLabel(button, 'Starting scan...');
         button.classList.add('btn-processing');
 
         const response = await fetch('/api/watchlist/scan', {
@@ -3157,7 +3153,7 @@ async function startWatchlistScan() {
             throw new Error(data.error || 'Failed to start scan');
         }
 
-        button.textContent = 'Scanning...';
+        _wlSetChipLabel(button, 'Scanning...');
 
         // Show cancel button
         const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
@@ -3180,7 +3176,7 @@ async function startWatchlistScan() {
         console.error('Error starting watchlist scan:', error);
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = false;
-        button.textContent = 'Scan for New Releases';
+        _wlSetChipLabel(button, 'Scan for New Releases');
         button.classList.remove('btn-processing');
         alert(`Error starting scan: ${error.message}`);
     }
@@ -3226,6 +3222,18 @@ function renderWatchlistScanTrackLedger(events) {
 
 // Human-readable phase line for the scan deck ("checking_album_2_of_5" →
 // "Checking album 2 of 5").
+// Set a wl-chip button's label without destroying its icon/shimmer children
+// (textContent wipes them; these buttons carry an svg + shimmer span).
+function _wlSetChipLabel(btn, text) {
+    if (!btn) return;
+    const svg = btn.querySelector('svg');
+    const shimmer = btn.querySelector('.wl-chip-shimmer');
+    btn.textContent = '';
+    if (svg) btn.appendChild(svg);
+    btn.appendChild(document.createTextNode(' ' + text));
+    if (shimmer) btn.appendChild(shimmer);
+}
+
 function _wlPrettyPhase(data) {
     const phase = data.current_phase || '';
     if (!phase) return 'Working…';
@@ -3360,7 +3368,7 @@ function handleWatchlistScanData(data) {
     if (data.status === 'completed') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3411,7 +3419,7 @@ function handleWatchlistScanData(data) {
     } else if (data.status === 'cancelled') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3459,7 +3467,7 @@ function handleWatchlistScanData(data) {
     } else if (data.status === 'error') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3510,7 +3518,7 @@ async function updateSimilarArtists() {
         const scanButton = document.getElementById('scan-watchlist-btn');
 
         button.disabled = true;
-        button.textContent = 'Updating...';
+        _wlSetChipLabel(button, 'Updating...');
         button.classList.add('btn-processing');
         if (scanButton) scanButton.disabled = true;
 
@@ -3535,7 +3543,7 @@ async function updateSimilarArtists() {
         const scanButton = document.getElementById('scan-watchlist-btn');
 
         button.disabled = false;
-        button.textContent = 'Update Similar Artists';
+        _wlSetChipLabel(button, 'Update Similar Artists');
         button.classList.remove('btn-processing');
         if (scanButton) scanButton.disabled = false;
 
@@ -3558,7 +3566,7 @@ async function pollSimilarArtistsUpdate() {
             if (data.status === 'completed') {
                 if (button) {
                     button.disabled = false;
-                    button.textContent = 'Update Similar Artists';
+                    _wlSetChipLabel(button, 'Update Similar Artists');
                     button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
@@ -3569,7 +3577,7 @@ async function pollSimilarArtistsUpdate() {
             } else if (data.status === 'error') {
                 if (button) {
                     button.disabled = false;
-                    button.textContent = 'Update Similar Artists';
+                    _wlSetChipLabel(button, 'Update Similar Artists');
                     button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
@@ -3596,7 +3604,7 @@ async function pollSimilarArtistsUpdate() {
 
         if (button) {
             button.disabled = false;
-            button.textContent = 'Update Similar Artists';
+            _wlSetChipLabel(button, 'Update Similar Artists');
             button.classList.remove('btn-processing');
         }
         if (scanButton) scanButton.disabled = false;
