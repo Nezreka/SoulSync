@@ -1138,8 +1138,14 @@ def _register_automation_handlers():
         return match_mb_tracks(tracks, _mb_match_deps)
 
     _playlist_source_registry = build_playlist_source_registry(
-        spotify_client_getter=lambda: spotify_client,
-        tidal_client_getter=lambda: tidal_client,
+        # Per-profile source reads: the adapter calls these fresh on every read,
+        # so they resolve the CURRENT profile's account (their session
+        # interactively, their automation's owner in the background — via
+        # core.profile_context). Admin/profile 1 → the global client, so the
+        # admin's existing auto-sync pipelines are unchanged. (Deezer/Qobuz stay
+        # global for now — their playlist login is tangled with downloads.)
+        spotify_client_getter=get_spotify_client_for_profile,
+        tidal_client_getter=get_tidal_client_for_profile,
         qobuz_client_getter=_get_qobuz_client_for_sync,
         deezer_client_getter=_get_deezer_client,
         youtube_parser=parse_youtube_playlist,
