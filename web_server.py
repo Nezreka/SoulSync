@@ -4405,6 +4405,33 @@ def detect_soulseek_endpoint():
 
 # --- Authentication Routes ---
 
+def _profile_spotify_oauth(profile_id_int):
+    """Build a SpotifyOAuth for a profile's connect/callback.
+
+    Shared-app model (#profiles): a profile authenticates its OWN account through
+    the GLOBAL app credentials and gets its own token cache. A profile that set
+    its own app creds (legacy) still works. show_dialog forces Spotify's account
+    chooser so a user can't silently inherit whatever Spotify session is active
+    in their browser (e.g. the admin's). Returns None if no app creds exist."""
+    from spotipy.oauth2 import SpotifyOAuth
+    creds = (get_database().get_profile_spotify(profile_id_int) or {})
+    cfg = config_manager.get_spotify_config()
+    client_id = creds.get('client_id') or cfg.get('client_id')
+    client_secret = creds.get('client_secret') or cfg.get('client_secret')
+    redirect_uri = creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
+    if not client_id or not client_secret:
+        return None
+    return SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
+        state=f'profile_{profile_id_int}',
+        show_dialog=True,
+    )
+
+
 @app.route('/auth/spotify')
 def auth_spotify():
     """
@@ -4414,23 +4441,12 @@ def auth_spotify():
     try:
         profile_id = request.args.get('profile_id', '')
 
-        # Per-profile auth: use profile's own credentials
+        # Per-profile auth: the profile's own account via the shared (global) app.
         if profile_id and profile_id != '1':
             try:
                 profile_id_int = int(profile_id)
-                db = get_database()
-                creds = db.get_profile_spotify(profile_id_int)
-                if creds and creds.get('client_id'):
-                    from spotipy.oauth2 import SpotifyOAuth
-                    redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
-                    auth_manager = SpotifyOAuth(
-                        client_id=creds['client_id'],
-                        client_secret=creds['client_secret'],
-                        redirect_uri=redirect_uri,
-                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
-                        state=f'profile_{profile_id_int}'
-                    )
+                auth_manager = _profile_spotify_oauth(profile_id_int)
+                if auth_manager:
                     auth_url = auth_manager.get_authorize_url()
                     logger.info(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
                     return redirect(auth_url)
@@ -4805,20 +4821,10 @@ def spotify_callback():
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
-        # Per-profile callback: use profile's credentials
+        # Per-profile callback: the profile's own account via the shared app.
         if profile_id_from_state and profile_id_from_state != 1:
-            db = get_database()
-            creds = db.get_profile_spotify(profile_id_from_state)
-            if creds and creds.get('client_id'):
-                redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
-                auth_manager = SpotifyOAuth(
-                    client_id=creds['client_id'],
-                    client_secret=creds['client_secret'],
-                    redirect_uri=redirect_uri,
-                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                    cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
-                    state=f'profile_{profile_id_from_state}'
-                )
+            auth_manager = _profile_spotify_oauth(profile_id_from_state)
+            if auth_manager:
                 token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
                     metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
@@ -19625,7 +19631,7 @@ def get_spotify_playlists():
 
         # Add virtual "Liked Songs" playlist at the END (just count, no full fetch)
         try:
-            liked_songs_count = spotify_client.get_saved_tracks_count()
+            liked_songs_count = client.get_saved_tracks_count()
             if liked_songs_count > 0:
                 liked_songs_id = "spotify:liked-songs"
                 status_info = sync_statuses.get(liked_songs_id, {})
@@ -19636,7 +19642,7 @@ def get_spotify_playlists():
                     sync_status = f"Synced: {last_sync_time}"
 
                 # Get user info for owner name
-                user_info = spotify_client.get_user_info()
+                user_info = client.get_user_info()
                 owner_name = user_info.get('display_name', 'You') if user_info else 'You'
 
                 # Add Liked Songs as LAST playlist
@@ -19661,12 +19667,15 @@ def get_spotify_playlists():
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
-    if not spotify_client or not spotify_client.is_authenticated():
+    # Use THIS profile's own Spotify (their playlists/private content); falls
+    # back to the global/admin client for admin + unconnected profiles.
+    client = get_spotify_client_for_profile() or spotify_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
         # Handle special "Liked Songs" virtual playlist
         if playlist_id == "spotify:liked-songs":
-            user_info = spotify_client.get_user_info()
+            user_info = client.get_user_info()
             owner_name = user_info.get('display_name', 'You') if user_info else 'You'
 
             # Fetch raw saved tracks with full album data
@@ -19679,7 +19688,7 @@ def get_playlist_tracks(playlist_id):
                     return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
                 from core.api_call_tracker import api_call_tracker
                 api_call_tracker.record_call('spotify', endpoint='current_user_saved_tracks')
-                results = spotify_client.sp.current_user_saved_tracks(limit=limit, offset=offset)
+                results = client.sp.current_user_saved_tracks(limit=limit, offset=offset)
 
                 if not results or 'items' not in results:
                     break
@@ -19723,7 +19732,7 @@ def get_playlist_tracks(playlist_id):
         # Fetch raw playlist data to preserve full album objects
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('spotify', endpoint='playlist')
-        playlist_data = spotify_client.sp.playlist(playlist_id)
+        playlist_data = client.sp.playlist(playlist_id)
 
         # Fetch all tracks with full album data
         tracks = []
@@ -19734,7 +19743,7 @@ def get_playlist_tracks(playlist_id):
         items_err = None
         for _attempt in range(2):
             try:
-                results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
+                results = client._get_playlist_items_page(playlist_id, limit=100)
                 break
             except Exception as _e:
                 items_err = _e
@@ -19798,7 +19807,7 @@ def get_playlist_tracks(playlist_id):
 
             if results.get('next'):
                 api_call_tracker.record_call('spotify', endpoint='playlist_tracks_page')
-                results = spotify_client.sp.next(results)
+                results = client.sp.next(results)
             else:
                 results = None
 
@@ -25343,6 +25352,66 @@ def test_profile_listenbrainz():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # --- Per-Profile Service Credentials API ---
+
+def _profile_spotify_connection(profile_id):
+    """(connected, account_name) for a profile's OWN connected Spotify — not the
+    global/admin fallback. A profile is connected only when its own token cache
+    exists and authenticates."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    if not os.path.exists(f"config/.spotify_cache_profile_{profile_id}"):
+        return (False, None)
+    try:
+        client = metadata_registry.get_spotify_client_for_profile(profile_id)
+        if client and client.is_spotify_authenticated():
+            info = client.get_user_info() or {}
+            return (True, info.get('display_name') or info.get('id'))
+    except Exception as e:
+        logger.debug("profile %s spotify connection check failed: %s", profile_id, e)
+    return (False, None)
+
+
+@app.route('/api/profiles/me/connections', methods=['GET'])
+def get_my_connections():
+    """Per-profile playlist-service connection status for the My Accounts modal.
+    Readable by any profile; reports only this profile's own connections."""
+    try:
+        pid = get_current_profile_id()
+        sp_connected, sp_account = _profile_spotify_connection(pid)
+        return jsonify({
+            'success': True,
+            'is_admin': pid == 1,
+            'connections': {
+                'spotify': {'connected': sp_connected, 'account': sp_account},
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/me/connections/spotify/disconnect', methods=['POST'])
+def disconnect_my_spotify():
+    """Disconnect the current profile's own Spotify (clears its token cache +
+    stored tokens + cached client). The global/admin Spotify is untouched."""
+    try:
+        pid = get_current_profile_id()
+        if pid == 1:
+            return jsonify({'success': False, 'error': 'The admin Spotify is managed in Settings'}), 400
+        cache_path = f"config/.spotify_cache_profile_{pid}"
+        try:
+            if os.path.exists(cache_path):
+                os.remove(cache_path)
+        except Exception as e:
+            logger.debug("could not remove profile spotify cache: %s", e)
+        try:
+            get_database().set_profile_spotify_tokens(pid, '', '')
+        except Exception as e:
+            logger.debug("could not clear profile spotify tokens: %s", e)
+        metadata_registry.clear_cached_profile_spotify_client(pid)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/profiles/me/spotify', methods=['GET'])
 def get_profile_spotify_creds():
