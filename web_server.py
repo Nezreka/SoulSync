@@ -572,6 +572,60 @@ def get_spotify_client_for_profile(profile_id=None):
         profile_id = get_current_profile_id()
     return metadata_registry.get_spotify_client_for_profile(profile_id)
 
+
+_profile_tidal_clients = {}
+_profile_tidal_lock = threading.Lock()
+
+
+def get_tidal_client_for_profile(profile_id=None):
+    """Get the Tidal client for a profile's OWN playlists, or the global one.
+
+    A profile that has connected its own Tidal account gets a dedicated client
+    seeded with its tokens (refreshed via the shared/global app creds). Crucially
+    its token refresh is redirected to the profile row, so a per-profile refresh
+    never overwrites the global tidal_tokens the app runs on. Admin (profile 1)
+    and unconnected profiles use the global client unchanged."""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    if not profile_id or profile_id == 1:
+        return tidal_client
+    try:
+        toks = get_database().get_profile_tidal(profile_id) or {}
+    except Exception:
+        return tidal_client
+    if not toks.get('access_token') and not toks.get('refresh_token'):
+        return tidal_client
+    with _profile_tidal_lock:
+        cached = _profile_tidal_clients.get(profile_id)
+        if cached is not None:
+            return cached
+        try:
+            c = TidalClient()
+            c.access_token = toks.get('access_token') or None
+            c.refresh_token = toks.get('refresh_token') or None
+            c.token_expires_at = 0  # force a refresh check on first use
+            if c.access_token:
+                c.session.headers['Authorization'] = f'Bearer {c.access_token}'
+            # Redirect token persistence to the PROFILE, never the global slot.
+            _pid = profile_id
+            def _save_to_profile(_c=c, _p=_pid):
+                try:
+                    get_database().set_profile_tidal_tokens(_p, _c.access_token, _c.refresh_token)
+                except Exception as e:
+                    logger.debug("per-profile Tidal token save failed: %s", e)
+            c._save_tokens = _save_to_profile
+            _profile_tidal_clients[profile_id] = c
+            return c
+        except Exception as e:
+            logger.error("per-profile Tidal client build failed for %s: %s", profile_id, e)
+            return tidal_client
+
+
+def clear_profile_tidal_client(profile_id):
+    """Evict a profile's cached Tidal client (after (dis)connect)."""
+    with _profile_tidal_lock:
+        _profile_tidal_clients.pop(profile_id, None)
+
 # Valid page IDs for profile permission validation
 VALID_PAGE_IDS = {
     'dashboard',
@@ -4985,20 +5039,9 @@ def tidal_callback():
             if profile_id_for_tidal:
                 try:
                     profile_id_int = int(profile_id_for_tidal)
-                    db = get_database()
-                    # Store Tidal tokens on the profile
-                    from config.settings import config_manager as _cm
-                    enc_access = _cm._encrypt_value(temp_tidal_client.access_token) if temp_tidal_client.access_token else None
-                    enc_refresh = _cm._encrypt_value(temp_tidal_client.refresh_token) if temp_tidal_client.refresh_token else None
-                    with db._get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE profiles
-                            SET tidal_access_token = ?, tidal_refresh_token = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        """, (enc_access, enc_refresh, profile_id_int))
-                        conn.commit()
+                    get_database().set_profile_tidal_tokens(
+                        profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
+                    clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
                     add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
                     return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
                 except Exception as profile_err:
@@ -21163,11 +21206,12 @@ def tidal_disconnect():
 @app.route('/api/tidal/playlists', methods=['GET'])
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
-    if not tidal_client or not tidal_client.is_authenticated():
+    client = get_tidal_client_for_profile() or tidal_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
         # Use same method as sync.py - this already includes all track data
-        playlists = tidal_client.get_user_playlists_metadata_only()
+        playlists = client.get_user_playlists_metadata_only()
         
         playlist_data = []
         for p in playlists:
@@ -21212,8 +21256,8 @@ def get_tidal_playlists():
                 COLLECTION_PLAYLIST_NAME,
                 COLLECTION_PLAYLIST_DESCRIPTION,
             )
-            collection_count = tidal_client.get_collection_tracks_count()
-            needs_reconnect = tidal_client.collection_needs_reconnect()
+            collection_count = client.get_collection_tracks_count()
+            needs_reconnect = client.collection_needs_reconnect()
 
             if needs_reconnect:
                 playlist_data.append({
@@ -21254,7 +21298,8 @@ def get_tidal_playlists():
 @app.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
 def get_tidal_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
-    if not tidal_client or not tidal_client.is_authenticated():
+    client = get_tidal_client_for_profile() or tidal_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
         logger.info(f"Getting full Tidal playlist with tracks for: {playlist_id}")
@@ -21263,7 +21308,7 @@ def get_tidal_playlist_tracks(playlist_id):
         # `get_playlist` recognizes the virtual `tidal-favorites` ID and
         # dispatches to the userCollectionTracks endpoint internally, so
         # the rest of this handler treats it identically to a real playlist.
-        full_playlist = tidal_client.get_playlist(playlist_id)
+        full_playlist = client.get_playlist(playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
             
@@ -25371,6 +25416,20 @@ def _profile_spotify_connection(profile_id):
     return (False, None)
 
 
+def _profile_tidal_connection(profile_id):
+    """(connected, account_name) for a profile's OWN Tidal. Connected = it has
+    stored tokens; validity is checked (and refreshed) on actual use, so this
+    stays a cheap no-network check for the modal."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    try:
+        toks = get_database().get_profile_tidal(profile_id) or {}
+        return (bool(toks.get('refresh_token') or toks.get('access_token')), None)
+    except Exception as e:
+        logger.debug("profile %s tidal connection check failed: %s", profile_id, e)
+        return (False, None)
+
+
 @app.route('/api/profiles/me/connections', methods=['GET'])
 def get_my_connections():
     """Per-profile playlist-service connection status for the My Accounts modal.
@@ -25378,36 +25437,59 @@ def get_my_connections():
     try:
         pid = get_current_profile_id()
         sp_connected, sp_account = _profile_spotify_connection(pid)
+        td_connected, td_account = _profile_tidal_connection(pid)
         return jsonify({
             'success': True,
             'is_admin': pid == 1,
             'connections': {
                 'spotify': {'connected': sp_connected, 'account': sp_account},
+                'tidal': {'connected': td_connected, 'account': td_account},
             },
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
-@app.route('/api/profiles/me/connections/spotify/disconnect', methods=['POST'])
-def disconnect_my_spotify():
-    """Disconnect the current profile's own Spotify (clears its token cache +
-    stored tokens + cached client). The global/admin Spotify is untouched."""
+def _disconnect_profile_spotify(pid):
+    cache_path = f"config/.spotify_cache_profile_{pid}"
+    try:
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
+    except Exception as e:
+        logger.debug("could not remove profile spotify cache: %s", e)
+    try:
+        get_database().set_profile_spotify_tokens(pid, '', '')
+    except Exception as e:
+        logger.debug("could not clear profile spotify tokens: %s", e)
+    metadata_registry.clear_cached_profile_spotify_client(pid)
+
+
+def _disconnect_profile_tidal(pid):
+    try:
+        get_database().set_profile_tidal_tokens(pid, '', '')
+    except Exception as e:
+        logger.debug("could not clear profile tidal tokens: %s", e)
+    clear_profile_tidal_client(pid)
+
+
+_PROFILE_DISCONNECTORS = {
+    'spotify': _disconnect_profile_spotify,
+    'tidal': _disconnect_profile_tidal,
+}
+
+
+@app.route('/api/profiles/me/connections/<service>/disconnect', methods=['POST'])
+def disconnect_my_connection(service):
+    """Disconnect the current profile's OWN account for a service (clears its
+    per-profile tokens + cached client). The global/admin auth is untouched."""
     try:
         pid = get_current_profile_id()
+        fn = _PROFILE_DISCONNECTORS.get(service)
+        if not fn:
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
         if pid == 1:
-            return jsonify({'success': False, 'error': 'The admin Spotify is managed in Settings'}), 400
-        cache_path = f"config/.spotify_cache_profile_{pid}"
-        try:
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-        except Exception as e:
-            logger.debug("could not remove profile spotify cache: %s", e)
-        try:
-            get_database().set_profile_spotify_tokens(pid, '', '')
-        except Exception as e:
-            logger.debug("could not clear profile spotify tokens: %s", e)
-        metadata_registry.clear_cached_profile_spotify_client(pid)
+            return jsonify({'success': False, 'error': 'The admin account is managed in Settings'}), 400
+        fn(pid)
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500

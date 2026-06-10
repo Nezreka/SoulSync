@@ -67722,3 +67722,4 @@ body.em-scroll-lock { overflow: hidden; }
 .ma-btn--connect:hover { filter: brightness(1.1); }
 .ma-btn--ghost { background: transparent; color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.18); }
 .ma-btn--ghost:hover { background: rgba(255,255,255,0.06); color: #fff; }
+.ma-disc.ma-disc--dark { background: #1f2329; }

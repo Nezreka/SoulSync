@@ -4747,6 +4747,48 @@ class MusicDatabase:
             logger.error(f"Error setting Spotify tokens for profile {profile_id}: {e}")
             return False
 
+    def set_profile_tidal_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
+        """Save Tidal OAuth tokens for a profile (encrypted). Used by the
+        per-profile Tidal client's token refresh — keeps a profile's refresh from
+        ever touching the global tidal_tokens slot."""
+        try:
+            from config.settings import config_manager
+            enc_access = config_manager._encrypt_value(access_token) if access_token else None
+            enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET tidal_access_token = ?, tidal_refresh_token = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (enc_access, enc_refresh, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Tidal tokens for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_tidal(self, profile_id: int) -> Dict[str, Any]:
+        """Get decrypted Tidal tokens for a profile ({} if none)."""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT tidal_access_token, tidal_refresh_token FROM profiles WHERE id = ?",
+                    (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return {}
+                return {
+                    'access_token': config_manager._decrypt_value(row[0]) if row[0] else '',
+                    'refresh_token': config_manager._decrypt_value(row[1]) if row[1] else '',
+                }
+        except Exception as e:
+            logger.error(f"Error getting Tidal tokens for profile {profile_id}: {e}")
+            return {}
+
     def set_profile_server_library(self, profile_id: int, server_type: str,
                                     library_id: str = None, user_id: str = None) -> bool:
         """Save media server library/user selection for a profile."""
