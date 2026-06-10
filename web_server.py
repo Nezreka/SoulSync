@@ -2927,6 +2927,7 @@ def get_activity_logs():
 
 # --- Internal API Key Management (browser-only, no auth) ---
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
+@admin_only
 def list_api_keys_internal():
     """List API keys for the settings page (no auth required — same as all UI routes)."""
     keys = config_manager.get('api_keys', [])
@@ -2943,6 +2944,7 @@ def list_api_keys_internal():
     return jsonify({"success": True, "data": {"keys": safe_keys}})
 
 @app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
+@admin_only
 def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
     from api.auth import generate_api_key
@@ -2961,6 +2963,7 @@ def generate_api_key_internal():
     }}), 201
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
+@admin_only
 def revoke_api_key_internal(key_id):
     """Revoke API key from settings page (no auth required)."""
     keys = config_manager.get('api_keys', [])
@@ -4040,6 +4043,7 @@ def get_plex_pin_status():
 
 
 @app.route('/api/plex/clear-library', methods=['POST'])
+@admin_only
 def clear_plex_library_preference():
     try:
         from database.music_database import MusicDatabase
@@ -11636,6 +11640,7 @@ def library_manual_match():
         logger.error(f"Error manual matching: {e}")
 
 @app.route('/api/library/clear-match', methods=['PUT'])
+@admin_only
 def library_clear_match():
     """Clear a service ID match for an entity, reverting it to not_found.
     Body: { entity_type: str, entity_id: str, service: str }
@@ -11751,6 +11756,7 @@ def library_import_existing_track_for_missing_slot(album_id):
 
 
 @app.route('/api/library/track/<track_id>', methods=['DELETE'])
+@admin_only
 def library_delete_track(track_id):
     """Delete a track from the database, optionally deleting the file and blacklisting the source."""
     try:
@@ -12322,6 +12328,7 @@ def sync_artist_library(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
+@admin_only
 def library_delete_album(album_id):
     """Delete an album and all its tracks from the database, optionally deleting files on disk."""
     try:
@@ -12399,6 +12406,7 @@ def library_delete_album(album_id):
 
 
 @app.route('/api/library/tracks/delete-batch', methods=['POST'])
+@admin_only
 def library_delete_tracks_batch():
     """Delete multiple track records from the database (does NOT delete files on disk).
     Body: { track_ids: [int] }
@@ -16055,6 +16063,7 @@ def add_album_track_to_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/update', methods=['POST'])
+@admin_only
 def start_database_update():
     """Endpoint to start the database update process."""
     global db_update_worker
@@ -16111,6 +16120,7 @@ def stop_database_update():
 _BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
 
 @app.route('/api/database/backup', methods=['POST'])
+@admin_only
 def backup_database_endpoint():
     """Create a rolling backup of the database (max 5)."""
     try:
@@ -16202,6 +16212,7 @@ def list_backups_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/backups/<filename>', methods=['DELETE'])
+@admin_only
 def delete_backup_endpoint(filename):
     """Delete a specific database backup."""
     try:
@@ -16224,6 +16235,7 @@ def delete_backup_endpoint(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/backups/<filename>/restore', methods=['POST'])
+@admin_only
 def restore_backup_endpoint(filename):
     """Restore the database from a specific backup."""
     try:
@@ -16367,6 +16379,7 @@ def database_maintenance_info():
 
 
 @app.route('/api/database/maintenance/vacuum', methods=['POST'])
+@admin_only
 def database_vacuum():
     """Run VACUUM to compact the database. Locks DB during operation."""
     try:
@@ -16556,6 +16569,7 @@ def metadata_cache_browse_musicbrainz():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/metadata-cache/clear', methods=['DELETE'])
+@admin_only
 def metadata_cache_clear():
     """Clear cached metadata. Optional query params: source, type."""
     try:
@@ -16583,6 +16597,7 @@ def metadata_cache_evict():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata-cache/clear-musicbrainz', methods=['DELETE'])
+@admin_only
 def metadata_cache_clear_musicbrainz():
     """Clear MusicBrainz cache entries. Optional query param: failed_only=true."""
     try:
