@@ -55534,6 +55534,12 @@ tr.tag-diff-same {
     border-radius: 10px;
     transition: all 0.2s;
     user-select: none;
+    cursor: grab;
+}
+.hybrid-source-item.dragging {
+    opacity: 0.5;
+    cursor: grabbing;
+    border-color: rgb(var(--accent-light-rgb));
 }
 .hybrid-source-item:hover {
     border-color: rgba(255, 255, 255, 0.12);

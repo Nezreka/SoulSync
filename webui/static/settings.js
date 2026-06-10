@@ -699,6 +699,21 @@ function buildHybridSourceList() {
             </label>
         `;
 
+        // Real drag-to-reorder (the help text promised it; previously only the
+        // arrow buttons worked — item.draggable was set with no handlers).
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', srcId);
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => item.classList.remove('dragging'));
+        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const draggedId = e.dataTransfer.getData('text/plain');
+            if (draggedId && draggedId !== srcId) _reorderHybridSource(draggedId, srcId);
+        });
+
         container.appendChild(item);
     });
 
@@ -717,6 +732,22 @@ function moveHybridSource(srcId, direction) {
     [_hybridVisualOrder[idx], _hybridVisualOrder[newIdx]] = [_hybridVisualOrder[newIdx], _hybridVisualOrder[idx]];
 
     // Rebuild enabled order from visual order
+    _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+    debouncedAutoSaveSettings();
+}
+
+function _reorderHybridSource(draggedId, targetId) {
+    // Move draggedId to just before targetId in the visual order, then rebuild
+    // the enabled subset + persist — same model moveHybridSource uses.
+    if (!_hybridVisualOrder) return;
+    const from = _hybridVisualOrder.indexOf(draggedId);
+    if (from < 0) return;
+    _hybridVisualOrder.splice(from, 1);
+    const to = _hybridVisualOrder.indexOf(targetId);
+    if (to < 0) { _hybridVisualOrder.splice(from, 0, draggedId); return; }  // target gone — undo
+    _hybridVisualOrder.splice(to, 0, draggedId);
     _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
     buildHybridSourceList();
     updateDownloadSourceUI();
