@@ -19056,14 +19056,24 @@ def server_playlist_add_track(playlist_id):
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             from core.sync.playlist_edit import plan_playlist_add
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
+            jf = media_server_engine.client('jellyfin')
+            current_tracks = jf.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
             # is a LINK, not a second copy — don't duplicate it (#768).
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
-                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+                # #837: append the ONE found track IN PLACE. The old path called
+                # update_playlist(full track list), which on Jellyfin/Emby deletes
+                # and recreates the playlist — wiping its description + cover image.
+                # append_to_playlist adds in place (dedupe-safe), the same
+                # non-destructive op the 'append' sync mode already uses. It reads
+                # `.id` (not ratingKey) off each track, so set both.
+                new_track_obj = type('T', (), {
+                    'id': str(track_id), 'ratingKey': str(track_id),
+                    'title': server_track_title or '',
+                })()
+                jf.append_to_playlist(playlist_name, [new_track_obj])
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
