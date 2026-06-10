@@ -2478,7 +2478,13 @@ async function verifApprove(hid, btn) {
 }
 
 async function verifDelete(hid, btn) {
-    if (!confirm('Delete this file from disk and remove the entry?')) return;
+    if (!await showConfirmDialog({
+        title: 'Delete Unverified File',
+        message: 'This permanently deletes the downloaded file from disk and removes the review entry. Cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
     if (btn) btn.disabled = true;
     try {
         const r = await fetch(`/api/verification/${hid}/delete`, { method: 'POST' });
@@ -2698,7 +2704,13 @@ async function verifQuarRecover(idx, btn) {
 
 async function verifQuarDelete(idx, btn) {
     const q = _verifQuarEntries[idx]; if (!q) return;
-    if (!confirm('Permanently delete this quarantined file?')) return;
+    if (!await showConfirmDialog({
+        title: 'Delete Quarantined File',
+        message: 'This permanently removes the file and its metadata sidecar. Cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
     if (btn) btn.disabled = true;
     try {
         const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
@@ -2721,7 +2733,12 @@ function _verifUnverifiedIds() {
 async function verifApproveAll(btn) {
     const ids = _verifUnverifiedIds();
     if (!ids.length) return;
-    if (!confirm(`Mark all ${ids.length} unverified entries as human-verified? The AcoustID scanner will skip them from now on.`)) return;
+    if (!await showConfirmDialog({
+        title: 'Approve Unverified Files',
+        message: `Mark all ${ids.length} unverified entries as human-verified? The AcoustID scanner will skip them from now on.`,
+        confirmText: 'Approve All',
+        cancelText: 'Cancel',
+    })) return;
     if (btn) btn.disabled = true;
     let ok = 0;
     for (const id of ids) {
@@ -2739,7 +2756,13 @@ async function verifApproveAll(btn) {
 async function verifDeleteAll(btn) {
     const ids = _verifUnverifiedIds();
     if (!ids.length) return;
-    if (!confirm(`Delete ALL ${ids.length} unverified files from disk and remove their entries? This cannot be undone.`)) return;
+    if (!await showConfirmDialog({
+        title: 'Delete Unverified Files',
+        message: `This permanently deletes all ${ids.length} unverified files from disk and removes their review entries. Cannot be undone.`,
+        confirmText: 'Delete All',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
     if (btn) btn.disabled = true;
     let ok = 0;
     for (const id of ids) {
@@ -2760,7 +2783,12 @@ async function verifQuarApproveAll(btn) {
         showToast && showToast('No one-click-approvable entries (legacy sidecars need Recover)', 'info');
         return;
     }
-    if (!confirm(`Approve and re-import all ${entries.length} quarantined files? They will be imported into the library marked human-verified.`)) return;
+    if (!await showConfirmDialog({
+        title: 'Approve Quarantined Files',
+        message: `Approve and re-import all ${entries.length} quarantined files? They will be imported into the library marked human-verified.`,
+        confirmText: 'Approve & Import All',
+        cancelText: 'Cancel',
+    })) return;
     if (btn) btn.disabled = true;
     let ok = 0;
     for (const q of entries) {
@@ -2779,7 +2807,13 @@ async function verifQuarApproveAll(btn) {
 
 async function verifQuarClearAll(btn) {
     if (!_verifQuarEntries.length) return;
-    if (!confirm(`Permanently delete ALL ${_verifQuarEntries.length} quarantined files? This cannot be undone.`)) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Quarantine',
+        message: `This permanently deletes all ${_verifQuarEntries.length} quarantined files and their metadata sidecars. Cannot be undone.`,
+        confirmText: 'Delete All',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
     if (btn) btn.disabled = true;
     try {
         const r = await fetch('/api/quarantine/clear', { method: 'POST' });
@@ -3635,4 +3669,3 @@ window.adlCancelRow = adlCancelRow;
 window.adlCancelAll = adlCancelAll;
 window.adlToggleBatchHistory = adlToggleBatchHistory;
 window.adlToggleBatchPanel = adlToggleBatchPanel;
-
