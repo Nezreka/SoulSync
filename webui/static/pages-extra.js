@@ -2359,8 +2359,77 @@ function _adlVerifBadge(dl) {
     if (dl.verification_status === 'verified') {
         return ' <span class="verif-badge verif-ok" title="AcoustID verified: audio fingerprint matches the expected track.">✔</span>';
     }
+    if (dl.verification_status === 'human_verified') {
+        return ' <span class="verif-badge verif-human" title="Human verified: you confirmed this file is the right track. The AcoustID scanner skips it.">🛡✔</span>';
+    }
     return '';
 }
+
+// ---- Verification review queue (the ⚠ Unverified filter) ----
+let _verifAudio = null;
+let _verifAudioId = null;
+
+function verifHistoryId(dl) {
+    // Persistent history rows carry task_id 'history-<dbid>'.
+    if (!dl.is_persistent_history || !dl.task_id) return null;
+    const m = String(dl.task_id).match(/^history-(\d+)$/);
+    return m ? m[1] : null;
+}
+
+function _adlReviewActions(dl) {
+    if (_adlFilter !== 'unverified') return '';
+    const hid = verifHistoryId(dl);
+    if (!hid) return '';
+    const q = encodeURIComponent(`${dl.artist || ''} ${dl.title || ''}`.trim());
+    const playing = _verifAudioId === hid ? ' playing' : '';
+    return `<div class="verif-actions" onclick="event.stopPropagation()">
+        <button class="verif-act verif-act-play${playing}" onclick="verifTogglePlay('${hid}', this)" title="Listen to the downloaded file">▶</button>
+        <button class="verif-act" onclick="window.open('https://www.youtube.com/results?search_query=${q}','_blank')" title="Open a YouTube search for this track in a new tab — compare side by side">YT</button>
+        <button class="verif-act verif-act-ok" onclick="verifApprove('${hid}', this)" title="Approve: mark as human-verified (tag + DB). The AcoustID scanner will skip it.">✔</button>
+        <button class="verif-act verif-act-del" onclick="verifDelete('${hid}', this)" title="Wrong file: delete it from disk and remove this entry">🗑</button>
+    </div>`;
+}
+
+function verifTogglePlay(hid, btn) {
+    if (_verifAudio && _verifAudioId === hid) {
+        _verifAudio.pause(); _verifAudio = null; _verifAudioId = null;
+        if (btn) { btn.textContent = '▶'; btn.classList.remove('playing'); }
+        return;
+    }
+    if (_verifAudio) { try { _verifAudio.pause(); } catch (e) {} }
+    document.querySelectorAll('.verif-act-play.playing').forEach(b => { b.textContent = '▶'; b.classList.remove('playing'); });
+    _verifAudio = new Audio(`/api/verification/${hid}/stream`);
+    _verifAudioId = hid;
+    _verifAudio.play().catch(() => { showToast && showToast('Could not play file', 'error'); });
+    _verifAudio.onended = () => { _verifAudioId = null; if (btn) { btn.textContent = '▶'; btn.classList.remove('playing'); } };
+    if (btn) { btn.textContent = '⏸'; btn.classList.add('playing'); }
+}
+
+async function verifApprove(hid, btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/verification/${hid}/approve`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) { showToast && showToast('Marked as human-verified 🛡✔', 'success'); _adlFetch(); }
+        else showToast && showToast(d.error || 'Approve failed', 'error');
+    } catch (e) { showToast && showToast('Approve failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
+async function verifDelete(hid, btn) {
+    if (!confirm('Delete this file from disk and remove the entry?')) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/verification/${hid}/delete`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) { showToast && showToast('File deleted', 'success'); _adlFetch(); }
+        else showToast && showToast(d.error || 'Delete failed', 'error');
+    } catch (e) { showToast && showToast('Delete failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+window.verifTogglePlay = verifTogglePlay;
+window.verifApprove = verifApprove;
+window.verifDelete = verifDelete;
 
 function _adlRender() {
     const list = document.getElementById('adl-list');
@@ -2387,6 +2456,7 @@ function _adlRender() {
     else if (_adlFilter === 'unverified') filtered = filtered.filter(d =>
         completedStatuses.includes(d.status) &&
         (d.verification_status === 'unverified' || d.verification_status === 'force_imported'));
+    // (review banner injected below when this filter is active)
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
     const completedN = _adlData.filter(d =>
@@ -2514,6 +2584,7 @@ function _adlRender() {
                     <span class="adl-status-dot ${statusClass}"></span>
                     ${statusLabel}${_adlVerifBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
                 </div>
+                ${_adlReviewActions(dl)}
                 ${cancelBtnHtml}
             </div>`;
         }

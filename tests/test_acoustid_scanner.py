@@ -868,3 +868,23 @@ def test_force_imported_mismatch_is_reported_as_informational(monkeypatch):
 def test_force_imported_can_be_skipped_via_setting(monkeypatch):
     captured = _force_imported_scan(monkeypatch, skip_setting=True)
     assert captured == []
+
+
+def test_human_verified_files_are_never_scanned(monkeypatch):
+    import core.repair_jobs.acoustid_scanner as scanner_mod
+    monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
+                        lambda name: [], raising=False)
+    monkeypatch.setattr('core.tag_writer.read_file_tags',
+                        lambda fpath: {'artist': None, 'verification_status': 'human_verified'})
+    job = AcoustIDScannerJob()
+    captured = []
+    context = _make_finding_capturing_context(
+        track_row=("7", "T", "A", "/music/t.flac", 1, "Al", None, None),
+        captured=captured)
+    fake = SimpleNamespace(fingerprint_and_lookup=lambda f: {
+        'best_score': 0.99,
+        'recordings': [{'title': 'Totally Different', 'artist': 'Metallica'}]})
+    job._scan_file('/music/t.flac', '7', {'title': 'T', 'artist': 'A'},
+                   fake, context, JobResultStub(),
+                   fp_threshold=0.85, title_threshold=0.85, artist_threshold=0.6)
+    assert captured == []

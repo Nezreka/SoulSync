@@ -3689,6 +3689,8 @@ function processModalStatusUpdate(playlistId, data) {
                             statusText += ' <span class="verif-badge verif-unverified" title="Imported but not hard-verified (AcoustID could not confirm — e.g. cross-script metadata or no fingerprint match).">⚠</span>';
                         } else if (task.verification_status === 'verified') {
                             statusText += ' <span class="verif-badge verif-ok" title="AcoustID verified: audio fingerprint matches the expected track.">✔</span>';
+                        } else if (task.verification_status === 'human_verified') {
+                            statusText += ' <span class="verif-badge verif-human" title="Human verified: you confirmed this file is the right track.">🛡✔</span>';
                         }
                         completedCount++;
                         break;

@@ -651,9 +651,10 @@ class MusicDatabase:
                     CASE acoustid_result
                         WHEN 'pass' THEN 'verified'
                         WHEN 'skip' THEN 'unverified'
+                        WHEN 'fail' THEN 'force_imported'
                     END
                 WHERE verification_status IS NULL
-                  AND acoustid_result IN ('pass', 'skip')
+                  AND acoustid_result IN ('pass', 'skip', 'fail')
             """)
             if cursor.rowcount:
                 logger.info("Backfilled verification_status from acoustid_result (%d rows)", cursor.rowcount)

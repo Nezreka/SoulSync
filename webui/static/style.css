@@ -67899,3 +67899,10 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
 .verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }
 .adl-retry-info { margin-left: 6px; font-size: 11px; color: #e67e22; cursor: help; }
+.verif-badge.verif-human { color: #3498db; background: rgba(52,152,219,0.14); }
+.verif-actions { display: inline-flex; gap: 6px; margin-left: 10px; align-items: center; }
+.verif-act { border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; line-height: 18px; }
+.verif-act:hover { background: rgba(255,255,255,0.14); }
+.verif-act-ok:hover { background: rgba(46,204,113,0.25); border-color: rgba(46,204,113,0.5); }
+.verif-act-del:hover { background: rgba(231,76,60,0.25); border-color: rgba(231,76,60,0.5); }
+.verif-act-play.playing { background: rgba(var(--accent-rgb),0.3); }
