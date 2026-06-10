@@ -25421,6 +25421,106 @@ def save_profile_server_library():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+# ==================================================================================
+# SERVICE CREDENTIAL SETS  (admin-created named "pills" per auth service; #profiles)
+# ----------------------------------------------------------------------------------
+# Admin manages the named credential sets; any profile only SELECTS among them
+# (see /api/credentials/active + /select below). Payloads (the actual secrets)
+# are NEVER returned to the browser — only id/service/label.
+# ==================================================================================
+
+@app.route('/api/credentials', methods=['GET'])
+@admin_only
+def list_service_credentials_endpoint():
+    """List all credential sets grouped by service (metadata only, no secrets)."""
+    try:
+        from core.credentials.store import SERVICE_CREDENTIAL_SCHEMA
+        rows = get_database().list_service_credentials()
+        grouped = {svc: [] for svc in SERVICE_CREDENTIAL_SCHEMA}
+        for r in rows:
+            grouped.setdefault(r['service'], []).append(
+                {'id': r['id'], 'label': r['label'], 'updated_at': r['updated_at']}
+            )
+        return jsonify({'success': True, 'services': grouped})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials', methods=['POST'])
+@admin_only
+def create_service_credential_endpoint():
+    """Create a named credential set for a service. Body: {service, label, payload}."""
+    try:
+        from core.credentials.store import is_supported_service, validate_credential_payload
+        data = request.json or {}
+        service = (data.get('service') or '').strip()
+        label = (data.get('label') or '').strip()
+        payload = data.get('payload') or {}
+
+        if not is_supported_service(service):
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
+        if not label:
+            return jsonify({'success': False, 'error': 'A name is required'}), 400
+        ok, missing = validate_credential_payload(service, payload)
+        if not ok:
+            return jsonify({'success': False, 'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+        cred_id = get_database().create_service_credential(service, label, payload)
+        if cred_id is None:
+            return jsonify({'success': False, 'error': f'A "{label}" set already exists for {service}'}), 409
+        return jsonify({'success': True, 'id': cred_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials/<int:credential_id>', methods=['PUT'])
+@admin_only
+def update_service_credential_endpoint(credential_id):
+    """Update a credential set's label and/or payload. Only provided fields change."""
+    try:
+        from core.credentials.store import validate_credential_payload
+        data = request.json or {}
+        label = data.get('label')
+        payload = data.get('payload')  # None = leave secrets untouched
+
+        existing = get_database().get_service_credential(credential_id)
+        if not existing:
+            return jsonify({'success': False, 'error': 'Credential set not found'}), 404
+
+        if label is not None and not str(label).strip():
+            return jsonify({'success': False, 'error': 'Name cannot be empty'}), 400
+        if payload is not None:
+            ok, missing = validate_credential_payload(existing['service'], payload)
+            if not ok:
+                return jsonify({'success': False, 'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+        updated = get_database().update_service_credential(
+            credential_id,
+            label=str(label).strip() if label is not None else None,
+            payload=payload,
+        )
+        if not updated:
+            return jsonify({'success': False, 'error': 'Nothing to update or name already in use'}), 400
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials/<int:credential_id>', methods=['DELETE'])
+@admin_only
+def delete_service_credential_endpoint(credential_id):
+    """Delete a credential set. Any profile that had it selected falls back to
+    the global/admin default automatically (selection is cleared in the DB)."""
+    try:
+        ok = get_database().delete_service_credential(credential_id)
+        if not ok:
+            return jsonify({'success': False, 'error': 'Credential set not found'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # --- Watchlist API Endpoints ---
 
 @app.route('/api/watchlist/count', methods=['GET'])
