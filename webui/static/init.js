@@ -2072,10 +2072,16 @@ document.addEventListener('DOMContentLoaded', async function () {
     if (!forceSetup) {
         try {
             const setupResp = await fetch('/api/setup/status');
-            const setupData = await setupResp.json();
-            if (!setupData.setup_complete) {
-                showWizard = true;
-                localStorage.removeItem('soulsync_setup_complete');
+            // Fail-safe (#842): only launch the wizard when the server DEFINITIVELY
+            // says setup isn't done. A non-OK response (e.g. 401 while the launch
+            // PIN is locked) must NOT trigger the wizard — otherwise a PIN-gated
+            // returning user gets the full setup flow every visit.
+            if (setupResp.ok) {
+                const setupData = await setupResp.json();
+                if (setupData.setup_complete === false) {
+                    showWizard = true;
+                    localStorage.removeItem('soulsync_setup_complete');
+                }
             }
         } catch (e) {
             console.warn('Setup status check failed, continuing normal init:', e);
