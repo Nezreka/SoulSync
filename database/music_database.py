@@ -641,6 +641,23 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
 
+            # One-time backfill: derive verification_status for history rows
+            # written before the column existed (or by pipeline exits that
+            # missed it) from the acoustid_result those imports already
+            # recorded (pass->verified, skip->unverified). force_imported
+            # can't be derived retroactively. Idempotent: only fills NULLs.
+            cursor.execute("""
+                UPDATE library_history SET verification_status =
+                    CASE acoustid_result
+                        WHEN 'pass' THEN 'verified'
+                        WHEN 'skip' THEN 'unverified'
+                    END
+                WHERE verification_status IS NULL
+                  AND acoustid_result IN ('pass', 'skip')
+            """)
+            if cursor.rowcount:
+                logger.info("Backfilled verification_status from acoustid_result (%d rows)", cursor.rowcount)
+
             # Migration: download-origin provenance — what TRIGGERED a download
             # ('watchlist' + artist / 'playlist' + playlist name). Read by the
             # origin-history modal on the watchlist + sync pages.
