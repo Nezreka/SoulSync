@@ -181,3 +181,18 @@ def test_active_sources_nonadmin_readonly_and_blocked(client, nonadmin_profile):
         sess['profile_id'] = nonadmin_profile
     assert client.get('/api/profiles/me/active-sources').get_json()['editable'] is False
     assert client.post('/api/profiles/active-sources', json={'metadata_source': 'deezer'}).status_code == 403
+
+
+def test_spotify_free_composite_roundtrips_like_settings(client):
+    # "Spotify (no auth)" is stored as fallback_source=spotify + spotify_free=true
+    # (the same composite the Settings page uses) — the modal must report it as
+    # active='spotify_free', not raw 'spotify'.
+    from config.settings import config_manager
+    assert client.post('/api/profiles/active-sources', json={'metadata_source': 'spotify_free'}).get_json()['success']
+    assert config_manager.get('metadata.fallback_source') == 'spotify'
+    assert config_manager.get('metadata.spotify_free') is True
+    assert client.get('/api/profiles/me/active-sources').get_json()['metadata']['active'] == 'spotify_free'
+    # Switching to plain spotify clears the flag.
+    client.post('/api/profiles/active-sources', json={'metadata_source': 'spotify'})
+    assert config_manager.get('metadata.spotify_free') is False
+    assert client.get('/api/profiles/me/active-sources').get_json()['metadata']['active'] == 'spotify'

@@ -67668,7 +67668,38 @@ body.em-scroll-lock { overflow: hidden; }
 .ss-tab.active .ss-tab-cat { color: color-mix(in srgb, var(--ss-brand) 75%, white); }
 .ss-tab-cur { font-size: 0.92rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.ss-panel { flex: 1; padding: 22px 24px; overflow-y: auto; }
+.ss-panel {
+    flex: 1; padding: 22px 24px; overflow-y: auto;
+    background:
+        radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--ss-brand) 9%, transparent), transparent 60%),
+        radial-gradient(90% 60% at 0% 100%, rgba(255,255,255,0.02), transparent 70%);
+}
+.ss-hero {
+    position: relative; display: flex; align-items: center; gap: 16px; padding: 16px 18px; margin-bottom: 20px;
+    border-radius: 16px; overflow: hidden;
+    background: linear-gradient(120deg, color-mix(in srgb, var(--ss-brand) 24%, transparent), rgba(255,255,255,0.025));
+    border: 1px solid color-mix(in srgb, var(--ss-brand) 40%, transparent);
+}
+.ss-hero::after {
+    content: ''; position: absolute; right: -40px; top: -60px; width: 180px; height: 180px; border-radius: 50%;
+    background: radial-gradient(circle, color-mix(in srgb, var(--ss-brand) 40%, transparent), transparent 70%);
+    pointer-events: none;
+}
+.ss-hero-disc {
+    width: 60px; height: 60px; flex-shrink: 0; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 3px var(--ss-brand), 0 0 26px color-mix(in srgb, var(--ss-brand) 55%, transparent);
+}
+.ss-hero-logo { width: 36px; height: 36px; object-fit: contain; }
+.ss-hero-emoji { font-size: 1.8rem; }
+.ss-hero-info { flex: 1; min-width: 0; }
+.ss-hero-eyebrow { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.1em; color: color-mix(in srgb, var(--ss-brand) 70%, white); font-weight: 700; }
+.ss-hero-name { font-size: 1.35rem; font-weight: 700; margin: 1px 0 3px; }
+.ss-hero-sub { font-size: 0.82rem; color: rgba(255,255,255,0.55); }
+.ss-hero-pill {
+    align-self: flex-start; font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 4px 10px; border-radius: 999px; color: #0a0a0a; background: var(--ss-brand);
+}
 .ss-section-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: rgba(255, 255, 255, 0.45); margin-bottom: 16px; }
 .ss-hint { color: rgba(255, 255, 255, 0.5); font-size: 0.82rem; margin-bottom: 12px; }
 .ss-empty { color: rgba(255, 255, 255, 0.4); font-style: italic; padding: 30px 0; text-align: center; }
