@@ -84,6 +84,7 @@ def test_search_kind_artists_returns_normalized_dicts():
     assert result == [{
         'id': 'id1',
         'name': 'Pink Floyd',
+        'source': 'spotify',
         'image_url': 'thumb.jpg',
         'external_urls': {'spotify': 'url'},
     }]
@@ -137,6 +138,8 @@ def test_search_kind_tracks_returns_full_shape():
         'id': 't1',
         'name': 'Money',
         'artist': 'Pink Floyd',
+        'artists': ['Pink Floyd'],
+        'source': '',
         'album': 'DSOTM',
         'duration_ms': 383000,
         'image_url': 'm.jpg',
@@ -201,3 +204,45 @@ def test_search_source_all_fail_returns_empty_lists():
     client = _Client(fail={'artists', 'albums', 'tracks'})
     result = sources.search_source('q', client, 'spotify')
     assert result == {'artists': [], 'albums': [], 'tracks': [], 'available': True}
+
+
+# ── source field on serialized results (Netti93 multi-artist fix) ───────────
+# Search results must carry which metadata source they came from: the payload
+# travels Download Now → download task → import context, where the Deezer
+# contributors upgrade (multi-artist tags) is gated on source == 'deezer'.
+# Without it get_import_source() resolved '' and collab tracks were tagged
+# with only the primary artist until a Retag.
+
+def _full_client():
+    return _Client(
+        artists=[_Artist('id1', 'A')],
+        albums=[_Album('a1', 'Album', artists=['A'])],
+        tracks=[_Track('t1', 'T', artists=['A'], album='Album')],
+    )
+
+
+def test_serialized_tracks_carry_source():
+    out = sources.search_kind(_full_client(), "q", "tracks", source_name="deezer")
+    assert out and all(t["source"] == "deezer" for t in out)
+
+
+def test_serialized_albums_and_artists_carry_source():
+    albums = sources.search_kind(_full_client(), "q", "albums", source_name="deezer")
+    artists = sources.search_kind(_full_client(), "q", "artists", source_name="deezer")
+    assert albums and all(a["source"] == "deezer" for a in albums)
+    assert artists and all(a["source"] == "deezer" for a in artists)
+
+
+def test_serialized_source_empty_when_unnamed():
+    # hydrabase path calls without a source_name — emit '' not the class name.
+    out = sources.search_kind(_full_client(), "q", "tracks")
+    assert out and all(t["source"] == "" for t in out)
+
+
+def test_serialized_tracks_carry_real_artists_list():
+    """Collabs must survive as a LIST — the joined "A, B" display string made
+    downloads tag a single combined artist (Marcus's report)."""
+    client = _Client(tracks=[_Track('t1', 'Collab', artists=['Artist A', 'Artist B'], album='X')])
+    out = sources.search_kind(client, 'q', 'tracks', source_name='spotify')
+    assert out[0]['artists'] == ['Artist A', 'Artist B']
+    assert out[0]['artist'] == 'Artist A, Artist B'   # display string unchanged
