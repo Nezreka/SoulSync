@@ -283,17 +283,17 @@
             </div>
 
             <!-- Status Section -->
-            <div class="status-section status-section--clickable" onclick="openServiceSwitchModal()" title="Switch which account each service uses" role="button" tabindex="0">
-                <h4 class="status-title">Service Status <span class="status-switch-hint">switch ▸</span></h4>
-                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false">
+            <div class="status-section status-section--clickable" onclick="openServiceSwitchModal('metadata')" title="Change active sources for your profile" role="button" tabindex="0">
+                <h4 class="status-title">Service Status</h4>
+                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="metadata-source-name">Metadata Source</span>
                 </div>
-                <div class="status-indicator" id="media-server-indicator" data-status-ready="false">
+                <div class="status-indicator" id="media-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="media-server-name">Media Server</span>
                 </div>
-                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false">
+                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="download-source-name">Download Source</span>
                 </div>
@@ -8198,6 +8198,7 @@
     <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='credential-sets.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='service-switch.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
