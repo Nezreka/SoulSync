@@ -67674,8 +67674,12 @@ body.em-scroll-lock { overflow: hidden; }
 .ss-hybrid-logo { width: 26px; height: 26px; object-fit: contain; }
 .ss-hybrid-name { font-size: 0.9rem; }
 
-/* Service Status is admin-only — non-admins get no clickable affordance. */
-.status-section--locked { cursor: default; }
+/* Service Status quick-switch (admin only) — show the hand cursor so it's
+   clearly clickable; non-admins get no clickable affordance. */
+.status-section--clickable { cursor: pointer; border-radius: 10px; transition: background 0.15s; }
+.status-section--clickable:hover { background: rgba(255, 255, 255, 0.04); }
+.status-section--clickable .status-indicator { cursor: pointer; }
+.status-section--locked, .status-section--locked .status-indicator { cursor: default; }
 .status-section--locked:hover { background: transparent; }
 
 /* ── My Accounts (per-profile self-auth for playlist services) ── */
