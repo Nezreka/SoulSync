@@ -16105,6 +16105,7 @@ def get_database_update_status():
         return jsonify(db_update_state)
 
 @app.route('/api/database/update/stop', methods=['POST'])
+@admin_only
 def stop_database_update():
     """Endpoint to stop the current database update."""
     global db_update_worker
@@ -16586,6 +16587,7 @@ def metadata_cache_clear():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata-cache/evict', methods=['POST'])
+@admin_only
 def metadata_cache_evict():
     """Evict expired entries from the metadata cache."""
     try:
