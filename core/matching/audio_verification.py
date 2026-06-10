@@ -159,20 +159,18 @@ def _find_best_title_artist_match(recordings, expected_title, expected_artist,
 
 def evaluate(expected_title: str, expected_artist: str,
              recordings: List[dict], *, fingerprint_score: float,
-             file_duration_s: Optional[float] = None,
              aliases_provider: Optional[Any] = None) -> Outcome:
     """Decide PASS / SKIP / FAIL for a fingerprinted file against expected
     title/artist. Pure: no I/O. Shared by import verification and library scan.
 
     ``aliases_provider``: iterable or callable of expected-artist aliases
     (kanji/cyrillic/etc) used to bridge cross-script comparisons.
-    ``file_duration_s``: when provided, a strong duration mismatch downgrades a
-    would-be FAIL to SKIP (fingerprint hash collision guard, used by the scan).
+
+    Note: fingerprint-collision duration checks are the caller's responsibility
+    (the library scan pre-checks the top recording's length before calling this)
+    so the decision here stays purely about title/artist/version identity.
     """
     from core.matching.script_compat import is_cross_script_mismatch
-    from core.matching.acoustid_candidates import (
-        duration_mismatches_strongly, find_matching_recording,
-    )
     from core.matching.version_mismatch import is_acceptable_version_mismatch
 
     best_rec, title_sim, artist_sim = _find_best_title_artist_match(
@@ -212,9 +210,6 @@ def evaluate(expected_title: str, expected_artist: str,
             ) >= ARTIST_MATCH_THRESHOLD:
                 return out(Decision.PASS, "Expected artist found in AcoustID results")
         if artist_sim < CLEAR_MISMATCH_THRESHOLD:
-            if file_duration_s and duration_mismatches_strongly(
-                file_duration_s, best_rec.get('duration') or best_rec.get('length')):
-                return out(Decision.SKIP, "Duration mismatch (fingerprint collision)")
             return out(Decision.FAIL,
                        f"Audio mismatch: '{matched_title}' by '{matched_artist}' "
                        f"— expected artist not found")
@@ -254,10 +249,6 @@ def evaluate(expected_title: str, expected_artist: str,
     if (language_script_skip or high_confidence_strong_match_skip
             or cross_script_artist_skip):
         return out(Decision.SKIP, "Likely same song in different language/script")
-
-    if file_duration_s and duration_mismatches_strongly(
-            file_duration_s, best_rec.get('duration') or best_rec.get('length')):
-        return out(Decision.SKIP, "Duration mismatch (fingerprint collision)")
 
     return out(Decision.FAIL,
                f"Audio mismatch: file identified as '{matched_title}' by "

@@ -15,6 +15,9 @@ from typing import Optional
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
+from core.matching.audio_verification import evaluate, Decision
+from core.matching.acoustid_candidates import duration_mismatches_strongly
+from core.acoustid_verification import _resolve_expected_artist_aliases
 
 logger = get_logger("repair_job.acoustid")
 
@@ -220,112 +223,60 @@ class AcoustIDScannerJob(RepairJob):
                 or expected['artist']
             )
 
-        # Normalize and compare
-        norm_expected_title = _normalize(expected['title'])
-        norm_aid_title = _normalize(aid_title)
-        norm_expected_artist = _normalize(expected_artist)
-        norm_aid_artist = _normalize(aid_artist)
-
-        title_sim = SequenceMatcher(None, norm_expected_title, norm_aid_title).ratio()
-        # Issue (Foxxify Discord report): AcoustID returns the FULL artist
-        # credit (e.g. `Okayracer, aldrch & poptropicaslutz!`) while the
-        # library DB carries only the primary artist (`Okayracer`). Raw
-        # similarity scores ~43% — well below threshold — so multi-artist
-        # tracks get flagged as Wrong Song even though the primary IS in
-        # the credit. Route through the shared `artist_names_match` helper
-        # which splits the credit on common separators (comma, ampersand,
-        # feat./ft./with/vs., etc.) and checks each token. Primary-in-
-        # credit cases now resolve at 100% match instead of 43%.
-        #
-        # Pass RAW artist strings (not pre-normalised) so the splitter
-        # can recognise the separators. The helper applies its own
-        # case + whitespace normalisation internally per token.
-        if norm_expected_artist:
-            from core.matching.artist_aliases import artist_names_match
-
-            _, artist_sim = artist_names_match(
-                expected_artist,
-                aid_artist,
-                threshold=artist_threshold,
-            )
-        else:
-            artist_sim = 1.0
-
-        if title_sim >= title_threshold and artist_sim >= artist_threshold:
-            return
-
-        # Issue #587 (Foxxify) — top recording's metadata mismatched, but
-        # AcoustID often returns multiple recordings per fingerprint
-        # (sample collisions, multi-MB-record cases). Check ALL of them
-        # before flagging — if any candidate's metadata matches expected
-        # title + artist, the file IS the right song and AcoustID's top
-        # match was just a wrong-credited recording.
-        from core.matching.acoustid_candidates import (
-            duration_mismatches_strongly,
-            find_matching_recording,
-        )
-        from core.matching.artist_aliases import artist_names_match
-
-        def _scanner_title_sim(a, b):
-            return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
-
-        def _scanner_artist_sim(expected_a, actual_a):
-            _, score = artist_names_match(expected_a, actual_a, threshold=artist_threshold)
-            return score
-
-        candidate_match, _, _ = find_matching_recording(
-            fp_result.get('recordings') or [],
-            expected['title'],
-            expected_artist,
-            title_threshold=title_threshold,
-            artist_threshold=artist_threshold,
-            similarity=_scanner_title_sim,
-            artist_similarity=_scanner_artist_sim,
-        )
-        if candidate_match is not None:
-            # A lower-ranked candidate matched — file IS the right song.
-            # No finding.
+        # Fingerprint-collision guard: when the TOP recording's length is wildly
+        # different from the file, the fingerprint hit is a hash collision (the
+        # 17-min mashup → 5-min track case), not a real match — skip BEFORE any
+        # title/artist/version analysis so it can't surface as a false finding.
+        try:
+            file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
+        except Exception:
+            file_duration_s = 0.0
+        cand_duration_s = best_recording.get('duration') or best_recording.get('length')
+        if file_duration_s and duration_mismatches_strongly(file_duration_s, cand_duration_s):
             if context.report_progress:
                 context.report_progress(
-                    log_line=(
-                        f'Resolved (lower-ranked candidate match): {fname} — '
-                        f'expected "{expected["title"]}" matched candidate '
-                        f'"{candidate_match.get("title")}" by '
-                        f'"{candidate_match.get("artist")}"'
-                    ),
+                    log_line=(f'Skipped (duration mismatch suggests fingerprint '
+                              f'collision): {fname}'),
+                    log_type='skip')
+            return
+
+        # Decision via the shared verification core — identical logic to import-
+        # time verification (alias-aware artist match + cross-script SKIP), so the
+        # scan no longer false-flags correct cross-script tracks. Only a FAIL
+        # produces a "Wrong download" finding.
+        _alias_cache = {}
+
+        def _aliases():
+            if 'v' not in _alias_cache:
+                try:
+                    _alias_cache['v'] = _resolve_expected_artist_aliases(expected_artist)
+                except Exception:
+                    _alias_cache['v'] = []
+            return _alias_cache['v']
+
+        outcome = evaluate(
+            expected['title'], expected_artist, fp_result['recordings'],
+            fingerprint_score=best_score,
+            aliases_provider=_aliases,
+        )
+
+        if outcome.decision != Decision.FAIL:
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'OK ({outcome.decision.value}): {fname} — {outcome.reason}',
                     log_type='ok',
                 )
             return
 
-        # Issue #587 (Foxxify "17min mashup → 5min track") — duration
-        # guard against fingerprint hash collisions. When the file's
-        # actual duration differs from AcoustID's matched recording by
-        # more than max(60s, 35%), the fingerprint is almost certainly
-        # a sample/intro collision, not a real recording match. Don't
-        # produce a confident "Wrong Song" finding.
-        try:
-            file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
-        except Exception:
-            file_duration_s = 0
-        candidate_duration_s = best_recording.get('duration')
-        if candidate_duration_s is None and best_recording.get('length'):
-            candidate_duration_s = best_recording.get('length')
-        if duration_mismatches_strongly(file_duration_s, candidate_duration_s):
-            if context.report_progress:
-                context.report_progress(
-                    log_line=(
-                        f'Skipped (duration mismatch suggests fingerprint collision): '
-                        f'{fname} — expected {file_duration_s:.0f}s, AcoustID '
-                        f'candidate {candidate_duration_s:.0f}s'
-                    ),
-                    log_type='skip',
-                )
-            return
+        title_sim = outcome.title_sim
+        artist_sim = outcome.artist_sim
+        matched_title = outcome.matched_title or aid_title
+        matched_artist = outcome.matched_artist or aid_artist
 
-        # Mismatch detected
+        # Mismatch (FAIL) — create finding.
         if context.report_progress:
             context.report_progress(
-                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{aid_title}"',
+                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{matched_title}"',
                 log_type='error'
             )
         if context.create_finding:
@@ -337,18 +288,18 @@ class AcoustIDScannerJob(RepairJob):
                 entity_type='track',
                 entity_id=str(track_id),
                 file_path=fpath,
-                title=f'Wrong download: "{expected["title"]}" is actually "{aid_title}"',
+                title=f'Wrong download: "{expected["title"]}" is actually "{matched_title}"',
                 description=(
                     f'Expected "{expected["title"]}" by {expected_artist}, '
-                    f'but audio fingerprint matches "{aid_title}" by {aid_artist} '
+                    f'but audio fingerprint matches "{matched_title}" by {matched_artist} '
                     f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
                     f'artist match: {artist_sim:.0%})'
                 ),
                 details={
                     'expected_title': expected['title'],
                     'expected_artist': expected_artist,
-                    'acoustid_title': aid_title,
-                    'acoustid_artist': aid_artist,
+                    'acoustid_title': matched_title,
+                    'acoustid_artist': matched_artist,
                     'fingerprint_score': round(best_score, 3),
                     'title_similarity': round(title_sim, 3),
                     'artist_similarity': round(artist_sim, 3),
@@ -480,11 +431,3 @@ class AcoustIDScannerJob(RepairJob):
         finally:
             if conn:
                 conn.close()
-
-
-def _normalize(text: str) -> str:
-    t = text.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
-    return t.strip()
