@@ -25641,6 +25641,14 @@ def get_active_sources():
     try:
         mode = config_manager.get('download_source.mode', 'soulseek') or 'soulseek'
         hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+        # "Spotify (no auth)" is a COMPOSITE the Settings page uses: it stores
+        # fallback_source='spotify' + metadata.spotify_free=true, NOT a literal
+        # 'spotify_free' fallback value. Mirror that mapping so the modal agrees
+        # with the Settings dropdown (settings.js _metaSel / save logic).
+        _fb = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+        _free = config_manager.get('metadata.spotify_free', False)
+        meta_active = 'spotify_free' if (_fb == 'spotify' and _free) else _fb
+        meta_effective = 'spotify_free' if meta_active == 'spotify_free' else _get_metadata_fallback_source()
         return jsonify({
             'success': True,
             'editable': get_current_profile_id() == 1,  # admin writes the global default
@@ -25650,8 +25658,8 @@ def get_active_sources():
                 # fallback (e.g. configured 'spotify' but not authenticated →
                 # the app falls back). Surfacing both stops the modal disagreeing
                 # with the sidebar/Settings status.
-                'active': config_manager.get('metadata.fallback_source', 'deezer') or 'deezer',
-                'effective': _get_metadata_fallback_source(),
+                'active': meta_active,
+                'effective': meta_effective,
                 'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
             },
             'server': {
@@ -25683,7 +25691,14 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _QS_METADATA_SOURCES:
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            config_manager.set('metadata.fallback_source', src)
+            # Same composite the Settings save uses: 'spotify_free' is stored as
+            # fallback_source='spotify' + metadata.spotify_free=true.
+            if src == 'spotify_free':
+                config_manager.set('metadata.fallback_source', 'spotify')
+                config_manager.set('metadata.spotify_free', True)
+            else:
+                config_manager.set('metadata.fallback_source', src)
+                config_manager.set('metadata.spotify_free', False)
             invalidate_metadata_status_caches()
             changed.append('metadata')
 

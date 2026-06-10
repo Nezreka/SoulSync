@@ -173,12 +173,39 @@ function _ssCard({ logo, emoji, label, active, available, onclick, badge, brand 
         </button>`;
 }
 
+const _SS_TAB_BLURB = {
+    metadata: 'Where artist, album & track details come from.',
+    server: 'The library backend SoulSync reads and writes.',
+    download: 'Where SoulSync grabs tracks you don\'t have yet.',
+};
+
+function _ssHero(kind) {
+    const cur = _ssRailCurrent(kind);
+    if (!cur) return '';
+    const media = cur.logo
+        ? `<img class="ss-hero-logo" src="${cur.logo}" onerror="this.outerHTML='<span class=\\'ss-hero-emoji\\'>${cur.emoji}</span>'">`
+        : `<span class="ss-hero-emoji">${cur.emoji}</span>`;
+    const eyebrow = kind === 'metadata' ? 'Active metadata source'
+        : kind === 'server' ? 'Active media server' : 'Active download source';
+    return `
+        <div class="ss-hero" style="--ss-brand:${cur.brand}">
+            <div class="ss-hero-disc">${media}</div>
+            <div class="ss-hero-info">
+                <div class="ss-hero-eyebrow">${eyebrow}</div>
+                <div class="ss-hero-name">${_ssEsc(cur.label)}</div>
+                <div class="ss-hero-sub">${_SS_TAB_BLURB[kind] || ''}</div>
+            </div>
+            <span class="ss-hero-pill">Active</span>
+        </div>`;
+}
+
 function _ssRenderPanel() {
     const panel = document.getElementById('ss-panel');
     const d = _ssState.data;
     if (!panel) return;
     if (!d || !d.success) { panel.innerHTML = '<div class="ss-empty">Could not load active sources.</div>'; return; }
     const editable = !!d.editable;
+    panel.style.setProperty('--ss-brand', (_ssRailCurrent(_ssState.tab) || {}).brand || '#7c5cff');
     const sub = document.getElementById('ss-topbar-sub');
     if (sub) sub.textContent = editable
         ? 'What this profile uses for metadata, library, and downloads'
@@ -199,7 +226,7 @@ function _ssRenderPanel() {
         const note = (eff && eff !== d.metadata.active)
             ? `<div class="ss-effective-note">Configured source isn't connected — actually using <b>${_ssEsc((_ssMetaInfo(eff).text) || eff)}</b> right now.</div>`
             : '';
-        panel.innerHTML = `<div class="ss-section-title">Metadata source</div>${note}<div class="ss-grid">${cards}</div>`;
+        panel.innerHTML = `${_ssHero('metadata')}<div class="ss-section-title">Choose source</div>${note}<div class="ss-grid">${cards}</div>`;
     } else if (_ssState.tab === 'server') {
         const cards = d.server.options.map(o => {
             const info = _SS_SERVER_INFO[o.id] || { name: o.id };
@@ -209,7 +236,7 @@ function _ssRenderPanel() {
                 onclick: (editable && o.available) ? `setActiveSource('server','${o.id}')` : null,
             });
         }).join('');
-        panel.innerHTML = `<div class="ss-section-title">Media server</div><div class="ss-grid">${cards}</div>`;
+        panel.innerHTML = `${_ssHero('server')}<div class="ss-section-title">Choose server</div><div class="ss-grid">${cards}</div>`;
     } else {
         _ssRenderDownloadPanel(panel, d, editable);
     }
@@ -249,7 +276,7 @@ function _ssRenderDownloadPanel(panel, d, editable) {
         }).join('');
         body = `<div class="ss-grid">${cards}</div>`;
     }
-    panel.innerHTML = `<div class="ss-section-title">Download source</div>${toggle}${body}`;
+    panel.innerHTML = `${_ssHero('download')}<div class="ss-section-title">Choose source</div>${toggle}${body}`;
     if (isHybrid && editable) _ssWireHybridDrag();
 }
 
