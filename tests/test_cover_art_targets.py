@@ -128,3 +128,63 @@ def test_artist_action_without_found_artist_url_fails_cleanly(tmp_path):
     assert res['success'] is False
     album_thumb, artist_thumb = _thumbs(w)
     assert artist_thumb == 'http://old/artist.jpg'   # nothing changed
+
+
+# ── apply-result message accuracy (Sokhi/Boulder: "read-only?" on writable fs) ──
+
+def _add_track(w, path):
+    conn = w.db._get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO tracks VALUES ('t1', 'al1', ?)", (str(path),))
+    conn.commit()
+    conn.close()
+
+
+def _apply_returns(monkeypatch, **art_result):
+    import core.metadata.art_apply as aa
+    base = {'embedded': 0, 'failed': 0, 'skipped': 0, 'cover_written': False, 'read_only_fs': False}
+    base.update(art_result)
+    monkeypatch.setattr(aa, 'apply_art_to_album_files', lambda *a, **k: base)
+
+
+def test_already_arted_reports_present_not_readonly(tmp_path, monkeypatch):
+    # The bug: all files already had art (skipped) → embedded 0, cover 0 → the
+    # old message cried "(read-only?)" on a perfectly writable library.
+    w = _worker(tmp_path)
+    f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
+    _add_track(w, f)
+    _apply_returns(monkeypatch, skipped=1)
+    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    assert res['success'] is True
+    assert 'already present' in res['message'].lower()
+    assert 'read-only' not in res['message'].lower()
+
+
+def test_failed_writes_blame_permissions_not_readonly(tmp_path, monkeypatch):
+    w = _worker(tmp_path)
+    f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
+    _add_track(w, f)
+    _apply_returns(monkeypatch, failed=1)
+    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    assert res['success'] is True
+    assert 'permission' in res['message'].lower()
+    assert 'read-only' not in res['message'].lower()
+
+
+def test_genuine_read_only_still_hard_fails(tmp_path, monkeypatch):
+    w = _worker(tmp_path)
+    f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
+    _add_track(w, f)
+    _apply_returns(monkeypatch, read_only_fs=True)
+    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    assert res['success'] is False
+    assert 'read-only' in res['error'].lower()
+
+
+def test_embedded_success_message(tmp_path, monkeypatch):
+    w = _worker(tmp_path)
+    f = tmp_path / 'song.mp3'; f.write_bytes(b'x')
+    _add_track(w, f)
+    _apply_returns(monkeypatch, embedded=1)
+    res = w._fix_missing_cover_art('album', 'al1', None, {**DETAILS, '_fix_action': 'album'})
+    assert res['success'] is True and 'embedded into 1' in res['message']

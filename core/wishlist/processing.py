@@ -61,7 +61,7 @@ class WishlistAutoProcessingRuntime:
     update_automation_progress: Callable[..., Any]
     automation_engine: Any
     missing_download_executor: Any
-    run_full_missing_tracks_process: Callable[[str, str, list[dict[str, Any]]], Any]
+    run_full_missing_tracks_process: Callable[..., Any]  # (batch_id, playlist_id, tracks, serialize=False)
     get_batch_max_concurrent: Callable[[], int]
     get_active_server: Callable[[], str]
     current_time_fn: Callable[[], float]
@@ -246,11 +246,14 @@ def _run_wishlist_cycle(
                 f"'{album_name}' ({len(group.tracks)} tracks) → {album_batch_id}"
             )
         submitted.append(album_batch_id)
-        # Album bundles block their worker for the whole search+download → dedicated
-        # pool (falls back to the shared pool when unset). See #740.
+        # Album bundles block their worker for the whole search+download →
+        # dedicated pool (falls back to the shared pool when unset). serialize=True
+        # makes the worker actually HOLD its pool slot until the album drains, so
+        # only a few albums are in flight at once instead of every album flooding
+        # the shared download pool with 'searching' tracks (#740 / Sokhi).
         album_executor.submit(
             runtime.run_full_missing_tracks_process,
-            album_batch_id, playlist_id, group.tracks,
+            album_batch_id, playlist_id, group.tracks, True,
         )
 
     residual_tracks = grouping.residual_tracks if grouping is not None else tracks
@@ -626,7 +629,7 @@ class WishlistManualDownloadRuntime:
     download_batches: Dict[str, Dict[str, Any]]
     tasks_lock: Any
     missing_download_executor: Any
-    run_full_missing_tracks_process: Callable[[str, str, list[dict[str, Any]]], Any]
+    run_full_missing_tracks_process: Callable[..., Any]  # (batch_id, playlist_id, tracks, serialize=False)
     get_batch_max_concurrent: Callable[[], int]
     add_activity_item: Callable[[Any, Any, Any, Any], Any]
     active_server: str

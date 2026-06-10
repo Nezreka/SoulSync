@@ -338,3 +338,20 @@ def test_detect_album_info_web_forces_album_when_track_and_artist_differ():
     assert album_info["album_name"] == "Album One"
     assert album_info["track_number"] == 4
     assert album_info["disc_number"] == 2
+
+
+def test_get_import_source_reads_underscore_source_from_nested_dicts():
+    """Netti93 multi-artist fix: many track payloads carry '_source' (the
+    discography/wishlist dicts) or 'source' only inside track_info (search
+    results). get_import_source must resolve all of them — previously only
+    the context-level keys worked, so direct downloads resolved '' and
+    source-specific metadata logic never ran."""
+    from core.imports.context import get_import_source
+
+    assert get_import_source({"track_info": {"source": "deezer"}}) == "deezer"
+    assert get_import_source({"track_info": {"_source": "deezer"}}) == "deezer"
+    assert get_import_source({"original_search_result": {"_source": "itunes"}}) == "itunes"
+    assert get_import_source({"_source": "tidal"}) == "tidal"
+    # context-level 'source' still wins over nested
+    assert get_import_source({"source": "spotify", "track_info": {"_source": "deezer"}}) == "spotify"
+    assert get_import_source({}) == ""

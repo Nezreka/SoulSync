@@ -138,6 +138,15 @@ def test_normalize_keeps_reconcile_from_config():
     assert normalize_sync_mode('', 'reconcile') == 'reconcile'
 
 
+def test_normalize_keeps_append_from_config():
+    # #823 — an AUTOMATED sync (mirrored auto-sync / Playlist Pipeline) passes no
+    # per-request mode, so it must resolve to the user's configured global mode
+    # instead of hardcoding 'replace' (which recreated the playlist + wiped its
+    # image/description). Default 'replace' users are unaffected.
+    assert normalize_sync_mode(None, 'append') == 'append'
+    assert normalize_sync_mode(None, 'replace') == 'replace'
+
+
 def test_normalize_request_overrides_config():
     assert normalize_sync_mode('append', 'reconcile') == 'append'
     assert normalize_sync_mode('reconcile', 'replace') == 'reconcile'
@@ -152,3 +161,38 @@ def test_normalize_falls_back_for_unknown():
 def test_normalize_all_real_modes_pass_through():
     for m in ('replace', 'append', 'reconcile'):
         assert normalize_sync_mode(m, 'replace') == m
+
+
+# ── plan_playlist_append (#823 round 2) ──────────────────────────────────────
+# The Jellyfin/Emby + Navidrome appends deduped on `t.id`, but their track
+# wrappers only define `ratingKey` — the existing-ids set was always empty, so
+# every sync re-appended the full matched list (every track N times,
+# "skipped 0 already present"). The planner is the now-testable dedupe.
+
+from core.sync.playlist_edit import plan_playlist_append  # noqa: E402
+
+
+def test_append_skips_already_present():
+    # carlosjfcasero's case: second sync of an unchanged playlist adds NOTHING.
+    assert plan_playlist_append(['a', 'b', 'c'], ['a', 'b', 'c']) == []
+
+
+def test_append_adds_only_new_in_desired_order():
+    assert plan_playlist_append(['a', 'c'], ['a', 'b', 'c', 'd']) == ['b', 'd']
+
+
+def test_append_to_empty_playlist_adds_all():
+    assert plan_playlist_append([], ['a', 'b']) == ['a', 'b']
+
+
+def test_append_dedupes_within_desired():
+    assert plan_playlist_append(['x'], ['a', 'a', 'x', 'b', 'a']) == ['a', 'b']
+
+
+def test_append_stringifies_ids():
+    # Emby numeric ids may arrive as ints on one side and strings on the other.
+    assert plan_playlist_append([16607838], ['16607838', '999']) == ['999']
+
+
+def test_append_ignores_empty_ids():
+    assert plan_playlist_append(['a'], ['', 'b']) == ['b']

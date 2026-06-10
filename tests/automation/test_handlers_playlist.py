@@ -738,6 +738,12 @@ class TestSyncPlaylist:
             import time
             time.sleep(0.01)
         assert len(sync_calls) == 1
+        # #823 — the handler must NOT force a sync mode; it leaves it unset so
+        # _run_sync_task resolves the user's configured global mode (else the
+        # automated sync always 'replace'd and wiped the playlist image/desc).
+        args, kwargs = sync_calls[0]
+        assert kwargs.get('sync_mode') is None      # not forced via kwarg
+        assert len(args) == 6                        # no 7th positional sync_mode either
 
     def test_organize_by_playlist_passes_skip_wishlist_add(self):
         discovered_track = {

@@ -1325,7 +1325,11 @@ class RepairWorker:
             artist_result = self._fix_artist_art(album_id, details)
 
         artwork_url = details.get('found_artwork_url')
-        if not artwork_url:
+        # sidecar_from_embedded: the album already has embedded art and just needs
+        # a cover.jpg sidecar — the apply writes it from the existing embedded art,
+        # so no API artwork_url is required (Sokhi #813).
+        sidecar_from_embedded = bool(details.get('sidecar_from_embedded'))
+        if not artwork_url and not sidecar_from_embedded:
             # 'both' but no album art — report the artist outcome if that ran.
             if artist_result is not None:
                 return artist_result
@@ -1390,7 +1394,14 @@ class RepairWorker:
             'album_name': album_title, 'album_image_url': artwork_url,
             'musicbrainz_release_id': mbid,
         }
-        folder = details.get('album_folder') or os.path.dirname(resolved[0])
+        # Use the RESOLVED file's directory — NOT details['album_folder'], which
+        # is the raw DB path (e.g. Jellyfin's /data/music) and frequently does
+        # NOT exist inside the SoulSync container (only the resolved /app/...
+        # path does). Passing the raw folder made os.path.isdir() fail in
+        # apply_art_to_album_files, silently skipping the cover.jpg write while
+        # embedding (which uses the resolved paths) still worked — Sokhi's
+        # "embeds art but never writes cover.jpgs".
+        folder = os.path.dirname(resolved[0])
         art_result = apply_art_to_album_files(resolved, metadata, album_info, folder=folder)
 
         embedded = art_result.get('embedded', 0)
@@ -1407,12 +1418,34 @@ class RepairWorker:
                               'mount (NFS/SMB/mergerfs) is read-write, then recreate the '
                               'container. (Database thumbnail was still updated.)'),
                     'art_result': art_result}
-        msg = f'Applied cover art: embedded into {embedded}/{len(resolved)} file(s)'
-        if art_result.get('cover_written'):
-            msg += ' + wrote cover.jpg'
-        if embedded == 0 and not art_result.get('cover_written'):
-            # DB updated but nothing reached disk (e.g. permissions).
-            msg = 'Updated database thumbnail, but could not write art to files (read-only?)'
+        skipped = art_result.get('skipped', 0)
+        failed = art_result.get('failed', 0)
+        cover_written = art_result.get('cover_written')
+
+        wrote_parts = []
+        if embedded:
+            wrote_parts.append(f'embedded into {embedded}/{len(resolved)} file(s)')
+        if cover_written:
+            wrote_parts.append('wrote cover.jpg')
+
+        if wrote_parts:
+            msg = 'Applied cover art: ' + ' + '.join(wrote_parts)
+        elif failed:
+            # Real per-file write failures that were NOT a read-only mount
+            # (genuine EROFS is handled above) — almost always file/folder
+            # permissions or a locked file.
+            msg = (f'Updated database thumbnail, but could not write art to '
+                   f'{failed} file(s) — check file/folder permissions')
+        elif skipped:
+            # Every file already had embedded art and no new cover.jpg was
+            # needed — nothing to do, NOT a failure. This is the case that made
+            # the old "(read-only?)" message fire on perfectly writable
+            # libraries (Boulder on Windows, Sokhi): the files were simply
+            # already arted, so embedded==0 and cover_written==False.
+            msg = f'Cover art already present on all {skipped} file(s) — database thumbnail updated'
+        else:
+            # No file art applied and nothing found to write.
+            msg = 'Updated database thumbnail (no file artwork was applied)'
         if artist_result is not None and artist_result.get('success'):
             msg += ' + applied artist image'
         return {'success': True, 'action': 'applied_cover_art', 'message': msg, 'art_result': art_result}

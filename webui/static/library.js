@@ -2794,10 +2794,7 @@ async function startDiscographyDownload() {
                         item.classList.remove('active');
 
                         if (data.status === 'done') {
-                            const parts = [];
-                            if (data.tracks_added > 0) parts.push(`${data.tracks_added} added`);
-                            if (data.tracks_skipped > 0) parts.push(`${data.tracks_skipped} skipped`);
-                            statusEl.textContent = parts.join(', ') || 'No new tracks';
+                            statusEl.textContent = _discogItemStatus(data);
                             iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
                             item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
                         } else if (data.status === 'error') {
@@ -2814,6 +2811,22 @@ async function startDiscographyDownload() {
     }
 }
 
+// Build a clear per-album status from the discography stream payload. The
+// backend already reports WHY tracks weren't added — other-artist credit,
+// already owned/queued, or content-filtered — so surface that instead of a
+// misleading "No new tracks" (#830: collab tracks dropped for "artist mismatch"
+// looked identical to "you already have it").
+function _discogItemStatus(data) {
+    const parts = [];
+    const added = data.tracks_added || 0;
+    if (added > 0) parts.push(`${added} added`);
+    if ((data.tracks_skipped_owned || 0) > 0) parts.push(`${data.tracks_skipped_owned} already owned`);
+    if ((data.tracks_skipped || 0) > 0) parts.push(`${data.tracks_skipped} already queued`);
+    if ((data.tracks_skipped_artist || 0) > 0) parts.push(`${data.tracks_skipped_artist} by other artists`);
+    if ((data.tracks_skipped_filter || 0) > 0) parts.push(`${data.tracks_skipped_filter} filtered out`);
+    return parts.join(', ') || 'No tracks';
+}
+
 function _handleDiscogProgress(data) {
     if (data.type === 'album') {
         const item = document.getElementById(`discog-prog-${data.album_id}`);
@@ -2826,10 +2839,7 @@ function _handleDiscogProgress(data) {
             statusEl.textContent = `Processing ${data.tracks_total} tracks...`;
             item.classList.add('active');
         } else if (data.status === 'done') {
-            const parts = [];
-            if (data.tracks_added > 0) parts.push(`${data.tracks_added} added`);
-            if (data.tracks_skipped > 0) parts.push(`${data.tracks_skipped} skipped`);
-            statusEl.textContent = parts.join(', ') || 'No new tracks';
+            statusEl.textContent = _discogItemStatus(data);
             iconEl.innerHTML = data.tracks_added > 0 ? '<span class="discog-check">✓</span>' : '<span class="discog-skip">—</span>';
             item.classList.remove('active');
             item.classList.add(data.tracks_added > 0 ? 'done' : 'skipped');
@@ -3754,6 +3764,7 @@ function renderAlbumMetaRow(album) {
     const fields = [
         { key: 'title', label: 'Title', value: album.title || '' },
         { key: 'year', label: 'Year', value: album.year || '', type: 'number' },
+        { key: 'release_date', label: 'Release Date', value: album.release_date || '', placeholder: 'YYYY-MM-DD' },
         { key: 'genres', label: 'Genres', value: Array.isArray(album.genres) ? album.genres.join(', ') : (album.genres || '') },
         { key: 'label', label: 'Label', value: album.label || '' },
         { key: 'style', label: 'Style', value: album.style || '' },
@@ -3774,6 +3785,7 @@ function renderAlbumMetaRow(album) {
             const input = document.createElement('input');
             input.className = 'enhanced-album-meta-input';
             input.type = f.type || 'text';
+            if (f.placeholder) input.placeholder = f.placeholder;
             input.dataset.albumId = album.id;
             input.dataset.field = f.key;
             input.value = String(f.value);
@@ -5952,6 +5964,7 @@ async function saveAlbumMetadata(albumId) {
 
     const inputs = metaRow.querySelectorAll('.enhanced-album-meta-input');
     const updates = {};
+    let invalidDate = false;
 
     inputs.forEach(input => {
         const field = input.dataset.field;
@@ -5965,10 +5978,19 @@ async function saveAlbumMetadata(albumId) {
         } else if (field === 'year' || field === 'explicit' || field === 'track_count') {
             const numVal = value !== '' ? parseInt(value) : null;
             if (numVal !== (album[field] || null)) updates[field] = numVal;
+        } else if (field === 'release_date') {
+            // Accept empty, YYYY, YYYY-MM or YYYY-MM-DD (#824 full release dates).
+            if (value && !/^\d{4}(-\d{2}(-\d{2})?)?$/.test(value)) { invalidDate = true; return; }
+            if ((value || '') !== (album.release_date || '')) updates[field] = value || null;
         } else {
             if ((value || '') !== (album[field] || '')) updates[field] = value || null;
         }
     });
+
+    if (invalidDate) {
+        showToast('Release Date must be YYYY-MM-DD (or just YYYY)', 'error');
+        return;
+    }
 
     if (Object.keys(updates).length === 0) {
         showToast('No album changes to save', 'error');

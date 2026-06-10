@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 import weakref
 from types import SimpleNamespace
@@ -142,13 +143,63 @@ def is_vorbis_like(audio_file: Any, symbols: Any) -> bool:
     return bool(vorbis_classes) and isinstance(audio_file, vorbis_classes) or is_ogg_opus(audio_file)
 
 
-def save_audio_file(audio_file: Any, symbols: Any) -> None:
+def _raw_audio_save(audio_file: Any, symbols: Any, target: Any = None) -> None:
+    """The plain mutagen save with the format-specific kwargs. ``target`` None →
+    save in place (the exact call used before #819, byte-for-byte unchanged); a
+    path → save into that file (the atomic temp copy)."""
     if isinstance(audio_file.tags, symbols.ID3):
-        audio_file.save(v1=0, v2_version=4)
+        audio_file.save(v1=0, v2_version=4) if target is None else audio_file.save(target, v1=0, v2_version=4)
     elif isinstance(audio_file, symbols.FLAC):
-        audio_file.save(deleteid3=True)
+        audio_file.save(deleteid3=True) if target is None else audio_file.save(target, deleteid3=True)
     else:
-        audio_file.save()
+        audio_file.save() if target is None else audio_file.save(target)
+
+
+def save_audio_file(audio_file: Any, symbols: Any) -> None:
+    """Persist mutagen tag changes ATOMICALLY where possible (#819).
+
+    mutagen's in-place ``save()`` rewrites the file; if the process is
+    interrupted or OOM-killed mid-write, the file is left truncated — audio AND
+    tags gone (CubeComming's large hi-res FLACs imported to an empty shell).
+    Instead: copy the original to a temp in the same directory, write the
+    modified tags into that copy, verify it's still a valid audio file, then
+    ``os.replace`` it in atomically. The original is never touched until that
+    final swap, so a crash can only ever orphan the temp — never destroy the
+    user's file.
+
+    Falls back to the plain in-place save if the atomic path can't run (no
+    filename, copy fails, or a format mutagen can't save-to-path) so the file
+    is never left worse off than it is today.
+    """
+    path = getattr(audio_file, "filename", None)
+    try:
+        path = os.fspath(path) if path else None
+    except TypeError:
+        path = None
+    if not path or not os.path.isfile(path):
+        _raw_audio_save(audio_file, symbols)
+        return
+
+    tmp = f"{path}.sstmp"
+    try:
+        shutil.copy2(path, tmp)               # snapshot original (audio + tags)
+        _raw_audio_save(audio_file, symbols, target=tmp)  # write new tags into the copy
+        check = symbols.File(tmp)             # verify it's still real audio
+        if check is None or getattr(getattr(check, "info", None), "length", 0) <= 0:
+            raise ValueError("atomic save produced a file with no audio")
+        os.replace(tmp, path)                 # atomic swap — original safe until here
+    except Exception as atomic_err:
+        # Original untouched (only tmp was written). Clean up + fall back to the
+        # original in-place save so any format/edge the atomic path can't handle
+        # behaves exactly as before.
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        logger.warning("[Atomic Save] atomic path failed (%s) — in-place fallback for %s",
+                       atomic_err, os.path.basename(path))
+        _raw_audio_save(audio_file, symbols)
 
 
 def get_image_dimensions(data: bytes):

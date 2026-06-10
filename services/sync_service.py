@@ -665,6 +665,10 @@ class PlaylistSyncService:
                             _try_title, _try_artist,
                             confidence_threshold=0.7, server_source=active_server,
                             candidate_tracks=artist_candidates,
+                            # #825: album context enables the album-aware fallback
+                            # (multi-artist albums filed under another artist) —
+                            # the cleanup path already passes it; sync didn't.
+                            album=getattr(spotify_track, 'album', None) or None,
                         )
                         if _cand_conf > confidence:
                             db_track, confidence = _cand_track, _cand_conf

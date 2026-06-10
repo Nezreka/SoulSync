@@ -750,6 +750,9 @@ function initializeSearchModeToggle() {
             // Enrich each track with full album object (needed for wishlist functionality)
             const enrichedTracks = albumData.tracks.map(track => ({
                 ...track,
+                // Carry the metadata source for source-specific import logic
+                // (Deezer contributors upgrade for multi-artist tags).
+                source: track.source || album.source || null,
                 album: {
                     name: albumData.name,
                     id: albumData.id,
@@ -902,7 +905,16 @@ function initializeSearchModeToggle() {
             const enrichedTrack = {
                 id: track.id,
                 name: track.name,
-                artists: [track.artist], // Convert string to array for modal compatibility
+                // Carry the metadata source so the import pipeline can run
+                // source-specific logic (Deezer contributors upgrade for
+                // multi-artist tags) on the downloaded file.
+                source: track.source || null,
+                // Prefer the real artist list (Spotify/Tidal collabs) over the
+                // joined "A, B" display string, so downloads get proper
+                // multi-artist tags instead of one combined artist.
+                artists: (Array.isArray(track.artists) && track.artists.length)
+                    ? track.artists
+                    : [track.artist],
                 album: {
                     name: track.album,
                     id: null,

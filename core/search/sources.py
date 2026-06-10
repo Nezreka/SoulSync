@@ -35,6 +35,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                 artists.append({
                     "id": artist.id,
                     "name": artist.name,
+                    "source": source_name or "",
                     "image_url": artist.image_url,
                     "external_urls": artist.external_urls or {},
                 })
@@ -52,6 +53,7 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "id": album.id,
                     "name": album.name,
                     "artist": artist_name,
+                    "source": source_name or "",
                     "image_url": album.image_url,
                     "release_date": album.release_date,
                     "total_tracks": album.total_tracks,
@@ -78,6 +80,21 @@ def search_kind(client, query: str, kind: str, source_name: Optional[str] = None
                     "id": track.id,
                     "name": track.name,
                     "artist": artist_name,
+                    # The REAL artist list, not the joined display string above.
+                    # Spotify/Tidal/iTunes searches return collabs as a list;
+                    # collapsing them to one "A, B" string made the import
+                    # pipeline tag downloads with a single combined artist
+                    # (resolve_track_artists saw one value). The frontend keeps
+                    # using "artist" for display.
+                    "artists": list(track.artists or []),
+                    # Which metadata source this result came from. Travels with
+                    # the payload through Download Now -> download task ->
+                    # import context, where extract_source_metadata needs it to
+                    # run source-specific logic (the Deezer contributors
+                    # upgrade for multi-artist tags — Netti93's report: without
+                    # it get_import_source() resolved '' and collab tracks
+                    # were tagged with only the primary artist until a Retag).
+                    "source": source_name or "",
                     "album": track.album,
                     "duration_ms": track.duration_ms,
                     "image_url": track.image_url,

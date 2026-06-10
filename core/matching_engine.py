@@ -214,6 +214,22 @@ class MusicMatchingEngine:
         # Standard similarity
         standard_ratio = SequenceMatcher(None, str1, str2).ratio()
 
+        # Version vocabulary, shared by the prefix check and the divergent
+        # check below.
+        remaster_keywords = ['remaster', 'remastered']
+        different_version_keywords = [
+            'remix', 'mix', 'rmx',  # Remixes (different song)
+            'live', 'live at', 'live from',  # Live versions (different recording)
+            'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
+            'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
+            'radio edit', 'radio version',  # Radio edits (different cut)
+            'single edit',  # Single edits (different cut)
+            'album edit',  # Album edits (different cut)
+            'instrumental', 'karaoke',  # Instrumental (different)
+            'extended', 'extended version',  # Extended (different length)
+            'demo', 'rough cut',  # Demos (different recording)
+        ]
+
         # STRICT VERSION CHECKING: Different versions should score LOW
         # This prevents "Song Title" from matching "Song Title (Remix)" during sync
         shorter, longer = (str1, str2) if len(str1) <= len(str2) else (str2, str1)
@@ -222,23 +238,6 @@ class MusicMatchingEngine:
         if longer.startswith(shorter):
             # Extract the extra content
             extra_content = longer[len(shorter):].strip()
-
-            # Check if the extra content looks like version info
-            # Separate remasters from other versions - they should be treated differently
-            remaster_keywords = ['remaster', 'remastered']
-
-            different_version_keywords = [
-                'remix', 'mix', 'rmx',  # Remixes (different song)
-                'live', 'live at', 'live from',  # Live versions (different recording)
-                'acoustic', 'unplugged',  # Acoustic versions (different arrangement)
-                'slowed', 'reverb', 'sped up', 'speed up',  # TikTok edits (different)
-                'radio edit', 'radio version',  # Radio edits (different cut)
-                'single edit',  # Single edits (different cut)
-                'album edit',  # Album edits (different cut)
-                'instrumental', 'karaoke',  # Instrumental (different)
-                'extended', 'extended version',  # Extended (different length)
-                'demo', 'rough cut',  # Demos (different recording)
-            ]
 
             # Normalize extra content for comparison
             extra_normalized = extra_content.lower().strip(' -()[]')
@@ -260,6 +259,38 @@ class MusicMatchingEngine:
                     # With 50/50 title/artist split: 0.3 * 0.5 + 1.0 * 0.5 = 0.65 < 0.7 threshold
                     logger.debug(f"Version mismatch detected: '{str1}' vs '{str2}' (keyword: '{keyword}') - applying heavy penalty")
                     return 0.30
+
+        # STRICT VERSION CHECKING (divergent case): two DIFFERENT versions of
+        # the same base — e.g. "Song (Shazam Remix)" vs "Song (southstar
+        # Remix)", or "...live at pukkelpop" vs "...live at wembley". Both
+        # carry a version descriptor, so neither is a prefix of the other and
+        # the prefix check above misses them; the raw ratio then stays high off
+        # the shared base. Without this, when the requested version is absent a
+        # different cut of the same song can outscore the threshold and get
+        # downloaded. A correct same-version match is identical after
+        # normalisation and already returned 1.0 above, so a both-versioned
+        # pair that survives to here with high base overlap is a genuinely
+        # different cut. (Remasters are intentionally excluded — the prefix
+        # branch gives them the lenient 0.75 so re-mastered cuts still match.)
+        def _versions_in(s: str) -> frozenset:
+            return frozenset(
+                kw for kw in different_version_keywords
+                if re.search(r'\b' + re.escape(kw) + r'\b', s))
+
+        v1, v2 = _versions_in(str1), _versions_in(str2)
+        if v1 and v2 and standard_ratio >= 0.5:
+            # Strip the version words; what remains is base + distinguishing
+            # descriptor (remixer / performance / year).
+            def _strip_versions(s: str) -> str:
+                for kw in different_version_keywords:
+                    s = re.sub(r'\b' + re.escape(kw) + r'\b', ' ', s)
+                return re.sub(r'\s+', ' ', s).strip()
+
+            if v1 != v2 or _strip_versions(str1) != _strip_versions(str2):
+                logger.debug(
+                    f"Divergent version detected: '{str1}' vs '{str2}' "
+                    f"- applying heavy penalty")
+                return 0.30
 
         return standard_ratio
     

@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.8"
+_SOULSYNC_BASE_VERSION = "2.6.9"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -389,6 +389,41 @@ def inject_webui_assets():
     return {
         'vite_assets': build_webui_vite_assets,
     }
+
+# --- Launch PIN gate (before_request hook) ---
+@app.before_request
+def _enforce_launch_pin():
+    """Server-side enforcement of the launch PIN (#832).
+
+    The PIN was previously a client-only overlay — removing the div (Safari
+    "Hide Distracting Items", devtools, curl) gave full API access. This rejects
+    every request from an unverified session with 401 while the launch lock is
+    on, except the page shell + the unlock flow + the key-authed public API.
+    No-ops entirely when ``security.require_pin_on_launch`` is off (the default).
+    """
+    try:
+        require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+    except Exception:
+        require_pin = False
+    if not require_pin:
+        return
+    from core.security.launch_lock import request_is_locked, is_html_navigation
+    if request_is_locked(
+        request.path, request.method,
+        require_pin=require_pin,
+        pin_verified=bool(session.get('launch_pin_verified', False)),
+    ):
+        # A browser navigating to a sub-page (deep link / refresh) should land
+        # on the lock screen, not raw JSON — bounce it to the root, which serves
+        # the lock UI. Programmatic fetch/XHR get the JSON so the frontend reacts.
+        if is_html_navigation(
+            request.method,
+            request.headers.get('Accept', ''),
+            request.headers.get('Sec-Fetch-Mode', ''),
+        ):
+            return redirect('/')
+        return jsonify({"error": "locked", "launch_pin_required": True}), 401
+
 
 # --- Profile Context (before_request hook) ---
 @app.before_request
@@ -3010,11 +3045,12 @@ def handle_settings():
             return jsonify({"success": False, "error": str(e)}), 500
     else:  # GET request
         try:
-            data = dict(config_manager.config_data)
-            # Never ship the OAuth token payload to the browser — the settings
-            # UI has no field for it and it doesn't belong in devtools/HAR
-            # captures. NOTE: dict() above is a SHALLOW copy of live config
-            # state, so rebuild the section instead of popping in place.
+            # Masks every configured secret (API keys, tokens, passwords) as a
+            # sentinel so decrypted credentials never reach the browser/devtools/
+            # HAR captures (#832 follow-up). Deep copy — safe to mutate below.
+            data = config_manager.redacted_config()
+            # Also drop the Spotify OAuth token payload — not a settings field
+            # and not in the sensitive-paths list.
             if isinstance(data.get('spotify'), dict) and 'token_info' in data['spotify']:
                 data['spotify'] = {k: v for k, v in data['spotify'].items() if k != 'token_info'}
             # Include which download sources are configured so the UI can auto-disable unconfigured ones
@@ -7083,6 +7119,28 @@ def download_selected_candidate(task_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _resolve_link_track_query(source: str, track_id: str):
+    """Resolve a pasted (source, track_id) to a clean "artist title" search
+    query via the source client's get_track (#813). Returns (query, None) or
+    (None, error). Used so a pasted Tidal/Qobuz link runs the source's normal
+    search (proven-downloadable candidates) instead of a hand-built one."""
+    from core.downloads.track_link import query_from_track_payload
+    client = download_orchestrator.client(source) if download_orchestrator else None
+    if not client or not hasattr(client, 'get_track'):
+        return None, f"{source.title()} is not connected"
+    try:
+        raw = client.get_track(track_id)
+    except Exception as e:
+        return None, f"Could not resolve {source.title()} track: {e}"
+    if not raw:
+        return None, f"{source.title()} track {track_id} not found"
+
+    query = query_from_track_payload(source, raw)
+    if not query:
+        return None, f"Could not read the track title from {source.title()}"
+    return query, None
+
+
 @app.route('/api/downloads/task/<task_id>/manual-search', methods=['POST'])
 def manual_search_for_task(task_id):
     """Run a user-driven search against one (or all) configured download
@@ -7121,6 +7179,34 @@ def manual_search_for_task(task_id):
 
         download_mode, available_sources = _list_available_download_sources()
         valid_source_ids = {s['id'] for s in available_sources}
+
+        # Pasted streaming-source track link (#813): resolve it to a clean
+        # "artist title" query and search ONLY that source, then bubble the
+        # exact track to the top. Falls back to a normal text search if the
+        # source isn't connected or the link can't be resolved — so the user is
+        # never worse off than typing the query themselves.
+        from core.downloads.track_link import parse_download_track_link
+        link = parse_download_track_link(query)
+        link_source = None
+        link_track_id = None
+        if link:
+            _src, _tid = link
+            # A parsed link is unambiguously a Tidal/Qobuz track URL, never a
+            # name a user would type — so if we can't use it, say why clearly
+            # instead of running a useless search of the raw URL text.
+            if _src not in valid_source_ids:
+                return jsonify({
+                    "error": f"{_src.title()} isn't connected — can't resolve a "
+                             f"{_src.title()} link. Connect it in Settings, or search by name."
+                }), 400
+            clean_q, link_err = _resolve_link_track_query(_src, _tid)
+            if not clean_q:
+                return jsonify({
+                    "error": link_err or f"Couldn't resolve that {_src.title()} link."
+                }), 400
+            query = clean_q
+            source = _src
+            link_source, link_track_id = _src, _tid
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -7181,6 +7267,13 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
+                    # Pasted-link exact match: bubble the track whose id matches
+                    # the link to the top so the user sees the exact version
+                    # first (graceful no-op if ids don't line up).
+                    if src_name == link_source and link_track_id and tracks:
+                        tracks = sorted(
+                            tracks,
+                            key=lambda t: str(getattr(t, 'id', '')) != str(link_track_id))
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
@@ -9520,6 +9613,7 @@ def _build_library_tag_db_data(track_data, album_genres=None):
         'track_artist': track_data.get('track_artist'),
         'album_title': track_data.get('album_title'),
         'year': track_data.get('year'),
+        'release_date': track_data.get('release_date'),  # #824: full date wins over year when present
         'genres': album_genres,
         'track_number': track_data.get('track_number'),
         'disc_number': track_data.get('disc_number'),
@@ -9556,7 +9650,7 @@ def get_track_tag_preview(track_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9632,7 +9726,7 @@ def get_batch_tag_preview():
         placeholders = ','.join('?' for _ in track_ids)
         cursor.execute(f"""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9717,7 +9811,7 @@ def write_track_tags(track_id):
         cursor = conn.cursor()
         cursor.execute("""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -9811,7 +9905,7 @@ def write_tracks_tags_batch():
         placeholders = ','.join('?' * len(track_ids))
         cursor.execute(f"""
             SELECT t.*, a.name as artist_name, al.title as album_title,
-                   al.year, al.genres as album_genres, al.track_count,
+                   al.year, al.release_date, al.genres as album_genres, al.track_count,
                    al.thumb_url as album_thumb_url, a.thumb_url as artist_thumb_url
             FROM tracks t
             JOIN artists a ON t.artist_id = a.id
@@ -11070,14 +11164,18 @@ def _resolve_library_file_path(file_path):
     path_parts = file_path.replace('\\', '/').split('/')
 
     # Try progressively shorter path suffixes against each candidate directory
-    # (skip index 0 to avoid drive letter issues)
+    # (skip index 0 to avoid drive letter issues). find_on_disk matches each
+    # component exactly when present, else folds typographic confusables (#833:
+    # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
+    # matches always win, so paths that already resolved are unaffected.
+    from core.library.path_resolve import find_on_disk
     for base_dir in [transfer_dir, download_dir] + list(library_dirs):
         if not base_dir or not os.path.isdir(base_dir):
             continue
         for i in range(1, len(path_parts)):
-            candidate = os.path.join(base_dir, *path_parts[i:])
-            if os.path.exists(candidate):
-                return candidate
+            found = find_on_disk(base_dir, path_parts[i:])
+            if found:
+                return found
 
     return None
 
@@ -17092,9 +17190,9 @@ def _build_master_deps():
 
 
 
-def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json):
+def _run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, serialize=False):
     return _downloads_master.run_full_missing_tracks_process(
-        batch_id, playlist_id, tracks_json, _build_master_deps()
+        batch_id, playlist_id, tracks_json, _build_master_deps(), serialize=serialize
     )
 
 
@@ -24078,9 +24176,20 @@ def _run_sync_task(
     automation_id=None,
     profile_id=1,
     playlist_image_url='',
-    sync_mode='replace',
+    sync_mode=None,
     skip_wishlist_add=False,
 ):
+    # When a caller doesn't specify a mode — the mirrored auto-sync + Playlist
+    # Pipeline (auto_sync_playlist), iTunes-link sync, Wing It — honor the user's
+    # configured global "Playlist sync mode" instead of hardcoding 'replace'.
+    # Hardcoding replace meant every AUTOMATED sync recreated the server
+    # playlist, wiping its custom image + description even when the user chose
+    # Append/Reconcile (#823 carlosjfcasero). The global default is still
+    # 'replace', so default users are unaffected; only users who set
+    # Append/Reconcile get the change. (Mirrors _submit_sync_task.)
+    if sync_mode is None:
+        from core.sync.playlist_edit import normalize_sync_mode
+        sync_mode = normalize_sync_mode(None, config_manager.get('playlist_sync.mode', 'replace'))
     return _discovery_sync.run_sync_task(
         playlist_id, playlist_name, tracks_json, automation_id, profile_id, playlist_image_url,
         _build_sync_deps(),
@@ -24990,8 +25099,12 @@ def get_current_profile():
 
         # Check if launch PIN is required
         require_pin = config_manager.get('security.require_pin_on_launch', False) if config_manager else False
-        # Check if PIN was verified this page load, then consume the flag
-        pin_verified = session.pop('launch_pin_verified', False)
+        # #832: READ (don't pop) the verified flag — the server-side gate
+        # (_enforce_launch_pin) relies on it persisting for the whole session,
+        # so verified requests keep passing. Verification now lasts the session
+        # (until logout / cookie expiry) instead of one page load — which is
+        # both what an enforced gate requires and the correct security model.
+        pin_verified = session.get('launch_pin_verified', False)
 
         return jsonify({
             'success': True,
@@ -25883,9 +25996,14 @@ def start_watchlist_scan():
                     'current_track_name': '',
                     'tracks_found_this_scan': 0,
                     'tracks_added_this_scan': 0,
-                    'recent_wishlist_additions': []
+                    'recent_wishlist_additions': [],
+                    # #831: full per-run ledger of found tracks (added vs
+                    # skipped) so the completed-scan summary can list WHICH
+                    # tracks the "New tracks / Added to wishlist" counts mean.
+                    'scan_track_events': [],
+                    'scan_run_id': datetime.now().strftime('%Y%m%d-%H%M%S'),
                 })
-                
+
                 scan_results = []
 
                 # Pause enrichment workers during scan to reduce API contention
@@ -25921,6 +26039,29 @@ def start_watchlist_scan():
                     logger.info(f"Found {total_new_tracks} new tracks, added {total_added_to_wishlist} to wishlist")
                 else:
                     logger.warning("Watchlist scan cancelled — skipping post-scan steps")
+
+                # #831 round 2: persist this run + its track ledger so the
+                # Watchlist History modal can show what every past scan did.
+                try:
+                    _state = watchlist_scan_state
+                    get_database().save_watchlist_scan_run(
+                        run_id=_state.get('scan_run_id') or datetime.now().strftime('%Y%m%d-%H%M%S'),
+                        profile_id=scan_profile_id,
+                        status='cancelled' if was_cancelled else 'completed',
+                        started_at=(_state.get('started_at').isoformat()
+                                    if _state.get('started_at') else None),
+                        completed_at=(_state.get('completed_at') or datetime.now()).isoformat()
+                                     if not isinstance(_state.get('completed_at'), str)
+                                     else _state.get('completed_at'),
+                        total_artists=(_state.get('summary') or {}).get('total_artists',
+                                                                        _state.get('total_artists', 0)),
+                        artists_scanned=(_state.get('summary') or {}).get('successful_scans', 0),
+                        tracks_found=_state.get('tracks_found_this_scan', 0),
+                        tracks_added=_state.get('tracks_added_this_scan', 0),
+                        track_events=_state.get('scan_track_events') or [],
+                    )
+                except Exception as _hist_err:
+                    logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
 
                 # Post-scan steps — skip if cancelled
                 if not was_cancelled:
@@ -26077,6 +26218,29 @@ def get_watchlist_scan_status():
     except Exception as e:
         logger.error(f"Error getting watchlist scan status: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/watchlist/scan/history', methods=['GET'])
+def get_watchlist_scan_history():
+    """Recent watchlist scan runs (counts only — ledgers fetched per run)."""
+    try:
+        limit = min(int(request.args.get('limit', 30) or 30), 100)
+        runs = get_database().get_watchlist_scan_runs(limit=limit)
+        return jsonify({"success": True, "runs": runs})
+    except Exception as e:
+        logger.error(f"Error getting watchlist scan history: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/watchlist/scan/history/<run_id>/tracks', methods=['GET'])
+def get_watchlist_scan_history_tracks(run_id):
+    """The track ledger (added/skipped) for one past scan run."""
+    try:
+        events = get_database().get_watchlist_scan_run_events(run_id)
+        return jsonify({"success": True, "events": events})
+    except Exception as e:
+        logger.error(f"Error getting watchlist scan history tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/watchlist/scan/cancel', methods=['POST'])
 def cancel_watchlist_scan():

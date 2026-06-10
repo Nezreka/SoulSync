@@ -45,6 +45,11 @@ function debouncedAutoSaveSettings() {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // #827: the Logs tab has no savable settings — its live-viewer controls
+    // (source picker, filters, auto-scroll) were tripping the auto-save and
+    // flooding app.log with "Settings saved" lines, drowning out the logs the
+    // user is trying to read. Never auto-save while the Logs tab is active.
+    if (document.querySelector('.stg-tab.active')?.dataset.tab === 'logs') return;
     if (settingsAutoSaveTimer) clearTimeout(settingsAutoSaveTimer);
     settingsAutoSaveTimer = setTimeout(() => saveSettings(true), 2000);
 }
@@ -1056,6 +1061,10 @@ async function loadSettingsData() {
         const _metaSel = (_fbSrc === 'spotify' && settings.metadata?.spotify_free === true)
             ? 'spotify_free' : _fbSrc;
         document.getElementById('metadata-fallback-source').value = _metaSel;
+        const _efEl = document.getElementById('metadata-spotify-free-enrichment');
+        // Default ON: unset (undefined) reads as enabled, matching the worker's
+        // config default (metadata.spotify_free_enrichment defaults True).
+        if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment !== false;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -1391,10 +1400,47 @@ async function loadSettingsData() {
             console.error('Error checking dev mode:', error);
         }
 
+        // Secret fields now arrive masked as REDACTED_SECRET_SENTINEL (#832
+        // follow-up) — wire them so editing replaces the mask instead of typing
+        // on top of it, and an untouched field re-masks on blur (round-trips the
+        // sentinel, which the server treats as "keep existing").
+        _wireRedactedSecrets();
+
     } catch (error) {
         console.error('Error loading settings:', error);
         showToast('Failed to load settings', 'error');
     }
+}
+
+// Mirrors ConfigManager.REDACTED_SENTINEL — secrets are never sent to the
+// browser; configured ones come back as this placeholder (rendered as dots in
+// the password inputs).
+const REDACTED_SECRET_SENTINEL = '__redacted_unchanged__';
+
+function _wireRedactedSecrets() {
+    document.querySelectorAll('input[type="password"]').forEach(el => {
+        if (el.dataset.redactWired === '1') return;
+        el.dataset.redactWired = '1';
+        // Clear the mask on focus so the user types a fresh value, not on top
+        // of the sentinel.
+        el.addEventListener('focus', () => {
+            if (el.value === REDACTED_SECRET_SENTINEL) {
+                el.value = '';
+                el.dataset.wasRedacted = '1';
+            }
+        });
+        // Untouched (focused but not edited, left empty) → restore the mask so
+        // save round-trips the sentinel and the real secret is kept.
+        el.addEventListener('blur', () => {
+            if (el.dataset.wasRedacted === '1' && el.value === '') {
+                el.value = REDACTED_SECRET_SENTINEL;
+                el.dataset.wasRedacted = '';
+            }
+        });
+        // Real typing means a genuine change/clear — drop the redacted mark so
+        // blur won't re-mask (an emptied field then saves as a real clear).
+        el.addEventListener('input', () => { el.dataset.wasRedacted = ''; });
+    });
 }
 
 async function changeLogLevel() {
@@ -2881,7 +2927,10 @@ async function saveSettings(quiet = false) {
             // 'Spotify Free' is stored as the spotify source + a flag, so all
             // downstream 'spotify' routing is unchanged.
             fallback_source: metadataSource === 'spotify_free' ? 'spotify' : metadataSource,
-            spotify_free: metadataSource === 'spotify_free'
+            spotify_free: metadataSource === 'spotify_free',
+            // Independent opt-in: run the enrichment worker on Spotify Free even
+            // when an official account is connected (spares the official quota).
+            spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,
