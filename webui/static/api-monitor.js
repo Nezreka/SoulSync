@@ -3189,6 +3189,50 @@ async function startWatchlistScan() {
 /**
  * Poll watchlist scan status
  */
+// #831 (Tacobell444): the scan summary said "New tracks: 19 • Added to
+// wishlist: 10" with no way to see WHICH tracks. The scan now ships a per-run
+// ledger (scan_track_events: track/artist/album/thumb + added|skipped) and
+// this renders it as an expandable list under the completion summary.
+function renderWatchlistScanTrackLedger(events) {
+    if (!Array.isArray(events) || events.length === 0) return '';
+    const added = events.filter(e => e.status === 'added');
+    const skipped = events.filter(e => e.status !== 'added');
+
+    const row = (e) => `
+        <div class="watchlist-live-addition-item">
+            <img src="${escapeHtml(e.album_image_url || '')}" alt="" onerror="this.style.display='none';" />
+            <div class="watchlist-live-addition-item-info">
+                <div class="watchlist-live-addition-item-track">${escapeHtml(e.track_name || '')}</div>
+                <div class="watchlist-live-addition-item-artist">${escapeHtml(e.artist_name || '')}${e.album_name ? ' — ' + escapeHtml(e.album_name) : ''}</div>
+            </div>
+            ${e.status === 'added'
+                ? '<span class="watchlist-scan-track-badge added">added</span>'
+                : '<span class="watchlist-scan-track-badge skipped">skipped</span>'}
+        </div>`;
+
+    const section = (label, list) => list.length
+        ? `<div class="watchlist-scan-tracks-section">${label} (${list.length})</div>${list.map(row).join('')}`
+        : '';
+
+    return `
+        <button type="button" class="watchlist-scan-tracks-toggle" onclick="toggleWatchlistScanTracks(this)">
+            Show tracks <span class="watchlist-scan-tracks-caret">▾</span>
+        </button>
+        <div class="watchlist-scan-tracks" style="display: none;">
+            ${section('Added to wishlist', added)}
+            ${section('Found but skipped — already queued or blocklisted', skipped)}
+        </div>`;
+}
+
+function toggleWatchlistScanTracks(btn) {
+    const list = btn.parentElement.querySelector('.watchlist-scan-tracks');
+    if (!list) return;
+    const open = list.style.display !== 'none';
+    list.style.display = open ? 'none' : 'block';
+    btn.innerHTML = (open ? 'Show tracks ' : 'Hide tracks ')
+        + `<span class="watchlist-scan-tracks-caret">${open ? '▾' : '▴'}</span>`;
+}
+
 function handleWatchlistScanData(data) {
     const button = document.getElementById('scan-watchlist-btn');
     const liveActivity = document.getElementById('watchlist-live-activity');
@@ -3295,6 +3339,7 @@ function handleWatchlistScanData(data) {
                         <span class="sync-separator"> • </span>
                         <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
                     </div>
+                    ${renderWatchlistScanTrackLedger(data.scan_track_events)}
                 </div>
             `;
         }
@@ -3341,6 +3386,7 @@ function handleWatchlistScanData(data) {
                         <span class="sync-separator"> &bull; </span>
                         <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
                     </div>
+                    ${renderWatchlistScanTrackLedger(data.scan_track_events)}
                 </div>
             `;
         }

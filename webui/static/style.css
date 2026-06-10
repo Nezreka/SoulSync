@@ -19891,6 +19891,65 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 10px;
 }
 
+/* #831: expandable per-run track ledger under the scan summary */
+.watchlist-scan-tracks-toggle {
+    margin-top: 10px;
+    padding: 5px 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    color: #ccc;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.watchlist-scan-tracks-toggle:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+}
+
+.watchlist-scan-tracks {
+    margin-top: 10px;
+    max-height: 280px;
+    overflow-y: auto;
+    text-align: left;
+}
+
+.watchlist-scan-tracks-section {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #888;
+    margin: 10px 0 4px;
+}
+
+.watchlist-scan-tracks .watchlist-live-addition-item {
+    position: relative;
+}
+
+.watchlist-scan-track-badge {
+    margin-left: auto;
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.watchlist-scan-track-badge.added {
+    background: rgba(80, 200, 120, 0.15);
+    color: #6fd99a;
+}
+
+.watchlist-scan-track-badge.skipped {
+    background: rgba(255, 255, 255, 0.08);
+    color: #999;
+}
+
 /* Watchlist Search */
 
 .watchlist-search-input {
@@ -66706,6 +66765,55 @@ body.em-scroll-lock { overflow: hidden; }
 .origin-row-delete {
     border-color: rgba(248, 113, 113, 0.4) !important;
     color: #f87171 !important;
+}
+
+/* #831: origins grouped by what triggered them (artist / playlist) */
+.origin-group {
+    margin-bottom: 6px;
+}
+
+.origin-group-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.15s ease;
+}
+
+.origin-group-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.origin-group-caret {
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    width: 12px;
+}
+
+.origin-group-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgb(var(--accent-light-rgb));
+}
+
+.origin-group-count {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.origin-group-body {
+    padding: 4px 0 2px 6px;
 }
 
 /* ── Blocklist modal (artist/album/track bans) ── */
