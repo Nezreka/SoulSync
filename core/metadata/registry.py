@@ -203,17 +203,23 @@ def get_spotify_client_for_profile(profile_id: Optional[int] = None):
     except Exception:
         return get_spotify_client()
 
+    import os
+    cache_path = f"config/.spotify_cache_profile_{profile_id}"
+    own_app = bool(creds.get("client_id") and creds.get("client_secret"))
+    connected = os.path.exists(cache_path)
+    # Build a per-profile client when the profile has its OWN app creds (legacy)
+    # OR has connected via the shared app (its own token cache exists). A profile
+    # with neither uses the global/admin client — so background workers and
+    # unconnected users are unaffected.
+    if not own_app and not connected:
+        return get_spotify_client()
+
     # Effective OAuth app creds: the profile's own (legacy) else the global app.
     client_id = creds.get("client_id") or _get_config_value("spotify.client_id", "")
     client_secret = creds.get("client_secret") or _get_config_value("spotify.client_secret", "")
     redirect_uri = (creds.get("redirect_uri")
                     or _get_config_value("spotify.redirect_uri", "http://127.0.0.1:8888/callback"))
-
-    import os
-    cache_path = f"config/.spotify_cache_profile_{profile_id}"
-    # Only use a per-profile client when this profile has actually connected
-    # (its own token cache exists). Otherwise use the global/admin client.
-    if not client_id or not os.path.exists(cache_path):
+    if not client_id:
         return get_spotify_client()
 
     cache_key = _build_profile_spotify_cache_key(
