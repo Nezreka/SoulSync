@@ -529,11 +529,19 @@ def get_current_profile_id() -> int:
     scanner) have no request context, so `g.profile_id` raises
     `RuntimeError("Working outside of application context")` rather
     than `AttributeError`. Catch both so non-request callers degrade
-    to the admin profile instead of crashing the handler."""
+    to the admin profile instead of crashing the handler.
+
+    A real web request always wins. Only when there's NO request do we honour a
+    background-profile override (set by the automation engine to the automation's
+    owner) — so a non-admin's scheduled job acts as them, while admin/system jobs
+    (profile 1) and anything with no override resolve to admin exactly as before."""
     try:
         return g.profile_id
     except (AttributeError, RuntimeError):
-        return 1
+        pass
+    from core.profile_context import get_background_profile
+    pid = get_background_profile()
+    return pid if pid is not None else 1
 
 
 def admin_only(view_fn):
