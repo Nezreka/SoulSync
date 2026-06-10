@@ -286,3 +286,32 @@ def test_listenbrainz_connection_status_and_disconnect(client, nonadmin_profile)
     # disconnect via the generic endpoint
     assert client.post('/api/profiles/me/connections/listenbrainz/disconnect').get_json()['success']
     assert client.get('/api/profiles/me/connections').get_json()['connections']['listenbrainz']['connected'] is False
+
+
+# ── Background profile context drives get_current_profile_id() (part 1) ────────
+
+def test_background_profile_override_when_no_request():
+    # Outside a web request, get_current_profile_id() honours the engine's
+    # background override; admin (default) and cleared state stay profile 1.
+    from core.profile_context import set_background_profile, reset_background_profile
+    assert web_server.get_current_profile_id() == 1     # no override → admin
+    tok = set_background_profile(7)
+    try:
+        assert web_server.get_current_profile_id() == 7  # acts as the owner
+    finally:
+        reset_background_profile(tok)
+    assert web_server.get_current_profile_id() == 1     # reset → admin
+
+
+def test_real_session_still_wins_over_background(client, nonadmin_profile):
+    # A genuine request's session profile must override any background context.
+    from core.profile_context import set_background_profile, reset_background_profile
+    with client.session_transaction() as sess:
+        sess['profile_id'] = nonadmin_profile
+    tok = set_background_profile(999)  # a bogus background override
+    try:
+        # the request resolves to the SESSION profile, not the background one
+        body = client.get('/api/profiles/me/connections').get_json()
+        assert body['is_admin'] is False  # it's the non-admin session, not 999/admin
+    finally:
+        reset_background_profile(tok)
