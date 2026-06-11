@@ -398,6 +398,11 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+# Brute-force limiter for the launch-PIN unlock (lenient; only a flood of wrong
+# PINs from one IP trips it — correct entry clears it instantly).
+from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
+_launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+
 # --- Launch PIN gate (before_request hook) ---
 @app.before_request
 def _enforce_launch_pin():
@@ -25255,6 +25260,15 @@ def get_current_profile():
 def verify_launch_pin():
     """Verify PIN for launch lock screen"""
     try:
+        # Brute-force guard: only a flood of WRONG PINs from one IP trips this; a
+        # correct entry clears it instantly, so normal use is never affected.
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
         data = request.json or {}
         pin = data.get('pin', '')
         if not pin:
@@ -25263,8 +25277,10 @@ def verify_launch_pin():
         database = get_database()
         # Validate against admin profile (ID 1)
         if not database.verify_profile_pin(1, pin):
+            _launch_pin_limiter.record_failure(_ip, _now)
             return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
+        _launch_pin_limiter.record_success(_ip)
         session['launch_pin_verified'] = True
         return jsonify({'success': True})
     except Exception as e:
