@@ -15,15 +15,8 @@ internet. This guide covers the safe setup.
 
 By default SoulSync does **not** trust proxy headers (so a direct client can't spoof
 its IP or pretend the connection is HTTPS). If you're behind a proxy that
-terminates TLS, opt in by setting this in your `config.json`:
-
-```json
-{
-  "security": {
-    "trust_reverse_proxy": true
-  }
-}
-```
+terminates TLS, turn on **Settings → Security → "Behind a reverse proxy"** and
+**restart SoulSync** (this option applies at startup).
 
 When enabled, SoulSync:
 - trusts `X-Forwarded-For/Proto/Host/Port` from **one** proxy hop (correct client
@@ -116,11 +109,8 @@ Pick one:
   option for internet exposure.
 
   SoulSync can **trust the proxy's authenticated-user header** so the launch PIN is
-  skipped once the proxy has logged you in. Set the header name in `config.json`:
-
-  ```json
-  { "security": { "auth_proxy_header": "Remote-User" } }
-  ```
+  skipped once the proxy has logged you in. Set the header name in **Settings →
+  Security → "Auth proxy user header"** (e.g. `Remote-User`).
 
   > ⚠️ **Only enable this behind a proxy you control that STRIPS any client-supplied
   > copy of that header.** Otherwise a direct visitor could send `Remote-User: admin`
