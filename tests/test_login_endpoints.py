@@ -80,3 +80,21 @@ def test_cannot_enable_login_without_admin_password(client):
     r = client.post('/api/settings', json={'security': {'require_login': True}})
     assert r.status_code == 400
     assert 'password' in r.get_json().get('error', '').lower()
+
+
+def test_set_password_endpoint(client):
+    db = web_server.get_database()
+    pid = db.create_profile(name='SetPwTest')
+    # admin (default session) can set any profile's login password
+    r = client.post(f'/api/profiles/{pid}/set-password', json={'password': 'newpw123'})
+    body = r.get_json()
+    assert body['success'] is True and body['has_password'] is True
+    assert db.verify_profile_password(pid, 'newpw123') is True
+    # clearing it
+    assert client.post(f'/api/profiles/{pid}/set-password', json={'password': ''}).get_json()['has_password'] is False
+
+
+def test_profiles_current_signals_login_required(client, monkeypatch):
+    _enable_login(monkeypatch)
+    body = client.get('/api/profiles/current').get_json()
+    assert body.get('login_required') is True   # frontend uses this to show the sign-in screen

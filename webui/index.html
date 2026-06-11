@@ -51,6 +51,19 @@
         </div>
     </div>
 
+    <!-- Login Screen (username/password mode) -->
+    <div id="login-overlay" class="launch-pin-overlay" style="display: none;">
+        <div class="launch-pin-container">
+            <div class="launch-pin-icon">🔐</div>
+            <h2 class="launch-pin-title">Sign in to SoulSync</h2>
+            <p class="launch-pin-subtitle">Enter your account name and password</p>
+            <input type="text" id="login-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+            <input type="password" id="login-password" class="launch-pin-input" placeholder="Password" autocomplete="current-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitLogin()">
+            <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+            <p id="login-error" class="launch-pin-error" style="display: none;"></p>
+        </div>
+    </div>
+
     <!-- Profile Picker Overlay -->
     <div id="profile-picker-overlay" class="profile-picker-overlay" style="display: none;">
         <div class="profile-picker-container">
@@ -192,6 +205,9 @@
                     </button>
                     <button id="personal-settings-btn" class="personal-settings-trigger" onclick="event.stopPropagation(); openPersonalSettings()" title="My Settings">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
+                    <button id="logout-btn" class="personal-settings-trigger" style="display:none" onclick="event.stopPropagation(); soulsyncLogout()" title="Sign out">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                     </button>
                 </div>
             </div>
@@ -6009,6 +6025,28 @@
                                     <input type="text" id="security-auth-proxy-header" placeholder="Remote-User" autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
                                     <div class="setting-help-text">
                                         If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in <em>in front of</em> SoulSync, enter the header it sets (e.g. <code>Remote-User</code>) and SoulSync will skip the launch PIN for already-authenticated requests. <strong>Only set this behind a proxy that strips any client-supplied copy of the header</strong> — otherwise it can be spoofed. Leave blank to disable (the default).
+                                    </div>
+                                </div>
+
+                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:18px 0 14px;">
+
+                                <div class="form-group">
+                                    <label>Login password (admin account):</label>
+                                    <div class="setting-help-text" style="margin-bottom: 8px;">
+                                        Set a password for the admin account, then turn on "Require login" below. Your username is your profile name. Set passwords for other profiles in <strong>Manage Profiles</strong>.
+                                    </div>
+                                    <input type="password" id="security-login-password" placeholder="Set admin login password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
+                                    <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
+                                    <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="security-require-login">
+                                        <span>Require login (username + password)</span>
+                                    </label>
+                                    <div class="setting-help-text">
+                                        When enabled, a sign-in screen replaces the profile picker + launch PIN — everyone signs in with their account name + password. <strong>Set the admin password above first</strong> (you can't enable this without one, to avoid locking yourself out). Best for instances exposed to the internet.
                                     </div>
                                 </div>
                             </div>

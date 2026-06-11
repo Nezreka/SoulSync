@@ -25282,6 +25282,12 @@ def select_profile():
 def get_current_profile():
     """Get the currently selected profile from session"""
     try:
+        # Login mode: when on and the session isn't authenticated, tell the
+        # frontend to show the sign-in screen (this is checked before profile
+        # selection, since there's no profile until you log in).
+        if _require_login_enabled() and not session.get('login_authenticated', False):
+            return jsonify({'success': False, 'login_required': True}), 200
+
         pid = session.get('profile_id')
         if not pid:
             return jsonify({'success': False, 'error': 'No profile selected'}), 200
@@ -25305,6 +25311,7 @@ def get_current_profile():
             'success': True,
             'profile': profile,
             'launch_pin_required': bool(require_pin) and not pin_verified,
+            'login_mode': _require_login_enabled(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -25466,6 +25473,24 @@ def set_profile_pin(profile_id):
 
         success = database.update_profile(profile_id, pin_hash=pin_hash)
         return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-password', methods=['POST'])
+def set_profile_password_endpoint(profile_id):
+    """Set or clear a profile's LOGIN password (admin, or the profile itself).
+    Distinct from the quick-switch PIN."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        password = data.get('password', '')
+        ok = database.set_profile_password(profile_id, password)
+        return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
