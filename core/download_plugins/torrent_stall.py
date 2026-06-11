@@ -74,26 +74,50 @@ class StallTracker:
     def __init__(self, timeout_seconds: float):
         self.timeout = float(timeout_seconds or 0)
         self._last_downloaded = -1           # -1 = first observation
+        self._had_metadata = None            # None = first observation; else size>0?
         self._progress_since = None          # monotonic time of last forward movement
 
-    def is_stalled(self, downloaded: int, state: str, now: float) -> bool:
-        """Record this poll's observation; return True iff the torrent has
-        gone ``timeout`` seconds with no byte progress while in a state
-        that's supposed to be downloading.
+    def is_stalled(self, downloaded: int, state: str, now: float,
+                   size: int = None) -> bool:
+        """Record this poll's observation; return True iff the torrent has gone
+        ``timeout`` seconds with no real forward progress while in a working state.
 
-        ``downloaded`` is cumulative bytes; ``state`` is the adapter-uniform
-        state; ``now`` is a monotonic timestamp (seconds)."""
+        ``downloaded`` is cumulative payload bytes; ``state`` is the adapter-uniform
+        state; ``now`` is a monotonic timestamp; ``size`` is the torrent's total
+        size in bytes (0/None while still fetching metadata).
+
+        Metadata-phase fix (#852-adjacent torrent report): a magnet stuck
+        "downloading metadata" reports ``size==0`` and a ``downloaded`` byte
+        counter that still ticks up from DHT/peer-protocol overhead even though it
+        makes no actual progress. Treating those bumps as progress reset the stall
+        clock forever, so a dead magnet never timed out. Now the byte counter only
+        counts once metadata is in (``size>0``); during the metadata phase the only
+        thing that counts as progress is *obtaining* the metadata, so a torrent
+        that can't even do that within the timeout is correctly flagged stalled.
+        """
         if self.timeout <= 0:
             return False
 
         downloaded = int(downloaded or 0)
+        # size is None when the caller doesn't track it (assume metadata present —
+        # the old byte-progress behavior); an explicit size==0 is the metadata
+        # phase (metaDL), where the byte counter is unreliable noise.
+        has_metadata = size is None or int(size) > 0
 
-        # Forward progress (or first sighting) resets the stall clock.
-        if self._last_downloaded < 0 or downloaded > self._last_downloaded:
-            self._last_downloaded = downloaded
+        # Real forward progress: first sighting, metadata just arrived, or (only
+        # once we have metadata) more payload bytes. Byte bumps during the
+        # metadata phase are protocol noise and do NOT count.
+        progressed = (
+            self._had_metadata is None                                  # first poll
+            or (has_metadata and not self._had_metadata)                # got metadata
+            or (has_metadata and downloaded > self._last_downloaded)    # more payload
+        )
+        self._had_metadata = has_metadata
+        self._last_downloaded = downloaded
+
+        if progressed:
             self._progress_since = now
             return False
-        self._last_downloaded = downloaded
 
         # Not in a working state → not a stall (seeding/paused/completed).
         if state not in STALLABLE_STATES:
