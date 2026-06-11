@@ -281,7 +281,12 @@ function createSearchController({
             if (resp.ok) {
                 const status = await resp.json();
                 const ms = status && status.metadata_source;
-                const src = (ms && typeof ms === 'object') ? ms.source : ms;
+                let src = (ms && typeof ms === 'object') ? ms.source : ms;
+                // "Spotify (no auth)" reports as 'spotify_free' for display, but the
+                // search picker only has a 'spotify' icon (it's the same searchable
+                // source). Map it so no-auth auto-selects Spotify instead of leaving
+                // the picker empty (no SOURCE_ORDER icon matches 'spotify_free').
+                if (src === 'spotify_free') src = 'spotify';
                 if (src && SOURCE_LABELS[src]) state.activeSource = src;
             }
         } catch (_) { /* best-effort */ }
