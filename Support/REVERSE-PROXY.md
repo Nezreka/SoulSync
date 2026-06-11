@@ -114,6 +114,18 @@ Pick one:
   [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/). These sit in front
   of SoulSync and force a login (with 2FA) before any request reaches it. Best
   option for internet exposure.
+
+  SoulSync can **trust the proxy's authenticated-user header** so the launch PIN is
+  skipped once the proxy has logged you in. Set the header name in `config.json`:
+
+  ```json
+  { "security": { "auth_proxy_header": "Remote-User" } }
+  ```
+
+  > ⚠️ **Only enable this behind a proxy you control that STRIPS any client-supplied
+  > copy of that header.** Otherwise a direct visitor could send `Remote-User: admin`
+  > and walk straight in. It's **off by default** — an unset header name means
+  > SoulSync ignores the header entirely (a spoofed one does nothing).
 - **HTTP Basic Auth** — quick and simple (nginx `auth_basic` / Caddy `basicauth`).
   Better than nothing; weaker than an auth proxy.
 - **SoulSync launch PIN** — set an admin PIN in Settings. Enforced server-side, so

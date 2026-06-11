@@ -379,3 +379,35 @@ def test_verify_launch_pin_rate_limited_after_flood(client):
         with db._get_connection() as conn:
             conn.execute("UPDATE profiles SET pin_hash = NULL WHERE id = 1")
             conn.commit()
+
+
+def test_auth_proxy_header_satisfies_launch_lock(client, monkeypatch):
+    # Lock on + Remote-User trusted → a request with the header passes the gate.
+    real_get = web_server.config_manager.get
+    def fake_get(key, default=None):
+        if key == 'security.require_pin_on_launch':
+            return True
+        if key == 'security.auth_proxy_header':
+            return 'Remote-User'
+        return real_get(key, default)
+    monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
+
+    assert client.get('/api/profiles/me/connections').status_code == 401            # no header → locked
+    assert client.get('/api/profiles/me/connections',
+                      headers={'Remote-User': 'alice'}).status_code == 200          # trusted → in
+
+
+def test_spoofed_auth_proxy_header_ignored_when_feature_off(client, monkeypatch):
+    # THE safety pin: feature OFF (default) → a client-sent Remote-User must NOT
+    # bypass the lock. Only an operator who explicitly configured it gets the trust.
+    real_get = web_server.config_manager.get
+    def fake_get(key, default=None):
+        if key == 'security.require_pin_on_launch':
+            return True
+        if key == 'security.auth_proxy_header':
+            return ''   # OFF (default)
+        return real_get(key, default)
+    monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
+
+    assert client.get('/api/profiles/me/connections',
+                      headers={'Remote-User': 'admin'}).status_code == 401          # spoof ignored → still locked
