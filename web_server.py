@@ -12225,6 +12225,7 @@ def redownload_start(track_id):
 
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
+@admin_only
 def sync_artist_library(artist_id):
     """Bidirectional sync: pull new content from media server AND remove stale entries."""
     try:
@@ -12336,6 +12337,7 @@ def sync_artist_library(artist_id):
         # ── Phase 2: Remove stale entries (files no longer on disk) ──
         stale_removed = 0
         empty_albums_removed = 0
+        removal_skipped = False
 
         with database._get_connection() as conn:
             cursor = conn.cursor()
@@ -12352,16 +12354,31 @@ def sync_artist_library(artist_id):
                 if not resolved or not os.path.exists(resolved):
                     stale_ids.append(track['id'])
 
-            if stale_ids:
+            # Storage-unreachable guard (#828 pattern): if an implausibly large
+            # fraction of this artist's tracks look missing, the disk/mount is
+            # almost certainly down — don't wipe the artist over a flaky mount.
+            from core.library.stale_guard import is_implausible_stale_removal
+            if is_implausible_stale_removal(len(stale_ids), len(tracks)):
+                removal_skipped = True
+                logger.warning(
+                    f"[Artist Sync] {artist_name}: {len(stale_ids)}/{len(tracks)} tracks look "
+                    f"missing — skipping stale removal (storage likely unreachable)"
+                )
+            elif stale_ids:
                 placeholders = ','.join('?' for _ in stale_ids)
                 cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_ids)
                 stale_removed = len(stale_ids)
 
-            cursor.execute("""
-                DELETE FROM albums WHERE artist_id = ?
-                AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
-            """, (db_artist_id,))
-            empty_albums_removed = cursor.rowcount
+            # Only prune empty albums when we actually removed tracks — never on the
+            # skipped path, where "empty" would be a false reading of a down mount.
+            # ``album_id IS NOT NULL`` avoids the NOT IN-with-NULL gotcha that would
+            # otherwise no-op this cleanup whenever a track has a null album_id.
+            if not removal_skipped:
+                cursor.execute("""
+                    DELETE FROM albums WHERE artist_id = ?
+                    AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                """, (db_artist_id,))
+                empty_albums_removed = cursor.rowcount
 
             cursor.execute("""
                 UPDATE albums SET track_count = (
@@ -12372,7 +12389,8 @@ def sync_artist_library(artist_id):
             conn.commit()
 
         logger.warning(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
-              f"-{stale_removed} stale, -{empty_albums_removed} empty albums")
+              f"-{stale_removed} stale, -{empty_albums_removed} empty albums"
+              f"{' (removal skipped — storage unreachable)' if removal_skipped else ''}")
 
         return jsonify({
             "success": True,
@@ -12382,6 +12400,7 @@ def sync_artist_library(artist_id):
             "new_tracks": new_tracks,
             "stale_removed": stale_removed,
             "empty_albums_removed": empty_albums_removed,
+            "removal_skipped": removal_skipped,
         })
 
     except Exception as e:
