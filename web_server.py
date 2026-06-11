@@ -7914,10 +7914,12 @@ def get_quarantine_file_tags(entry_id):
 
 
 @app.route('/api/verification/<int:history_id>/approve', methods=['POST'])
+@admin_only
 def approve_verification_item(history_id):
     """User confirmed the file IS the right track: set human_verified on the
     history row, the file tag, and (best-effort) the tracks row. The AcoustID
-    scanner skips human-verified files entirely."""
+    scanner skips human-verified files entirely. Admin-only: mutates shared
+    library/verification state."""
     try:
         from core.matching.verification_status import HUMAN_VERIFIED
         from core.tag_writer import write_verification_status
@@ -7927,16 +7929,16 @@ def approve_verification_item(history_id):
             return jsonify({"success": False, "error": "History entry not found"}), 404
         file_path = row.get('file_path') or ''
         on_disk = _resolve_history_audio_path(row)
-        conn = db._get_connection()
-        conn.cursor().execute(
-            "UPDATE library_history SET verification_status = ? WHERE id = ?",
-            (HUMAN_VERIFIED, history_id))
-        # The tracks row may carry either the recorded or the resolved path.
-        for p in {p for p in (file_path, on_disk) if p}:
-            conn.cursor().execute(
-                "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
-                (HUMAN_VERIFIED, p))
-        conn.commit()
+        with db._get_connection() as conn:
+            conn.execute(
+                "UPDATE library_history SET verification_status = ? WHERE id = ?",
+                (HUMAN_VERIFIED, history_id))
+            # The tracks row may carry either the recorded or the resolved path.
+            for p in {p for p in (file_path, on_disk) if p}:
+                conn.execute(
+                    "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
+                    (HUMAN_VERIFIED, p))
+            conn.commit()
         tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
         return jsonify({"success": True, "tag_written": tag_written})
     except Exception as e:
@@ -7945,9 +7947,11 @@ def approve_verification_item(history_id):
 
 
 @app.route('/api/verification/<int:history_id>/delete', methods=['POST'])
+@admin_only
 def delete_verification_item(history_id):
     """User decided the file is wrong: delete it from disk and drop the
-    history row (the media-server mirror cleans the tracks row on next scan)."""
+    history row (the media-server mirror cleans the tracks row on next scan).
+    Admin-only: it removes a file from disk + the library."""
     try:
         db = get_database()
         row = _get_library_history_row(history_id)
