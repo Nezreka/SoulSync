@@ -98,3 +98,30 @@ def test_profiles_current_signals_login_required(client, monkeypatch):
     _enable_login(monkeypatch)
     body = client.get('/api/profiles/current').get_json()
     assert body.get('login_required') is True   # frontend uses this to show the sign-in screen
+
+
+def test_pin_gate_unaffected_when_login_off(client, monkeypatch):
+    # THE guarantee: with login mode OFF (default) and the launch PIN ON, the PIN
+    # gate must STILL enforce — the login feature must not weaken or bypass it.
+    real_get = web_server.config_manager.get
+    def fake_get(key, default=None):
+        if key == 'security.require_login':
+            return False                       # login OFF (default)
+        if key == 'security.require_pin_on_launch':
+            return True                        # PIN ON
+        return real_get(key, default)
+    monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
+
+    # Unverified session, PIN required → the launch-PIN gate still 401s.
+    assert client.get('/api/profiles/me/connections').status_code == 401
+    # And /api/profiles/current reports the PIN screen, NOT login.
+    body = client.get('/api/profiles/current').get_json()
+    assert body.get('login_required') is not True
+
+
+def test_everything_normal_when_both_off(client, monkeypatch):
+    # Default install: login OFF + PIN OFF → no gate at all (today's behavior).
+    real_get = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, 'get',
+        lambda k, d=None: False if k in ('security.require_login', 'security.require_pin_on_launch') else real_get(k, d))
+    assert client.get('/api/profiles/me/connections').status_code == 200   # reachable, unguarded
