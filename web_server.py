@@ -19825,6 +19825,13 @@ def start_missing_tracks_process(playlist_id):
     playlist_name = data.get('playlist_name', 'Unknown Playlist')
     force_download_all = data.get('force_download_all', False)
     playlist_folder_mode = data.get('playlist_folder_mode', False)
+    keep_playlist_folder_copies = bool(data.get('keep_playlist_folder_copies', False))
+    if (
+        playlist_folder_mode
+        and config_manager.get_active_media_server() == 'soulsync'
+        and 'keep_playlist_folder_copies' not in data
+    ):
+        keep_playlist_folder_copies = True
     wing_it = data.get('wing_it', False)
     ignore_manual_matches = data.get('ignore_manual_matches')
     if ignore_manual_matches is None:
@@ -19888,10 +19895,12 @@ def start_missing_tracks_process(playlist_id):
             default_source='spotify',
         )
         if mirrored_pl and mirrored_pl.get('id'):
-            db_pref.set_mirrored_playlist_organize_by_playlist(
-                int(mirrored_pl['id']),
-                bool(playlist_folder_mode),
-            )
+            pref_kwargs = {'organize_by_playlist': bool(playlist_folder_mode)}
+            if not playlist_folder_mode:
+                pref_kwargs['keep_playlist_folder_copies'] = False
+            elif keep_playlist_folder_copies:
+                pref_kwargs['keep_playlist_folder_copies'] = True
+            db_pref.set_mirrored_playlist_preferences(int(mirrored_pl['id']), **pref_kwargs)
     except Exception as pref_err:
         logger.debug(f"[Playlist Folder] Could not persist mirrored preference: {pref_err}")
 
@@ -19930,6 +19939,8 @@ def start_missing_tracks_process(playlist_id):
             # at the modal, so the per-track filter (2a) skips this batch.
             'ignore_blocklist': ignore_blocklist,
             'playlist_folder_mode': playlist_folder_mode,  # Organize downloads by playlist folder
+            'organize_by_playlist': bool(playlist_folder_mode),
+            'keep_playlist_folder_copies': keep_playlist_folder_copies and playlist_folder_mode,
             # Album context for artist album downloads (explicit folder structure)
             'is_album_download': is_album_download,
             'album_context': album_context,
@@ -33597,19 +33608,26 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
 
 @app.route('/api/mirrored-playlists/<int:playlist_id>/preferences', methods=['PATCH'])
 def update_mirrored_playlist_preferences_endpoint(playlist_id):
-    """Update per-playlist download preferences (e.g. organize by playlist folder)."""
+    """Update per-playlist download preferences (playlist-folder layout and copies)."""
     try:
         data = request.get_json() or {}
-        if 'organize_by_playlist' not in data:
-            return jsonify({"error": "organize_by_playlist is required"}), 400
+        if 'organize_by_playlist' not in data and 'keep_playlist_folder_copies' not in data:
+            return jsonify({"error": "At least one preference field is required"}), 400
 
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
             return jsonify({"error": "Playlist not found"}), 404
 
-        enabled = bool(data.get('organize_by_playlist'))
-        ok = database.set_mirrored_playlist_organize_by_playlist(playlist_id, enabled)
+        kwargs = {}
+        if 'organize_by_playlist' in data:
+            kwargs['organize_by_playlist'] = bool(data.get('organize_by_playlist'))
+        if 'keep_playlist_folder_copies' in data:
+            kwargs['keep_playlist_folder_copies'] = bool(data.get('keep_playlist_folder_copies'))
+        is_standalone = config_manager.get_active_media_server() == 'soulsync'
+        if is_standalone and kwargs.get('organize_by_playlist') and 'keep_playlist_folder_copies' not in data:
+            kwargs['keep_playlist_folder_copies'] = True
+        ok = database.set_mirrored_playlist_preferences(playlist_id, **kwargs)
         if not ok:
             return jsonify({"error": "Failed to update preferences"}), 500
 

@@ -113,8 +113,10 @@ def _run_duplicate_cleaner():
                 if file_ext_lower not in audio_extensions:
                     continue
 
-                # Group by directory and filename (without extension)
-                files_by_dir_and_name[root][file_name].append({
+                # Group by directory and normalised filename (without extension,
+                # lower-cased so that casing variants like "HUGEL - Song.flac"
+                # and "hugel - Song.flac" are treated as the same track).
+                files_by_dir_and_name[root][file_name.lower()].append({
                     'full_path': file_path,
                     'extension': file_ext_lower,
                     'size': os.path.getsize(file_path)

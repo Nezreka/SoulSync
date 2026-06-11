@@ -1120,7 +1120,15 @@
                         <div class="sync-tab-content" id="spotify-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Spotify Playlists</h3>
-                                <button class="refresh-button" id="spotify-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="spotify"
+                                            onclick="selectAllSyncPlaylists('spotify')" disabled title="Select all loaded playlists">Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled title="Clear playlist selection">Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled title="Sync all selected playlists">Sync selected</button>
+                                    <button class="refresh-button" id="spotify-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="spotify-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your Spotify playlists.</div>
@@ -1131,7 +1139,15 @@
                         <div class="sync-tab-content" id="tidal-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Tidal Playlists</h3>
-                                <button class="refresh-button tidal" id="tidal-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="tidal"
+                                            onclick="selectAllSyncPlaylists('tidal')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button tidal" id="tidal-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="tidal-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your Tidal playlists.</div>
@@ -1142,7 +1158,15 @@
                         <div class="sync-tab-content" id="deezer-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Deezer Playlists</h3>
-                                <button class="refresh-button deezer" id="deezer-arl-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="deezer"
+                                            onclick="selectAllSyncPlaylists('deezer')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button deezer" id="deezer-arl-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="deezer-arl-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your Deezer playlists.</div>
@@ -1153,7 +1177,15 @@
                         <div class="sync-tab-content" id="qobuz-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Qobuz Playlists</h3>
-                                <button class="refresh-button qobuz" id="qobuz-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="qobuz"
+                                            onclick="selectAllSyncPlaylists('qobuz')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button qobuz" id="qobuz-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="qobuz-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your Qobuz playlists.</div>
@@ -1168,6 +1200,14 @@
                                 <button id="deezer-parse-btn">Load Playlist</button>
                             </div>
                             <div class="url-history-bar" id="deezer-url-history" style="display:none"></div>
+                            <div class="playlist-bulk-toolbar">
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="deezer-link"
+                                        onclick="selectAllSyncPlaylists('deezer-link')" disabled>Select all</button>
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                        onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                        onclick="startSequentialSync()" disabled>Sync selected</button>
+                            </div>
                             <div class="playlist-scroll-container" id="deezer-playlist-container">
                                 <div class="playlist-placeholder">Paste a Deezer playlist URL above to get started.</div>
                             </div>
@@ -1181,6 +1221,14 @@
                                 <button id="youtube-parse-btn">Parse Playlist</button>
                             </div>
                             <div class="url-history-bar" id="youtube-url-history" style="display:none"></div>
+                            <div class="playlist-bulk-toolbar">
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="youtube"
+                                        onclick="selectAllSyncPlaylists('youtube')" disabled>Select all</button>
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                        onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                        onclick="startSequentialSync()" disabled>Sync selected</button>
+                            </div>
                             <div class="playlist-scroll-container" id="youtube-playlist-container">
                                 <div class="playlist-placeholder">Parsed YouTube playlists will appear here.</div>
                             </div>
@@ -1194,6 +1242,14 @@
                                 <button id="spotify-public-parse-btn">Load</button>
                             </div>
                             <div class="url-history-bar" id="spotify-public-url-history" style="display:none"></div>
+                            <div class="playlist-bulk-toolbar">
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="spotify-public"
+                                        onclick="selectAllSyncPlaylists('spotify-public')" disabled>Select all</button>
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                        onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                        onclick="startSequentialSync()" disabled>Sync selected</button>
+                            </div>
                             <div class="playlist-scroll-container" id="spotify-public-playlist-container">
                                 <div class="playlist-placeholder">Paste a Spotify playlist or album URL above to load tracks without needing Spotify API credentials.</div>
                             </div>
@@ -1207,6 +1263,14 @@
                                 <button id="itunes-link-parse-btn">Load</button>
                             </div>
                             <div class="url-history-bar" id="itunes-link-url-history" style="display:none"></div>
+                            <div class="playlist-bulk-toolbar">
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="itunes-link"
+                                        onclick="selectAllSyncPlaylists('itunes-link')" disabled>Select all</button>
+                                <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                        onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                        onclick="startSequentialSync()" disabled>Sync selected</button>
+                            </div>
                             <div class="playlist-scroll-container" id="itunes-link-playlist-container">
                                 <div class="playlist-placeholder">Paste an iTunes or Apple Music album/track URL above to load tracks.</div>
                             </div>
@@ -1628,7 +1692,15 @@
                             <div class="beatport-tab-content" id="beatport-playlists-content">
                                 <div class="playlist-header">
                                     <h3>My Beatport Playlists</h3>
-                                    <button class="refresh-button beatport" id="beatport-clear-btn">🗑️ Clear</button>
+                                    <div class="playlist-header-actions">
+                                        <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="beatport"
+                                                onclick="selectAllSyncPlaylists('beatport')" disabled>Select all</button>
+                                        <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                                onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                        <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                                onclick="startSequentialSync()" disabled>Sync selected</button>
+                                        <button class="refresh-button beatport" id="beatport-clear-btn">🗑️ Clear charts</button>
+                                    </div>
                                 </div>
                                 <div class="playlist-scroll-container" id="beatport-playlist-container">
                                     <div class="playlist-placeholder">Your created Beatport playlists will appear here.
@@ -1997,7 +2069,15 @@
                         <div class="sync-tab-content" id="soulsync-discovery-sync-tab-content">
                             <div class="playlist-header">
                                 <h3>SoulSync Discovery Playlists</h3>
-                                <button class="refresh-button soulsync-discovery" id="soulsync-discovery-sync-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="soulsync-discovery-sync"
+                                            onclick="selectAllSyncPlaylists('soulsync-discovery-sync')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button soulsync-discovery" id="soulsync-discovery-sync-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="soulsync-discovery-sync-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your personalized SoulSync Discovery playlists.</div>
@@ -2008,7 +2088,15 @@
                         <div class="sync-tab-content" id="lastfm-sync-tab-content">
                             <div class="playlist-header">
                                 <h3>Your Last.fm Radio Playlists</h3>
-                                <button class="refresh-button lastfm" id="lastfm-sync-refresh-btn">🔄 Refresh</button>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="lastfm-sync"
+                                            onclick="selectAllSyncPlaylists('lastfm-sync')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button lastfm" id="lastfm-sync-refresh-btn">🔄 Refresh</button>
+                                </div>
                             </div>
                             <div class="playlist-scroll-container" id="lastfm-sync-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your Last.fm Radio playlists. Generate new ones from the Discover page.</div>
@@ -2017,14 +2105,22 @@
 
                         <!-- ListenBrainz Sync Tab Content (separate ID from Discover-page LB UI) -->
                         <div class="sync-tab-content" id="listenbrainz-sync-tab-content">
-                            <div class="playlist-header">
+                            <div class="playlist-header playlist-header--listenbrainz">
                                 <h3>Your ListenBrainz Playlists</h3>
+                                <div class="playlist-header-actions">
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-select-all-btn" data-sync-source="listenbrainz-sync"
+                                            onclick="selectAllSyncPlaylists('listenbrainz-sync')" disabled>Select all</button>
+                                    <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                            onclick="clearSyncPlaylistSelection()" disabled>Clear</button>
+                                    <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                            onclick="startSequentialSync()" disabled>Sync selected</button>
+                                    <button class="refresh-button listenbrainz" id="listenbrainz-sync-refresh-btn">🔄 Refresh</button>
+                                </div>
                                 <div class="listenbrainz-sub-tabs">
                                     <button class="listenbrainz-sub-tab-btn active" data-lb-type="created_for_user">For You</button>
                                     <button class="listenbrainz-sub-tab-btn" data-lb-type="user_created">My Playlists</button>
                                     <button class="listenbrainz-sub-tab-btn" data-lb-type="collaborative">Collaborative</button>
                                 </div>
-                                <button class="refresh-button listenbrainz" id="listenbrainz-sync-refresh-btn">🔄 Refresh</button>
                             </div>
                             <div class="playlist-scroll-container" id="listenbrainz-sync-playlist-container">
                                 <div class="playlist-placeholder">Click 'Refresh' to load your ListenBrainz playlists.</div>
@@ -2128,6 +2224,20 @@
                             <div id="sync-progress-text">Ready to sync...</div>
                             <textarea id="sync-log-area" readonly>Waiting for sync to start...</textarea>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Bulk actions when Spotify playlists are selected (sidebar is hidden until sync starts) -->
+                <div class="sync-playlist-bulk-bar" id="sync-playlist-bulk-bar" hidden>
+                    <div class="sync-playlist-bulk-bar-info">
+                        <span class="sync-playlist-bulk-count" id="sync-playlist-bulk-count">0</span>
+                        <span class="sync-playlist-bulk-label" id="sync-playlist-bulk-label">playlists selected</span>
+                    </div>
+                    <div class="sync-playlist-bulk-bar-actions">
+                        <button type="button" class="btn btn--sm btn--secondary sync-playlist-clear-btn"
+                                onclick="clearSyncPlaylistSelection()">Clear</button>
+                        <button type="button" class="btn btn--sm btn--primary sync-playlist-start-btn"
+                                onclick="startSequentialSync()" disabled>Sync selected</button>
                     </div>
                 </div>
                 </div>
@@ -8336,6 +8446,7 @@
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-soulsync-discovery.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='sync-bulk-selection.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>

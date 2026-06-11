@@ -1577,28 +1577,78 @@ function autoSyncAutomationCardHtml(auto, playlists) {
     `;
 }
 
+function autoSyncEffectiveKeepCopies(playlist) {
+    if (typeof effectiveKeepPlaylistFolderCopies === 'function') {
+        return effectiveKeepPlaylistFolderCopies(playlist);
+    }
+    return !!playlist.keep_playlist_folder_copies;
+}
+
 function autoSyncOrganizeToggleHtml(playlist) {
-    const checked = playlist.organize_by_playlist ? 'checked' : '';
+    const organizeChecked = playlist.organize_by_playlist ? 'checked' : '';
+    const keepChecked = autoSyncEffectiveKeepCopies(playlist) ? 'checked' : '';
+    const keepDisabled = playlist.organize_by_playlist ? '' : 'disabled';
+    const keepClass = playlist.organize_by_playlist ? '' : 'is-disabled';
     return `
-        <label class="auto-sync-organize-toggle" onclick="event.stopPropagation();" title="Download missing tracks into a playlist-named folder (artist - track)">
-            <input type="checkbox" ${checked} onchange="setAutoSyncOrganizeByPlaylist(${playlist.id}, this.checked)">
-            <span>Organize by playlist</span>
-        </label>
+        <div class="auto-sync-organize-toggles" onclick="event.stopPropagation();">
+            <label class="auto-sync-organize-toggle" title="Download missing tracks into a playlist-named folder (artist - track)">
+                <input type="checkbox" ${organizeChecked} onchange="setAutoSyncOrganizeByPlaylist(${playlist.id}, this.checked)">
+                <span>Organize by playlist</span>
+            </label>
+            <label class="auto-sync-organize-toggle auto-sync-organize-subtoggle ${keepClass}" title="Also download a file into this playlist folder when the track already exists in your library (e.g. Rekordbox USB sets)">
+                <input type="checkbox" ${keepChecked} ${keepDisabled}
+                    onchange="setAutoSyncKeepPlaylistFolderCopies(${playlist.id}, this.checked)">
+                <span>Keep folder copies</span>
+            </label>
+        </div>
     `;
+}
+
+async function patchAutoSyncMirroredPreferences(playlistId, body) {
+    const res = await fetch(`/api/mirrored-playlists/${playlistId}/preferences`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
+    const pl = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
+    if (pl && data.playlist) {
+        pl.organize_by_playlist = !!data.playlist.organize_by_playlist;
+        pl.keep_playlist_folder_copies = !!data.playlist.keep_playlist_folder_copies;
+        pl.keep_playlist_folder_copies_opt_out = !!data.playlist.keep_playlist_folder_copies_opt_out;
+    }
+    return data;
 }
 
 async function setAutoSyncOrganizeByPlaylist(playlistId, enabled) {
     try {
-        const res = await fetch(`/api/mirrored-playlists/${playlistId}/preferences`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ organize_by_playlist: !!enabled }),
-        });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(data.error || 'Failed to update preference');
-        const pl = _autoSyncScheduleState.playlists.find(p => parseInt(p.id, 10) === parseInt(playlistId, 10));
-        if (pl) pl.organize_by_playlist = !!enabled;
+        const body = { organize_by_playlist: !!enabled };
+        if (!enabled) {
+            body.keep_playlist_folder_copies = false;
+        } else if (typeof isSoulsyncStandaloneMode === 'function' && isSoulsyncStandaloneMode()) {
+            body.keep_playlist_folder_copies = true;
+        }
+        await patchAutoSyncMirroredPreferences(playlistId, body);
         showToast(enabled ? 'Auto-Sync will use playlist folders' : 'Auto-Sync will use standard download layout', 'success');
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+        await refreshAutoSyncScheduleModal();
+    }
+}
+
+async function setAutoSyncKeepPlaylistFolderCopies(playlistId, enabled) {
+    try {
+        await patchAutoSyncMirroredPreferences(playlistId, {
+            keep_playlist_folder_copies: !!enabled,
+            organize_by_playlist: true,
+        });
+        showToast(
+            enabled
+                ? 'Missing tracks will download into each playlist folder even if already in library'
+                : 'Tracks already in library will not be copied into playlist folders',
+            'success',
+        );
     } catch (err) {
         showToast(`Error: ${err.message}`, 'error');
         await refreshAutoSyncScheduleModal();

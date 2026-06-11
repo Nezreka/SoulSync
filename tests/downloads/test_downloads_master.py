@@ -326,6 +326,59 @@ def test_analysis_phase_sets_state(monkeypatch):
     assert len(download_batches['B1']['analysis_results']) == 1
 
 
+def test_keep_playlist_folder_copies_skips_library_match(monkeypatch):
+    """With keep copies, a library hit still downloads when the track is absent from this playlist folder."""
+    db = _FakeDB(found_tracks={('shared', 'artist'): 1.0})
+    db.resolve_mirrored_playlist = lambda *args, **kwargs: {
+        'id': 9,
+        'name': 'Playlist B',
+        'organize_by_playlist': True,
+        'keep_playlist_folder_copies': False,
+        'keep_playlist_folder_copies_opt_out': False,
+    }
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr(
+        'core.downloads.playlist_folder.track_exists_in_playlist_folder_from_track_data',
+        lambda *_a, **_k: False,
+    )
+
+    _seed_batch(
+        'Bkeep',
+        playlist_folder_mode=True,
+        playlist_id='9',
+        playlist_name='Playlist B',
+    )
+    deps = _build_deps(config=_FakeConfig({'_active_server': 'soulsync'}))
+    tracks = [{'name': 'Shared', 'artists': ['Artist']}]
+
+    mw.run_full_missing_tracks_process('Bkeep', '9', tracks, deps)
+
+    assert download_batches['Bkeep']['analysis_results'][0]['found'] is False
+    assert len(download_batches['Bkeep']['queue']) == 1
+
+
+def test_playlist_folder_mode_without_keep_copies_skips_library_match(monkeypatch):
+    db = _FakeDB(found_tracks={('shared', 'artist'): 1.0})
+    db.resolve_mirrored_playlist = lambda *args, **kwargs: {
+        'id': 9,
+        'name': 'Playlist B',
+        'organize_by_playlist': True,
+        'keep_playlist_folder_copies': False,
+    }
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+    monkeypatch.setattr(
+        'core.downloads.playlist_folder.track_exists_in_playlist_folder_from_track_data',
+        lambda *_a, **_k: False,
+    )
+    _seed_batch('Bnokeep', playlist_folder_mode=True, playlist_id='9', playlist_name='Playlist B')
+    deps = _build_deps()
+    mw.run_full_missing_tracks_process(
+        'Bnokeep', '9', [{'name': 'Shared', 'artists': ['Artist']}], deps
+    )
+    assert download_batches['Bnokeep']['analysis_results'][0]['found'] is True
+    assert download_batches['Bnokeep']['queue'] == []
+
+
 def test_force_download_treats_all_as_missing(monkeypatch):
     """force_download_all skips DB check — every track marked missing."""
     db = _FakeDB(found_tracks={('t1', 'a'): 1.0, ('t2', 'a'): 1.0})  # would otherwise be found
@@ -1064,6 +1117,37 @@ def test_playlist_folder_mode_propagates(monkeypatch):
     info = download_tasks[task_id]['track_info']
     assert info['_playlist_folder_mode'] is True
     assert info['_playlist_name'] == 'My Mix'
+
+
+def test_wishlist_source_info_organize_by_playlist_enables_folder_mode(monkeypatch):
+    """Wishlist requeue honors organize_by_playlist saved from the download modal."""
+    db = _FakeDB()
+    monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
+
+    deps = _build_deps()
+    _seed_batch('Bwlf')
+    tracks = [{
+        'name': 'Song One',
+        'artists': [{'name': 'Artist One'}],
+        'source_info': {
+            'playlist_id': '37i9dQZF1DX0XUsuxWHRQd',
+            'playlist_name': 'Daily Mix',
+            'organize_by_playlist': True,
+            'playlist_source': 'spotify',
+        },
+        'spotify_data': {
+            'album': {'id': 'album-1', 'name': 'Album One'},
+            'artists': [{'name': 'Artist One'}],
+        },
+    }]
+
+    mw.run_full_missing_tracks_process('Bwlf', 'wishlist', tracks, deps)
+
+    task_id = download_batches['Bwlf']['queue'][0]
+    info = download_tasks[task_id]['track_info']
+    assert info['_playlist_folder_mode'] is True
+    assert info['_playlist_name'] == 'Daily Mix'
+    assert '_is_explicit_album_download' not in info
 
 
 # ---------------------------------------------------------------------------

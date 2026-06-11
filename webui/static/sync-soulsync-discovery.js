@@ -91,14 +91,24 @@ function renderSoulsyncDiscoverySyncPlaylists() {
         `;
     }).join('');
 
-    container.querySelectorAll('.soulsync-discovery-playlist-card').forEach(card => {
-        card.addEventListener('click', () => {
-            const kind = card.dataset.ssdKind;
-            const variant = card.dataset.ssdVariant;
-            const name = card.dataset.ssdName;
-            handleSoulsyncDiscoverySyncCardClick(kind, variant, name, card);
-        });
-    });
+    if (typeof wirePhaseSyncCards === 'function') {
+        wirePhaseSyncCards(
+            'soulsync-discovery-sync',
+            '#soulsync-discovery-sync-playlist-container',
+            '.soulsync-discovery-playlist-card',
+            card => card.dataset.ssdId,
+            syntheticId => {
+                const c = document.getElementById(`soulsync-discovery-sync-card-${syntheticId}`);
+                if (!c) return;
+                handleSoulsyncDiscoverySyncCardClick(
+                    c.dataset.ssdKind,
+                    c.dataset.ssdVariant,
+                    c.dataset.ssdName,
+                    c
+                );
+            }
+        );
+    }
 }
 
 function _soulsyncSyntheticId(kind, variant) {

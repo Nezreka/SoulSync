@@ -979,6 +979,10 @@ function playlistDetailsOrganizeCheckboxId(playlistRef) {
     return `playlist-organize-${playlistRef}`;
 }
 
+function playlistDetailsKeepCopiesCheckboxId(playlistRef) {
+    return `playlist-keep-copies-${playlistRef}`;
+}
+
 /** Infer mirrored-playlist API source from a UI playlist / virtual id. */
 function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
     if (explicitSource) {
@@ -990,6 +994,15 @@ function playlistOrganizeSourceForRef(playlistRef, explicitSource = null) {
     }
     if (ref.startsWith('deezer_arl_')) {
         return 'deezer';
+    }
+    if (ref.startsWith('tidal_')) {
+        return 'tidal';
+    }
+    if (ref.startsWith('youtube_')) {
+        return 'youtube';
+    }
+    if (ref.startsWith('qobuz_')) {
+        return 'qobuz';
     }
     return 'spotify';
 }
@@ -1008,29 +1021,59 @@ function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
 
 function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
     return `
-        <label class="force-download-toggle">
-            <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync">
-            <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
-        </label>`;
+        <div class="playlist-organize-pref-group">
+            <label class="force-download-toggle">
+                <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync"
+                    onchange="onDownloadMissingOrganizeToggle('${String(playlistId).replace(/'/g, "\\'")}', this.checked)">
+                <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
+            </label>
+            <label class="force-download-toggle playlist-organize-subtoggle is-disabled" id="playlist-keep-copies-wrap-${playlistId}">
+                <input type="checkbox" id="playlist-keep-copies-mode-${playlistId}" disabled
+                    onchange="onDownloadMissingKeepCopiesToggle('${String(playlistId).replace(/'/g, "\\'")}', this.checked)">
+                <span>Keep folder copies (download even if already in library)</span>
+            </label>
+        </div>`;
 }
 
 function playlistOrganizeToggleHtml(playlistRef, source = 'spotify') {
     const safeRef = String(playlistRef).replace(/'/g, "\\'");
     const safeSource = String(source).replace(/'/g, "\\'");
     return `
-        <label class="playlist-modal-organize-toggle" title="Download into a playlist-named folder (Artist - Track) under your transfer path">
-            <input type="checkbox" id="${playlistDetailsOrganizeCheckboxId(playlistRef)}"
-                onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
-            <span>Organize by playlist</span>
-        </label>
+        <div class="playlist-organize-pref-group">
+            <label class="playlist-modal-organize-toggle" title="Download into a playlist-named folder (Artist - Track) under your transfer path">
+                <input type="checkbox" id="${playlistDetailsOrganizeCheckboxId(playlistRef)}"
+                    onchange="onPlaylistOrganizePreferenceChange('${safeRef}', this.checked, '${safeSource}')">
+                <span>Organize by playlist</span>
+            </label>
+            <label class="playlist-modal-organize-toggle playlist-organize-subtoggle is-disabled"
+                id="${playlistDetailsKeepCopiesCheckboxId(playlistRef)}-wrap" title="Download into this playlist folder even when the track is already in your library">
+                <input type="checkbox" id="${playlistDetailsKeepCopiesCheckboxId(playlistRef)}" disabled
+                    onchange="onPlaylistKeepCopiesPreferenceChange('${safeRef}', this.checked, '${safeSource}')">
+                <span>Keep folder copies</span>
+            </label>
+        </div>
     `;
 }
 
-function syncPlaylistOrganizeCheckboxes(playlistRef, enabled) {
+function syncPlaylistOrganizeCheckboxes(playlistRef, organizeEnabled, keepCopiesEnabled = false) {
     const detailsCb = document.getElementById(playlistDetailsOrganizeCheckboxId(playlistRef));
     const downloadMissingCb = document.getElementById(`playlist-folder-mode-${playlistRef}`);
-    if (detailsCb) detailsCb.checked = !!enabled;
-    if (downloadMissingCb) downloadMissingCb.checked = !!enabled;
+    const detailsKeep = document.getElementById(playlistDetailsKeepCopiesCheckboxId(playlistRef));
+    const downloadKeep = document.getElementById(`playlist-keep-copies-mode-${playlistRef}`);
+    const detailsKeepWrap = document.getElementById(`${playlistDetailsKeepCopiesCheckboxId(playlistRef)}-wrap`);
+    const downloadKeepWrap = document.getElementById(`playlist-keep-copies-wrap-${playlistRef}`);
+    if (detailsCb) detailsCb.checked = !!organizeEnabled;
+    if (downloadMissingCb) downloadMissingCb.checked = !!organizeEnabled;
+    if (detailsKeep) {
+        detailsKeep.checked = !!organizeEnabled && !!keepCopiesEnabled;
+        detailsKeep.disabled = !organizeEnabled;
+    }
+    if (downloadKeep) {
+        downloadKeep.checked = !!organizeEnabled && !!keepCopiesEnabled;
+        downloadKeep.disabled = !organizeEnabled;
+    }
+    if (detailsKeepWrap) detailsKeepWrap.classList.toggle('is-disabled', !organizeEnabled);
+    if (downloadKeepWrap) downloadKeepWrap.classList.toggle('is-disabled', !organizeEnabled);
 }
 
 function isPlaylistOrganizeEnabled(playlistRef) {
@@ -1040,42 +1083,96 @@ function isPlaylistOrganizeEnabled(playlistRef) {
     return downloadMissingCb ? downloadMissingCb.checked : false;
 }
 
+function isSoulsyncStandaloneMode() {
+    return !!_isSoulsyncStandalone;
+}
+
+function effectiveKeepPlaylistFolderCopies(playlist) {
+    if (!playlist?.organize_by_playlist) return false;
+    if (playlist.keep_playlist_folder_copies) return true;
+    if (playlist.keep_playlist_folder_copies_opt_out) return false;
+    return isSoulsyncStandaloneMode();
+}
+
+function isPlaylistKeepFolderCopiesEnabled(playlistRef) {
+    if (!isPlaylistOrganizeEnabled(playlistRef)) return false;
+    const detailsCb = document.getElementById(playlistDetailsKeepCopiesCheckboxId(playlistRef));
+    if (detailsCb) return detailsCb.checked;
+    const downloadCb = document.getElementById(`playlist-keep-copies-mode-${playlistRef}`);
+    return downloadCb ? downloadCb.checked : false;
+}
+
+async function resolveMirroredPlaylistForRef(playlistRef, source = null) {
+    const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
+    const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
+    const res = await fetch(
+        `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
+    );
+    const data = await res.json();
+    if (!data.found || !data.playlist) {
+        return null;
+    }
+    return data.playlist;
+}
+
 async function fetchMirroredOrganizePreference(playlistRef, source = null) {
     try {
-        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
-        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
-        const res = await fetch(
-            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
-        );
-        const data = await res.json();
-        return !!(data.found && data.playlist?.organize_by_playlist);
+        const pl = await resolveMirroredPlaylistForRef(playlistRef, source);
+        return !!pl?.organize_by_playlist;
     } catch (err) {
         console.debug('Could not load organize-by-playlist preference:', err);
         return false;
     }
 }
 
+async function fetchMirroredPlaylistFolderPreferences(playlistRef, source = null) {
+    try {
+        const pl = await resolveMirroredPlaylistForRef(playlistRef, source);
+        if (!pl) {
+            return { organize: false, keepCopies: false };
+        }
+        return {
+            organize: !!pl.organize_by_playlist,
+            keepCopies: effectiveKeepPlaylistFolderCopies(pl),
+        };
+    } catch (err) {
+        console.debug('Could not load mirrored playlist folder preferences:', err);
+        return { organize: false, keepCopies: false };
+    }
+}
+
+async function patchMirroredPlaylistPreferences(playlistId, body) {
+    const patchRes = await fetch(`/api/mirrored-playlists/${playlistId}/preferences`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const patchData = await patchRes.json();
+    if (!patchRes.ok || patchData.error) {
+        return null;
+    }
+    return patchData.playlist || null;
+}
+
 async function setMirroredOrganizePreference(playlistRef, enabled, source = null) {
     try {
-        const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
-        const resolveRef = normalizePlaylistOrganizeRef(playlistRef, resolvedSource);
-        const res = await fetch(
-            `/api/mirrored-playlists/resolve?ref=${encodeURIComponent(resolveRef)}&source=${encodeURIComponent(resolvedSource)}`
+        const pl = await resolveMirroredPlaylistForRef(playlistRef, source);
+        if (!pl?.id) {
+            return false;
+        }
+        const body = { organize_by_playlist: !!enabled };
+        if (!enabled) {
+            body.keep_playlist_folder_copies = false;
+        } else if (isSoulsyncStandaloneMode()) {
+            body.keep_playlist_folder_copies = true;
+        }
+        const updated = await patchMirroredPlaylistPreferences(pl.id, body);
+        if (!updated) return false;
+        syncPlaylistOrganizeCheckboxes(
+            playlistRef,
+            !!updated.organize_by_playlist,
+            !!updated.keep_playlist_folder_copies,
         );
-        const data = await res.json();
-        if (!data.found || !data.playlist?.id) {
-            return false;
-        }
-        const patchRes = await fetch(`/api/mirrored-playlists/${data.playlist.id}/preferences`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ organize_by_playlist: !!enabled }),
-        });
-        const patchData = await patchRes.json();
-        if (!patchRes.ok || patchData.error) {
-            return false;
-        }
-        syncPlaylistOrganizeCheckboxes(playlistRef, !!enabled);
         return true;
     } catch (err) {
         console.debug('Could not save organize-by-playlist preference:', err);
@@ -1083,17 +1180,70 @@ async function setMirroredOrganizePreference(playlistRef, enabled, source = null
     }
 }
 
+async function setMirroredKeepCopiesPreference(playlistRef, enabled, source = null) {
+    try {
+        const pl = await resolveMirroredPlaylistForRef(playlistRef, source);
+        if (!pl?.id) {
+            return false;
+        }
+        const updated = await patchMirroredPlaylistPreferences(pl.id, {
+            keep_playlist_folder_copies: !!enabled,
+            organize_by_playlist: true,
+        });
+        if (!updated) return false;
+        syncPlaylistOrganizeCheckboxes(
+            playlistRef,
+            !!updated.organize_by_playlist,
+            !!updated.keep_playlist_folder_copies,
+        );
+        return true;
+    } catch (err) {
+        console.debug('Could not save keep-playlist-folder-copies preference:', err);
+        return false;
+    }
+}
+
 async function loadPlaylistOrganizePreferenceIntoModal(playlistRef, source = null) {
-    const resolvedSource = playlistOrganizeSourceForRef(playlistRef, source);
-    const enabled = await fetchMirroredOrganizePreference(playlistRef, resolvedSource);
-    syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+    const prefs = await fetchMirroredPlaylistFolderPreferences(playlistRef, source);
+    syncPlaylistOrganizeCheckboxes(playlistRef, prefs.organize, prefs.keepCopies);
 }
 
 async function onPlaylistOrganizePreferenceChange(playlistRef, enabled, source = 'spotify') {
-    syncPlaylistOrganizeCheckboxes(playlistRef, enabled);
+    const defaultKeep = enabled && isSoulsyncStandaloneMode();
+    syncPlaylistOrganizeCheckboxes(playlistRef, enabled, defaultKeep);
     const ok = await setMirroredOrganizePreference(playlistRef, enabled, source);
     if (!ok) {
         showToast('Could not save playlist folder preference (mirror this playlist first)', 'warning');
+    }
+}
+
+async function onPlaylistKeepCopiesPreferenceChange(playlistRef, enabled, source = 'spotify') {
+    syncPlaylistOrganizeCheckboxes(playlistRef, true, enabled);
+    const ok = await setMirroredKeepCopiesPreference(playlistRef, enabled, source);
+    if (!ok) {
+        showToast('Could not save keep folder copies preference (mirror this playlist first)', 'warning');
+    }
+}
+
+async function onDownloadMissingOrganizeToggle(playlistId, enabled) {
+    syncPlaylistOrganizeCheckboxes(playlistId, enabled, enabled && isSoulsyncStandaloneMode());
+    const source = playlistOrganizeSourceForRef(playlistId);
+    const ok = await setMirroredOrganizePreference(playlistId, enabled, source);
+    if (!ok) {
+        showToast('Could not save playlist folder preference (mirror this playlist first)', 'warning');
+    }
+}
+
+async function onDownloadMissingKeepCopiesToggle(playlistId, enabled) {
+    const organizeCb = document.getElementById(`playlist-folder-mode-${playlistId}`);
+    if (organizeCb && !organizeCb.checked) {
+        organizeCb.checked = true;
+    }
+    syncPlaylistOrganizeCheckboxes(playlistId, true, enabled);
+    const source = playlistOrganizeSourceForRef(playlistId);
+    const ok = await setMirroredKeepCopiesPreference(playlistId, enabled, source);
+    if (!ok) {
+        showToast('Could not save keep folder copies preference (mirror this playlist first)', 'warning');
     }
 }
 

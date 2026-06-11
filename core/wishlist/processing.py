@@ -406,8 +406,12 @@ def build_wishlist_source_context(batch: Dict[str, Any], current_time: datetime 
     }
     if batch.get('mirrored_playlist_id') is not None:
         context['mirrored_playlist_id'] = batch.get('mirrored_playlist_id')
-    if batch.get('organize_by_playlist'):
+    if batch.get('organize_by_playlist') or batch.get('playlist_folder_mode'):
         context['organize_by_playlist'] = True
+    batch_source = batch.get('batch_source') or batch.get('source_page')
+    if batch_source:
+        context['playlist_source'] = batch_source
+        context['source'] = batch_source
     # Preserve album-batch provenance so wishlist requeue has a real signal
     # for album-vs-single routing instead of relying on per-track album dicts
     # that may have been mangled by reconstruction fallbacks.

@@ -817,7 +817,15 @@ const HELPER_CONTENT = {
     '#start-sync-btn': {
         title: 'Start Sync',
         description: 'Begin downloading missing tracks from all selected playlists. Playlists are processed sequentially — each one completes before the next starts.',
-        tips: ['Select playlists first using checkboxes on the cards', 'Progress bar and log update in real-time', 'Button is disabled until at least one playlist is selected'],
+        tips: ['Click playlist cards to select them, or use Select all in the Spotify header', 'Use Sync selected in the bottom bar (visible when playlists are selected)', 'Progress bar and log update in real-time when the sync sidebar is open'],
+    },
+    '.sync-playlist-select-all-btn': {
+        title: 'Select All Playlists',
+        description: 'Select every loaded playlist in the current source tab for bulk sequential sync.',
+    },
+    '.sync-playlist-start-btn': {
+        title: 'Sync Selected Playlists',
+        description: 'Start sequential sync for all selected playlists in this tab. Each playlist finishes before the next begins. Click again while running to cancel.',
     },
     '#sync-log-area': {
         title: 'Sync Log',
@@ -2402,7 +2410,7 @@ const HELPER_TOURS = {
             { page: 'sync', selector: '.sync-tab-button[data-tab="mirrored"]', title: 'Mirrored Playlists', description: 'Every imported playlist is saved here permanently. Re-sync anytime to catch new additions, check match status, or view the Discovery Pool for unmatched tracks.' },
 
             // Sidebar
-            { page: 'sync', selector: '.sync-sidebar', title: 'Sync Controls', description: 'The command center. Select playlists with checkboxes on the left, then click "Start Sync" here. Progress bars, match counts, and logs update in real-time. That\'s the sync flow! 🎉' },
+            { page: 'sync', selector: '#sync-playlist-bulk-bar', title: 'Bulk Sync', description: 'Click Spotify playlist cards to select them (or use Select all), then Sync selected in the bar at the bottom. Playlists sync one after another. Progress and logs appear in the sidebar on wide screens when sync is running.' },
         ]
     },
     // 'artists-browse' tour retired — the Artists sidebar entry was replaced by the
