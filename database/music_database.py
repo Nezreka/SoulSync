@@ -6631,17 +6631,22 @@ class MusicDatabase:
             logger.error(f"Error searching artists with query '{query}': {e}")
             return []
     
-    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None) -> List[DatabaseTrack]:
-        """Search tracks by title and/or artist name with Unicode-aware fuzzy matching"""
+    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None,
+                       rank_artist: str = None) -> List[DatabaseTrack]:
+        """Search tracks by title and/or artist name with Unicode-aware fuzzy matching.
+
+        ``rank_artist`` is a relevance-only hint (never filters): when given, rows
+        by that artist rank to the top so an exact title+artist match wins over
+        same-title tracks by other artists."""
         try:
             if not title and not artist:
                 return []
-            
+
             conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             # STRATEGY 1: Try basic SQL LIKE search first (fastest)
-            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source)
+            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
             
             if basic_results:
                 logger.debug(f"Basic search found {len(basic_results)} results")
@@ -6681,14 +6686,18 @@ class MusicDatabase:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
     
-    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
+    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None,
+                             rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
-        rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
+        rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source, rank_artist)
         return self._rows_to_tracks(rows)
 
     def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None):
-        """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
+                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+        """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers).
+
+        ``rank_artist`` is a relevance-only hint (does NOT filter): when given,
+        rows by that artist sort to the top so an exact title+artist match wins."""
         where_conditions = []
         params = []
 
@@ -6711,6 +6720,33 @@ class MusicDatabase:
             return []
 
         where_clause = " AND ".join(where_conditions)
+
+        # Relevance ordering. The old `ORDER BY tracks.title` was case-SENSITIVE
+        # (SQLite BINARY collation sorts 'B' before 'b'), so a lowercase exact
+        # title like Billie Eilish's "bad guy" sorted BELOW every capitalised
+        # "Bad Guy" and got cut off by LIMIT. Now: exact title match first, then
+        # prefix, then — when an artist is given — exact/contains artist match,
+        # finally case-insensitive alphabetical. unidecode_lower folds case +
+        # accents, matching the WHERE clause.
+        order_parts, order_params = [], []
+        if title:
+            norm_title = self._normalize_for_comparison(title)
+            order_parts.append(
+                "CASE WHEN unidecode_lower(tracks.title) = ? THEN 0 "
+                "WHEN unidecode_lower(tracks.title) LIKE ? THEN 1 ELSE 2 END")
+            order_params.extend([norm_title, f"{norm_title}%"])
+        _rank_artist = artist or rank_artist
+        if _rank_artist:
+            norm_artist = self._normalize_for_comparison(_rank_artist)
+            order_parts.append(
+                "CASE WHEN unidecode_lower(artists.name) = ? THEN 0 "
+                "WHEN unidecode_lower(artists.name) LIKE ? THEN 1 ELSE 2 END")
+            order_params.extend([norm_artist, f"%{norm_artist}%"])
+        order_parts.append("unidecode_lower(tracks.title)")
+        order_parts.append("unidecode_lower(artists.name)")
+        order_by = ", ".join(order_parts)
+
+        params.extend(order_params)
         params.append(limit)
 
         cursor.execute(f"""
@@ -6719,7 +6755,7 @@ class MusicDatabase:
             JOIN artists ON tracks.artist_id = artists.id
             JOIN albums ON tracks.album_id = albums.id
             WHERE {where_clause}
-            ORDER BY tracks.title, artists.name
+            ORDER BY {order_by}
             LIMIT ?
         """, params)
 
