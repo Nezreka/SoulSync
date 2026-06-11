@@ -1226,6 +1226,9 @@ function populateArtistDetailPage(data) {
     // Update hero section with image, name, and stats
     updateArtistHeroSection(artist, discography);
 
+    // "DB Record" inspector button (library artists only)
+    setupArtistRecordButton(artist);
+
     // Update genres (if element exists)
     updateArtistGenres(artist.genres);
 
@@ -8788,3 +8791,222 @@ async function _mlmDeleteMatch(id) {
 }
 
 // =================================
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// Artist "DB Record" inspector — everything the database knows about an artist.
+// A small glowing button at the bottom-right of the hero opens a programmer-style
+// modal: a copyable field table + syntax-highlighted raw JSON, with copy-all and
+// save-as-JSON. Library artists only (source artists have no DB row).
+// ════════════════════════════════════════════════════════════════════════════
+
+let _artistRecordData = null;   // last-fetched { artist_id, counts, record }
+
+function setupArtistRecordButton(artist) {
+    const hero = document.getElementById('artist-hero-section');
+    if (!hero) return;
+    let btn = document.getElementById('artist-db-record-btn');
+
+    const isLibrary = !!(artist && artist.id && document.body.dataset.artistSource === 'library');
+    if (!isLibrary) { if (btn) btn.style.display = 'none'; return; }
+
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'artist-db-record-btn';
+        btn.className = 'artist-db-record-btn';
+        btn.type = 'button';
+        btn.title = 'Inspect everything the database knows about this artist';
+        btn.innerHTML =
+            '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<ellipse cx="12" cy="5" rx="8" ry="3"></ellipse>' +
+            '<path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"></path>' +
+            '<path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"></path>' +
+            '</svg><span>DB Record</span>';
+        hero.appendChild(btn);
+    }
+    btn.style.display = '';
+    btn.onclick = () => openArtistRecordModal(artist.id, artist.name || 'Artist');
+}
+
+async function openArtistRecordModal(artistId, artistName) {
+    // Clean any prior instance
+    const existing = document.getElementById('artist-record-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'artist-record-overlay';
+    overlay.className = 'arec-overlay';
+    overlay.innerHTML =
+        '<div class="arec-card" role="dialog" aria-label="Artist database record">' +
+            '<div class="arec-header">' +
+                '<div class="arec-title-wrap">' +
+                    '<div class="arec-title"><span class="arec-dot"></span>Artist DB Record</div>' +
+                    '<div class="arec-sub" id="arec-sub">' + _arecEsc(artistName) + '</div>' +
+                '</div>' +
+                '<button class="arec-close" id="arec-close" title="Close (Esc)">&times;</button>' +
+            '</div>' +
+            '<div class="arec-toolbar">' +
+                '<div class="arec-tabs">' +
+                    '<button class="arec-tab active" data-tab="fields">Fields</button>' +
+                    '<button class="arec-tab" data-tab="json">JSON</button>' +
+                '</div>' +
+                '<input id="arec-filter" class="arec-filter" type="text" placeholder="filter fields…" autocomplete="off" spellcheck="false">' +
+                '<div class="arec-actions">' +
+                    '<button class="arec-btn" id="arec-copy"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>Copy JSON</button>' +
+                    '<button class="arec-btn" id="arec-download"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>Save .json</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="arec-body" id="arec-body">' +
+                '<div class="arec-loading">Loading record…</div>' +
+            '</div>' +
+            '<div class="arec-footer" id="arec-footer"></div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => {
+        overlay.classList.remove('visible');
+        document.removeEventListener('keydown', onKey);
+        setTimeout(() => overlay.remove(), 220);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('#arec-close').onclick = close;
+
+    // Fetch the record
+    let payload;
+    try {
+        const res = await fetch(`/api/artist/${encodeURIComponent(artistId)}/record`);
+        payload = await res.json();
+        if (!payload || !payload.success) throw new Error((payload && payload.error) || 'Request failed');
+    } catch (err) {
+        document.getElementById('arec-body').innerHTML =
+            '<div class="arec-error">Could not load record: ' + _arecEsc(err.message || String(err)) + '</div>';
+        return;
+    }
+
+    _artistRecordData = payload;
+    const record = payload.record || {};
+    const counts = payload.counts || {};
+
+    // Footer stat line
+    const fieldCount = Object.keys(record).length;
+    const matched = Object.entries(record).filter(([k, v]) => /match_status$/.test(k) && v === 'matched').length;
+    document.getElementById('arec-footer').innerHTML =
+        '<span><b>' + fieldCount + '</b> fields</span>' +
+        '<span><b>' + (counts.albums != null ? counts.albums : '–') + '</b> albums</span>' +
+        '<span><b>' + (counts.tracks != null ? counts.tracks : '–') + '</b> tracks</span>' +
+        '<span><b>' + matched + '</b> sources matched</span>' +
+        '<span class="arec-id">id ' + _arecEsc(String(payload.artist_id)) + '</span>';
+
+    _arecRenderFields(record);
+
+    // Toolbar wiring
+    overlay.querySelectorAll('.arec-tab').forEach(tab => {
+        tab.onclick = () => {
+            overlay.querySelectorAll('.arec-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            const filterEl = document.getElementById('arec-filter');
+            if (tab.dataset.tab === 'json') { _arecRenderJson(record); filterEl.style.visibility = 'hidden'; }
+            else { _arecRenderFields(record); filterEl.style.visibility = ''; _arecApplyFilter(filterEl.value); }
+        };
+    });
+    document.getElementById('arec-filter').addEventListener('input', (e) => _arecApplyFilter(e.target.value));
+    document.getElementById('arec-copy').onclick = () =>
+        _arecCopy(JSON.stringify(record, null, 2), 'Full record copied as JSON');
+    document.getElementById('arec-download').onclick = () => _arecDownload(record, artistName);
+}
+
+function _arecRenderFields(record) {
+    const body = document.getElementById('arec-body');
+    if (!body) return;
+    const rows = Object.entries(record).map(([key, val]) => {
+        const isEmpty = val === null || val === undefined || val === '';
+        let display, copyVal;
+        if (isEmpty) { display = '<span class="arec-null">null</span>'; copyVal = ''; }
+        else if (typeof val === 'object') {
+            copyVal = JSON.stringify(val);
+            display = '<span class="arec-json">' + _arecEsc(JSON.stringify(val)) + '</span>';
+        } else {
+            copyVal = String(val);
+            display = _arecEsc(String(val));
+        }
+        return '<div class="arec-row' + (isEmpty ? ' is-empty' : '') + '" data-field="' + _arecEscAttr(key.toLowerCase()) +
+                ' ' + _arecEscAttr(copyVal.toLowerCase()) + '">' +
+            '<span class="arec-key">' + _arecEsc(key) + '</span>' +
+            '<span class="arec-val">' + display + '</span>' +
+            '<button class="arec-rowcopy" title="Copy value" data-copy="' + _arecEscAttr(copyVal) + '">⧉</button>' +
+        '</div>';
+    }).join('');
+    body.innerHTML = '<div class="arec-fields">' + rows + '</div>';
+    body.querySelectorAll('.arec-rowcopy').forEach(b => {
+        b.onclick = () => _arecCopy(b.getAttribute('data-copy'), 'Value copied');
+    });
+}
+
+function _arecRenderJson(record) {
+    const body = document.getElementById('arec-body');
+    if (!body) return;
+    body.innerHTML = '<pre class="arec-code">' + _jsonSyntaxHighlight(record) + '</pre>';
+}
+
+function _arecApplyFilter(q) {
+    q = (q || '').trim().toLowerCase();
+    document.querySelectorAll('#arec-body .arec-row').forEach(row => {
+        row.style.display = (!q || row.dataset.field.includes(q)) ? '' : 'none';
+    });
+}
+
+function _jsonSyntaxHighlight(obj) {
+    let json = JSON.stringify(obj, null, 2);
+    json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false)\b|\bnull\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, (m) => {
+        let cls = 'tok-num';
+        if (/^"/.test(m)) cls = /:$/.test(m) ? 'tok-key' : 'tok-str';
+        else if (/true|false/.test(m)) cls = 'tok-bool';
+        else if (/null/.test(m)) cls = 'tok-null';
+        return '<span class="' + cls + '">' + m + '</span>';
+    });
+}
+
+function _arecCopy(text, label) {
+    text = text == null ? '' : String(text);
+    const done = () => (typeof showToast === 'function') && showToast(label || 'Copied', 'success');
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done).catch(() => _arecCopyFallback(text, done));
+    } else { _arecCopyFallback(text, done); }
+}
+
+function _arecCopyFallback(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); } catch (e) { /* ignore */ }
+    document.body.removeChild(ta);
+    done();
+}
+
+function _arecDownload(record, artistName) {
+    const safe = String(artistName || 'artist').replace(/[^a-z0-9._-]+/gi, '_').slice(0, 60) || 'artist';
+    const blob = new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safe + '_db_record.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (typeof showToast === 'function') showToast('Saved ' + a.download, 'success');
+}
+
+function _arecEsc(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function _arecEscAttr(s) {
+    return _arecEsc(s).replace(/"/g, '&quot;');
+}
