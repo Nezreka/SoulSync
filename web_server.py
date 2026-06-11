@@ -29638,11 +29638,15 @@ def _fetch_liked_albums(profile_id: int):
             if discogs_cl.is_authenticated():
                 logger.info("[Your Albums] Fetching collection from Discogs...")
                 releases = discogs_cl.get_user_collection()
+                from core.discogs_client import _tag_discogs_album_id
                 for r in releases:
                     database.upsert_liked_album(
                         album_name=r['album_name'], artist_name=r['artist_name'],
                         source_service='discogs',
-                        source_id=str(r['release_id']), source_id_type='discogs',
+                        # Collection items are always releases — store the ID tagged
+                        # ('r<id>') to match search/discography (#848), so every stored
+                        # Discogs album ID is uniform and re-fetches route correctly.
+                        source_id=_tag_discogs_album_id(r['release_id'], 'release'), source_id_type='discogs',
                         image_url=r.get('image_url'), release_date=r.get('release_date', ''),
                         total_tracks=r.get('total_tracks', 0), profile_id=profile_id
                     )
