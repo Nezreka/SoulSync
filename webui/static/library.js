@@ -3193,8 +3193,13 @@ function renderArtistMetaPanel(artist) {
             const data = await res.json();
             if (data.success) {
                 if (data.removal_skipped) {
-                    // Storage looked unreachable — we deliberately did NOT delete.
-                    showToast(`${data.artist_name}: most files looked missing — skipped removal in case your music storage is offline. Check it's mounted, then sync again.`, 'warning');
+                    // Couldn't get a trustworthy server view — we deliberately did NOT delete.
+                    const parts = [];
+                    if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                    if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                    if (data.name_updated) parts.push('name updated');
+                    const added = parts.length ? ` (${parts.join(', ')})` : '';
+                    showToast(`${data.artist_name}: couldn't fully confirm against your media server — skipped removing tracks to be safe${added}.`, 'warning');
                 } else {
                     const parts = [];
                     if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);

@@ -1,14 +1,16 @@
-"""Artist 'Sync' button (enhanced tab) must not wipe an artist when storage is
-unreachable, and must stay admin-only (it deletes tracks + albums). #828 pattern."""
+"""Artist 'Sync' = a single-artist deep scan: stale removal is a server-diff
+(tracks the media server no longer has), with the same safety net + admin gate as
+the whole-library deep scan. #828 pattern."""
 
 from __future__ import annotations
 
 import os
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 
-_TMP = tempfile.mkdtemp(prefix='soulsync-testdb-stale-')
+_TMP = tempfile.mkdtemp(prefix='soulsync-testdb-sync2-')
 os.environ['DATABASE_PATH'] = os.path.join(_TMP, 's.db')
 os.environ['SOULSYNC_TEST_DB_READY'] = '1'
 
@@ -20,58 +22,86 @@ def client():
     return web_server.app.test_client()
 
 
-def _seed(artist_id, *, missing, present, tmp_path):
-    """Artist with server_source NULL (skips the media-server pull phase), an
-    album, ``present`` tracks pointing at real files + ``missing`` at dead paths."""
+def _seed(artist_id, track_ids):
+    """Plex artist + album + tracks (server_source='plex')."""
     db = web_server.get_database()
-    album_id = artist_id * 10
+    aid, album_id = str(artist_id), artist_id * 10
     with db._get_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) VALUES (?, ?, NULL)",
-                     (artist_id, f'Artist {artist_id}'))
+        conn.execute("INSERT OR REPLACE INTO artists (id, name, server_source) VALUES (?, ?, 'plex')",
+                     (aid, f'Artist {aid}'))
         conn.execute("INSERT OR REPLACE INTO albums (id, title, artist_id) VALUES (?, 'Alb', ?)",
-                     (album_id, artist_id))
-        tid = artist_id * 1000
-        for i in range(present):
-            p = tmp_path / f"{artist_id}_present_{i}.flac"
-            p.write_bytes(b'\x00\x00')
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path) "
-                         "VALUES (?, ?, ?, ?, 1, 100, ?)", (tid, album_id, artist_id, f'P{i}', str(p)))
-            tid += 1
-        for i in range(missing):
-            conn.execute("INSERT INTO tracks (id, album_id, artist_id, title, track_number, duration, file_path) "
-                         "VALUES (?, ?, ?, ?, 1, 100, ?)", (tid, album_id, artist_id, f'M{i}', f'/nonexistent/{artist_id}_{i}.flac'))
-            tid += 1
+                     (album_id, aid))
+        for tid in track_ids:
+            conn.execute("INSERT OR REPLACE INTO tracks (id, album_id, artist_id, title, track_number, "
+                         "duration, file_path, server_source) VALUES (?, ?, ?, ?, 1, 100, ?, 'plex')",
+                         (tid, album_id, aid, f'T{tid}', f'/m/{tid}.flac'))
         conn.commit()
 
 
-def _track_count(artist_id):
+def _track_ids(artist_id):
     db = web_server.get_database()
     with db._get_connection() as conn:
-        return conn.execute("SELECT COUNT(*) c FROM tracks WHERE artist_id = ?", (artist_id,)).fetchone()['c']
+        return {r['id'] for r in conn.execute("SELECT id FROM tracks WHERE artist_id = ?", (str(artist_id),))}
 
 
-def test_all_files_missing_skips_removal_and_keeps_tracks(client, tmp_path):
-    _seed(9001, missing=8, present=0, tmp_path=tmp_path)
-    body = client.post('/api/library/artist/9001/sync').get_json()
-    assert body['success'] is True
-    assert body['removal_skipped'] is True          # guard tripped
+def _mock_server_pull(monkeypatch, *, seen, success=True):
+    """Fake the media server returning `seen` track IDs for the artist."""
+    class _FakeServer:
+        def fetchItem(self, _id):
+            return SimpleNamespace(title=None)  # truthy artist, no name change
+
+    class _FakePlex:
+        server = _FakeServer()
+
+    class _FakeEngine:
+        def client(self, name):
+            return _FakePlex() if name == 'plex' else None
+
+    monkeypatch.setattr(web_server, 'media_server_engine', _FakeEngine())
+
+    class _FakeWorker:
+        def __init__(self, *a, **k):
+            self.database = None
+        def _process_artist_with_content(self, server_artist, skip_existing_tracks=False, seen_track_ids=None):
+            if seen_track_ids is not None:
+                seen_track_ids.update(seen)
+            return (success, 'ok', 0, 0)
+
+    monkeypatch.setattr('core.database_update_worker.DatabaseUpdateWorker', _FakeWorker)
+
+
+def test_removes_tracks_the_server_no_longer_has(client, monkeypatch):
+    _seed(7001, [f't{i}' for i in range(1, 11)])           # t1..t10 in DB
+    _mock_server_pull(monkeypatch, seen={f't{i}' for i in range(1, 9)})  # server has t1..t8
+    body = client.post('/api/library/artist/7001/sync').get_json()
+    assert body['success'] and body['removal_skipped'] is False
+    assert body['stale_removed'] == 2                      # t9,t10 gone from server
+    assert _track_ids(7001) == {f't{i}' for i in range(1, 9)}
+
+
+def test_guard_skips_when_most_tracks_unseen(client, monkeypatch):
+    _seed(7002, [f't{i}' for i in range(1, 11)])
+    _mock_server_pull(monkeypatch, seen={'t1'})            # 9/10 unseen → flaky response
+    body = client.post('/api/library/artist/7002/sync').get_json()
+    assert body['removal_skipped'] is True
     assert body['stale_removed'] == 0
-    assert _track_count(9001) == 8                   # nothing deleted — storage looked down
+    assert len(_track_ids(7002)) == 10                    # nothing deleted
 
 
-def test_a_few_missing_files_are_removed(client, tmp_path):
-    _seed(9002, missing=2, present=8, tmp_path=tmp_path)
-    body = client.post('/api/library/artist/9002/sync').get_json()
-    assert body['success'] is True
-    assert body['removal_skipped'] is False
-    assert body['stale_removed'] == 2               # only the genuinely-gone ones
-    assert _track_count(9002) == 8
+def test_failed_pull_skips_removal(client, monkeypatch):
+    _seed(7003, [f't{i}' for i in range(1, 11)])
+    _mock_server_pull(monkeypatch, seen=set(), success=False)  # pull failed → no trustworthy view
+    body = client.post('/api/library/artist/7003/sync').get_json()
+    assert body['removal_skipped'] is True
+    assert body['stale_removed'] == 0
+    assert len(_track_ids(7003)) == 10
 
 
-def test_sync_is_admin_only(client, tmp_path):
-    _seed(9003, missing=2, present=2, tmp_path=tmp_path)
+def test_sync_is_admin_only(client, monkeypatch):
+    _seed(7004, ['t1', 't2'])
+    _mock_server_pull(monkeypatch, seen={'t1', 't2'})
     nonadmin = web_server.get_database().create_profile(name=f'u_{os.urandom(3).hex()}')
     with client.session_transaction() as sess:
         sess['profile_id'] = nonadmin
-    assert client.post('/api/library/artist/9003/sync').status_code == 403
-    assert _track_count(9003) == 4                   # untouched
+    assert client.post('/api/library/artist/7004/sync').status_code == 403
+    assert len(_track_ids(7004)) == 2                     # untouched
