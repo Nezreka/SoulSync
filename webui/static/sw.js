@@ -108,28 +108,82 @@ self.addEventListener('fetch', (event) => {
 });
 
 
+// ── image fetch throttle ───────────────────────────────────────────────
+// A discography page fires 70+ cover-art requests at once. Routed through the
+// SW one-for-one, that burst overruns the browser's per-host connection pool
+// (~6); the overflow fetches reject, and a cache-first strategy that maps a
+// rejection to Response.error() turns each into a hard NS_ERROR_INTERCEPTION_
+// FAILED — a permanently broken, *uncached* image for that load. (It only
+// "fixes itself" on reload because the images that did win the race are then
+// served from cache, shrinking the burst.) We cap how many image fetches the
+// SW runs at once so the rest queue instead of failing.
+const MAX_CONCURRENT_IMAGE_FETCHES = 6;
+let _activeImageFetches = 0;
+const _imageFetchQueue = [];
+
+function _acquireImageSlot() {
+    if (_activeImageFetches < MAX_CONCURRENT_IMAGE_FETCHES) {
+        _activeImageFetches++;
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => _imageFetchQueue.push(resolve));
+}
+
+function _releaseImageSlot() {
+    const next = _imageFetchQueue.shift();
+    // Hand the slot straight to the next waiter (count stays put); only
+    // decrement when nobody is queued.
+    if (next) next();
+    else _activeImageFetches--;
+}
+
+async function _fetchWithRetry(request, retries = 1, backoffMs = 200) {
+    try {
+        return await fetch(request);
+    } catch (err) {
+        if (retries <= 0) throw err;
+        // Most failures here are transient connection-cap rejections that
+        // clear as the burst drains — one short retry recovers the bulk.
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        return _fetchWithRetry(request, retries - 1, backoffMs);
+    }
+}
+
+
 // ── strategies ───────────────────────────────────────────────────────
 
 async function _cacheFirst(request, cacheName) {
+    // Cache lookup first — a hit must never consume a fetch slot. If the cache
+    // layer itself is unavailable, fall through to a throttled network fetch.
+    let cache = null;
     try {
-        const cache = await caches.open(cacheName);
+        cache = await caches.open(cacheName);
         const hit = await cache.match(request);
         if (hit) return hit;
+    } catch (err) {
+        cache = null;
+    }
 
-        const response = await fetch(request);
+    await _acquireImageSlot();
+    try {
+        const response = await _fetchWithRetry(request);
         // Only cache successful, opaque-OK responses. Don't cache 404s
         // / 500s — would pin a bad placeholder for the lifetime of the
         // cache version.
-        if (response && (response.ok || response.type === 'opaque')) {
+        if (cache && response && (response.ok || response.type === 'opaque')) {
             // Clone before .put — body is consumed otherwise.
             cache.put(request, response.clone()).catch(() => { /* quota / disk full */ });
         }
         return response;
     } catch (err) {
-        // Network failure with no cache hit — let the browser surface
-        // its standard offline / error UI (returning Response.error()
-        // is equivalent to letting the fetch reject naturally).
-        return Response.error();
+        // Both attempts failed (offline / connection cap / CDN error). Return a
+        // benign 504 rather than Response.error(): a network-error response
+        // from a SW surfaces as NS_ERROR_INTERCEPTION_FAILED in Firefox, which
+        // hard-fails the <img>. A plain 504 just yields a broken image that
+        // recovers on the next navigation once the cache is warm.
+        return new Response('', { status: 504, statusText: 'Image fetch failed' });
+    } finally {
+        _releaseImageSlot();
     }
 }
 
