@@ -54,13 +54,33 @@
     <!-- Login Screen (username/password mode) -->
     <div id="login-overlay" class="launch-pin-overlay" style="display: none;">
         <div class="launch-pin-container">
-            <div class="launch-pin-icon">🔐</div>
-            <h2 class="launch-pin-title">Sign in to SoulSync</h2>
-            <p class="launch-pin-subtitle">Enter your account name and password</p>
-            <input type="text" id="login-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
-            <input type="password" id="login-password" class="launch-pin-input" placeholder="Password" autocomplete="current-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitLogin()">
-            <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
-            <p id="login-error" class="launch-pin-error" style="display: none;"></p>
+            <!-- Sign-in view -->
+            <div id="login-entry">
+                <div class="launch-pin-icon">🔐</div>
+                <h2 class="launch-pin-title">Sign in to SoulSync</h2>
+                <p class="launch-pin-subtitle">Enter your account name and password</p>
+                <input type="text" id="login-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                <input type="password" id="login-password" class="launch-pin-input" placeholder="Password" autocomplete="current-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitLogin()">
+                <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <p id="login-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
+            </div>
+            <!-- Recovery view -->
+            <div id="login-recovery" style="display: none;">
+                <div class="launch-pin-icon">🔑</div>
+                <h2 class="launch-pin-title">Reset your password</h2>
+                <p class="launch-pin-subtitle">Answer your recovery question</p>
+                <input type="text" id="recovery-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                <button id="recovery-fetch-btn" class="launch-pin-submit" onclick="fetchRecoveryQuestion()">Continue</button>
+                <div id="recovery-answer-section" style="display: none;">
+                    <p id="recovery-question-text" class="launch-pin-subtitle" style="margin-top: 12px; font-weight: 600;"></p>
+                    <input type="text" id="recovery-answer" class="launch-pin-input" placeholder="Your answer" autocomplete="off" maxlength="120" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="recovery-new-password" class="launch-pin-input" placeholder="New password (min 6)" autocomplete="new-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
+                    <button class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
+                </div>
+                <p id="recovery-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showLoginEntry()">← Back to sign in</button>
+            </div>
         </div>
     </div>
 
@@ -6038,6 +6058,26 @@
                                     <input type="password" id="security-login-password" placeholder="Set admin login password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
                                     <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
                                     <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="security-recovery-question">Password recovery question:</label>
+                                    <div class="setting-help-text" style="margin-bottom: 8px;">
+                                        Lets you reset a forgotten login password by answering this. Recommended if you enable login. (You can set one per profile in <strong>Manage Profiles</strong> too.)
+                                    </div>
+                                    <select id="security-recovery-question" class="form-select" onchange="handleRecoveryQuestionChange()" style="margin-bottom: 6px;">
+                                        <option value="">— Select a question —</option>
+                                        <option>What was the name of your first pet?</option>
+                                        <option>What city were you born in?</option>
+                                        <option>What was your first concert?</option>
+                                        <option>What is your all-time favorite album?</option>
+                                        <option>What was the make of your first car?</option>
+                                        <option value="__custom__">Custom question…</option>
+                                    </select>
+                                    <input type="text" id="security-recovery-custom" placeholder="Type your own question" maxlength="120" style="display:none; margin-bottom: 6px;">
+                                    <input type="text" id="security-recovery-answer" placeholder="Your answer" maxlength="120" autocomplete="off" style="margin-bottom: 6px;">
+                                    <button class="auth-button" onclick="saveRecoveryQuestion()">Save Recovery Question</button>
+                                    <p id="security-recovery-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
                                 </div>
 
                                 <div class="form-group">
