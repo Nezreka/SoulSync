@@ -83,15 +83,17 @@ def _normalize_for_finding(text: str) -> str:
 
 
 def _extract_basename(api_filename: str) -> str:
-    """Cross-platform rightmost-separator split, with YouTube /
-    Tidal ``id||title`` encoded filenames pre-normalised — the id
-    half is stripped so the title becomes the basename. Mirrors
-    the strip-then-split order ``web_server`` used."""
+    """Cross-platform rightmost-separator split for a real remote PATH.
+
+    A YouTube/Tidal/Qobuz ``id||title`` encoded filename is handled by
+    returning the title VERBATIM: the title is not a filesystem path, so a '/'
+    in it (e.g. the Sawano track ``YouSeeBIGGIRL/T:T``) is part of the name and
+    must NOT be split on (issue #835)."""
     if not api_filename:
         return ""
     if '||' in api_filename:
         _id, title = api_filename.split('||', 1)
-        api_filename = title
+        return title
     last_slash = max(api_filename.rfind('/'), api_filename.rfind('\\'))
     return api_filename[last_slash + 1:] if last_slash != -1 else api_filename
 
@@ -236,14 +238,23 @@ def find_completed_audio_file(
     ``None`` when the file isn't found anywhere — callers should
     treat that as "not yet" (still mid-write) or "lost".
     """
-    # YouTube / Tidal encoded filenames carry the id ahead of ``||``.
-    # Strip it up front so basename + dir-component extraction both
-    # operate on the title half.
+    # YouTube / Tidal / Qobuz encoded filenames carry the id ahead of ``||``.
+    # The title half is NOT a filesystem path: a '/' in it (e.g. the Sawano
+    # track ``YouSeeBIGGIRL/T:T``) is part of the title, so it must NOT be
+    # basename-split or read as a remote directory component — doing so
+    # truncated the search target to ``T:T`` and the real file was never found,
+    # quarantining valid downloads (issue #835). Real remote paths (Soulseek)
+    # still get basename + dir-component extraction.
+    encoded_title = None
     if api_filename and '||' in api_filename:
-        _id, api_filename = api_filename.split('||', 1)
-    target_basename = _extract_basename(api_filename)
+        _id, encoded_title = api_filename.split('||', 1)
+    if encoded_title is not None:
+        target_basename = encoded_title
+        api_dirs = []
+    else:
+        target_basename = _extract_basename(api_filename)
+        api_dirs = _api_dir_parts(api_filename)
     normalized_target = _normalize_for_finding(target_basename)
-    api_dirs = _api_dir_parts(api_filename)
 
     best_dl_path, dl_sim = _search_in_directory(
         download_dir, 'downloads', target_basename, normalized_target, api_dirs,

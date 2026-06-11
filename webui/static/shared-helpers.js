@@ -42,6 +42,11 @@ const SOURCE_LABELS = {
         logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
         tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify',
     },
+    spotify_free: {
+        text: 'Spotify (no auth)', icon: '🎵',
+        logo: 'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
+        tabClass: 'enh-tab-spotify', badgeClass: 'enh-badge-spotify',
+    },
     itunes: {
         text: 'Apple Music', icon: '🍎',
         logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
@@ -3633,6 +3638,7 @@ function getMetadataSourceLabel(source) {
     if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
     if (source === 'musicbrainz') return 'MusicBrainz';
+    if (source === 'spotify_free') return 'Spotify (no auth)';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
 }
@@ -3641,9 +3647,12 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
     const source = metadataStatus?.source;
     const sourceLabel = getMetadataSourceLabel(source);
     const connected = metadataStatus?.connected === true;
-    const sessionActive = spotifyStatus?.authenticated === true || (source === 'spotify' && connected);
-    const rateLimited = !!(source === 'spotify' && spotifyStatus?.rate_limited && spotifyStatus?.rate_limit);
-    const cooldown = !!(source === 'spotify' && spotifyStatus?.post_ban_cooldown > 0);
+    // 'spotify_free' (the no-auth composite) is part of the Spotify family for
+    // session/rate-limit/cooldown display.
+    const spotifyFamily = (source === 'spotify' || source === 'spotify_free');
+    const sessionActive = spotifyStatus?.authenticated === true || (spotifyFamily && connected);
+    const rateLimited = !!(spotifyFamily && spotifyStatus?.rate_limited && spotifyStatus?.rate_limit);
+    const cooldown = !!(spotifyFamily && spotifyStatus?.post_ban_cooldown > 0);
 
     if (rateLimited) {
         const remaining = spotifyStatus.rate_limit?.remaining_seconds || 0;
@@ -3670,7 +3679,7 @@ function getMetadataSourcePresentation(metadataStatus, spotifyStatus) {
     if (source) {
         return {
             statusClass: connected ? 'connected' : 'disconnected',
-            statusText: connected ? (source === 'spotify' ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
+            statusText: connected ? (spotifyFamily ? `Connected (${metadataStatus?.response_time}ms)` : sourceLabel) : 'Disconnected',
             dotClass: connected ? 'connected' : 'disconnected',
             dotTitle: connected ? sourceLabel : 'Disconnected',
             sessionActive

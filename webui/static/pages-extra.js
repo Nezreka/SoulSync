@@ -1680,6 +1680,10 @@ async function serverSearchReplace(trackIndex, mode) {
     const searchQuery = src.name ? src.name.trim() : (svr.title || '').trim();
     const contextArtist = src.artist || svr.artist || '';
     const contextName = src.name || svr.title || '';
+    // Pass the source artist as a relevance hint so an exact title+artist match
+    // ranks to the top of the library search instead of being buried under
+    // same-title tracks by other artists (#: "bad guy" by Billie Eilish).
+    _serverEditorState.searchArtist = contextArtist;
 
     const existing = document.getElementById('server-search-overlay');
     if (existing) existing.remove();
@@ -1756,7 +1760,9 @@ async function _serverSearchExecute() {
     if (resultsHeader) resultsHeader.textContent = '';
 
     try {
-        const response = await fetch(`/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=20`);
+        const artistHint = (_serverEditorState && _serverEditorState.searchArtist) || '';
+        const response = await fetch(`/api/library/search-tracks?q=${encodeURIComponent(query)}&limit=20`
+            + (artistHint ? `&artist=${encodeURIComponent(artistHint)}` : ''));
         const data = await response.json();
 
         if (!data.success || !data.tracks || data.tracks.length === 0) {

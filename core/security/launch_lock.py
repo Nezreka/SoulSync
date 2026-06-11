@@ -30,6 +30,9 @@ from __future__ import annotations
 _ALLOWED_GET = frozenset({
     '/api/profiles',          # profile picker list (multi-profile launch)
     '/api/profiles/current',  # how the frontend detects the lock state
+    '/api/setup/status',      # #842: first-run check runs before the PIN screen;
+                              # blocking it made the frontend think setup wasn't
+                              # done and re-launch the wizard on every visit.
 })
 
 # POST endpoints that drive selection + unlock. Selecting a profile only sets

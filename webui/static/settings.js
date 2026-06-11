@@ -699,6 +699,21 @@ function buildHybridSourceList() {
             </label>
         `;
 
+        // Real drag-to-reorder (the help text promised it; previously only the
+        // arrow buttons worked — item.draggable was set with no handlers).
+        item.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', srcId);
+            item.classList.add('dragging');
+        });
+        item.addEventListener('dragend', () => item.classList.remove('dragging'));
+        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        item.addEventListener('drop', (e) => {
+            e.preventDefault();
+            const draggedId = e.dataTransfer.getData('text/plain');
+            if (draggedId && draggedId !== srcId) _reorderHybridSource(draggedId, srcId);
+        });
+
         container.appendChild(item);
     });
 
@@ -717,6 +732,22 @@ function moveHybridSource(srcId, direction) {
     [_hybridVisualOrder[idx], _hybridVisualOrder[newIdx]] = [_hybridVisualOrder[newIdx], _hybridVisualOrder[idx]];
 
     // Rebuild enabled order from visual order
+    _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+    debouncedAutoSaveSettings();
+}
+
+function _reorderHybridSource(draggedId, targetId) {
+    // Move draggedId to just before targetId in the visual order, then rebuild
+    // the enabled subset + persist — same model moveHybridSource uses.
+    if (!_hybridVisualOrder) return;
+    const from = _hybridVisualOrder.indexOf(draggedId);
+    if (from < 0) return;
+    _hybridVisualOrder.splice(from, 1);
+    const to = _hybridVisualOrder.indexOf(targetId);
+    if (to < 0) { _hybridVisualOrder.splice(from, 0, draggedId); return; }  // target gone — undo
+    _hybridVisualOrder.splice(to, 0, draggedId);
     _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
     buildHybridSourceList();
     updateDownloadSourceUI();
@@ -1367,6 +1398,14 @@ async function loadSettingsData() {
             const corsField = document.getElementById('security-cors-origins');
             if (corsField) corsField.value = corsOrigins;
 
+            // Reverse-proxy mode + auth-proxy header (default off / empty).
+            const trustProxy = document.getElementById('security-trust-proxy');
+            if (trustProxy) trustProxy.checked = settings.security?.trust_reverse_proxy || false;
+            const authHeader = document.getElementById('security-auth-proxy-header');
+            if (authHeader) authHeader.value = settings.security?.auth_proxy_header || '';
+            const reqLogin = document.getElementById('security-require-login');
+            if (reqLogin) reqLogin.checked = settings.security?.require_login || false;
+
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
             const profilesData = await profilesRes.json();
@@ -1382,6 +1421,12 @@ async function loadSettingsData() {
                 document.getElementById('security-require-pin').checked = false;
                 document.getElementById('security-require-pin').disabled = true;
             }
+
+            // Login: the "Require login" toggle is gated on an admin password —
+            // visually locked until Step 1 is done (anti-lockout, made obvious).
+            updateRequireLoginGate(adminProfile?.has_password || false);
+            // Show already-saved password/recovery state (vs looking unset).
+            applyLoginSavedState(adminProfile);
         } catch (error) {
             console.error('Error loading security settings:', error);
         }
@@ -3115,6 +3160,9 @@ async function saveSettings(quiet = false) {
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
             cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
+            trust_reverse_proxy: document.getElementById('security-trust-proxy')?.checked || false,
+            auth_proxy_header: document.getElementById('security-auth-proxy-header')?.value?.trim() || '',
+            require_login: document.getElementById('security-require-login')?.checked || false,
         }
     };
 
@@ -3404,6 +3452,9 @@ async function revokeApiKey(keyId, label) {
 
 // Dashboard-specific test functions that create activity items
 async function testDashboardConnection(service) {
+    // 'spotify_free' is a display-only label for the no-auth composite; the real
+    // service to test is 'spotify'.
+    if (service === 'spotify_free') service = 'spotify';
     try {
         showLoadingOverlay(`Testing ${service} service...`);
 

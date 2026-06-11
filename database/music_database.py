@@ -460,7 +460,10 @@ class MusicDatabase:
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
+            self._add_profile_password_support(cursor)
+            self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
+            self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
 
@@ -3853,6 +3856,228 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error in per-profile service credentials migration: {e}")
 
+    def _add_service_credential_sets(self, cursor):
+        """Named, switchable credential sets per auth service + each profile's
+        selection of which set is active (Phase 0 foundation).
+
+        Additive only — two new tables, no change to existing tables/columns.
+        Dormant until the resolver + UI are wired in a later phase, so this
+        migration changes no runtime behaviour for existing installs.
+        """
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'service_credentials_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+
+            logger.info("Applying service-credential-sets migration...")
+
+            # Admin-created named credential sets. `payload` is a Fernet-encrypted
+            # JSON blob (same key as per-profile tokens), so secrets stay encrypted
+            # at rest. UNIQUE(service, label) keeps pill names distinct per service.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS service_credentials (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service TEXT NOT NULL,
+                    label TEXT NOT NULL,
+                    payload TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(service, label)
+                )
+            """)
+
+            # Per-profile selection of which credential set is active for a
+            # service. A missing row (or NULL credential_id) means "fall back to
+            # the global/admin default" — so a profile never breaks if its
+            # chosen set is later removed.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS profile_service_credentials (
+                    profile_id INTEGER NOT NULL,
+                    service TEXT NOT NULL,
+                    credential_id INTEGER,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (profile_id, service)
+                )
+            """)
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_service_credentials_service "
+                "ON service_credentials (service)"
+            )
+
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('service_credentials_v1', '1')"
+            )
+            logger.info("Service-credential-sets migration completed")
+        except Exception as e:
+            logger.error(f"Error in service-credential-sets migration: {e}")
+
+    # ── Service credential sets (named, switchable per profile) ──────────────
+
+    def create_service_credential(self, service: str, label: str, payload: dict):
+        """Create a named credential set for a service. Returns the new id, or
+        None on failure / duplicate (service, label). Payload is encrypted."""
+        try:
+            from config.settings import config_manager
+            enc = config_manager._encrypt_value(payload) if payload else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO service_credentials (service, label, payload) VALUES (?, ?, ?)",
+                    (service, label, enc),
+                )
+                conn.commit()
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            logger.warning(f"Service credential '{label}' already exists for {service}")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating service credential ({service}/{label}): {e}")
+            return None
+
+    def update_service_credential(self, credential_id: int, label: str = None,
+                                  payload: dict = None) -> bool:
+        """Update a credential set's label and/or payload. Only provided fields
+        change. Returns True if a row was updated."""
+        try:
+            from config.settings import config_manager
+            sets, params = [], []
+            if label is not None:
+                sets.append("label = ?")
+                params.append(label)
+            if payload is not None:
+                sets.append("payload = ?")
+                params.append(config_manager._encrypt_value(payload) if payload else None)
+            if not sets:
+                return False
+            sets.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(credential_id)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    f"UPDATE service_credentials SET {', '.join(sets)} WHERE id = ?", params
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.IntegrityError:
+            logger.warning(f"Rename of credential {credential_id} collides with an existing label")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating service credential {credential_id}: {e}")
+            return False
+
+    def delete_service_credential(self, credential_id: int) -> bool:
+        """Delete a credential set and clear any profile selections that point
+        at it (so those profiles fall back to the global default). Returns True
+        if the set existed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE profile_service_credentials SET credential_id = NULL, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE credential_id = ?",
+                    (credential_id,),
+                )
+                cursor.execute("DELETE FROM service_credentials WHERE id = ?", (credential_id,))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting service credential {credential_id}: {e}")
+            return False
+
+    def list_service_credentials(self, service: str = None):
+        """List credential sets (metadata only — never the payload). Optionally
+        filtered to one service. Returns dicts: id, service, label, timestamps."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                if service:
+                    cursor.execute(
+                        "SELECT id, service, label, created_at, updated_at FROM service_credentials "
+                        "WHERE service = ? ORDER BY label COLLATE NOCASE",
+                        (service,),
+                    )
+                else:
+                    cursor.execute(
+                        "SELECT id, service, label, created_at, updated_at FROM service_credentials "
+                        "ORDER BY service, label COLLATE NOCASE"
+                    )
+                return [
+                    {'id': r[0], 'service': r[1], 'label': r[2],
+                     'created_at': r[3], 'updated_at': r[4]}
+                    for r in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"Error listing service credentials: {e}")
+            return []
+
+    def get_service_credential(self, credential_id: int):
+        """Get a credential set WITH its decrypted payload, or None. For the
+        resolver / client wiring — not for shipping to the browser."""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, service, label, payload FROM service_credentials WHERE id = ?",
+                    (credential_id,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                payload = config_manager._decrypt_value(row[3]) if row[3] else {}
+                return {'id': row[0], 'service': row[1], 'label': row[2],
+                        'payload': payload if isinstance(payload, dict) else {}}
+        except Exception as e:
+            logger.error(f"Error reading service credential {credential_id}: {e}")
+            return None
+
+    def set_profile_service_credential(self, profile_id: int, service: str,
+                                       credential_id) -> bool:
+        """Select which credential set is active for a profile + service.
+        Pass credential_id=None to clear (fall back to global). Upsert."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO profile_service_credentials (profile_id, service, credential_id) "
+                    "VALUES (?, ?, ?) "
+                    "ON CONFLICT(profile_id, service) DO UPDATE SET "
+                    "credential_id = excluded.credential_id, updated_at = CURRENT_TIMESTAMP",
+                    (profile_id, service, credential_id),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error setting profile {profile_id} {service} credential: {e}")
+            return False
+
+    def get_profile_service_credential_id(self, profile_id: int, service: str):
+        """Return the credential_id a profile selected for a service, or None."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT credential_id FROM profile_service_credentials "
+                    "WHERE profile_id = ? AND service = ?",
+                    (profile_id, service),
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            logger.error(f"Error reading profile {profile_id} {service} selection: {e}")
+            return None
+
+    def resolve_profile_service_credential(self, profile_id: int, service: str):
+        """Resolve a profile's ACTIVE credential payload for a service: the
+        decrypted payload of its selected set, or None when it hasn't selected
+        one (or the set was deleted) — caller then uses the global/admin default.
+        Stale-safe: a dangling selection resolves to None, not an error."""
+        cred_id = self.get_profile_service_credential_id(profile_id, service)
+        if not cred_id:
+            return None
+        cred = self.get_service_credential(cred_id)
+        return cred['payload'] if cred else None
+
     def _add_soul_id_columns(self, cursor):
         """Add soul_id columns to artists, albums, and tracks tables."""
         try:
@@ -4524,6 +4749,48 @@ class MusicDatabase:
             logger.error(f"Error setting Spotify tokens for profile {profile_id}: {e}")
             return False
 
+    def set_profile_tidal_tokens(self, profile_id: int, access_token: str, refresh_token: str) -> bool:
+        """Save Tidal OAuth tokens for a profile (encrypted). Used by the
+        per-profile Tidal client's token refresh — keeps a profile's refresh from
+        ever touching the global tidal_tokens slot."""
+        try:
+            from config.settings import config_manager
+            enc_access = config_manager._encrypt_value(access_token) if access_token else None
+            enc_refresh = config_manager._encrypt_value(refresh_token) if refresh_token else None
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE profiles
+                    SET tidal_access_token = ?, tidal_refresh_token = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (enc_access, enc_refresh, profile_id))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error setting Tidal tokens for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_tidal(self, profile_id: int) -> Dict[str, Any]:
+        """Get decrypted Tidal tokens for a profile ({} if none)."""
+        try:
+            from config.settings import config_manager
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT tidal_access_token, tidal_refresh_token FROM profiles WHERE id = ?",
+                    (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row[0]:
+                    return {}
+                return {
+                    'access_token': config_manager._decrypt_value(row[0]) if row[0] else '',
+                    'refresh_token': config_manager._decrypt_value(row[1]) if row[1] else '',
+                }
+        except Exception as e:
+            logger.error(f"Error getting Tidal tokens for profile {profile_id}: {e}")
+            return {}
+
     def set_profile_server_library(self, profile_id: int, server_type: str,
                                     library_id: str = None, user_id: str = None) -> bool:
         """Save media server library/user selection for a profile."""
@@ -4979,6 +5246,9 @@ class MusicDatabase:
                         'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
                         'is_admin': bool(row['is_admin']),
                         'has_pin': row['pin_hash'] is not None,
+                        'has_password': row['password_hash'] is not None if 'password_hash' in columns else False,
+                        'has_recovery': row['recovery_answer_hash'] is not None if 'recovery_answer_hash' in columns else False,
+                        'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
@@ -5009,6 +5279,9 @@ class MusicDatabase:
                         'avatar_url': row['avatar_url'] if 'avatar_url' in columns else None,
                         'is_admin': bool(row['is_admin']),
                         'has_pin': row['pin_hash'] is not None,
+                        'has_password': row['password_hash'] is not None if 'password_hash' in columns else False,
+                        'has_recovery': row['recovery_answer_hash'] is not None if 'recovery_answer_hash' in columns else False,
+                        'recovery_question': row['recovery_question'] if 'recovery_question' in columns else None,
                         'home_page': row['home_page'] if 'home_page' in columns else None,
                         'allowed_pages': json.loads(ap_raw) if ap_raw else None,
                         'can_download': bool(row['can_download']) if 'can_download' in columns else True,
@@ -5109,6 +5382,172 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error verifying PIN for profile {profile_id}: {e}")
             return False
+
+    # ── Per-profile LOGIN password (opt-in username/password mode) ────────────
+    # Separate from the quick-switch PIN on purpose: the PIN is a low-stakes
+    # convenience on a trusted LAN; the password authenticates an account for
+    # public exposure. Conflating them would make logins as weak as a 4-digit PIN.
+
+    def set_profile_password(self, profile_id: int, password: str) -> bool:
+        """Set (or clear, when password is falsy) a profile's login password."""
+        try:
+            from werkzeug.security import generate_password_hash
+            pwd_hash = generate_password_hash(password, method='pbkdf2:sha256') if password else None
+            with self._get_connection() as conn:
+                conn.execute("UPDATE profiles SET password_hash = ? WHERE id = ?", (pwd_hash, profile_id))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting password for profile {profile_id}: {e}")
+            return False
+
+    def verify_profile_password(self, profile_id: int, password: str) -> bool:
+        """Verify a profile's login password. Unlike the PIN, a profile with NO
+        password set is NOT loginable (returns False) — you can't authenticate to
+        an account that has no credential."""
+        try:
+            from werkzeug.security import check_password_hash
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT password_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row['password_hash']:
+                    return False  # no password set → cannot log in
+                return check_password_hash(row['password_hash'], password)
+        except Exception as e:
+            logger.error(f"Error verifying password for profile {profile_id}: {e}")
+            return False
+
+    def profile_has_password(self, profile_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT password_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return bool(row and row['password_hash'])
+        except Exception as e:
+            logger.error(f"Error checking password for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Look up a profile by name (the login username), case-insensitive."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, name, is_admin FROM profiles WHERE LOWER(name) = LOWER(?)",
+                    (name or '',))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin'])}
+        except Exception as e:
+            logger.error(f"Error looking up profile by name '{name}': {e}")
+            return None
+
+    def _add_profile_password_support(self, cursor):
+        """Add a per-profile login password column (separate from pin_hash)."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_password_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            logger.info("Applying per-profile login-password migration...")
+            try:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN password_hash TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_password_v1', '1')")
+            logger.info("Per-profile login-password migration completed")
+        except Exception as e:
+            logger.error(f"Error in login-password migration: {e}")
+
+    # ── Login-password recovery (security question + answer) ──────────────────
+
+    @staticmethod
+    def _normalize_recovery_answer(answer: str) -> str:
+        """Forgiving match: trim + lowercase + collapse internal whitespace."""
+        return ' '.join((answer or '').strip().lower().split())
+
+    def set_profile_recovery(self, profile_id: int, question: str, answer: str) -> bool:
+        """Set (or clear, when either is empty) a profile's recovery Q + answer."""
+        try:
+            from werkzeug.security import generate_password_hash
+            q = (question or '').strip()
+            norm = self._normalize_recovery_answer(answer)
+            if not q or not norm:
+                question_val, answer_hash = None, None  # clear
+            else:
+                question_val = q
+                answer_hash = generate_password_hash(norm, method='pbkdf2:sha256')
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE profiles SET recovery_question = ?, recovery_answer_hash = ? WHERE id = ?",
+                    (question_val, answer_hash, profile_id))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting recovery for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_recovery_question(self, profile_id: int) -> Optional[str]:
+        """The recovery question text, or None if none set."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_question FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return row['recovery_question'] if row and row['recovery_question'] else None
+        except Exception as e:
+            logger.error(f"Error reading recovery question for profile {profile_id}: {e}")
+            return None
+
+    def verify_profile_recovery_answer(self, profile_id: int, answer: str) -> bool:
+        """Verify the recovery answer. No recovery set → never verifies."""
+        try:
+            from werkzeug.security import check_password_hash
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_answer_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row['recovery_answer_hash']:
+                    return False
+                return check_password_hash(row['recovery_answer_hash'], self._normalize_recovery_answer(answer))
+        except Exception as e:
+            logger.error(f"Error verifying recovery answer for profile {profile_id}: {e}")
+            return False
+
+    def profile_has_recovery(self, profile_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_answer_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return bool(row and row['recovery_answer_hash'])
+        except Exception as e:
+            logger.error(f"Error checking recovery for profile {profile_id}: {e}")
+            return False
+
+    def _add_profile_recovery_support(self, cursor):
+        """Add recovery question + answer-hash columns (login-password recovery)."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_recovery_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            logger.info("Applying per-profile recovery-question migration...")
+            for col_sql in (
+                "ALTER TABLE profiles ADD COLUMN recovery_question TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN recovery_answer_hash TEXT DEFAULT NULL",
+            ):
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_recovery_v1', '1')")
+            logger.info("Per-profile recovery-question migration completed")
+        except Exception as e:
+            logger.error(f"Error in recovery-question migration: {e}")
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
@@ -6366,17 +6805,22 @@ class MusicDatabase:
             logger.error(f"Error searching artists with query '{query}': {e}")
             return []
     
-    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None) -> List[DatabaseTrack]:
-        """Search tracks by title and/or artist name with Unicode-aware fuzzy matching"""
+    def search_tracks(self, title: str = "", artist: str = "", limit: int = 50, server_source: str = None,
+                       rank_artist: str = None) -> List[DatabaseTrack]:
+        """Search tracks by title and/or artist name with Unicode-aware fuzzy matching.
+
+        ``rank_artist`` is a relevance-only hint (never filters): when given, rows
+        by that artist rank to the top so an exact title+artist match wins over
+        same-title tracks by other artists."""
         try:
             if not title and not artist:
                 return []
-            
+
             conn = self._get_connection()
             cursor = conn.cursor()
-            
+
             # STRATEGY 1: Try basic SQL LIKE search first (fastest)
-            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source)
+            basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
             
             if basic_results:
                 logger.debug(f"Basic search found {len(basic_results)} results")
@@ -6416,14 +6860,18 @@ class MusicDatabase:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
     
-    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None) -> List[DatabaseTrack]:
+    def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None,
+                             rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
-        rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
+        rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source, rank_artist)
         return self._rows_to_tracks(rows)
 
     def _search_tracks_basic_rows(self, cursor, title: str, artist: str, limit: int,
-                                  server_source: Optional[str] = None):
-        """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers)."""
+                                  server_source: Optional[str] = None, rank_artist: Optional[str] = None):
+        """Basic SQL LIKE search returning raw rows (shared by DatabaseTrack and dict-returning callers).
+
+        ``rank_artist`` is a relevance-only hint (does NOT filter): when given,
+        rows by that artist sort to the top so an exact title+artist match wins."""
         where_conditions = []
         params = []
 
@@ -6446,6 +6894,33 @@ class MusicDatabase:
             return []
 
         where_clause = " AND ".join(where_conditions)
+
+        # Relevance ordering. The old `ORDER BY tracks.title` was case-SENSITIVE
+        # (SQLite BINARY collation sorts 'B' before 'b'), so a lowercase exact
+        # title like Billie Eilish's "bad guy" sorted BELOW every capitalised
+        # "Bad Guy" and got cut off by LIMIT. Now: exact title match first, then
+        # prefix, then — when an artist is given — exact/contains artist match,
+        # finally case-insensitive alphabetical. unidecode_lower folds case +
+        # accents, matching the WHERE clause.
+        order_parts, order_params = [], []
+        if title:
+            norm_title = self._normalize_for_comparison(title)
+            order_parts.append(
+                "CASE WHEN unidecode_lower(tracks.title) = ? THEN 0 "
+                "WHEN unidecode_lower(tracks.title) LIKE ? THEN 1 ELSE 2 END")
+            order_params.extend([norm_title, f"{norm_title}%"])
+        _rank_artist = artist or rank_artist
+        if _rank_artist:
+            norm_artist = self._normalize_for_comparison(_rank_artist)
+            order_parts.append(
+                "CASE WHEN unidecode_lower(artists.name) = ? THEN 0 "
+                "WHEN unidecode_lower(artists.name) LIKE ? THEN 1 ELSE 2 END")
+            order_params.extend([norm_artist, f"%{norm_artist}%"])
+        order_parts.append("unidecode_lower(tracks.title)")
+        order_parts.append("unidecode_lower(artists.name)")
+        order_by = ", ".join(order_parts)
+
+        params.extend(order_params)
         params.append(limit)
 
         cursor.execute(f"""
@@ -6454,7 +6929,7 @@ class MusicDatabase:
             JOIN artists ON tracks.artist_id = artists.id
             JOIN albums ON tracks.album_id = albums.id
             WHERE {where_clause}
-            ORDER BY tracks.title, artists.name
+            ORDER BY {order_by}
             LIMIT ?
         """, params)
 
