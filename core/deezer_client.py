@@ -896,12 +896,19 @@ class DeezerClient:
         requested_types = [t.strip() for t in album_type.split(',')]
         offset = 0
         page_size = 100  # Deezer API max per request
+        complete = True  # cleared if pagination breaks on a transient/malformed error
 
         while offset < limit:
             fetch_limit = min(page_size, limit - offset)
             data = self._api_get(f'artist/{artist_id}/albums', {'limit': fetch_limit, 'index': offset})
-            if not data or 'data' not in data or len(data['data']) == 0:
+            if not data or 'data' not in data:
+                # Malformed/transient response mid-pagination — what we have is a
+                # PARTIAL discography. Don't cache it as the full list (mirrors the
+                # Spotify truncated-fetch guard). #853 follow-up.
+                complete = False
                 break
+            if len(data['data']) == 0:
+                break  # No more albums — a clean end of pagination.
 
             for album_data in data['data']:
                 all_raw.append(album_data)
@@ -931,7 +938,11 @@ class DeezerClient:
                 entries.append((str(ad['id']), ad))
         if entries:
             cache.store_entities_bulk('deezer', 'album', entries, skip_if_exists=True)
-        store_artist_album_items(cache, 'deezer', artist_id, all_raw, album_type=album_type, limit=limit)
+        # Only cache the artist→album-LIST when pagination finished cleanly; a
+        # partial list would otherwise serve an incomplete discography until TTL.
+        # (Individual album entities above are complete, so they cache regardless.)
+        if complete:
+            store_artist_album_items(cache, 'deezer', artist_id, all_raw, album_type=album_type, limit=limit)
 
         logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
         return albums[:limit]
