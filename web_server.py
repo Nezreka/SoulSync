@@ -12271,6 +12271,11 @@ def sync_artist_library(artist_id):
         new_albums = 0
         new_tracks = 0
         name_updated = False
+        # Single-artist deep scan: collect the server track IDs we see during the
+        # pull. Stale removal (Phase 2) is a server-diff against this set — the SAME
+        # mechanism the whole-library deep scan uses, just scoped to one artist.
+        seen_track_ids = set()
+        pull_succeeded = False
 
         if server_source:
             media_client = None
@@ -12325,68 +12330,73 @@ def sync_artist_library(artist_id):
                             artist_name = new_name
                             name_updated = True
 
-                        # Process artist content (deep scan mode — skip existing, preserve enrichment)
+                        # Process artist content (deep scan mode — skip existing,
+                        # preserve enrichment) and collect the server's track IDs
+                        # for this artist into seen_track_ids.
                         success, details, new_albums, new_tracks = worker._process_artist_with_content(
-                            server_artist, skip_existing_tracks=True
+                            server_artist, skip_existing_tracks=True, seen_track_ids=seen_track_ids
                         )
+                        # Only a successful pull gives a trustworthy 'seen' set; a
+                        # failure/partial would make every track look stale.
+                        pull_succeeded = bool(success)
                         logger.info(f"[Artist Sync] Server pull for {artist_name}: {details}")
 
                 except Exception as e:
                     logger.error(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
 
-        # ── Phase 2: Remove stale entries (files no longer on disk) ──
+        # ── Phase 2: Remove stale entries (tracks the server no longer has) ──
+        # Server-diff, exactly like the whole-library deep scan: stale = this
+        # artist's DB tracks that were NOT seen on the server during the pull.
         stale_removed = 0
         empty_albums_removed = 0
         removal_skipped = False
 
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, file_path FROM tracks WHERE artist_id = ?", (db_artist_id,))
-            tracks = cursor.fetchall()
-
-            stale_ids = []
-            for track in tracks:
-                fp = track['file_path']
-                if not fp:
-                    stale_ids.append(track['id'])
-                    continue
-                resolved = _resolve_library_file_path(fp)
-                if not resolved or not os.path.exists(resolved):
-                    stale_ids.append(track['id'])
-
-            # Storage-unreachable guard (#828 pattern): if an implausibly large
-            # fraction of this artist's tracks look missing, the disk/mount is
-            # almost certainly down — don't wipe the artist over a flaky mount.
-            from core.library.stale_guard import is_implausible_stale_removal
-            if is_implausible_stale_removal(len(stale_ids), len(tracks)):
-                removal_skipped = True
-                logger.warning(
-                    f"[Artist Sync] {artist_name}: {len(stale_ids)}/{len(tracks)} tracks look "
-                    f"missing — skipping stale removal (storage likely unreachable)"
+        if not pull_succeeded:
+            # No trustworthy server view (no server configured, unreachable, or the
+            # pull failed) — without it we can't tell stale from "server was down",
+            # so we remove nothing rather than risk wiping the artist.
+            removal_skipped = True
+            logger.info(f"[Artist Sync] {artist_name}: server pull unavailable — skipping stale removal")
+        else:
+            with database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM tracks WHERE artist_id = ? AND server_source = ?",
+                    (db_artist_id, server_source),
                 )
-            elif stale_ids:
-                placeholders = ','.join('?' for _ in stale_ids)
-                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_ids)
-                stale_removed = len(stale_ids)
+                artist_track_ids = {row['id'] for row in cursor.fetchall()}
+                stale = artist_track_ids - seen_track_ids
 
-            # Only prune empty albums when we actually removed tracks — never on the
-            # skipped path, where "empty" would be a false reading of a down mount.
-            # ``album_id IS NOT NULL`` avoids the NOT IN-with-NULL gotcha that would
-            # otherwise no-op this cleanup whenever a track has a null album_id.
+                # Same safety net as deep scan (#828): if an implausibly large share
+                # of the artist's tracks went unseen, treat it as a flaky server
+                # response and skip rather than mass-delete.
+                from core.library.stale_guard import is_implausible_stale_removal
+                if is_implausible_stale_removal(len(stale), len(artist_track_ids)):
+                    removal_skipped = True
+                    logger.warning(
+                        f"[Artist Sync] {artist_name}: {len(stale)}/{len(artist_track_ids)} tracks "
+                        f"unseen on server — skipping stale removal (likely a flaky response)"
+                    )
+                elif stale:
+                    stale_removed = database.delete_stale_tracks(stale, server_source)
+
             if not removal_skipped:
-                cursor.execute("""
-                    DELETE FROM albums WHERE artist_id = ?
-                    AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
-                """, (db_artist_id,))
-                empty_albums_removed = cursor.rowcount
-
-            cursor.execute("""
-                UPDATE albums SET track_count = (
-                    SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
-                ) WHERE artist_id = ?
-            """, (db_artist_id,))
-
-            conn.commit()
+                with database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # Prune albums left with no tracks. ``album_id IS NOT NULL``
+                    # avoids the NOT IN-with-NULL gotcha that would otherwise no-op
+                    # this whenever a track has a null album_id.
+                    cursor.execute("""
+                        DELETE FROM albums WHERE artist_id = ?
+                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                    """, (db_artist_id,))
+                    empty_albums_removed = cursor.rowcount
+                    cursor.execute("""
+                        UPDATE albums SET track_count = (
+                            SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
+                        ) WHERE artist_id = ?
+                    """, (db_artist_id,))
+                    conn.commit()
 
         logger.warning(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
               f"-{stale_removed} stale, -{empty_albums_removed} empty albums"
