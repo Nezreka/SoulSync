@@ -346,3 +346,68 @@ def test_tidal_source_adapter_resolves_per_profile():
     from core.playlists.sources.tidal import TidalPlaylistSource
     src = TidalPlaylistSource(web_server.get_tidal_client_for_profile)
     assert src._client() is web_server.tidal_client   # admin -> global, unchanged
+
+
+def test_real_app_not_in_reverse_proxy_mode_by_default():
+    # Direct/LAN installs (no security.trust_reverse_proxy set) must not get
+    # ProxyFix or a forced-Secure cookie — proves zero impact for normal users.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    assert not isinstance(web_server.app.wsgi_app, ProxyFix)
+    assert web_server.app.config.get('SESSION_COOKIE_SECURE') in (None, False)
+    assert web_server.app.config.get('SESSION_COOKIE_SAMESITE') is None
+
+
+def test_verify_launch_pin_rate_limited_after_flood(client):
+    # A flood of WRONG PINs from one IP gets 429; cleaned up so neither the lock
+    # nor the temp PIN leaks to other tests (the limiter is a process singleton).
+    from werkzeug.security import generate_password_hash
+    db = web_server.get_database()
+    with db._get_connection() as conn:   # admin needs a PIN so wrong ones actually fail
+        conn.execute("UPDATE profiles SET pin_hash = ? WHERE id = 1",
+                     (generate_password_hash('1234', method='pbkdf2:sha256'),))
+        conn.commit()
+    web_server._launch_pin_limiter.record_success('127.0.0.1')  # clean slate
+    try:
+        for _ in range(10):
+            assert client.post('/api/profiles/verify-launch-pin',
+                               json={'pin': 'definitely-wrong'}).status_code == 401
+        r = client.post('/api/profiles/verify-launch-pin', json={'pin': 'definitely-wrong'})
+        assert r.status_code == 429
+        assert 'Retry-After' in r.headers
+    finally:
+        web_server._launch_pin_limiter.record_success('127.0.0.1')
+        with db._get_connection() as conn:
+            conn.execute("UPDATE profiles SET pin_hash = NULL WHERE id = 1")
+            conn.commit()
+
+
+def test_auth_proxy_header_satisfies_launch_lock(client, monkeypatch):
+    # Lock on + Remote-User trusted → a request with the header passes the gate.
+    real_get = web_server.config_manager.get
+    def fake_get(key, default=None):
+        if key == 'security.require_pin_on_launch':
+            return True
+        if key == 'security.auth_proxy_header':
+            return 'Remote-User'
+        return real_get(key, default)
+    monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
+
+    assert client.get('/api/profiles/me/connections').status_code == 401            # no header → locked
+    assert client.get('/api/profiles/me/connections',
+                      headers={'Remote-User': 'alice'}).status_code == 200          # trusted → in
+
+
+def test_spoofed_auth_proxy_header_ignored_when_feature_off(client, monkeypatch):
+    # THE safety pin: feature OFF (default) → a client-sent Remote-User must NOT
+    # bypass the lock. Only an operator who explicitly configured it gets the trust.
+    real_get = web_server.config_manager.get
+    def fake_get(key, default=None):
+        if key == 'security.require_pin_on_launch':
+            return True
+        if key == 'security.auth_proxy_header':
+            return ''   # OFF (default)
+        return real_get(key, default)
+    monkeypatch.setattr(web_server.config_manager, 'get', fake_get)
+
+    assert client.get('/api/profiles/me/connections',
+                      headers={'Remote-User': 'admin'}).status_code == 401          # spoof ignored → still locked

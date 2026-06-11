@@ -340,8 +340,20 @@ async function initProfileSystem() {
         // Check if a session already has a profile selected
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
+        // Login mode: show the sign-in screen and defer everything else until
+        // the user authenticates.
+        if (currentData.login_required) {
+            showLoginScreen();
+            return false;
+        }
         if (currentData.success && currentData.profile) {
             setCurrentProfile(currentData.profile);
+
+            // Login mode → reveal the Sign out button in the profile bar.
+            if (currentData.login_mode) {
+                const lb = document.getElementById('logout-btn');
+                if (lb) lb.style.display = '';
+            }
 
             // Check if launch PIN is required
             if (currentData.launch_pin_required) {
@@ -385,6 +397,109 @@ async function initProfileSystem() {
         console.error('Profile init error:', e);
         return true; // Fall through to normal init
     }
+}
+
+// ── Login Screen (username/password mode) ──────────────────────────────
+
+function showLoginScreen() {
+    const overlay = document.getElementById('login-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    const u = document.getElementById('login-username');
+    if (u) setTimeout(() => u.focus(), 50);
+}
+
+async function submitLogin() {
+    const username = (document.getElementById('login-username')?.value || '').trim();
+    const password = document.getElementById('login-password')?.value || '';
+    const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-submit');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username || !password) { showErr('Enter your username and password'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();   // authenticated → reload into the app
+        } else {
+            showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Sign in failed'));
+            if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+        }
+    } catch (e) {
+        showErr('Connection error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+    }
+}
+
+async function soulsyncLogout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) { /* reload anyway */ }
+    window.location.reload();
+}
+
+function showLoginRecovery() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (entry) entry.style.display = 'none';
+    if (rec) rec.style.display = 'block';
+    const u = document.getElementById('recovery-username');
+    const lu = document.getElementById('login-username');
+    if (u && lu && lu.value) u.value = lu.value;
+    const errEl = document.getElementById('recovery-error');
+    if (errEl) errEl.style.display = 'none';
+}
+
+function showLoginEntry() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (rec) rec.style.display = 'none';
+    if (entry) entry.style.display = 'block';
+}
+
+async function fetchRecoveryQuestion() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const errEl = document.getElementById('recovery-error');
+    const section = document.getElementById('recovery-answer-section');
+    const qText = document.getElementById('recovery-question-text');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username) { showErr('Enter your username'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-question?username=' + encodeURIComponent(username));
+        const data = await res.json();
+        if (data.success && data.question) {
+            if (qText) qText.textContent = data.question;
+            if (section) section.style.display = 'block';
+        } else {
+            showErr('No recovery question is set for that account.');
+        }
+    } catch (e) { showErr('Connection error'); }
+}
+
+async function submitRecoveryReset() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const answer = document.getElementById('recovery-answer')?.value || '';
+    const newPassword = document.getElementById('recovery-new-password')?.value || '';
+    const confirmPassword = document.getElementById('recovery-new-password-confirm')?.value || '';
+    const errEl = document.getElementById('recovery-error');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!answer || !newPassword) { showErr('Enter your answer and a new password'); return; }
+    if (newPassword.length < 6) { showErr('New password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { showErr('Passwords do not match'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-reset', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, answer, new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (data.success) { window.location.reload(); }
+        else { showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Reset failed')); }
+    } catch (e) { showErr('Connection error'); }
 }
 
 // ── Launch PIN Lock Screen ─────────────────────────────────────────────
@@ -450,6 +565,133 @@ function showLaunchPinScreen() {
 }
 
 // ── Security Settings Helpers ──────────────────────────────────────────
+
+async function saveLoginPassword() {
+    const input = document.getElementById('security-login-password');
+    const confirmInput = document.getElementById('security-login-password-confirm');
+    const msg = document.getElementById('security-login-password-msg');
+    const password = input?.value || '';
+    const confirm = confirmInput?.value || '';
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
+    if (password !== confirm) { show('Passwords do not match', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            show('Admin login password saved', true);
+            if (input) { input.value = ''; input.placeholder = 'Enter a new password to change it'; }
+            if (confirmInput) confirmInput.value = '';
+            updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
+            const st = document.getElementById('security-login-password-status');
+            if (st) st.style.display = 'block';
+        }
+        else show(data.error || 'Failed to save password', false);
+    } catch (e) { show('Connection error', false); }
+}
+
+// Lock/unlock the "Require login" toggle based on whether the admin has a
+// password — makes the prerequisite (anti-lockout) visible instead of a
+// surprise 400 on save.
+function updateRequireLoginGate(hasPassword) {
+    const toggle = document.getElementById('security-require-login');
+    const wrap = document.getElementById('security-login-toggle-wrap');
+    const help = document.getElementById('security-require-login-help');
+    if (!toggle) return;
+    toggle.disabled = !hasPassword;
+    if (!hasPassword) toggle.checked = false;
+    if (wrap) wrap.classList.toggle('security-locked', !hasPassword);
+    if (help) {
+        help.innerHTML = hasPassword
+            ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
+            : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
+    }
+}
+
+// Reflect already-saved login credentials. Passwords are never sent to the
+// browser, so instead of an empty field (which looks unset after a refresh) we
+// show that one is set and pre-fill the saved recovery question.
+function applyLoginSavedState(profile) {
+    const hasPassword = profile?.has_password || false;
+    const hasRecovery = profile?.has_recovery || false;
+    const question = profile?.recovery_question || '';
+
+    const pwStatus = document.getElementById('security-login-password-status');
+    const pwField = document.getElementById('security-login-password');
+    const pwConfirm = document.getElementById('security-login-password-confirm');
+    if (pwStatus) pwStatus.style.display = hasPassword ? 'block' : 'none';
+    if (hasPassword) {
+        if (pwField) pwField.placeholder = 'Enter a new password to change it';
+        if (pwConfirm) pwConfirm.placeholder = 'Confirm new password';
+    }
+
+    const recStatus = document.getElementById('security-recovery-status');
+    const recSel = document.getElementById('security-recovery-question');
+    const recCustom = document.getElementById('security-recovery-custom');
+    const recAnswer = document.getElementById('security-recovery-answer');
+    if (recStatus) {
+        recStatus.style.display = hasRecovery ? 'block' : 'none';
+        recStatus.textContent = hasRecovery
+            ? ('✓ Recovery question saved' + (question ? ': “' + question + '”' : ''))
+            : '';
+    }
+    if (hasRecovery) {
+        if (recSel && question) {
+            recSel.value = question;            // preset options default value = their text
+            if (recSel.value !== question) {    // not a preset → custom question
+                recSel.value = '__custom__';
+                if (recCustom) { recCustom.style.display = 'block'; recCustom.value = question; }
+            }
+        }
+        if (recAnswer) recAnswer.placeholder = 'Enter a new answer to change it';
+    }
+}
+
+function handleRecoveryQuestionChange() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    if (sel && custom) custom.style.display = (sel.value === '__custom__') ? 'block' : 'none';
+}
+
+async function saveRecoveryQuestion() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    const answer = document.getElementById('security-recovery-answer')?.value || '';
+    const msg = document.getElementById('security-recovery-msg');
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    let question = sel?.value || '';
+    if (question === '__custom__') question = (custom?.value || '').trim();
+    if (!question) { show('Pick or type a question', false); return; }
+    if (!answer.trim()) { show('Enter an answer', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-recovery', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, answer }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            show('Recovery question saved', true);
+            const a = document.getElementById('security-recovery-answer');
+            if (a) { a.value = ''; a.placeholder = 'Enter a new answer to change it'; }
+            const rst = document.getElementById('security-recovery-status');
+            if (rst) { rst.style.display = 'block'; rst.textContent = '✓ Recovery question saved: “' + question + '”'; }
+        }
+        else show(data.error || 'Failed to save', false);
+    } catch (e) { show('Connection error', false); }
+}
 
 async function saveSecurityPin() {
     const pin = document.getElementById('security-new-pin').value;

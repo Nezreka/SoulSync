@@ -579,45 +579,68 @@ def update_discovery_match(
             return {'error': 'Missing required fields'}, 400
 
         state = states.get(identifier)
-        if not state:
-            return {'error': 'Discovery state not found'}, 404
+        result = None
+        if state:
+            if track_index >= len(state['discovery_results']):
+                return {'error': 'Invalid track index'}, 400
 
-        if track_index >= len(state['discovery_results']):
-            return {'error': 'Invalid track index'}, 400
+            result = state['discovery_results'][track_index]
+            old_status = result.get('status')
 
-        result = state['discovery_results'][track_index]
-        old_status = result.get('status')
+            result['status'] = 'Found'
+            result['status_class'] = 'found'
+            result['spotify_track'] = spotify_track['name']
+            result['spotify_artist'] = join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else extract_artist_name(spotify_track['artists'])
+            result['spotify_album'] = spotify_track['album']
+            result['spotify_id'] = spotify_track['id']
 
-        result['status'] = 'Found'
-        result['status_class'] = 'found'
-        result['spotify_track'] = spotify_track['name']
-        result['spotify_artist'] = join_artist_names(spotify_track['artists']) if isinstance(spotify_track['artists'], list) else extract_artist_name(spotify_track['artists'])
-        result['spotify_album'] = spotify_track['album']
-        result['spotify_id'] = spotify_track['id']
+            duration_ms = spotify_track.get('duration_ms', 0)
+            if duration_ms:
+                minutes = duration_ms // 60000
+                seconds = (duration_ms % 60000) // 1000
+                result['duration'] = f"{minutes}:{seconds:02d}"
+            else:
+                result['duration'] = '0:00'
 
-        duration_ms = spotify_track.get('duration_ms', 0)
-        if duration_ms:
-            minutes = duration_ms // 60000
-            seconds = (duration_ms % 60000) // 1000
-            result['duration'] = f"{minutes}:{seconds:02d}"
-        else:
-            result['duration'] = '0:00'
+            result['spotify_data'] = build_fix_modal_spotify_data(spotify_track)
+            result['wing_it_fallback'] = False
+            result['manual_match'] = True
 
-        result['spotify_data'] = build_fix_modal_spotify_data(spotify_track)
-        result['wing_it_fallback'] = False
-        result['manual_match'] = True
+            if old_status != 'found' and old_status != 'Found':
+                state['spotify_matches'] = state.get('spotify_matches', 0) + 1
 
-        if old_status != 'found' and old_status != 'Found':
-            state['spotify_matches'] = state.get('spotify_matches', 0) + 1
+            logger.info(f"Manual match updated: {source_log_label} - {identifier} - track {track_index}")
+            logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
 
-        logger.info(f"Manual match updated: {source_log_label} - {identifier} - track {track_index}")
-        logger.info(f"   → {result['spotify_artist']} - {result['spotify_track']}")
-
-        try:
             original_track = result.get(original_track_key, {})
             original_name = original_track.get('name', spotify_track['name'])
             original_artist = original_artist_getter(original_track)
+        else:
+            # #843: the in-memory discovery state can be gone — a server restart,
+            # or an imported playlist that wasn't discovered in THIS process —
+            # while the card is still shown from persisted data. The DURABLE part
+            # of a manual fix (writing the match to the discovery cache so future
+            # syncs resolve it) doesn't need the in-memory state, only the original
+            # track's name + artist, which the client now sends. Fall back to those
+            # instead of 404ing the fix into uselessness.
+            original_name = (data.get('original_name') or '').strip()
+            original_artist = (data.get('original_artist') or '').strip()
+            if not original_name and not original_artist:
+                return {'error': 'Discovery state not found'}, 404
+            if not original_name:
+                original_name = spotify_track['name']
+            # Key the cache by the FIRST artist — every in-memory + sync path uses
+            # artists[0], but the client may send a joined "A, B, C" string. Without
+            # this, a multi-artist track would save under a key the sync never looks
+            # up (full string ≠ first artist), so the fix would silently never apply.
+            if original_artist:
+                original_artist = original_artist.split(',')[0].strip()
+            logger.info(
+                f"Manual match (no in-memory state) → discovery cache: "
+                f"{source_log_label} - {identifier} - '{original_name}' by '{original_artist}'"
+            )
 
+        try:
             cache_key = get_discovery_cache_key(original_name, original_artist)
             artists_list = spotify_track['artists']
             if isinstance(artists_list, list):

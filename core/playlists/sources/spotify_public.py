@@ -35,14 +35,19 @@ class SpotifyPublicPlaylistSource(PlaylistSource):
         """``playlist_id`` is a Spotify URL or ``open.spotify.com`` URI."""
         from core.spotify_public_scraper import (
             parse_spotify_url,
-            scrape_spotify_embed,
+            fetch_spotify_public,
         )
 
         parsed = parse_spotify_url(playlist_id)
         if not parsed:
             return None
 
-        data = scrape_spotify_embed(parsed["type"], parsed["id"])
+        # #838: use the full-fetch wrapper (paginates past the embed widget's
+        # ~100-track cap), NOT scrape_spotify_embed directly. The rest of the app
+        # already uses fetch_spotify_public; the adapter calling the capped embed
+        # scraper is why auto-sync truncated >100-track playlists to 100 while the
+        # initial discovery got the whole thing. Same return shape, so drop-in.
+        data = fetch_spotify_public(parsed["type"], parsed["id"])
         if not isinstance(data, dict) or data.get("error"):
             return None
 
