@@ -5993,6 +5993,24 @@
                                         Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
                                     </div>
                                 </div>
+
+                                <div class="form-group">
+                                    <label class="toggle-label">
+                                        <input type="checkbox" id="security-trust-proxy">
+                                        <span>Behind a reverse proxy</span>
+                                    </label>
+                                    <div class="setting-help-text">
+                                        Enable only if SoulSync runs behind nginx / Caddy / Traefik that terminates HTTPS. Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie HTTPS-only, and adds security headers. <strong>Leave OFF for direct or LAN access over http://</strong> — turning it on would make the session cookie HTTPS-only and break plain-HTTP access. <strong>Takes effect after a restart.</strong> See <code>Support/REVERSE-PROXY.md</code>.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="security-auth-proxy-header">Auth proxy user header <span style="opacity:0.6">(optional)</span>:</label>
+                                    <input type="text" id="security-auth-proxy-header" placeholder="Remote-User" autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                    <div class="setting-help-text">
+                                        If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in <em>in front of</em> SoulSync, enter the header it sets (e.g. <code>Remote-User</code>) and SoulSync will skip the launch PIN for already-authenticated requests. <strong>Only set this behind a proxy that strips any client-supplied copy of the header</strong> — otherwise it can be spoofed. Leave blank to disable (the default).
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Discovery Settings -->

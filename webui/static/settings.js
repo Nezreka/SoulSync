@@ -1398,6 +1398,12 @@ async function loadSettingsData() {
             const corsField = document.getElementById('security-cors-origins');
             if (corsField) corsField.value = corsOrigins;
 
+            // Reverse-proxy mode + auth-proxy header (default off / empty).
+            const trustProxy = document.getElementById('security-trust-proxy');
+            if (trustProxy) trustProxy.checked = settings.security?.trust_reverse_proxy || false;
+            const authHeader = document.getElementById('security-auth-proxy-header');
+            if (authHeader) authHeader.value = settings.security?.auth_proxy_header || '';
+
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
             const profilesData = await profilesRes.json();
@@ -3146,6 +3152,8 @@ async function saveSettings(quiet = false) {
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,
             cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
+            trust_reverse_proxy: document.getElementById('security-trust-proxy')?.checked || false,
+            auth_proxy_header: document.getElementById('security-auth-proxy-header')?.value?.trim() || '',
         }
     };
 
