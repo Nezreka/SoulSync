@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
+from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("deezer_client")
@@ -873,6 +874,23 @@ class DeezerClient:
 
         Matches iTunesClient.get_artist_albums() interface.
         Paginates through all results up to the requested limit."""
+        cache = get_metadata_cache()
+        cached_items = get_cached_artist_album_items(cache, 'deezer', artist_id, album_type=album_type, limit=limit)
+        if cached_items:
+            try:
+                requested_types = [t.strip() for t in album_type.split(',')]
+                cached_albums = []
+                for album_data in cached_items:
+                    album = Album.from_deezer_album(album_data)
+                    if album_type != 'album,single':
+                        if album.album_type not in requested_types:
+                            if not (album.album_type == 'ep' and 'single' in requested_types):
+                                continue
+                    cached_albums.append(album)
+                return cached_albums[:limit]
+            except Exception as e:
+                logger.debug("Deezer artist albums cache reuse failed: %s", e)
+
         albums = []
         all_raw = []
         requested_types = [t.strip() for t in album_type.split(',')]
@@ -900,7 +918,6 @@ class DeezerClient:
                 break  # Last page
             offset += len(data['data'])
 
-        cache = get_metadata_cache()
         # Deezer's /artist/{id}/albums endpoint doesn't include artist info on each album.
         # Inject it so cached album entities have artist_name for discover page display.
         artist_stub = None
@@ -914,6 +931,7 @@ class DeezerClient:
                 entries.append((str(ad['id']), ad))
         if entries:
             cache.store_entities_bulk('deezer', 'album', entries, skip_if_exists=True)
+        store_artist_album_items(cache, 'deezer', artist_id, all_raw, album_type=album_type, limit=limit)
 
         logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
         return albums[:limit]

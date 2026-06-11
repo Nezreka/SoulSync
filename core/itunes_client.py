@@ -5,6 +5,7 @@ import threading
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
+from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("itunes_client")
@@ -1036,7 +1037,15 @@ class iTunesClient:
         """
         import re
 
-        results = self._lookup(id=artist_id, entity='album', limit=min(limit, 200))
+        cache = get_metadata_cache()
+        cache_limit = min(limit, 200)
+        cached_items = get_cached_artist_album_items(cache, 'itunes', artist_id, album_type=album_type, limit=cache_limit)
+        cache_hit = False
+        if cached_items:
+            results = cached_items
+            cache_hit = True
+        else:
+            results = self._lookup(id=artist_id, entity='album', limit=cache_limit)
         seen_albums = {}  # Track albums by normalized name, prefer explicit versions
 
         def normalize_album_name(name: str) -> str:
@@ -1098,7 +1107,7 @@ class iTunesClient:
                 
                 # If this is an explicit album, validate it has tracks before keeping it
                 # (Some iTunes explicit albums are broken and return 0 tracks)
-                if is_explicit:
+                if is_explicit and not cache_hit:
                     try:
                         test_tracks = self._lookup(id=album.id, entity='song')
                         track_count = len([t for t in test_tracks if t.get('wrapperType') == 'track'])
@@ -1124,8 +1133,9 @@ class iTunesClient:
             if album_data.get('wrapperType') == 'collection' and album_data.get('collectionId'):
                 album_entries.append((str(album_data['collectionId']), album_data))
         if album_entries:
-            cache = get_metadata_cache()
             cache.store_entities_bulk('itunes', 'album', album_entries, skip_if_exists=True)
+        if not cache_hit:
+            store_artist_album_items(cache, 'itunes', artist_id, results, album_type=album_type, limit=cache_limit)
 
         logger.info(f"Retrieved {len(albums)} unique albums for artist {artist_id} (filtered from {len(results)} results)")
         return albums[:limit]
