@@ -8,6 +8,7 @@ from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
@@ -1897,15 +1898,20 @@ class SpotifyClient:
         cache = get_metadata_cache()
         fallback_src = self._fallback_source
         source = fallback_src if self._is_itunes_id(artist_id) else 'spotify'
-        cache_key = f"{artist_id}_albums_{album_type.replace(',', '_')}"
 
         # Check cache first (unless caller needs fresh data)
         if not skip_cache:
-            cached = cache.get_entity(source, 'artist', cache_key)
-            if cached:
+            cached_items = get_cached_artist_album_items(
+                cache,
+                source,
+                artist_id,
+                album_type=album_type,
+                limit=limit,
+                include_limit=False,
+            )
+            if cached_items:
                 try:
-                    albums_list = cached.get('_albums', cached) if isinstance(cached, dict) else cached
-                    return [Album.from_spotify_album(ad) for ad in albums_list]
+                    return [Album.from_spotify_album(ad) for ad in cached_items]
                 except Exception as e:
                     logger.debug("artist albums cache reuse: %s", e)
 
@@ -1959,7 +1965,15 @@ class SpotifyClient:
                 # complete entities regardless of how many pages we walked.
                 if raw_items:
                     if not truncated:
-                        cache.store_entity('spotify', 'artist', cache_key, {'name': f'albums_{artist_id}', '_albums': raw_items})
+                        store_artist_album_items(
+                            cache,
+                            'spotify',
+                            artist_id,
+                            raw_items,
+                            album_type=album_type,
+                            limit=limit,
+                            include_limit=False,
+                        )
                     # Also cache individual albums opportunistically
                     entries = [(ad.get('id'), ad) for ad in raw_items if ad.get('id')]
                     if entries:
