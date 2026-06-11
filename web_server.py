@@ -19184,6 +19184,10 @@ def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
     try:
         query = request.args.get('q', '').strip()
+        # Optional source-artist relevance hint (Find & Add knows the artist of
+        # the track it's matching) — used only to rank exact title+artist matches
+        # to the top, NOT to filter.
+        artist_hint = request.args.get('artist', '').strip()
         limit = int(request.args.get('limit', 10))
         if not query:
             return jsonify({"success": True, "tracks": []})
@@ -19213,7 +19217,8 @@ def library_search_tracks():
                 return f"{_art_prefix}{url}{_art_suffix}"
             return url
 
-        results = database.search_tracks(title=query, artist='', limit=limit, server_source=active_server)
+        results = database.search_tracks(title=query, artist='', limit=limit,
+                                         server_source=active_server, rank_artist=artist_hint)
 
         tracks = []
         for t in results:
