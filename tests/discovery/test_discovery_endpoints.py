@@ -966,7 +966,9 @@ def test_update_match_no_state_but_originals_saves_cache():
     db = _FakeCacheDB()
     gj, kw, _ = _update_kwargs(cache_db=db, json_data={
         'identifier': 'gone-from-memory', 'track_index': 0,
-        'original_name': 'Acid Dream', 'original_artist': 'Cherrymoon Traxx',
+        'original_name': 'Acid Dream',
+        # multi-artist joined string, exactly like the #843 reporter's track
+        'original_artist': 'Cherrymoon Traxx, Hermol, SBM, BELS',
         'spotify_track': {
             'id': 'sp1', 'name': 'Acid Dream (The Prophet remix)',
             'artists': ['Cherry Moon Trax'], 'album': 'X', 'duration_ms': 1000,
@@ -976,11 +978,41 @@ def test_update_match_no_state_but_originals_saves_cache():
 
     assert code == 200 and body['success'] is True
     assert body['result'] is None  # nothing to update in memory
-    # the durable cache match WAS written, keyed by the original track
+    # the durable cache match WAS written — and CRUCIALLY keyed by the FIRST
+    # artist, matching every in-memory/sync path (which use artists[0]). A
+    # full-string key here would silently never be looked up on sync.
     assert len(db.saved) == 1
     saved = db.saved[0]
-    assert saved[0] == 'acid dream'                 # cache_key from get_discovery_cache_key
-    assert saved[5] == 'Acid Dream' and saved[6] == 'Cherrymoon Traxx'  # original name/artist
+    assert saved[1] == 'cherrymoon traxx'   # cache_key artist = first artist (not the full string)
+    assert saved[6] == 'Cherrymoon Traxx'   # original_artist reduced to first
+
+
+def test_update_match_no_state_key_matches_in_memory_key():
+    """The no-state save and the normal in-memory save must produce the SAME cache
+    key for the same multi-artist track — else the fix wouldn't apply on sync."""
+    from core.discovery.endpoints import update_discovery_match
+    sp = {'id': 'sp1', 'name': 'M', 'artists': ['Z'], 'album': 'A', 'duration_ms': 1}
+
+    # in-memory path: result carries the original track as an artists LIST
+    db1 = _FakeCacheDB()
+    state = {'discovery_results': [{'tidal_track': {'name': 'Acid Dream',
+             'artists': ['Cherrymoon Traxx', 'Hermol', 'SBM', 'BELS']}}],
+             'spotify_matches': 0}
+    gj1, kw1, _ = _update_kwargs(cache_db=db1, json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': sp})
+    update_discovery_match({'p': state}, gj1, **kw1)
+
+    # no-state path: client sends the joined string
+    db2 = _FakeCacheDB()
+    gj2, kw2, _ = _update_kwargs(cache_db=db2, json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': sp,
+        'original_name': 'Acid Dream',
+        'original_artist': 'Cherrymoon Traxx, Hermol, SBM, BELS'})
+    update_discovery_match({}, gj2, **kw2)
+
+    # same cache key (name, artist) → the fix applies identically either way
+    assert db1.saved[0][0] == db2.saved[0][0]
+    assert db1.saved[0][1] == db2.saved[0][1]
 
 
 def test_update_match_no_state_and_no_originals_still_404():

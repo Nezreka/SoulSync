@@ -629,6 +629,12 @@ def update_discovery_match(
                 return {'error': 'Discovery state not found'}, 404
             if not original_name:
                 original_name = spotify_track['name']
+            # Key the cache by the FIRST artist — every in-memory + sync path uses
+            # artists[0], but the client may send a joined "A, B, C" string. Without
+            # this, a multi-artist track would save under a key the sync never looks
+            # up (full string ≠ first artist), so the fix would silently never apply.
+            if original_artist:
+                original_artist = original_artist.split(',')[0].strip()
             logger.info(
                 f"Manual match (no in-memory state) → discovery cache: "
                 f"{source_log_label} - {identifier} - '{original_name}' by '{original_artist}'"
