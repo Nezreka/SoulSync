@@ -8056,6 +8056,22 @@ class MusicDatabase:
         cleaned = re.sub(r'\s*\(with\s+[^)]*\)', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*\[with\s+[^\]]*\]', '', cleaned, flags=re.IGNORECASE)
 
+        # Featuring in parentheses/brackets — must run BEFORE bracket flattening.
+        # Otherwise ``feat.`` removal after flattening is greedy and strips
+        # version suffixes ("Extended Mix", "Radio Edit", …) from the same title.
+        cleaned = re.sub(
+            r'\s*\([^)]*(?:feat\.?|ft\.?|featuring)[^)]*\)',
+            '',
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(
+            r'\s*\[[^\]]*(?:feat\.?|ft\.?|featuring)[^\]]*\]',
+            '',
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+
         # STEP 1: Normalize bracket/dash styles for consistent matching
         # Convert all bracket styles to spaces for better matching
         cleaned = re.sub(r'\s*[\[\(]\s*', ' ', cleaned)  # Convert opening brackets/parens to space
@@ -8070,11 +8086,6 @@ class MusicDatabase:
             # Basic markers (content/parental ratings)
             r'\s*explicit\s*',      # Remove explicit markers
             r'\s*clean\s*',         # Remove clean markers
-
-            # Featuring/collaboration (metadata, not different version)
-            r'\s*feat\..*',         # Remove featuring
-            r'\s*featuring.*',      # Remove featuring
-            r'\s*ft\..*',           # Remove ft.
 
             # Remasters (same recording, different mastering)
             r'\s*\d{4}\s*remaster.*',  # Remove "2015 remaster"
@@ -8111,6 +8122,19 @@ class MusicDatabase:
 
         for pattern in patterns_to_remove:
             cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE).strip()
+
+        # Unparenthesized featuring (e.g. after bracket flatten) — bounded so
+        # "feat. Vika - Extended Mix" keeps the version tail.
+        _version_boundary = (
+            r'(?:extended|radio|club|dub|instrumental|acoustic|live|remix|'
+            r'original|edit|mix|version)\b'
+        )
+        cleaned = re.sub(
+            rf'\s+(?:feat\.?|ft\.?|featuring)\s+.+?(?=\s+-\s+{_version_boundary}|\s+{_version_boundary}|$)',
+            '',
+            cleaned,
+            flags=re.IGNORECASE,
+        ).strip()
 
         # STEP 3: Clean up extra spaces
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
