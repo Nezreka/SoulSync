@@ -3415,18 +3415,16 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.0': [
-        { date: 'June 2026 — 2.7.0 release' },
-        { title: 'Connect your own streaming accounts — My Accounts', desc: 'multi-user gets real. the new My Accounts panel (the music button by your profile) lets anyone connect their own spotify / tidal / listenbrainz, and from then on your playlist browsing and pulling uses your account, not the admin\'s. metadata + downloads stay on the admin\'s global accounts so background work is unchanged — only playlist reads are personal, and two people can browse their own playlists at the same time. admin and anyone who hasn\'t connected fall back to the global accounts exactly as before.', page: 'settings' },
-        { title: 'Auto-sync runs as you', desc: 'background automations now run as their owner profile — a non-admin\'s scheduled auto-sync pulls their playlist from their account instead of falling back to the admin\'s. admin pipelines are untouched.', page: 'sync' },
-        { title: 'Quick-switch active sources (admin)', desc: 'the sidebar Service Status panel is now clickable (admin only) — switch the active metadata source / media server / download source from one modal, with brand logos and real hybrid drag. the Manage Profiles modal got a visual revamp too.', page: 'dashboard' },
-        { title: 'User accounts & login (opt-in)', desc: 'turn on "require login" in Settings → Security and each profile becomes a real account: a username + password sign-in screen replaces the picker + PIN. passwords are hashed and never sent to the browser, brute-force limited, with anti-lockout (you can\'t enable it until the admin has a password). off by default — your existing PIN / LAN setup is untouched.', page: 'settings' },
-        { title: 'Forgot-password recovery', desc: 'set a security question + answer; if you forget your login password you answer it on the sign-in screen to reset. the answer is hashed and matched forgivingly.', page: 'settings' },
-        { title: 'Run securely behind a reverse proxy', desc: 'opt-in reverse-proxy mode trusts X-Forwarded-* (correct client IP + https), marks the session cookie secure, and adds security headers — for running behind nginx / caddy / traefik. off by default so direct http:// LAN access is untouched. a full setup guide ships in Support/REVERSE-PROXY.md.', page: 'settings' },
-        { title: 'Auth-proxy + PIN hardening', desc: 'optionally let authelia / authentik / oauth2-proxy be the gatekeeper (trust a Remote-User header), and the launch PIN now backs off after repeated wrong tries. the whole Security settings page was reorganized into clear PIN / user-accounts / reverse-proxy groups with step-by-step setup.', page: 'settings' },
-        { title: 'Fixes', desc: 'a "/" in a song title no longer truncates the search and quarantines youtube/tidal downloads (#835); a rejected slskd download no longer hangs forever (#836); manual find & add appends to a jellyfin/emby playlist instead of recreating it (#837); auto-sync no longer caps public spotify playlists at 100 tracks (#838); "discovery state not found" after a restart is fixed (#843); and find & add search now puts exact title matches first instead of burying them.', page: 'downloads' },
-        { title: 'Artist Sync is now a mini deep scan', desc: 'the sync button on an artist page reuses the same server-diff stale-removal as the whole-library deep scan, scoped to one artist — picking up new/changed tracks and removing ones the server no longer has, with the same safety guards (no more disk-check mass-deletes on an unreachable mount).', page: 'library' },
-        { title: 'Earlier versions', desc: 'before 2.7.0, the 2.6.x cycle brought the artist/track/album blocklist, the download-retry overhaul, Download Origins + retention cleanup, server-side launch-PIN enforcement + secret masking, Spotify-no-auth metadata, Import IDs from File Tags, Library Re-tag, and a large pile of import / library / watchlist fixes.' },
+    '2.7.1': [
+        { date: 'June 2026 — 2.7.1 release' },
+        { title: 'Download verification & review', desc: 'every download is fingerprint-checked (acoustid) against what you actually asked for, and the result sticks — a verified / unverified badge on the Downloads completed list, persisted to the db, a SOULSYNC_VERIFICATION file tag, and history. import + scan now share one verification core so they stop disagreeing about the same file.', page: 'active-downloads' },
+        { title: 'Unverified review queue', desc: 'questionable downloads land in a review queue where you can listen, compare, approve, or delete them — with visible retry progress. approve/delete are admin-only.', page: 'active-downloads' },
+        { title: 'Security: login bypass closed (#852)', desc: 'hiding the login/PIN overlay (safari "hide distracting items", devtools) could still stream live data over the websocket — the socket connection now enforces the same login/PIN gate the rest of the app does. every other surface was audited too; the socket was the one hole.', page: 'settings' },
+        { title: 'AcoustID "Relocate" fix action (#704)', desc: 'when an acoustid scan flags a wrong song, retag alone left the file in the wrong artist/album folder. the new Relocate option retags it and moves it to staging so auto-import re-files it under the correct artist/album.', page: 'tools' },
+        { title: 'Faster artist pages (#853)', desc: 'deezer / itunes / discogs now cache the artist→album list like spotify already did, so reopening an artist stops refetching the entire discography. thanks ramonskie!', page: 'library' },
+        { title: 'Fixes', desc: 'listenbrainz weekly playlists can no longer wedge in an unrecoverable sync state — cancel now clears it so you can re-sync (#702); magnets stuck "downloading metadata" actually hit the stall timeout now, and dead torrents are cleaned out of qbittorrent instead of orphaned + re-grabbed as duplicates; a "/" or ":" in a title matches sources that use "_" (#851); "&" is available as an artist tag separator (#840); search auto-selects spotify when "spotify (no auth)" is the active source.', page: 'active-downloads' },
+        { title: 'Contributor fixes', desc: 'opt-in import-folder artist override (#845), discogs master/release ID collision fetching the wrong album (#848), and the cover-art cache no longer hard-fails on first load (#850). thanks nick2000713 + RollingBase!' },
+        { title: 'Earlier versions', desc: '2.7.0 brought multi-user for real — per-profile streaming accounts (My Accounts), auto-sync running as its owner, opt-in username/password login with recovery, reverse-proxy support, and admin quick-switch for active sources. before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, server-side launch-PIN enforcement, Spotify-no-auth metadata, Library Re-tag, and a large pile of import / library / watchlist fixes.' },
     ],
 };
 
@@ -3457,55 +3455,38 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Per-profile streaming accounts",
-        description: "multi-user gets real. each profile can connect its own spotify / tidal / listenbrainz from the new My Accounts panel (the music button by your profile), and from then on your playlist browsing and pulling uses your account instead of the admin\'s.",
+        title: "Download verification & review",
+        description: "every download is fingerprint-checked (acoustid) against what you actually asked for, and the result sticks. import + scan now share one verification core, so the two stop disagreeing about the same file.",
         features: [
-            "connect your own spotify / tidal / listenbrainz — playlist reads then use your account",
-            "metadata + downloads stay on the admin\'s global accounts, so background work is unchanged",
-            "two people browse their own playlists at the same time without stepping on each other",
-            "background auto-sync runs as its owner profile, pulling their playlist from their account",
-            "admin + anyone who hasn\'t connected fall back to the global accounts exactly as before",
+            "verified / unverified badge on the Downloads completed list",
+            "status persisted to the db, a SOULSYNC_VERIFICATION file tag, and history",
+            "Unverified review queue: listen, compare, approve, or delete questionable downloads (approve/delete are admin-only)",
+            "visible retry progress while a questionable download re-fetches",
         ],
-        usage_note: "the music (My Accounts) button by your profile",
+        usage_note: "Downloads page → the Unverified filter",
     },
     {
-        title: "Secure access — login, recovery & reverse proxy (opt-in)",
-        description: "SoulSync can now stand on its own as a secured app, or sit cleanly behind a reverse proxy. all of it is off by default, so a normal LAN setup behaves exactly as before and the launch PIN keeps working untouched.",
-        features: [
-            "native login: each profile becomes a real username + password account; the sign-in screen replaces the picker + PIN",
-            "passwords hashed + never sent to the browser, brute-force limited, anti-lockout (can\'t enable until the admin has a password)",
-            "forgot-password recovery via a security question you set",
-            "reverse-proxy mode: trusts X-Forwarded-*, secure cookies, security headers — for nginx / caddy / traefik (see Support/REVERSE-PROXY.md)",
-            "auth-proxy trust (authelia / authentik / oauth2-proxy) + launch-PIN brute-force backoff",
-        ],
-        usage_note: "Settings → Security",
-    },
-    {
-        title: "Quick-switch active sources (admin)",
-        description: "the sidebar Service Status panel is now clickable — switch the active metadata source, media server, and download source from one modal, with brand logos, a hero header, and real hybrid drag. it surfaces the configured-vs-effective source so a no-auth source is never confused with the real one.",
-        features: [
-            "switch metadata / media-server / download source in one place",
-            "real drag-to-reorder for hybrid source priority",
-            "Manage Profiles modal got a visual revamp too",
-        ],
-        usage_note: "click the sidebar Service Status panel",
+        title: "Security fix — login bypass closed (#852)",
+        description: "hiding the login/PIN overlay (safari \"hide distracting items\", devtools, curl) could still stream live data over the websocket, because the gate was http-only. the socket connection now enforces the same login/PIN check the rest of the app does — every other surface was audited too; the socket was the one hole. covers both the launch PIN and the native login.",
+        features: [],
     },
     {
         title: "Fixes this release",
-        description: "a round of bug fixes alongside the big features.",
+        description: "a stack of issue fixes on top of 2.7.0.",
         features: [
-            "#835 — a \"/\" in a song title (e.g. Sawano\'s YouSeeBIGGIRL/T:T) no longer truncates the search + quarantines youtube/tidal downloads",
-            "#836 — a rejected slskd download no longer hangs at downloading forever",
-            "#837 — manual find & add appends to a jellyfin/emby playlist instead of recreating it",
-            "#838 — auto-sync no longer caps public spotify playlists at 100 tracks",
-            "#843 — discovery-state-not-found after a restart/import is fixed",
-            "find & add search puts exact title matches first instead of burying them under a case-sensitive sort",
-            "artist Sync is now a true single-artist deep scan (server-diff stale removal, no disk-check mass-deletes)",
+            "#704 — new acoustid Relocate action: retags a wrong song AND moves it to staging so auto-import re-files it under the correct artist/album",
+            "#702 — listenbrainz weekly playlists can no longer wedge in an unrecoverable sync state; cancel clears it so you can re-sync",
+            "torrents stuck \"downloading metadata\" actually hit the stall timeout now, and dead torrents are cleaned out of qbittorrent instead of orphaned + re-grabbed as duplicates",
+            "#853 — artist pages load way faster on reopen: deezer / itunes / discogs now cache the artist→album list instead of refetching the whole discography (thanks ramonskie!)",
+            "#851 — a \"/\" or \":\" in a title now matches sources that use \"_\"",
+            "#840 — \"&\" is available as an artist tag separator (musicbrainz/picard style)",
+            "search auto-selects spotify when \"spotify (no auth)\" is the active metadata source",
+            "#845 / #848 / #850 — opt-in import-folder artist override, discogs wrong-album collision, cover-art cache first-load failure (thanks nick2000713 + RollingBase!)",
         ],
     },
     {
-        title: "Earlier in 2.6.x",
-        description: "highlights from the cycle just before 2.7.0: the artist/track/album blocklist, the download-retry overhaul, Download Origins + retention cleanup, server-side launch-PIN enforcement + secret masking, Spotify-no-auth metadata, Import IDs from File Tags, Library Re-tag, and a large pile of import / library / watchlist fixes.",
+        title: "Earlier in 2.7.0",
+        description: "the release just before this one made multi-user real: per-profile streaming accounts (My Accounts — connect your own spotify / tidal / listenbrainz), auto-sync running as its owner profile, an opt-in username/password login with forgot-password recovery, reverse-proxy + auth-proxy support, admin quick-switch for active sources, and a round of fixes (#835–#843). before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, server-side launch-PIN enforcement, Spotify-no-auth metadata, and Library Re-tag.",
         features: [],
     },
 ];
