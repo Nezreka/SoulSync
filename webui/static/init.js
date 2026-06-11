@@ -441,6 +441,65 @@ async function soulsyncLogout() {
     window.location.reload();
 }
 
+function showLoginRecovery() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (entry) entry.style.display = 'none';
+    if (rec) rec.style.display = 'block';
+    const u = document.getElementById('recovery-username');
+    const lu = document.getElementById('login-username');
+    if (u && lu && lu.value) u.value = lu.value;
+    const errEl = document.getElementById('recovery-error');
+    if (errEl) errEl.style.display = 'none';
+}
+
+function showLoginEntry() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (rec) rec.style.display = 'none';
+    if (entry) entry.style.display = 'block';
+}
+
+async function fetchRecoveryQuestion() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const errEl = document.getElementById('recovery-error');
+    const section = document.getElementById('recovery-answer-section');
+    const qText = document.getElementById('recovery-question-text');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username) { showErr('Enter your username'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-question?username=' + encodeURIComponent(username));
+        const data = await res.json();
+        if (data.success && data.question) {
+            if (qText) qText.textContent = data.question;
+            if (section) section.style.display = 'block';
+        } else {
+            showErr('No recovery question is set for that account.');
+        }
+    } catch (e) { showErr('Connection error'); }
+}
+
+async function submitRecoveryReset() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const answer = document.getElementById('recovery-answer')?.value || '';
+    const newPassword = document.getElementById('recovery-new-password')?.value || '';
+    const errEl = document.getElementById('recovery-error');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!answer || !newPassword) { showErr('Enter your answer and a new password'); return; }
+    if (newPassword.length < 6) { showErr('New password must be at least 6 characters'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-reset', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, answer, new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (data.success) { window.location.reload(); }
+        else { showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Reset failed')); }
+    } catch (e) { showErr('Connection error'); }
+}
+
 // ── Launch PIN Lock Screen ─────────────────────────────────────────────
 
 function showLaunchPinScreen() {
@@ -524,6 +583,38 @@ async function saveLoginPassword() {
         const data = await res.json();
         if (data.success) { show('Admin login password saved', true); if (input) input.value = ''; }
         else show(data.error || 'Failed to save password', false);
+    } catch (e) { show('Connection error', false); }
+}
+
+function handleRecoveryQuestionChange() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    if (sel && custom) custom.style.display = (sel.value === '__custom__') ? 'block' : 'none';
+}
+
+async function saveRecoveryQuestion() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    const answer = document.getElementById('security-recovery-answer')?.value || '';
+    const msg = document.getElementById('security-recovery-msg');
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    let question = sel?.value || '';
+    if (question === '__custom__') question = (custom?.value || '').trim();
+    if (!question) { show('Pick or type a question', false); return; }
+    if (!answer.trim()) { show('Enter an answer', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-recovery', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, answer }),
+        });
+        const data = await res.json();
+        if (data.success) { show('Recovery question saved', true); const a = document.getElementById('security-recovery-answer'); if (a) a.value = ''; }
+        else show(data.error || 'Failed to save', false);
     } catch (e) { show('Connection error', false); }
 }
 
