@@ -461,6 +461,7 @@ class MusicDatabase:
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
             self._add_profile_password_support(cursor)
+            self._add_profile_recovery_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
@@ -5454,6 +5455,93 @@ class MusicDatabase:
             logger.info("Per-profile login-password migration completed")
         except Exception as e:
             logger.error(f"Error in login-password migration: {e}")
+
+    # ── Login-password recovery (security question + answer) ──────────────────
+
+    @staticmethod
+    def _normalize_recovery_answer(answer: str) -> str:
+        """Forgiving match: trim + lowercase + collapse internal whitespace."""
+        return ' '.join((answer or '').strip().lower().split())
+
+    def set_profile_recovery(self, profile_id: int, question: str, answer: str) -> bool:
+        """Set (or clear, when either is empty) a profile's recovery Q + answer."""
+        try:
+            from werkzeug.security import generate_password_hash
+            q = (question or '').strip()
+            norm = self._normalize_recovery_answer(answer)
+            if not q or not norm:
+                question_val, answer_hash = None, None  # clear
+            else:
+                question_val = q
+                answer_hash = generate_password_hash(norm, method='pbkdf2:sha256')
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE profiles SET recovery_question = ?, recovery_answer_hash = ? WHERE id = ?",
+                    (question_val, answer_hash, profile_id))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting recovery for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_recovery_question(self, profile_id: int) -> Optional[str]:
+        """The recovery question text, or None if none set."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_question FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return row['recovery_question'] if row and row['recovery_question'] else None
+        except Exception as e:
+            logger.error(f"Error reading recovery question for profile {profile_id}: {e}")
+            return None
+
+    def verify_profile_recovery_answer(self, profile_id: int, answer: str) -> bool:
+        """Verify the recovery answer. No recovery set → never verifies."""
+        try:
+            from werkzeug.security import check_password_hash
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_answer_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row['recovery_answer_hash']:
+                    return False
+                return check_password_hash(row['recovery_answer_hash'], self._normalize_recovery_answer(answer))
+        except Exception as e:
+            logger.error(f"Error verifying recovery answer for profile {profile_id}: {e}")
+            return False
+
+    def profile_has_recovery(self, profile_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT recovery_answer_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return bool(row and row['recovery_answer_hash'])
+        except Exception as e:
+            logger.error(f"Error checking recovery for profile {profile_id}: {e}")
+            return False
+
+    def _add_profile_recovery_support(self, cursor):
+        """Add recovery question + answer-hash columns (login-password recovery)."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_recovery_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            logger.info("Applying per-profile recovery-question migration...")
+            for col_sql in (
+                "ALTER TABLE profiles ADD COLUMN recovery_question TEXT DEFAULT NULL",
+                "ALTER TABLE profiles ADD COLUMN recovery_answer_hash TEXT DEFAULT NULL",
+            ):
+                try:
+                    cursor.execute(col_sql)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_recovery_v1', '1')")
+            logger.info("Per-profile recovery-question migration completed")
+        except Exception as e:
+            logger.error(f"Error in recovery-question migration: {e}")
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""

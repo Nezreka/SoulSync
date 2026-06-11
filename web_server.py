@@ -25397,6 +25397,75 @@ def auth_logout():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/auth/recovery-question', methods=['GET'])
+def auth_recovery_question():
+    """Return the recovery security-question for a username (forgot-password flow).
+    Generic when the user/question is absent — don't confirm which names exist."""
+    try:
+        username = (request.args.get('username') or '').strip()
+        database = get_database()
+        profile = database.get_profile_by_name(username) if username else None
+        question = database.get_profile_recovery_question(profile['id']) if profile else None
+        if not question:
+            return jsonify({'success': False, 'error': 'No recovery question available'}), 404
+        return jsonify({'success': True, 'question': question})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/recovery-reset', methods=['POST'])
+def auth_recovery_reset():
+    """Reset a login password by answering the recovery question. Brute-force
+    limited; a correct answer sets the new password and authenticates the session."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        answer = data.get('answer') or ''
+        new_password = data.get('new_password') or ''
+        if not username or not answer or not new_password:
+            return jsonify({'success': False, 'error': 'Username, answer and new password are required'}), 400
+        if len(new_password) < 6:
+            return jsonify({'success': False, 'error': 'New password must be at least 6 characters'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        if not profile or not database.verify_profile_recovery_answer(profile['id'], answer):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Incorrect answer'}), 401
+
+        _login_limiter.record_success(_ip)
+        database.set_profile_password(profile['id'], new_password)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-recovery', methods=['POST'])
+def set_profile_recovery_endpoint(profile_id):
+    """Set or clear a profile's recovery question + answer (admin, or self)."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        ok = database.set_profile_recovery(profile_id, data.get('question', ''), data.get('answer', ''))
+        return jsonify({'success': bool(ok), 'has_recovery': database.profile_has_recovery(profile_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/profiles/reset-pin-via-credential', methods=['POST'])
 def reset_pin_via_credential():
     """Reset admin PIN by verifying a known API credential"""
