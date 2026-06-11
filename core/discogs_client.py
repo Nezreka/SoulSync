@@ -12,6 +12,7 @@ import re
 import time
 import threading
 import requests
+from core.metadata.artist_album_cache import get_cached_artist_album_payload, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -77,6 +78,51 @@ def _clean_discogs_artist_name(name: Optional[str]) -> str:
     if not name:
         return ''
     return _DISCOGS_DISAMBIG_RE.sub('', name).strip()
+
+
+# --- Discogs album ID typing -------------------------------------------------
+# Discogs has two album object types — masters (/masters/{id}) and releases
+# (/releases/{id}) — whose numeric IDs share one space, so release N and master
+# N are DIFFERENT albums. A bare numeric ID is therefore ambiguous. We tag the
+# type into the ID string ('m12345' / 'r12345') at the point we parse it, so the
+# correct endpoint can be chosen later without guessing. (Artist IDs are a single
+# namespace and stay untagged.)
+
+def _discogs_album_kind(data: Dict[str, Any]) -> str:
+    """Classify a Discogs album payload as 'master' or 'release'.
+
+    Search results and artist-discography items carry an explicit ``type``;
+    full detail responses don't, but only master detail has ``main_release``."""
+    t = (data.get('type') or '').lower()
+    if t in ('master', 'release'):
+        return t
+    return 'master' if 'main_release' in data else 'release'
+
+
+def _tag_discogs_album_id(raw_id: Any, kind: str) -> str:
+    """``'12345'`` + ``'master'`` -> ``'m12345'``; empty input -> ``''``."""
+    s = str(raw_id or '').strip()
+    if not s:
+        return ''
+    return f"{'m' if kind == 'master' else 'r'}{s}"
+
+
+def _discogs_album_endpoints(album_id: Any) -> List[str]:
+    """Map a (possibly tagged) album ID to the API path(s) to try, in order.
+
+      ``'m12345'`` -> ``['/masters/12345']``
+      ``'r12345'`` -> ``['/releases/12345']``
+      ``'12345'``  (legacy untagged) -> ``['/releases/12345', '/masters/12345']``
+
+    Legacy bare IDs are tried release-first because stored IDs originate
+    overwhelmingly from search / manual-match / collection sync (all releases);
+    this also self-heals pre-fix bad matches. Returns ``[]`` for unusable input."""
+    s = str(album_id or '').strip()
+    if len(s) > 1 and s[0] in ('m', 'r') and s[1:].isdigit():
+        return [f"/{'masters' if s[0] == 'm' else 'releases'}/{s[1:]}"]
+    if s.isdigit():
+        return [f'/releases/{s}', f'/masters/{s}']
+    return []
 
 
 # --- Shared dataclasses (same shape as iTunes/Deezer/Spotify) ---
@@ -304,7 +350,7 @@ class Album:
             external_urls['discogs_api'] = release_data['resource_url']
 
         return cls(
-            id=str(release_data.get('id', '')),
+            id=_tag_discogs_album_id(release_data.get('id', ''), _discogs_album_kind(release_data)),
             name=title,
             artists=artists,
             release_date=release_date,
@@ -643,10 +689,13 @@ class DiscogsClient:
         if cached and cached.get('title'):
             data = cached
         else:
-            # Try as master first (artist discography returns master IDs)
-            data = self._api_get(f'/masters/{release_id}')
-            if not data or not data.get('title'):
-                data = self._api_get(f'/releases/{release_id}')
+            # Hit the endpoint that matches the ID's type (tag-driven, no guessing).
+            data = None
+            for path in _discogs_album_endpoints(release_id):
+                data = self._api_get(path)
+                if data and data.get('title'):
+                    break
+                data = None
             if not data:
                 return None
             cache.store_entity('discogs', 'album', release_id, data)
@@ -680,26 +729,45 @@ class DiscogsClient:
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
         """Get releases by an artist. Prefers master releases, filters features."""
-        # First get the artist name for feature filtering. Strip Discogs
-        # disambiguation suffix so feature-vs-primary matching below
-        # compares against the canonical name, not "Beyoncé*".
-        artist_data = self._api_get(f'/artists/{artist_id}')
-        artist_name = _clean_discogs_artist_name(
-            artist_data.get('name', '') if artist_data else ''
-        ).lower()
+        cache = get_metadata_cache()
+        cached_payload = get_cached_artist_album_payload(cache, 'discogs', artist_id, album_type=album_type, limit=limit)
+        releases = cached_payload.get('_releases') if cached_payload else None
+        artist_name = ''
+        if cached_payload:
+            artist_name = str(cached_payload.get('artist_name') or '').lower()
 
-        data = self._api_get(f'/artists/{artist_id}/releases', {
-            'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
-        })
-        if not data or not data.get('releases'):
-            return []
+        if not isinstance(releases, list) or not releases:
+            # First get the artist name for feature filtering. Strip Discogs
+            # disambiguation suffix so feature-vs-primary matching below
+            # compares against the canonical name, not "Beyoncé*".
+            artist_data = self._api_get(f'/artists/{artist_id}')
+            artist_name = _clean_discogs_artist_name(
+                artist_data.get('name', '') if artist_data else ''
+            ).lower()
+
+            data = self._api_get(f'/artists/{artist_id}/releases', {
+                'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
+            })
+            if not data or not data.get('releases'):
+                return []
+            releases = data.get('releases') or []
+            store_artist_album_items(
+                cache,
+                'discogs',
+                artist_id,
+                releases,
+                album_type=album_type,
+                limit=limit,
+                items_field='_releases',
+                extra_fields={'artist_name': artist_name},
+            )
 
         # Separate masters from individual releases — prefer masters (canonical versions)
         masters = []
         releases_no_master = []
         master_titles = set()
 
-        for item in data['releases']:
+        for item in releases:
             # Skip non-main roles
             role = item.get('role', 'Main').lower()
             if role not in ('main', ''):
@@ -767,10 +835,13 @@ class DiscogsClient:
         if cached:
             return cached
 
-        # Try as master first (master IDs are used in artist discography)
-        data = self._api_get(f'/masters/{release_id}')
-        if not data or not data.get('tracklist'):
-            data = self._api_get(f'/releases/{release_id}')
+        # Hit the endpoint that matches the ID's type (tag-driven, no guessing).
+        data = None
+        for path in _discogs_album_endpoints(release_id):
+            data = self._api_get(path)
+            if data and data.get('tracklist'):
+                break
+            data = None
         if not data or not data.get('tracklist'):
             return None
 
@@ -782,7 +853,7 @@ class DiscogsClient:
             image_url = (primary or images[0]).get('uri')
 
         album_info = {
-            'id': str(data.get('id', release_id)),
+            'id': str(release_id),
             'name': data.get('title', ''),
             'images': [{'url': image_url, 'height': 600, 'width': 600}] if image_url else [],
             'release_date': str(data.get('year', '')) if data.get('year') else '',
@@ -871,9 +942,13 @@ class DiscogsClient:
         cached = cache.get_entity('discogs', 'album', str(release_id))
         if cached and cached.get('title'):
             return cached
-        data = self._api_get(f'/masters/{release_id}')
-        if not data or not data.get('title'):
-            data = self._api_get(f'/releases/{release_id}')
+        # Hit the endpoint that matches the ID's type (tag-driven, no guessing).
+        data = None
+        for path in _discogs_album_endpoints(release_id):
+            data = self._api_get(path)
+            if data and data.get('title'):
+                break
+            data = None
         if data:
             cache.store_entity('discogs', 'album', str(release_id), data)
         return data

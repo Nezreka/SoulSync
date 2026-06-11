@@ -431,10 +431,10 @@ class TestAliasRescueLogging:
                 records.append(record)
 
         handler = _ListHandler(level=_logging.INFO)
-        # Logger name is `soulsync.acoustid.verification` per
-        # `core.acoustid_verification`'s `get_logger("acoustid_verification")`
-        # — dot-separated, NOT underscored.
-        verifier_logger = _logging.getLogger('soulsync.acoustid.verification')
+        # The alias-aware comparison now lives in the shared core
+        # (`core.matching.audio_verification`, logger `audio_verification`),
+        # which is where the rescue diagnostic is emitted.
+        verifier_logger = _logging.getLogger('soulsync.audio_verification')
         verifier_logger.addHandler(handler)
         prior_level = verifier_logger.level
         verifier_logger.setLevel(_logging.INFO)

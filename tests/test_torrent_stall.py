@@ -102,3 +102,38 @@ def test_get_stall_action(raw, expected):
     with patch.object(ts, "config_manager",
                       _cfg({"download_source.torrent_stall_action": raw})):
         assert get_stall_action() == expected
+
+
+# ── metadata-phase noise (noldevin #2: metaDL stuck 11h, stall never fired) ──
+def test_metadata_phase_byte_noise_does_not_reset_clock():
+    """A magnet stuck 'downloading metadata' reports size==0 and a downloaded
+    counter that still ticks up from DHT/peer overhead. Those bumps must NOT
+    reset the stall clock, or the dead magnet never times out (the bug)."""
+    t = StallTracker(timeout_seconds=600)
+    assert t.is_stalled(0,     "downloading", now=0,   size=0) is False  # first
+    assert t.is_stalled(16384, "downloading", now=120, size=0) is False  # noise bump
+    assert t.is_stalled(32768, "downloading", now=300, size=0) is False  # more noise
+    assert t.is_stalled(40000, "downloading", now=480, size=0) is False  # still under
+    # Despite the byte counter climbing the whole time, no metadata was obtained
+    # → stalled at the timeout.
+    assert t.is_stalled(50000, "downloading", now=600, size=0) is True
+
+
+def test_obtaining_metadata_resets_the_clock():
+    """size 0 -> >0 means metadata arrived — real progress, reset the clock."""
+    t = StallTracker(timeout_seconds=600)
+    assert t.is_stalled(0, "downloading", now=0,   size=0) is False
+    assert t.is_stalled(0, "downloading", now=500, size=0) is False        # accruing
+    # metadata arrives at t=550 (size now known) → progress → clock resets
+    assert t.is_stalled(0, "downloading", now=550, size=10_000_000) is False
+    assert t.is_stalled(0, "downloading", now=900, size=10_000_000) is False  # <600 since reset
+    assert t.is_stalled(0, "downloading", now=1150, size=10_000_000) is True  # 600 later, no bytes
+
+
+def test_real_download_progress_tracked_after_metadata():
+    """Once metadata is in, byte progress resets the clock as normal."""
+    t = StallTracker(timeout_seconds=600)
+    assert t.is_stalled(0,      "downloading", now=0,   size=10_000_000) is False
+    assert t.is_stalled(500000, "downloading", now=400, size=10_000_000) is False  # progress
+    assert t.is_stalled(500000, "downloading", now=900, size=10_000_000) is False  # <600 since
+    assert t.is_stalled(500000, "downloading", now=1001, size=10_000_000) is True  # stalled
