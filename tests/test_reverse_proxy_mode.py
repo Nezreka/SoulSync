@@ -50,3 +50,32 @@ def test_failure_falls_back_to_noop():
         raise RuntimeError('config exploded')
     assert apply_reverse_proxy_mode(app, boom) is False
     assert not isinstance(app.wsgi_app, ProxyFix)
+
+
+def test_off_adds_no_security_headers():
+    app = Flask(__name__)
+    apply_reverse_proxy_mode(app, _cfg(False))
+
+    @app.route('/ping')
+    def _ping():
+        return 'ok'
+
+    resp = app.test_client().get('/ping')
+    # direct/LAN install: none of the proxy-mode headers are added
+    assert 'X-Content-Type-Options' not in resp.headers
+    assert 'X-Frame-Options' not in resp.headers
+    assert 'Strict-Transport-Security' not in resp.headers
+
+
+def test_on_adds_security_headers():
+    app = Flask(__name__)
+    apply_reverse_proxy_mode(app, _cfg(True))
+
+    @app.route('/ping')
+    def _ping():
+        return 'ok'
+
+    resp = app.test_client().get('/ping')
+    assert resp.headers.get('X-Content-Type-Options') == 'nosniff'
+    assert resp.headers.get('X-Frame-Options') == 'SAMEORIGIN'
+    assert 'max-age=' in resp.headers.get('Strict-Transport-Security', '')
