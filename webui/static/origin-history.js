@@ -99,7 +99,8 @@ function _renderOriginEntries() {
         return;
     }
     const ctxLabel = _originActiveTab === 'watchlist' ? 'Watchlist artist' : 'Playlist';
-    body.innerHTML = _originEntries.map(e => {
+
+    const entryRow = (e) => {
         const checked = _originSelected.has(e.id) ? 'checked' : '';
         const thumb = e.thumb_url
             ? `<img class="library-history-thumb" src="${escapeHtml(e.thumb_url)}" alt="" loading="lazy"
@@ -116,7 +117,6 @@ function _renderOriginEntries() {
                         <div class="library-history-entry-title">${escapeHtml(e.title || 'Unknown')}</div>
                         <div class="library-history-entry-meta">${escapeHtml(e.artist_name || '')}${e.album_name ? ' — ' + escapeHtml(e.album_name) : ''}</div>
                     </div>
-                    <span class="origin-context-badge" title="${ctxLabel}">${escapeHtml(e.origin_context || '—')}</span>
                     ${e.quality ? `<span class="library-history-badge">${escapeHtml(e.quality)}</span>` : ''}
                     <div class="library-history-entry-time">${escapeHtml(_originFormatTime(e.created_at))}</div>
                     <button class="lh-audit-btn origin-row-delete" title="Delete this file + entry"
@@ -125,8 +125,37 @@ function _renderOriginEntries() {
                 ${fname ? `<div class="library-history-entry-source"><span class="lh-prov-label">File:</span> ${escapeHtml(fname)}</div>` : ''}
             </div>
         </div>`;
-    }).join('');
+    };
+
+    // #831: group entries by what triggered them (watchlist artist / playlist
+    // name) instead of a flat list with a per-row badge. Entries arrive
+    // newest-first, so groups order themselves by their newest download.
+    const groups = new Map();
+    for (const e of _originEntries) {
+        const key = e.origin_context || '—';
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(e);
+    }
+
+    body.innerHTML = Array.from(groups.entries()).map(([ctx, entries]) => `
+        <div class="origin-group">
+            <button type="button" class="origin-group-header" onclick="toggleOriginGroup(this)" title="${ctxLabel}">
+                <span class="origin-group-caret">▾</span>
+                <span class="origin-group-name">${escapeHtml(ctx)}</span>
+                <span class="origin-group-count">${entries.length} track${entries.length !== 1 ? 's' : ''}</span>
+            </button>
+            <div class="origin-group-body">${entries.map(entryRow).join('')}</div>
+        </div>`).join('');
     _updateOriginDeleteButton();
+}
+
+function toggleOriginGroup(btn) {
+    const bodyEl = btn.parentElement.querySelector('.origin-group-body');
+    const caret = btn.querySelector('.origin-group-caret');
+    if (!bodyEl) return;
+    const open = bodyEl.style.display !== 'none';
+    bodyEl.style.display = open ? 'none' : '';
+    if (caret) caret.textContent = open ? '▸' : '▾';
 }
 
 function toggleOriginEntry(id, on) {

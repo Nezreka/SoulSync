@@ -1376,14 +1376,34 @@ class WatchlistScanner:
                                 if scan_state is not None:
                                     scan_state['tracks_found_this_scan'] += 1
 
-                                if self.add_track_to_wishlist(track, album_data, artist):
+                                added = self.add_track_to_wishlist(
+                                    track, album_data, artist,
+                                    scan_run_id=(scan_state or {}).get('scan_run_id', ''),
+                                )
+
+                                track_artists = track.get('artists', [])
+                                track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
+
+                                # #831: per-run ledger so the completed-scan
+                                # summary can list WHICH tracks the counts mean.
+                                # 'skipped' = found-new but add_to_wishlist
+                                # declined (already queued in the wishlist, or
+                                # the artist is blocklisted). Capped for sanity.
+                                if scan_state is not None:
+                                    events = scan_state.setdefault('scan_track_events', [])
+                                    if len(events) < 500:
+                                        events.append({
+                                            'track_name': track_name,
+                                            'artist_name': track_artist_name,
+                                            'album_name': album_name,
+                                            'album_image_url': album_image_url,
+                                            'status': 'added' if added else 'skipped',
+                                        })
+
+                                if added:
                                     artist_added_tracks += 1
                                     if scan_state is not None:
                                         scan_state['tracks_added_this_scan'] += 1
-
-                                    track_artists = track.get('artists', [])
-                                    track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'
-                                    if scan_state is not None:
                                         scan_state['recent_wishlist_additions'].insert(0, {
                                             'track_name': track_name,
                                             'artist_name': track_artist_name,
@@ -2224,7 +2244,8 @@ class WatchlistScanner:
             logger.warning(f"Error checking if track exists: {track_name}: {e}")
             return True  # Assume missing if we can't check
     
-    def add_track_to_wishlist(self, track, album, watchlist_artist: WatchlistArtist) -> bool:
+    def add_track_to_wishlist(self, track, album, watchlist_artist: WatchlistArtist,
+                              scan_run_id: str = '') -> bool:
         """Add a missing track to the wishlist"""
         try:
             # Handle both dict and object track/album formats
@@ -2306,7 +2327,9 @@ class WatchlistScanner:
                     'watchlist_artist_name': watchlist_artist.artist_name,
                     'watchlist_artist_id': watchlist_artist.spotify_artist_id,
                     'album_name': album_name,
-                    'scan_timestamp': datetime.now().isoformat()
+                    'scan_timestamp': datetime.now().isoformat(),
+                    # #831: groups wishlist rows by the scan run that added them.
+                    'scan_run_id': scan_run_id or '',
                 },
                 profile_id=getattr(watchlist_artist, 'profile_id', 1)
             )

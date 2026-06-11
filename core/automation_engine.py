@@ -635,6 +635,11 @@ class AutomationEngine:
         action_config['_automation_name'] = auto.get('name', '')
         if profile_id is not None:
             action_config['_profile_id'] = profile_id
+        # The profile this run acts AS: an explicit trigger profile, else the
+        # automation's owner, else admin. System + admin automations are
+        # profile 1, so this is a no-op for them — only non-admin-owned
+        # automations gain their correct identity in the background.
+        _effective_profile_id = profile_id if profile_id is not None else (auto.get('profile_id') or 1)
 
         # Action delay (skipped for manual run_now)
         delay_minutes = action_config.get('delay', 0)
@@ -681,9 +686,14 @@ class AutomationEngine:
             except Exception as e:
                 logger.debug("scheduled progress init: %s", e)
 
-        # Execute the action
+        # Execute the action under the owner's profile so get_current_profile_id()
+        # (and the per-profile clients it resolves) act as the automation's owner
+        # in the background, not admin. Reset in finally so a pooled thread can't
+        # leak the override to the next job.
         error = None
         result = {}
+        from core.profile_context import set_background_profile, reset_background_profile
+        _bg_token = set_background_profile(_effective_profile_id)
         try:
             result = handler_info['handler'](action_config) or {}
             logger.info(f"Automation '{auto['name']}' (id={automation_id}) executed: {result.get('status', 'ok')}")
@@ -702,6 +712,8 @@ class AutomationEngine:
             error = str(e)
             result = {'status': 'error', 'error': error}
             logger.error(f"Automation '{auto['name']}' (id={automation_id}) failed: {e}")
+        finally:
+            reset_background_profile(_bg_token)
 
         # Finalize progress tracking
         if self._progress_finish_fn:

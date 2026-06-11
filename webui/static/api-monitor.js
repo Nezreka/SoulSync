@@ -2830,12 +2830,10 @@ async function openWatchlistGlobalSettingsModal() {
         // Update options visibility based on toggle state
         toggleGlobalOverrideOptions();
 
-        // Update toggle label border
+        // Reflect enabled state on the toggle card (styled in CSS)
         const toggleLabel = document.getElementById('global-override-toggle-label');
         if (toggleLabel) {
-            toggleLabel.style.border = config.global_override_enabled
-                ? '2px solid rgba(29, 185, 84, 0.5)'
-                : '2px solid rgba(255, 255, 255, 0.1)';
+            toggleLabel.classList.toggle('enabled', !!config.global_override_enabled);
         }
 
         // Show modal
@@ -2867,12 +2865,10 @@ function toggleGlobalOverrideOptions() {
         options.style.pointerEvents = enabled ? 'auto' : 'none';
     }
 
-    // Update toggle label border
+    // Reflect enabled state on the toggle card (styled in CSS)
     const toggleLabel = document.getElementById('global-override-toggle-label');
     if (toggleLabel) {
-        toggleLabel.style.border = enabled
-            ? '2px solid rgba(29, 185, 84, 0.5)'
-            : '2px solid rgba(255, 255, 255, 0.1)';
+        toggleLabel.classList.toggle('enabled', enabled);
     }
 }
 
@@ -3144,7 +3140,7 @@ async function startWatchlistScan() {
     try {
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = true;
-        button.textContent = 'Starting scan...';
+        _wlSetChipLabel(button, 'Starting scan...');
         button.classList.add('btn-processing');
 
         const response = await fetch('/api/watchlist/scan', {
@@ -3157,7 +3153,7 @@ async function startWatchlistScan() {
             throw new Error(data.error || 'Failed to start scan');
         }
 
-        button.textContent = 'Scanning...';
+        _wlSetChipLabel(button, 'Scanning...');
 
         // Show cancel button
         const cancelBtn = document.getElementById('cancel-watchlist-scan-btn');
@@ -3180,7 +3176,7 @@ async function startWatchlistScan() {
         console.error('Error starting watchlist scan:', error);
         const button = document.getElementById('scan-watchlist-btn');
         button.disabled = false;
-        button.textContent = 'Scan for New Releases';
+        _wlSetChipLabel(button, 'Scan for New Releases');
         button.classList.remove('btn-processing');
         alert(`Error starting scan: ${error.message}`);
     }
@@ -3189,6 +3185,91 @@ async function startWatchlistScan() {
 /**
  * Poll watchlist scan status
  */
+// #831 (Tacobell444): the scan summary said "New tracks: 19 • Added to
+// wishlist: 10" with no way to see WHICH tracks. The scan now ships a per-run
+// ledger (scan_track_events: track/artist/album/thumb + added|skipped) and
+// this renders it as an expandable list under the completion summary.
+function renderWatchlistScanTrackLedger(events) {
+    if (!Array.isArray(events) || events.length === 0) return '';
+    const added = events.filter(e => e.status === 'added');
+    const skipped = events.filter(e => e.status !== 'added');
+
+    const row = (e) => `
+        <div class="watchlist-live-addition-item">
+            <img src="${escapeHtml(e.album_image_url || '')}" alt="" onerror="this.style.display='none';" />
+            <div class="watchlist-live-addition-item-info">
+                <div class="watchlist-live-addition-item-track">${escapeHtml(e.track_name || '')}</div>
+                <div class="watchlist-live-addition-item-artist">${escapeHtml(e.artist_name || '')}${e.album_name ? ' — ' + escapeHtml(e.album_name) : ''}</div>
+            </div>
+            ${e.status === 'added'
+                ? '<span class="watchlist-scan-track-badge added">added</span>'
+                : '<span class="watchlist-scan-track-badge skipped">skipped</span>'}
+        </div>`;
+
+    const section = (label, list) => list.length
+        ? `<div class="watchlist-scan-tracks-section">${label} (${list.length})</div>${list.map(row).join('')}`
+        : '';
+
+    return `
+        <button type="button" class="watchlist-scan-tracks-toggle" onclick="toggleWatchlistScanTracks(this)">
+            Show tracks <span class="watchlist-scan-tracks-caret">▾</span>
+        </button>
+        <div class="watchlist-scan-tracks" style="display: none;">
+            ${section('Added to wishlist', added)}
+            ${section('Found but skipped — already queued or blocklisted', skipped)}
+        </div>`;
+}
+
+// Human-readable phase line for the scan deck ("checking_album_2_of_5" →
+// "Checking album 2 of 5").
+// Set a wl-chip button's label without destroying its icon/shimmer children
+// (textContent wipes them; these buttons carry an svg + shimmer span).
+function _wlSetChipLabel(btn, text) {
+    if (!btn) return;
+    const svg = btn.querySelector('svg');
+    const shimmer = btn.querySelector('.wl-chip-shimmer');
+    btn.textContent = '';
+    if (svg) btn.appendChild(svg);
+    btn.appendChild(document.createTextNode(' ' + text));
+    if (shimmer) btn.appendChild(shimmer);
+}
+
+function _wlPrettyPhase(data) {
+    const phase = data.current_phase || '';
+    if (!phase) return 'Working…';
+    const m = phase.match(/^checking_album_(\d+)_of_(\d+)$/);
+    if (m) return `Checking album ${m[1]} of ${m[2]}`;
+    const map = {
+        starting: 'Starting…',
+        fetching_discography: 'Fetching releases…',
+        populating_discovery_pool: 'Populating discovery…',
+        updating_listenbrainz: 'Updating ListenBrainz…',
+    };
+    return map[phase] || phase.replace(/_/g, ' ');
+}
+
+// Update a live counter and replay its pop animation when the value changes.
+function _wlBumpCounter(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const text = String(value);
+    if (el.textContent !== text) {
+        el.textContent = text;
+        el.classList.remove('pop');
+        void el.offsetWidth;  // restart the CSS animation
+        el.classList.add('pop');
+    }
+}
+
+function toggleWatchlistScanTracks(btn) {
+    const list = btn.parentElement.querySelector('.watchlist-scan-tracks');
+    if (!list) return;
+    const open = list.style.display !== 'none';
+    list.style.display = open ? 'none' : 'block';
+    btn.innerHTML = (open ? 'Show tracks ' : 'Hide tracks ')
+        + `<span class="watchlist-scan-tracks-caret">${open ? '▾' : '▴'}</span>`;
+}
+
 function handleWatchlistScanData(data) {
     const button = document.getElementById('scan-watchlist-btn');
     const liveActivity = document.getElementById('watchlist-live-activity');
@@ -3201,17 +3282,23 @@ function handleWatchlistScanData(data) {
 
     // Update live visual activity display
     if (liveActivity && data.status === 'scanning') {
-        liveActivity.style.display = 'flex';
+        liveActivity.style.display = liveActivity.classList.contains('wl-scan-deck') ? 'block' : 'flex';
 
-        // Update artist image and name
+        // Update artist image and name (hide the img when THIS artist has no
+        // photo, so the previous artist's portrait doesn't linger and the
+        // glyph placeholder shows instead)
         const artistImg = document.getElementById('watchlist-artist-img');
         const artistName = document.getElementById('watchlist-artist-name');
-        if (artistImg && data.current_artist_image_url) {
-            artistImg.src = data.current_artist_image_url;
-            artistImg.style.display = 'block';
+        if (artistImg) {
+            if (data.current_artist_image_url) {
+                artistImg.src = data.current_artist_image_url;
+                artistImg.style.display = 'block';
+            } else {
+                artistImg.style.display = 'none';
+            }
         }
         if (artistName) {
-            artistName.textContent = data.current_artist_name || 'Processing...';
+            artistName.textContent = data.current_artist_name || 'Starting…';
         }
 
         // Update album image and name
@@ -3224,30 +3311,54 @@ function handleWatchlistScanData(data) {
             albumImg.style.display = 'none';
         }
         if (albumName) {
-            albumName.textContent = data.current_album || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+            albumName.textContent = data.current_album
+                || (data.current_phase === 'fetching_discography' ? 'Fetching releases…' : 'Looking for new releases…');
         }
 
-        // Update current track
+        // Update current track ('' keeps the slot without echoing the album line)
         const trackName = document.getElementById('watchlist-track-name');
         if (trackName) {
-            trackName.textContent = data.current_track_name || (data.current_phase === 'fetching_discography' ? 'Fetching releases...' : 'Processing...');
+            trackName.textContent = data.current_track_name || '—';
         }
 
-        // Update wishlist additions feed
+        // #831 round 2: scan-deck extras — artist progress bar, live counters,
+        // readable phase. All optional elements, so the legacy modal markup
+        // (which lacks them) keeps working untouched.
+        const total = data.total_artists || 0;
+        const idx = total ? Math.min((data.current_artist_index || 0) + 1, total) : 0;
+        const progText = document.getElementById('wl-scan-progress-text');
+        if (progText) progText.textContent = total ? `${idx} / ${total} artists` : '';
+        const progBar = document.getElementById('wl-scan-progress-bar');
+        if (progBar && total) progBar.style.width = `${Math.round((100 * idx) / total)}%`;
+        const phaseEl = document.getElementById('wl-scan-phase');
+        if (phaseEl) phaseEl.textContent = _wlPrettyPhase(data);
+        _wlBumpCounter('wl-scan-found', data.tracks_found_this_scan || 0);
+        _wlBumpCounter('wl-scan-added', data.tracks_added_this_scan || 0);
+
+        // Update wishlist additions feed — only re-render when it actually
+        // changed, so the slide-in animation plays once per new track instead
+        // of replaying on every poll.
         const additionsFeed = document.getElementById('watchlist-additions-feed');
         if (additionsFeed) {
-            if (data.recent_wishlist_additions && data.recent_wishlist_additions.length > 0) {
-                additionsFeed.innerHTML = data.recent_wishlist_additions.map(item => `
-                    <div class="watchlist-live-addition-item">
-                        <img src="${item.album_image_url || ''}" alt="" onerror="this.style.display='none';" />
-                        <div class="watchlist-live-addition-item-info">
-                            <div class="watchlist-live-addition-item-track">${item.track_name}</div>
-                            <div class="watchlist-live-addition-item-artist">${item.artist_name}</div>
+            const additions = data.recent_wishlist_additions || [];
+            const feedKey = additions.map(a => a.track_name).join('');
+            if (additionsFeed.dataset.feedKey !== feedKey) {
+                const grew = additions.length > 0 && additionsFeed.dataset.feedKey !== undefined
+                    && feedKey.length > (additionsFeed.dataset.feedKey || '').length;
+                additionsFeed.dataset.feedKey = feedKey;
+                if (additions.length > 0) {
+                    additionsFeed.innerHTML = additions.map((item, i) => `
+                        <div class="watchlist-live-addition-item${grew && i === 0 ? ' is-new' : ''}">
+                            <img src="${escapeHtml(item.album_image_url || '')}" alt="" onerror="this.style.display='none';" />
+                            <div class="watchlist-live-addition-item-info">
+                                <div class="watchlist-live-addition-item-track">${escapeHtml(item.track_name || '')}</div>
+                                <div class="watchlist-live-addition-item-artist">${escapeHtml(item.artist_name || '')}</div>
+                            </div>
                         </div>
-                    </div>
-                `).join('');
-            } else {
-                additionsFeed.innerHTML = '<div class="watchlist-live-addition-empty">No tracks added yet...</div>';
+                    `).join('');
+                } else {
+                    additionsFeed.innerHTML = '<div class="watchlist-live-addition-empty">No tracks added yet…</div>';
+                }
             }
         }
     } else if (liveActivity && data.status !== 'scanning') {
@@ -3257,7 +3368,7 @@ function handleWatchlistScanData(data) {
     if (data.status === 'completed') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3295,6 +3406,7 @@ function handleWatchlistScanData(data) {
                         <span class="sync-separator"> • </span>
                         <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
                     </div>
+                    ${renderWatchlistScanTrackLedger(data.scan_track_events)}
                 </div>
             `;
         }
@@ -3307,7 +3419,7 @@ function handleWatchlistScanData(data) {
     } else if (data.status === 'cancelled') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3341,6 +3453,7 @@ function handleWatchlistScanData(data) {
                         <span class="sync-separator"> &bull; </span>
                         <span class="sync-stat">Added to wishlist: ${addedTracks}</span>
                     </div>
+                    ${renderWatchlistScanTrackLedger(data.scan_track_events)}
                 </div>
             `;
         }
@@ -3354,7 +3467,7 @@ function handleWatchlistScanData(data) {
     } else if (data.status === 'error') {
         if (button) {
             button.disabled = false;
-            button.textContent = 'Scan for New Releases';
+            _wlSetChipLabel(button, 'Scan for New Releases');
             button.classList.remove('btn-processing');
         }
 
@@ -3405,7 +3518,7 @@ async function updateSimilarArtists() {
         const scanButton = document.getElementById('scan-watchlist-btn');
 
         button.disabled = true;
-        button.textContent = 'Updating...';
+        _wlSetChipLabel(button, 'Updating...');
         button.classList.add('btn-processing');
         if (scanButton) scanButton.disabled = true;
 
@@ -3430,7 +3543,7 @@ async function updateSimilarArtists() {
         const scanButton = document.getElementById('scan-watchlist-btn');
 
         button.disabled = false;
-        button.textContent = 'Update Similar Artists';
+        _wlSetChipLabel(button, 'Update Similar Artists');
         button.classList.remove('btn-processing');
         if (scanButton) scanButton.disabled = false;
 
@@ -3453,7 +3566,7 @@ async function pollSimilarArtistsUpdate() {
             if (data.status === 'completed') {
                 if (button) {
                     button.disabled = false;
-                    button.textContent = 'Update Similar Artists';
+                    _wlSetChipLabel(button, 'Update Similar Artists');
                     button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
@@ -3464,7 +3577,7 @@ async function pollSimilarArtistsUpdate() {
             } else if (data.status === 'error') {
                 if (button) {
                     button.disabled = false;
-                    button.textContent = 'Update Similar Artists';
+                    _wlSetChipLabel(button, 'Update Similar Artists');
                     button.classList.remove('btn-processing');
                 }
                 if (scanButton) scanButton.disabled = false;
@@ -3491,7 +3604,7 @@ async function pollSimilarArtistsUpdate() {
 
         if (button) {
             button.disabled = false;
-            button.textContent = 'Update Similar Artists';
+            _wlSetChipLabel(button, 'Update Similar Artists');
             button.classList.remove('btn-processing');
         }
         if (scanButton) scanButton.disabled = false;

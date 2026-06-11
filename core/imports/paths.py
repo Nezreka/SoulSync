@@ -587,6 +587,45 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         disc_label = _get_config_manager().get("file_organization.disc_label", "Disc")
 
         folder_path, filename_base = get_file_path_from_template(template_context, "album_path")
+
+        # #829: if this album already lives in a single folder on disk, drop the
+        # new track there instead of a freshly-templated folder — this is what
+        # keeps an album from splitting when $albumtype/$year drift between
+        # batches (wishlist, Album Completeness, a missed track later). Strict
+        # match + transfer-dir-only + single-folder-only inside the resolver;
+        # any miss falls through to the template path below. Best-effort.
+        reuse_folder = None
+        if filename_base:
+            try:
+                from core.library.existing_album_folder import resolve_existing_album_folder
+                from database.music_database import get_database
+                try:
+                    _active_server = _get_config_manager().get_active_media_server()
+                except Exception:
+                    _active_server = None
+                _spotify_album_id = (album_context.get("id")
+                                     if album_context and str(source).startswith("spotify") else None)
+                _expected_tracks = None
+                if album_context and album_context.get("total_tracks"):
+                    _expected_tracks = _coerce_int(album_context.get("total_tracks"), 0) or None
+                reuse_folder = resolve_existing_album_folder(
+                    db=get_database(),
+                    transfer_dir=transfer_dir,
+                    album_name=album_info.get("album_name"),
+                    album_artist=template_context.get("albumartist"),
+                    spotify_album_id=_spotify_album_id,
+                    active_server=_active_server,
+                    expected_track_count=_expected_tracks,
+                    config_manager=_get_config_manager(),
+                )
+            except Exception as _reuse_err:
+                logger.debug("[Existing Album Folder] lookup failed: %s", _reuse_err)
+                reuse_folder = None
+        if reuse_folder and filename_base:
+            final_path = os.path.join(reuse_folder, filename_base + file_ext)
+            _ensure_dir(reuse_folder, exist_ok=True)
+            return final_path, True
+
         if folder_path and filename_base:
             if total_discs > 1 and not user_controls_disc:
                 disc_folder = f"{disc_label} {disc_number}"

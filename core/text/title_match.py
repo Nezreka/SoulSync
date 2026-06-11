@@ -115,6 +115,77 @@ def strip_redundant_context_qualifiers(title: str, *context_texts: str) -> str:
     return re.sub(r"\s+", " ", out).strip()
 
 
+# Qualifier tokens that mark a genuinely DIFFERENT recording/cut — these must
+# keep blocking a match. Union of the matching-engine keyword lists plus the
+# Spanish markers seen in real libraries (#825: 'En Directo…', 'Versión 1988',
+# 'Dueto 2007'). Titles reaching the matcher are unidecode-normalized, so the
+# ASCII forms ('version') cover the accented ones ('versión').
+_VERSION_MARKER_TOKENS = frozenset({
+    # English
+    "remix", "mix", "rmx", "live", "acoustic", "unplugged", "instrumental",
+    "karaoke", "demo", "demos", "edit", "version", "versions", "remaster",
+    "remastered", "slowed", "reverb", "sped", "spedup", "speedup", "extended",
+    "club", "mashup", "bootleg", "cover", "covers", "reprise", "session",
+    "sessions", "mono", "stereo", "duet", "rework", "dub", "vip", "single",
+    "radio", "alt", "alternate", "alternative", "take", "edition", "orchestral",
+    "symphonic", "piano", "acapella", "cappella", "nightcore",
+    # Distinct-track qualifiers — '(Interlude)' etc. are SEPARATE short tracks
+    # that share the base name with the full song; never treat as subtitles.
+    "interlude", "intro", "outro", "skit", "freestyle", "medley", "snippet",
+    # Part/volume markers whose number can be non-numeric ('Pt. II') — the
+    # digit guard below only catches actual digits.
+    "pt", "part", "vol", "ii", "iii", "iv", "vi", "vii", "viii",
+    # Spanish (unidecode-normalized; 'versión' → 'version' is covered above)
+    "directo", "vivo", "dueto",
+})
+
+
+def strip_subtitle_qualifiers(title: str, other_title: str) -> str:
+    """Remove bracketed qualifiers that are SUBTITLES, not version markers.
+
+    #825 (carlosjfcasero): the wishlist held 'Llamando a la tierra (Serenade
+    From the Stars)' — the song's official subtitle — while the library track
+    was the bare 'Llamando a la tierra'. The qualifier appears in no album or
+    counterpart title, so :func:`strip_redundant_context_qualifiers` keeps it,
+    and the length-ratio penalty then crushes an obviously-same song to ~0.14.
+    The sync matcher reported it missing on every run (re-adding it to the
+    wishlist) and the cleanup — same matcher — could never remove it.
+
+    A qualifier is stripped only when ALL of:
+      * its text does not appear in ``other_title`` (if it does, the direct
+        comparison already handles it);
+      * it contains no version-marker token ('(Live)', '(Versión 1988)',
+        '(Dueto 2007)' keep blocking — they are different recordings);
+      * it introduces no digit token absent from ``other_title`` ('(Pt. 2)',
+        '(2007)' are different releases, never subtitles).
+
+    Inputs should be normalized the same way the caller compares them
+    (lowercased / unidecode'd), like strip_redundant_context_qualifiers.
+    """
+    if not title:
+        return title
+
+    other = (other_title or "").casefold()
+    other_tokens = set(_TOKEN_RE.findall(other))
+
+    def _drop(match: re.Match) -> str:
+        inner = match.group(1).strip().casefold()
+        if not inner:
+            return " "
+        # Restated in the counterpart title — leave for the direct comparison.
+        if re.search(r"\b" + re.escape(inner) + r"\b", other):
+            return match.group(0)
+        tokens = _TOKEN_RE.findall(inner)
+        if any(t in _VERSION_MARKER_TOKENS for t in tokens):
+            return match.group(0)
+        if any(any(c.isdigit() for c in t) and t not in other_tokens for t in tokens):
+            return match.group(0)
+        return " "
+
+    out = _QUALIFIER_RE.sub(_drop, title)
+    return re.sub(r"\s+", " ", out).strip()
+
+
 def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
     """True when the digit-bearing tokens of two titles differ — 'Vol.4' vs
     'Vol.4.5', 'Album' vs 'Album 2'. A numeric difference is a different
@@ -133,5 +204,6 @@ def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
 __all__ = [
     "titles_plausibly_same",
     "strip_redundant_context_qualifiers",
+    "strip_subtitle_qualifiers",
     "numeric_tokens_differ",
 ]
