@@ -9316,6 +9316,59 @@ def get_album_tracks(album_id):
         logger.exception("Error fetching album tracks for album %s", album_id)
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/artist/<artist_id>/record', methods=['GET'])
+def get_artist_db_record(artist_id):
+    """Return the COMPLETE database record for a library artist — every column of
+    the ``artists`` row (all source IDs + match statuses, cached bios / tags /
+    similar / urls, timestamps, soul_id, etc.) plus owned album/track counts.
+
+    Powers the artist-detail "DB Record" inspector. JSON-encoded text columns
+    (genres, aliases, lastfm_tags/similar, discogs_urls, …) are decoded into real
+    arrays/objects so the dump is clean rather than escaped strings.
+    """
+    try:
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM artists WHERE id = ?", (str(artist_id),))
+            row = cur.fetchone()
+            if row is None:
+                return jsonify({"success": False, "error": "Artist not found in library"}), 404
+
+            record = {}
+            for key in row.keys():
+                val = row[key]
+                if isinstance(val, str):
+                    s = val.strip()
+                    if s and s[0] in '[{':
+                        try:
+                            val = json.loads(s)
+                        except Exception:  # noqa: S110 — leave non-JSON text as-is
+                            pass
+                record[key] = val
+
+            counts = {}
+            for label, table in (('albums', 'albums'), ('tracks', 'tracks')):
+                try:
+                    cur.execute(f"SELECT COUNT(*) FROM {table} WHERE artist_id = ?", (str(artist_id),))
+                    counts[label] = cur.fetchone()[0]
+                except Exception:
+                    counts[label] = None
+        finally:
+            conn.close()
+
+        return jsonify({
+            "success": True,
+            "artist_id": str(artist_id),
+            "counts": counts,
+            "record": record,
+        })
+    except Exception as e:
+        logger.error(f"Artist DB record fetch failed for {artist_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/artist/<artist_id>/download-discography', methods=['POST'])
 def download_discography(artist_id):
     """Add selected albums from an artist's discography to the wishlist.
