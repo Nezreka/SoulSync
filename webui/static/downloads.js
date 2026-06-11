@@ -3676,10 +3676,36 @@ function processModalStatusUpdate(playlistId, data) {
             } else {
                 switch (task.status) {
                     case 'pending': statusText = '⏸️ Pending'; break;
-                    case 'searching': statusText = '🔍 Searching...'; break;
-                    case 'downloading': statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`; break;
+                    case 'searching':
+                        statusText = '🔍 Searching...';
+                        // Quarantine-retry engine: show which attempt we're on
+                        // ("retry 2/5") while it walks the next-best candidates.
+                        if (task.retry_info) statusText += ` 🔁 retry ${task.retry_info}`;
+                        break;
+                    case 'downloading':
+                        statusText = `⏬ Downloading... ${Math.round(task.progress || 0)}%`;
+                        if (task.retry_info) statusText += ` 🔁 retry ${task.retry_info}`;
+                        break;
                     case 'post_processing': statusText = '⌛ Processing...'; break;
-                    case 'completed': statusText = '✅ Completed'; completedCount++; break;
+                    case 'completed': {
+                        statusText = '✅ Completed';
+                        // Verification badge — how this file passed verification:
+                        // verified = clean AcoustID pass; unverified = couldn't be
+                        // hard-confirmed (cross-script/ambiguous/no fingerprint match);
+                        // force_imported = accepted as best candidate after the retry
+                        // budget was exhausted (version-mismatch fallback).
+                        if (task.verification_status === 'force_imported') {
+                            statusText += ' <span class="verif-badge verif-force" title="Force-imported: accepted as best available candidate after repeated mismatches (version-mismatch fallback). A library AcoustID scan reports these as informational.">⚑</span>';
+                        } else if (task.verification_status === 'unverified') {
+                            statusText += ' <span class="verif-badge verif-unverified" title="Imported but not hard-verified (AcoustID could not confirm — e.g. cross-script metadata or no fingerprint match).">⚠</span>';
+                        } else if (task.verification_status === 'verified') {
+                            statusText += ' <span class="verif-badge verif-ok" title="AcoustID verified: audio fingerprint matches the expected track.">✔</span>';
+                        } else if (task.verification_status === 'human_verified') {
+                            statusText += ' <span class="verif-badge verif-human" title="Human verified: you confirmed this file is the right track.">🛡✔</span>';
+                        }
+                        completedCount++;
+                        break;
+                    }
                     case 'not_found': statusText = '🔇 Not Found'; notFoundCount++; break;
                     case 'failed': {
                         // Distinguish quarantine outcomes from generic
@@ -3712,7 +3738,14 @@ function processModalStatusUpdate(playlistId, data) {
                 delete statusEl.dataset.quarantineReason;
                 delete statusEl.dataset.quarantineTrack;
                 delete statusEl.dataset.detailOpen;
-                statusEl.textContent = statusText;
+                // statusText is static markup only; the verif-badge span is the
+                // one case that needs HTML. Everything else stays textContent
+                // (XSS-safe default).
+                if (statusText.includes('class="verif-badge')) {
+                    statusEl.innerHTML = statusText;
+                } else {
+                    statusEl.textContent = statusText;
+                }
                 // Visual-only hooks: the cell carries its state for the badge
                 // styling, the row glows while a track is actively working.
                 statusEl.dataset.state = isQuarantinedTask ? 'quarantined'

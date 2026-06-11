@@ -15,6 +15,9 @@ from typing import Optional
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
 from utils.logging_config import get_logger
+from core.matching.audio_verification import evaluate, Decision
+from core.matching.acoustid_candidates import duration_mismatches_strongly
+from core.acoustid_verification import _resolve_expected_artist_aliases
 
 logger = get_logger("repair_job.acoustid")
 
@@ -220,116 +223,111 @@ class AcoustIDScannerJob(RepairJob):
                 or expected['artist']
             )
 
-        # Normalize and compare
-        norm_expected_title = _normalize(expected['title'])
-        norm_aid_title = _normalize(aid_title)
-        norm_expected_artist = _normalize(expected_artist)
-        norm_aid_artist = _normalize(aid_artist)
-
-        title_sim = SequenceMatcher(None, norm_expected_title, norm_aid_title).ratio()
-        # Issue (Foxxify Discord report): AcoustID returns the FULL artist
-        # credit (e.g. `Okayracer, aldrch & poptropicaslutz!`) while the
-        # library DB carries only the primary artist (`Okayracer`). Raw
-        # similarity scores ~43% — well below threshold — so multi-artist
-        # tracks get flagged as Wrong Song even though the primary IS in
-        # the credit. Route through the shared `artist_names_match` helper
-        # which splits the credit on common separators (comma, ampersand,
-        # feat./ft./with/vs., etc.) and checks each token. Primary-in-
-        # credit cases now resolve at 100% match instead of 43%.
-        #
-        # Pass RAW artist strings (not pre-normalised) so the splitter
-        # can recognise the separators. The helper applies its own
-        # case + whitespace normalisation internally per token.
-        if norm_expected_artist:
-            from core.matching.artist_aliases import artist_names_match
-
-            _, artist_sim = artist_names_match(
-                expected_artist,
-                aid_artist,
-                threshold=artist_threshold,
-            )
-        else:
-            artist_sim = 1.0
-
-        if title_sim >= title_threshold and artist_sim >= artist_threshold:
-            return
-
-        # Issue #587 (Foxxify) — top recording's metadata mismatched, but
-        # AcoustID often returns multiple recordings per fingerprint
-        # (sample collisions, multi-MB-record cases). Check ALL of them
-        # before flagging — if any candidate's metadata matches expected
-        # title + artist, the file IS the right song and AcoustID's top
-        # match was just a wrong-credited recording.
-        from core.matching.acoustid_candidates import (
-            duration_mismatches_strongly,
-            find_matching_recording,
-        )
-        from core.matching.artist_aliases import artist_names_match
-
-        def _scanner_title_sim(a, b):
-            return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
-
-        def _scanner_artist_sim(expected_a, actual_a):
-            _, score = artist_names_match(expected_a, actual_a, threshold=artist_threshold)
-            return score
-
-        candidate_match, _, _ = find_matching_recording(
-            fp_result.get('recordings') or [],
-            expected['title'],
-            expected_artist,
-            title_threshold=title_threshold,
-            artist_threshold=artist_threshold,
-            similarity=_scanner_title_sim,
-            artist_similarity=_scanner_artist_sim,
-        )
-        if candidate_match is not None:
-            # A lower-ranked candidate matched — file IS the right song.
-            # No finding.
+        # Verification status from the embedded SOULSYNC_VERIFICATION tag.
+        # Only a human decision short-circuits the scan: the user explicitly
+        # confirmed the file via the review queue. Everything else (verified /
+        # unverified / force_imported / untagged) is re-checked; force_imported
+        # mismatches are reported as informational below since a mismatch
+        # there is EXPECTED (the user accepted the best candidate).
+        file_verif_status = None
+        try:
+            from core.tag_writer import read_file_tags as _rft
+            file_verif_status = (_rft(fpath) or {}).get('verification_status')
+        except Exception:
+            pass
+        if file_verif_status == 'human_verified':
+            # The user explicitly confirmed this file via the review queue —
+            # never second-guess a human decision.
             if context.report_progress:
                 context.report_progress(
-                    log_line=(
-                        f'Resolved (lower-ranked candidate match): {fname} — '
-                        f'expected "{expected["title"]}" matched candidate '
-                        f'"{candidate_match.get("title")}" by '
-                        f'"{candidate_match.get("artist")}"'
-                    ),
+                    log_line=f'Skipped (human-verified): {fname}', log_type='skip')
+            return
+
+        # Fingerprint-collision guard: when the TOP recording's length is wildly
+        # different from the file, the fingerprint hit is a hash collision (the
+        # 17-min mashup → 5-min track case), not a real match — skip BEFORE any
+        # title/artist/version analysis so it can't surface as a false finding.
+        try:
+            file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
+        except Exception:
+            file_duration_s = 0.0
+        cand_duration_s = best_recording.get('duration') or best_recording.get('length')
+        if file_duration_s and duration_mismatches_strongly(file_duration_s, cand_duration_s):
+            if context.report_progress:
+                context.report_progress(
+                    log_line=(f'Skipped (duration mismatch suggests fingerprint '
+                              f'collision): {fname}'),
+                    log_type='skip')
+            return
+
+        # Decision via the shared verification core — identical logic to import-
+        # time verification (alias-aware artist match + cross-script SKIP), so the
+        # scan no longer false-flags correct cross-script tracks. Only a FAIL
+        # produces a "Wrong download" finding.
+        _alias_cache = {}
+
+        def _aliases():
+            if 'v' not in _alias_cache:
+                try:
+                    _alias_cache['v'] = _resolve_expected_artist_aliases(expected_artist)
+                except Exception:
+                    _alias_cache['v'] = []
+            return _alias_cache['v']
+
+        outcome = evaluate(
+            expected['title'], expected_artist, fp_result['recordings'],
+            fingerprint_score=best_score,
+            aliases_provider=_aliases,
+        )
+
+        # Persist the scan outcome so it feeds the same review pipeline as
+        # import-time verification: PASS backfills 'verified' on untagged or
+        # previously-unverified files; SKIP (ambiguous / cross-script / no
+        # hard confirmation) marks untagged files 'unverified' so they surface
+        # in the Downloads-page review queue. force_imported is never blessed
+        # here (normalize() strips version words, so an instrumental can PASS
+        # the title check) and 'verified' is never downgraded by a SKIP (the
+        # import-time check ran with richer candidate metadata). FAIL keeps
+        # the finding flow below.
+        new_status = file_verif_status
+        if outcome.decision == Decision.PASS and file_verif_status in (None, '', 'unverified'):
+            new_status = 'verified'
+        elif outcome.decision == Decision.SKIP and not file_verif_status:
+            new_status = 'unverified'
+        if new_status:
+            self._persist_status(
+                context, track_id, fpath,
+                (expected.get('file_path') or '').strip() or None,
+                new_status, write_tag=(new_status != file_verif_status),
+                expected=expected)
+
+        if outcome.decision != Decision.FAIL:
+            if context.report_progress:
+                context.report_progress(
+                    log_line=f'OK ({outcome.decision.value}): {fname} — {outcome.reason}',
                     log_type='ok',
                 )
             return
 
-        # Issue #587 (Foxxify "17min mashup → 5min track") — duration
-        # guard against fingerprint hash collisions. When the file's
-        # actual duration differs from AcoustID's matched recording by
-        # more than max(60s, 35%), the fingerprint is almost certainly
-        # a sample/intro collision, not a real recording match. Don't
-        # produce a confident "Wrong Song" finding.
-        try:
-            file_duration_s = (expected.get('duration_ms') or 0) / 1000.0
-        except Exception:
-            file_duration_s = 0
-        candidate_duration_s = best_recording.get('duration')
-        if candidate_duration_s is None and best_recording.get('length'):
-            candidate_duration_s = best_recording.get('length')
-        if duration_mismatches_strongly(file_duration_s, candidate_duration_s):
-            if context.report_progress:
-                context.report_progress(
-                    log_line=(
-                        f'Skipped (duration mismatch suggests fingerprint collision): '
-                        f'{fname} — expected {file_duration_s:.0f}s, AcoustID '
-                        f'candidate {candidate_duration_s:.0f}s'
-                    ),
-                    log_type='skip',
-                )
-            return
+        title_sim = outcome.title_sim
+        artist_sim = outcome.artist_sim
+        matched_title = outcome.matched_title or aid_title
+        matched_artist = outcome.matched_artist or aid_artist
 
-        # Mismatch detected
+        # Mismatch (FAIL) — create finding.
         if context.report_progress:
             context.report_progress(
-                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{aid_title}"',
+                log_line=f'Mismatch: {fname} — expected "{expected["title"]}", got "{matched_title}"',
                 log_type='error'
             )
         if context.create_finding:
-            severity = 'warning' if best_score >= 0.90 else 'info'
+            _is_force = file_verif_status == 'force_imported'
+            severity = 'info' if _is_force else ('warning' if best_score >= 0.90 else 'info')
+            _title = (
+                f'Force-imported (fallback): "{expected["title"]}" is actually "{matched_title}"'
+                if _is_force else
+                f'Wrong download: "{expected["title"]}" is actually "{matched_title}"'
+            )
             inserted = context.create_finding(
                 job_id=self.job_id,
                 finding_type='acoustid_mismatch',
@@ -337,18 +335,18 @@ class AcoustIDScannerJob(RepairJob):
                 entity_type='track',
                 entity_id=str(track_id),
                 file_path=fpath,
-                title=f'Wrong download: "{expected["title"]}" is actually "{aid_title}"',
+                title=_title,
                 description=(
                     f'Expected "{expected["title"]}" by {expected_artist}, '
-                    f'but audio fingerprint matches "{aid_title}" by {aid_artist} '
+                    f'but audio fingerprint matches "{matched_title}" by {matched_artist} '
                     f'(fingerprint: {best_score:.0%}, title match: {title_sim:.0%}, '
                     f'artist match: {artist_sim:.0%})'
                 ),
                 details={
                     'expected_title': expected['title'],
                     'expected_artist': expected_artist,
-                    'acoustid_title': aid_title,
-                    'acoustid_artist': aid_artist,
+                    'acoustid_title': matched_title,
+                    'acoustid_artist': matched_artist,
                     'fingerprint_score': round(best_score, 3),
                     'title_similarity': round(title_sim, 3),
                     'artist_similarity': round(artist_sim, 3),
@@ -356,12 +354,63 @@ class AcoustIDScannerJob(RepairJob):
                     'artist_thumb_url': expected.get('artist_thumb_url'),
                     'album_title': expected.get('album_title', ''),
                     'track_number': expected.get('track_number'),
+                    'force_imported': file_verif_status == 'force_imported',
                 }
             )
             if inserted:
                 result.findings_created += 1
             else:
                 result.findings_skipped_dedup += 1
+
+    def _persist_status(self, context, track_id, fpath, db_path, status, write_tag,
+                        expected=None):
+        """Persist a verification status to the file tag (durable, travels with
+        the file), the tracks row (UI cache) and any library_history rows for
+        this file (feeds the Unverified review queue on the Downloads page).
+        ``db_path`` is the unresolved DB-side path — history rows may store
+        either form, so both are matched.
+
+        Files SoulSync never downloaded have no history row at all — for an
+        'unverified' outcome one is inserted (download_source 'acoustid_scan')
+        so EVERY scan-flagged file lands in the review queue, not just past
+        downloads. Re-scans then match this row via file_path (no duplicates).
+        """
+        if not status:
+            return
+        if write_tag:
+            try:
+                from core.tag_writer import write_verification_status
+                write_verification_status(fpath, status)
+            except Exception as e:
+                logger.debug("verification tag write failed for %s: %s", fpath, e)
+        try:
+            conn = context.db._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE tracks SET verification_status = ? WHERE id = ?",
+                (status, track_id))
+            matched = 0
+            for p in {p for p in (fpath, db_path) if p}:
+                cur.execute(
+                    "UPDATE library_history SET verification_status = ? WHERE file_path = ?",
+                    (status, p))
+                matched += max(getattr(cur, 'rowcount', 0) or 0, 0)
+            if status == 'unverified' and matched == 0:
+                exp = expected or {}
+                cur.execute(
+                    """INSERT INTO library_history
+                       (event_type, title, artist_name, album_name, file_path,
+                        thumb_url, download_source, verification_status)
+                       VALUES ('download', ?, ?, ?, ?, ?, 'acoustid_scan', ?)""",
+                    (exp.get('title') or os.path.basename(fpath),
+                     exp.get('artist') or None,
+                     exp.get('album_title') or None,
+                     db_path or fpath,
+                     exp.get('album_thumb_url') or None,
+                     status))
+            getattr(conn, 'commit', lambda: None)()
+        except Exception as e:
+            logger.debug("verification_status persist failed for %s: %s", track_id, e)
 
     def _load_db_tracks(self, context: JobContext) -> dict:
         """Load all tracks from DB keyed by track ID."""
@@ -480,11 +529,3 @@ class AcoustIDScannerJob(RepairJob):
         finally:
             if conn:
                 conn.close()
-
-
-def _normalize(text: str) -> str:
-    t = text.lower()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^a-z0-9 ]', '', t)
-    return t.strip()
