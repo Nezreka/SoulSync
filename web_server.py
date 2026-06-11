@@ -7598,40 +7598,27 @@ def _resolve_history_audio_path(row):
     3. the tracks table — the media-server mirror knows the CURRENT path for
        this title+artist even after a rename — resolved the same way.
     """
-    raw_path = (row.get('file_path') or '').strip()
-    if raw_path and os.path.exists(raw_path):
-        return raw_path
-    resolved = _resolve_library_file_path(raw_path) if raw_path else None
-    if resolved and os.path.exists(resolved):
-        return resolved
-    title = (row.get('title') or '').strip()
-    if not title:
-        return None
-    artist = (row.get('artist_name') or '').strip()
-    try:
-        conn = get_database()._get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND LOWER(title) = LOWER(?)",
-            (title,))
-        candidates = [r[0] for r in cursor.fetchall() if r[0]]
-    except Exception as e:
-        logger.debug(f"[Verification] tracks-table path fallback failed: {e}")
-        return None
-    # Same-title collisions across artists exist (and delete() trusts this
-    # path), so be strict: when the row names an artist, only accept
-    # candidates whose path mentions it; otherwise only an unambiguous
-    # single candidate.
-    artist_l = artist.lower()
-    if artist_l:
-        candidates = [p for p in candidates if artist_l in p.lower()]
-    elif len(candidates) != 1:
-        return None
-    for cand in candidates:
-        cand_resolved = _resolve_library_file_path(cand)
-        if cand_resolved and os.path.exists(cand_resolved):
-            return cand_resolved
-    return None
+    def _lookup_titled_paths(title):
+        # tracks-table mirror: paths for this title (knows the CURRENT path
+        # after a media-server rename). [] on any DB error → resolver returns None.
+        try:
+            conn = get_database()._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND LOWER(title) = LOWER(?)",
+                (title,))
+            return [r[0] for r in cursor.fetchall() if r[0]]
+        except Exception as e:
+            logger.debug(f"[Verification] tracks-table path fallback failed: {e}")
+            return []
+
+    from core.matching.history_paths import resolve_history_audio_path
+    return resolve_history_audio_path(
+        row,
+        exists=os.path.exists,
+        resolve_library_path=_resolve_library_file_path,
+        lookup_titled_paths=_lookup_titled_paths,
+    )
 
 
 @app.route('/api/verification/<int:history_id>/stream', methods=['GET'])
