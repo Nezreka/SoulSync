@@ -116,3 +116,50 @@ def test_discogs_artist_albums_reuses_list_cache(monkeypatch):
     assert [album.name for album in first] == ['Cached Discogs Album']
     assert [album.name for album in second] == ['Cached Discogs Album']
     assert client._api_get.call_count == 2
+
+
+def _deezer_album(i):
+    return {
+        'id': i, 'title': f'Album {i}', 'record_type': 'album',
+        'release_date': '2024-01-01', 'nb_tracks': 10,
+        'artist': {'id': 7, 'name': 'Artist'},
+    }
+
+
+def test_deezer_partial_pagination_not_cached(monkeypatch):
+    """#853 follow-up: a transient/malformed error mid-pagination must NOT cache a
+    partial discography (mirrors Spotify's truncated-fetch guard) — otherwise an
+    incomplete album list serves from cache until TTL."""
+    cache = MemoryCache()
+    monkeypatch.setattr(deezer_mod, 'get_metadata_cache', lambda: cache)
+    client = deezer_mod.DeezerClient.__new__(deezer_mod.DeezerClient)
+
+    full_page = {'data': [_deezer_album(i) for i in range(100)]}   # full → forces page 2
+    # page 1 ok, page 2 errors (None) → incomplete, on BOTH attempts
+    client._api_get = MagicMock(side_effect=[full_page, None, full_page, None])
+
+    first = client.get_artist_albums('7', limit=200)
+    assert len(first) == 100                          # page-1 albums still returned
+
+    second = client.get_artist_albums('7', limit=200)
+    assert len(second) == 100
+    # No partial cache → the second call refetched (4 api calls total), instead of
+    # serving a permanently-incomplete discography from cache (which would be 2).
+    assert client._api_get.call_count == 4
+
+
+def test_deezer_complete_multipage_is_cached(monkeypatch):
+    """A clean multi-page pagination still caches (guard didn't break the happy path)."""
+    cache = MemoryCache()
+    monkeypatch.setattr(deezer_mod, 'get_metadata_cache', lambda: cache)
+    client = deezer_mod.DeezerClient.__new__(deezer_mod.DeezerClient)
+
+    page1 = {'data': [_deezer_album(i) for i in range(100)]}        # full
+    page2 = {'data': [_deezer_album(i) for i in range(100, 150)]}   # short → clean end
+    client._api_get = MagicMock(side_effect=[page1, page2])
+
+    first = client.get_artist_albums('7', limit=200)
+    assert len(first) == 150
+    second = client.get_artist_albums('7', limit=200)               # served from cache
+    assert len(second) == 150
+    assert client._api_get.call_count == 2                          # no refetch → cached
