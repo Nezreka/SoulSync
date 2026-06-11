@@ -67927,3 +67927,9 @@ body.em-scroll-lock { overflow: hidden; }
 .security-locked .toggle-label {
     cursor: not-allowed;
 }
+.security-saved-status {
+    font-size: 12px;
+    color: #4caf50;
+    font-weight: 500;
+    margin-bottom: 6px;
+}

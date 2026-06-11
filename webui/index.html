@@ -6040,6 +6040,7 @@
 
                                     <div class="form-group">
                                         <label>Step 1 — Admin login password:</label>
+                                        <div class="security-saved-status" id="security-login-password-status" style="display:none;">✓ A login password is set</div>
                                         <input type="password" id="security-login-password" placeholder="Enter password (min 6)" maxlength="200" autocomplete="new-password" style="margin: 6px 0;">
                                         <input type="password" id="security-login-password-confirm" placeholder="Confirm password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
                                         <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
@@ -6051,6 +6052,7 @@
                                         <div class="setting-help-text" style="margin-bottom: 8px;">
                                             So you can reset a forgotten password by answering it on the sign-in screen.
                                         </div>
+                                        <div class="security-saved-status" id="security-recovery-status" style="display:none;"></div>
                                         <select id="security-recovery-question" class="form-select" onchange="handleRecoveryQuestionChange()" style="margin-bottom: 6px;">
                                             <option value="">— Select a question —</option>
                                             <option>What was the name of your first pet?</option>
