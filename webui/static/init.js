@@ -588,9 +588,11 @@ async function saveLoginPassword() {
         const data = await res.json();
         if (data.success) {
             show('Admin login password saved', true);
-            if (input) input.value = '';
+            if (input) { input.value = ''; input.placeholder = 'Enter a new password to change it'; }
             if (confirmInput) confirmInput.value = '';
             updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
+            const st = document.getElementById('security-login-password-status');
+            if (st) st.style.display = 'block';
         }
         else show(data.error || 'Failed to save password', false);
     } catch (e) { show('Connection error', false); }
@@ -611,6 +613,45 @@ function updateRequireLoginGate(hasPassword) {
         help.innerHTML = hasPassword
             ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
             : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
+    }
+}
+
+// Reflect already-saved login credentials. Passwords are never sent to the
+// browser, so instead of an empty field (which looks unset after a refresh) we
+// show that one is set and pre-fill the saved recovery question.
+function applyLoginSavedState(profile) {
+    const hasPassword = profile?.has_password || false;
+    const hasRecovery = profile?.has_recovery || false;
+    const question = profile?.recovery_question || '';
+
+    const pwStatus = document.getElementById('security-login-password-status');
+    const pwField = document.getElementById('security-login-password');
+    const pwConfirm = document.getElementById('security-login-password-confirm');
+    if (pwStatus) pwStatus.style.display = hasPassword ? 'block' : 'none';
+    if (hasPassword) {
+        if (pwField) pwField.placeholder = 'Enter a new password to change it';
+        if (pwConfirm) pwConfirm.placeholder = 'Confirm new password';
+    }
+
+    const recStatus = document.getElementById('security-recovery-status');
+    const recSel = document.getElementById('security-recovery-question');
+    const recCustom = document.getElementById('security-recovery-custom');
+    const recAnswer = document.getElementById('security-recovery-answer');
+    if (recStatus) {
+        recStatus.style.display = hasRecovery ? 'block' : 'none';
+        recStatus.textContent = hasRecovery
+            ? ('✓ Recovery question saved' + (question ? ': “' + question + '”' : ''))
+            : '';
+    }
+    if (hasRecovery) {
+        if (recSel && question) {
+            recSel.value = question;            // preset options default value = their text
+            if (recSel.value !== question) {    // not a preset → custom question
+                recSel.value = '__custom__';
+                if (recCustom) { recCustom.style.display = 'block'; recCustom.value = question; }
+            }
+        }
+        if (recAnswer) recAnswer.placeholder = 'Enter a new answer to change it';
     }
 }
 
@@ -641,7 +682,13 @@ async function saveRecoveryQuestion() {
             body: JSON.stringify({ question, answer }),
         });
         const data = await res.json();
-        if (data.success) { show('Recovery question saved', true); const a = document.getElementById('security-recovery-answer'); if (a) a.value = ''; }
+        if (data.success) {
+            show('Recovery question saved', true);
+            const a = document.getElementById('security-recovery-answer');
+            if (a) { a.value = ''; a.placeholder = 'Enter a new answer to change it'; }
+            const rst = document.getElementById('security-recovery-status');
+            if (rst) { rst.style.display = 'block'; rst.textContent = '✓ Recovery question saved: “' + question + '”'; }
+        }
         else show(data.error || 'Failed to save', false);
     } catch (e) { show('Connection error', false); }
 }

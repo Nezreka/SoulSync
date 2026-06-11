@@ -1425,6 +1425,8 @@ async function loadSettingsData() {
             // Login: the "Require login" toggle is gated on an admin password —
             // visually locked until Step 1 is done (anti-lockout, made obvious).
             updateRequireLoginGate(adminProfile?.has_password || false);
+            // Show already-saved password/recovery state (vs looking unset).
+            applyLoginSavedState(adminProfile);
         } catch (error) {
             console.error('Error loading security settings:', error);
         }
