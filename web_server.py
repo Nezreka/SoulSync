@@ -36500,8 +36500,39 @@ def _emit_download_status_loop():
 
 # --- Socket.IO event handlers ---
 
+def _ws_connection_blocked():
+    """#852: mirror the HTTP launch-PIN / login gate for the socketio handshake
+    (before_request doesn't run for it). Fails OPEN on a config-read error, same
+    as the HTTP gate, so a broken config never wedges every client."""
+    try:
+        require_login = _require_login_enabled()
+        require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
+        if not require_login and not require_pin:
+            return False
+        proxy_header = (config_manager.get('security.auth_proxy_header', '') or '') if config_manager else ''
+        from core.security.auth_proxy import trusted_proxy_user
+        proxy_authed = bool(trusted_proxy_user(request.headers.get, proxy_header))
+        from core.security.ws_gate import is_ws_connection_blocked
+        return is_ws_connection_blocked(
+            require_login=require_login,
+            login_authenticated=bool(session.get('login_authenticated', False)),
+            require_pin=require_pin,
+            pin_verified=bool(session.get('launch_pin_verified', False)),
+            proxy_authed=proxy_authed,
+        )
+    except Exception as e:
+        logger.error(f"[WS gate] check failed, allowing (matches HTTP gate fail-open): {e}")
+        return False
+
+
 @socketio.on('connect')
 def handle_connect():
+    # #852: the launch-PIN / login gate is a before_request hook, which does NOT
+    # run for the socketio handshake. Without this, removing the client overlay +
+    # opening a socket streams live data (downloads/logs/dashboard) unauthenticated.
+    if _ws_connection_blocked():
+        logger.warning("Rejected WebSocket connection — access gate active, session not verified (#852)")
+        return False
     logger.info("WebSocket client connected")
 
 @socketio.on('disconnect')
