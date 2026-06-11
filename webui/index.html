@@ -75,7 +75,8 @@
                 <div id="recovery-answer-section" style="display: none;">
                     <p id="recovery-question-text" class="launch-pin-subtitle" style="margin-top: 12px; font-weight: 600;"></p>
                     <input type="text" id="recovery-answer" class="launch-pin-input" placeholder="Your answer" autocomplete="off" maxlength="120" style="margin-bottom: 8px; letter-spacing: normal;">
-                    <input type="password" id="recovery-new-password" class="launch-pin-input" placeholder="New password (min 6)" autocomplete="new-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
+                    <input type="password" id="recovery-new-password" class="launch-pin-input" placeholder="New password (min 6)" autocomplete="new-password" maxlength="200" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="recovery-new-password-confirm" class="launch-pin-input" placeholder="Confirm new password" autocomplete="new-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
                     <button class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
                 </div>
                 <p id="recovery-error" class="launch-pin-error" style="display: none;"></p>
@@ -6039,7 +6040,8 @@
 
                                     <div class="form-group">
                                         <label>Step 1 — Admin login password:</label>
-                                        <input type="password" id="security-login-password" placeholder="Set admin login password" maxlength="200" autocomplete="new-password" style="margin: 6px 0;">
+                                        <input type="password" id="security-login-password" placeholder="Enter password (min 6)" maxlength="200" autocomplete="new-password" style="margin: 6px 0;">
+                                        <input type="password" id="security-login-password-confirm" placeholder="Confirm password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
                                         <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
                                         <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
                                     </div>
