@@ -955,3 +955,71 @@ def test_snapshot_exception_returns_500():
             raise RuntimeError('db down')
     body, code = save_bubble_snapshot(lambda: {'bubbles': [1]}, **_snap_kwargs(_BoomDB()))
     assert code == 500 and body == {'success': False, 'error': 'db down'}
+
+
+def test_update_match_no_state_but_originals_saves_cache():
+    """#843: the in-memory discovery state can be gone (server restart, or an
+    imported playlist not discovered this run) while the card is still shown from
+    persisted data. A manual fix must still save the match to the discovery cache
+    from the client-provided originals instead of 404ing."""
+    from core.discovery.endpoints import update_discovery_match
+    db = _FakeCacheDB()
+    gj, kw, _ = _update_kwargs(cache_db=db, json_data={
+        'identifier': 'gone-from-memory', 'track_index': 0,
+        'original_name': 'Acid Dream',
+        # multi-artist joined string, exactly like the #843 reporter's track
+        'original_artist': 'Cherrymoon Traxx, Hermol, SBM, BELS',
+        'spotify_track': {
+            'id': 'sp1', 'name': 'Acid Dream (The Prophet remix)',
+            'artists': ['Cherry Moon Trax'], 'album': 'X', 'duration_ms': 1000,
+        },
+    })
+    body, code = update_discovery_match({}, gj, **kw)  # empty in-memory states
+
+    assert code == 200 and body['success'] is True
+    assert body['result'] is None  # nothing to update in memory
+    # the durable cache match WAS written — and CRUCIALLY keyed by the FIRST
+    # artist, matching every in-memory/sync path (which use artists[0]). A
+    # full-string key here would silently never be looked up on sync.
+    assert len(db.saved) == 1
+    saved = db.saved[0]
+    assert saved[1] == 'cherrymoon traxx'   # cache_key artist = first artist (not the full string)
+    assert saved[6] == 'Cherrymoon Traxx'   # original_artist reduced to first
+
+
+def test_update_match_no_state_key_matches_in_memory_key():
+    """The no-state save and the normal in-memory save must produce the SAME cache
+    key for the same multi-artist track — else the fix wouldn't apply on sync."""
+    from core.discovery.endpoints import update_discovery_match
+    sp = {'id': 'sp1', 'name': 'M', 'artists': ['Z'], 'album': 'A', 'duration_ms': 1}
+
+    # in-memory path: result carries the original track as an artists LIST
+    db1 = _FakeCacheDB()
+    state = {'discovery_results': [{'tidal_track': {'name': 'Acid Dream',
+             'artists': ['Cherrymoon Traxx', 'Hermol', 'SBM', 'BELS']}}],
+             'spotify_matches': 0}
+    gj1, kw1, _ = _update_kwargs(cache_db=db1, json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': sp})
+    update_discovery_match({'p': state}, gj1, **kw1)
+
+    # no-state path: client sends the joined string
+    db2 = _FakeCacheDB()
+    gj2, kw2, _ = _update_kwargs(cache_db=db2, json_data={
+        'identifier': 'p', 'track_index': 0, 'spotify_track': sp,
+        'original_name': 'Acid Dream',
+        'original_artist': 'Cherrymoon Traxx, Hermol, SBM, BELS'})
+    update_discovery_match({}, gj2, **kw2)
+
+    # same cache key (name, artist) → the fix applies identically either way
+    assert db1.saved[0][0] == db2.saved[0][0]
+    assert db1.saved[0][1] == db2.saved[0][1]
+
+
+def test_update_match_no_state_and_no_originals_still_404():
+    """Without an in-memory state AND without originals to key the cache, there's
+    genuinely nothing to do — keep the 404 (the existing safety)."""
+    from core.discovery.endpoints import update_discovery_match
+    gj, kw, _ = _update_kwargs(json_data={
+        'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
+    body, code = update_discovery_match({}, gj, **kw)
+    assert code == 404 and body == {'error': 'Discovery state not found'}

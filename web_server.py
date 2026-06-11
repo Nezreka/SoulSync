@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.9"
+_SOULSYNC_BASE_VERSION = "2.7.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -346,6 +346,14 @@ def _init_flask_secret_key():
 
 app.secret_key = _init_flask_secret_key()
 
+# --- Reverse-proxy mode (opt-in, default OFF) ---
+# OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
+# the operator sets security.trust_reverse_proxy=true (behind nginx/Caddy/Traefik
+# with TLS) does this trust X-Forwarded-* + mark the session cookie Secure.
+from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
+if _apply_reverse_proxy_mode(app, config_manager.get):
+    logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
     resolve_cors_origins as _resolve_socketio_cors_origins,
@@ -390,6 +398,41 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+# Brute-force limiter for the launch-PIN unlock (lenient; only a flood of wrong
+# PINs from one IP trips it — correct entry clears it instantly).
+from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
+_launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+_login_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+
+
+def _require_login_enabled():
+    try:
+        return bool(config_manager.get('security.require_login', False)) if config_manager else False
+    except Exception:
+        return False
+
+
+# --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
+@app.before_request
+def _enforce_login():
+    """Server-side enforcement of username/password login. No-op unless
+    security.require_login is on. When on, an unauthenticated session can only
+    reach the page shell + the login flow + the key-authed public API."""
+    if not _require_login_enabled():
+        return
+    from core.security.login_gate import login_request_is_blocked
+    from core.security.launch_lock import is_html_navigation
+    if login_request_is_blocked(
+        request.path, request.method,
+        require_login=True,
+        authenticated=bool(session.get('login_authenticated', False)),
+    ):
+        if is_html_navigation(request.method, request.headers.get('Accept', ''),
+                              request.headers.get('Sec-Fetch-Mode', '')):
+            return redirect('/')
+        return jsonify({"error": "login_required", "login_required": True}), 401
+
+
 # --- Launch PIN gate (before_request hook) ---
 @app.before_request
 def _enforce_launch_pin():
@@ -401,6 +444,10 @@ def _enforce_launch_pin():
     on, except the page shell + the unlock flow + the key-authed public API.
     No-ops entirely when ``security.require_pin_on_launch`` is off (the default).
     """
+    # Login mode replaces the launch PIN entirely — when it's on, _enforce_login
+    # owns the gate and this no-ops.
+    if _require_login_enabled():
+        return
     try:
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
     except Exception:
@@ -408,10 +455,21 @@ def _enforce_launch_pin():
     if not require_pin:
         return
     from core.security.launch_lock import request_is_locked, is_html_navigation
+    # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
+    # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
+    # by default so a direct install is unaffected.
+    from core.security.auth_proxy import trusted_proxy_user
+    try:
+        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
+    except Exception:
+        _proxy_header = ''
+    _verified = bool(session.get('launch_pin_verified', False)) or bool(
+        trusted_proxy_user(request.headers.get, _proxy_header)
+    )
     if request_is_locked(
         request.path, request.method,
         require_pin=require_pin,
-        pin_verified=bool(session.get('launch_pin_verified', False)),
+        pin_verified=_verified,
     ):
         # A browser navigating to a sub-page (deep link / refresh) should land
         # on the lock screen, not raw JSON — bounce it to the root, which serves
@@ -3054,6 +3112,14 @@ def handle_settings():
             new_settings = request.get_json()
             if not new_settings:
                 return jsonify({"success": False, "error": "No data received."}), 400
+
+            # Anti-lockout: refuse to turn ON login mode until the admin account
+            # has a password — otherwise enabling it would lock everyone out.
+            _sec_in = new_settings.get('security') or {}
+            if _sec_in.get('require_login') and not config_manager.get('security.require_login', False):
+                if not get_database().profile_has_password(1):
+                    return jsonify({"success": False,
+                                    "error": "Set an admin password before enabling login mode."}), 400
 
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
@@ -12613,6 +12679,7 @@ def redownload_start(track_id):
 
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
+@admin_only
 def sync_artist_library(artist_id):
     """Bidirectional sync: pull new content from media server AND remove stale entries."""
     try:
@@ -12658,6 +12725,11 @@ def sync_artist_library(artist_id):
         new_albums = 0
         new_tracks = 0
         name_updated = False
+        # Single-artist deep scan: collect the server track IDs we see during the
+        # pull. Stale removal (Phase 2) is a server-diff against this set — the SAME
+        # mechanism the whole-library deep scan uses, just scoped to one artist.
+        seen_track_ids = set()
+        pull_succeeded = False
 
         if server_source:
             media_client = None
@@ -12712,55 +12784,77 @@ def sync_artist_library(artist_id):
                             artist_name = new_name
                             name_updated = True
 
-                        # Process artist content (deep scan mode — skip existing, preserve enrichment)
+                        # Process artist content (deep scan mode — skip existing,
+                        # preserve enrichment) and collect the server's track IDs
+                        # for this artist into seen_track_ids.
                         success, details, new_albums, new_tracks = worker._process_artist_with_content(
-                            server_artist, skip_existing_tracks=True
+                            server_artist, skip_existing_tracks=True, seen_track_ids=seen_track_ids
                         )
+                        # Only a successful pull gives a trustworthy 'seen' set; a
+                        # failure/partial would make every track look stale.
+                        pull_succeeded = bool(success)
                         logger.info(f"[Artist Sync] Server pull for {artist_name}: {details}")
 
                 except Exception as e:
                     logger.error(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
 
-        # ── Phase 2: Remove stale entries (files no longer on disk) ──
+        # ── Phase 2: Remove stale entries (tracks the server no longer has) ──
+        # Server-diff, exactly like the whole-library deep scan: stale = this
+        # artist's DB tracks that were NOT seen on the server during the pull.
         stale_removed = 0
         empty_albums_removed = 0
+        removal_skipped = False
 
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, file_path FROM tracks WHERE artist_id = ?", (db_artist_id,))
-            tracks = cursor.fetchall()
+        if not pull_succeeded:
+            # No trustworthy server view (no server configured, unreachable, or the
+            # pull failed) — without it we can't tell stale from "server was down",
+            # so we remove nothing rather than risk wiping the artist.
+            removal_skipped = True
+            logger.info(f"[Artist Sync] {artist_name}: server pull unavailable — skipping stale removal")
+        else:
+            with database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM tracks WHERE artist_id = ? AND server_source = ?",
+                    (db_artist_id, server_source),
+                )
+                artist_track_ids = {row['id'] for row in cursor.fetchall()}
+                stale = artist_track_ids - seen_track_ids
 
-            stale_ids = []
-            for track in tracks:
-                fp = track['file_path']
-                if not fp:
-                    stale_ids.append(track['id'])
-                    continue
-                resolved = _resolve_library_file_path(fp)
-                if not resolved or not os.path.exists(resolved):
-                    stale_ids.append(track['id'])
+                # Same safety net as deep scan (#828): if an implausibly large share
+                # of the artist's tracks went unseen, treat it as a flaky server
+                # response and skip rather than mass-delete.
+                from core.library.stale_guard import is_implausible_stale_removal
+                if is_implausible_stale_removal(len(stale), len(artist_track_ids)):
+                    removal_skipped = True
+                    logger.warning(
+                        f"[Artist Sync] {artist_name}: {len(stale)}/{len(artist_track_ids)} tracks "
+                        f"unseen on server — skipping stale removal (likely a flaky response)"
+                    )
+                elif stale:
+                    stale_removed = database.delete_stale_tracks(stale, server_source)
 
-            if stale_ids:
-                placeholders = ','.join('?' for _ in stale_ids)
-                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_ids)
-                stale_removed = len(stale_ids)
-
-            cursor.execute("""
-                DELETE FROM albums WHERE artist_id = ?
-                AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
-            """, (db_artist_id,))
-            empty_albums_removed = cursor.rowcount
-
-            cursor.execute("""
-                UPDATE albums SET track_count = (
-                    SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
-                ) WHERE artist_id = ?
-            """, (db_artist_id,))
-
-            conn.commit()
+            if not removal_skipped:
+                with database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # Prune albums left with no tracks. ``album_id IS NOT NULL``
+                    # avoids the NOT IN-with-NULL gotcha that would otherwise no-op
+                    # this whenever a track has a null album_id.
+                    cursor.execute("""
+                        DELETE FROM albums WHERE artist_id = ?
+                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                    """, (db_artist_id,))
+                    empty_albums_removed = cursor.rowcount
+                    cursor.execute("""
+                        UPDATE albums SET track_count = (
+                            SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
+                        ) WHERE artist_id = ?
+                    """, (db_artist_id,))
+                    conn.commit()
 
         logger.warning(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
-              f"-{stale_removed} stale, -{empty_albums_removed} empty albums")
+              f"-{stale_removed} stale, -{empty_albums_removed} empty albums"
+              f"{' (removal skipped — storage unreachable)' if removal_skipped else ''}")
 
         return jsonify({
             "success": True,
@@ -12770,6 +12864,7 @@ def sync_artist_library(artist_id):
             "new_tracks": new_tracks,
             "stale_removed": stale_removed,
             "empty_albums_removed": empty_albums_removed,
+            "removal_skipped": removal_skipped,
         })
 
     except Exception as e:
@@ -19449,14 +19544,24 @@ def server_playlist_add_track(playlist_id):
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             from core.sync.playlist_edit import plan_playlist_add
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
+            jf = media_server_engine.client('jellyfin')
+            current_tracks = jf.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
             # is a LINK, not a second copy — don't duplicate it (#768).
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
-                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+                # #837: append the ONE found track IN PLACE. The old path called
+                # update_playlist(full track list), which on Jellyfin/Emby deletes
+                # and recreates the playlist — wiping its description + cover image.
+                # append_to_playlist adds in place (dedupe-safe), the same
+                # non-destructive op the 'append' sync mode already uses. It reads
+                # `.id` (not ratingKey) off each track, so set both.
+                new_track_obj = type('T', (), {
+                    'id': str(track_id), 'ratingKey': str(track_id),
+                    'title': server_track_title or '',
+                })()
+                jf.append_to_playlist(playlist_name, [new_track_obj])
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
@@ -19567,6 +19672,10 @@ def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
     try:
         query = request.args.get('q', '').strip()
+        # Optional source-artist relevance hint (Find & Add knows the artist of
+        # the track it's matching) — used only to rank exact title+artist matches
+        # to the top, NOT to filter.
+        artist_hint = request.args.get('artist', '').strip()
         limit = int(request.args.get('limit', 10))
         if not query:
             return jsonify({"success": True, "tracks": []})
@@ -19596,7 +19705,8 @@ def library_search_tracks():
                 return f"{_art_prefix}{url}{_art_suffix}"
             return url
 
-        results = database.search_tracks(title=query, artist='', limit=limit, server_source=active_server)
+        results = database.search_tracks(title=query, artist='', limit=limit,
+                                         server_source=active_server, rank_artist=artist_hint)
 
         tracks = []
         for t in results:
@@ -25565,6 +25675,12 @@ def select_profile():
 def get_current_profile():
     """Get the currently selected profile from session"""
     try:
+        # Login mode: when on and the session isn't authenticated, tell the
+        # frontend to show the sign-in screen (this is checked before profile
+        # selection, since there's no profile until you log in).
+        if _require_login_enabled() and not session.get('login_authenticated', False):
+            return jsonify({'success': False, 'login_required': True}), 200
+
         pid = session.get('profile_id')
         if not pid:
             return jsonify({'success': False, 'error': 'No profile selected'}), 200
@@ -25588,6 +25704,7 @@ def get_current_profile():
             'success': True,
             'profile': profile,
             'launch_pin_required': bool(require_pin) and not pin_verified,
+            'login_mode': _require_login_enabled(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -25596,6 +25713,15 @@ def get_current_profile():
 def verify_launch_pin():
     """Verify PIN for launch lock screen"""
     try:
+        # Brute-force guard: only a flood of WRONG PINs from one IP trips this; a
+        # correct entry clears it instantly, so normal use is never affected.
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
         data = request.json or {}
         pin = data.get('pin', '')
         if not pin:
@@ -25604,12 +25730,134 @@ def verify_launch_pin():
         database = get_database()
         # Validate against admin profile (ID 1)
         if not database.verify_profile_pin(1, pin):
+            _launch_pin_limiter.record_failure(_ip, _now)
             return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
+        _launch_pin_limiter.record_success(_ip)
         session['launch_pin_verified'] = True
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Username/password login (opt-in login mode). Username = profile name.
+    Brute-force limited per IP; a profile with no password set can't log in."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        # Same generic error + a recorded failure whether the name or password is
+        # wrong — don't leak which names exist.
+        if not profile or not database.verify_profile_password(profile['id'], password):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+
+        _login_limiter.record_success(_ip)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        # A fresh login also clears any stale launch-PIN flag.
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True, 'profile': {
+            'id': profile['id'], 'name': profile['name'], 'is_admin': profile['is_admin'],
+        }})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Log out — clears the authenticated session."""
+    try:
+        session.pop('login_authenticated', None)
+        session.pop('profile_id', None)
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/recovery-question', methods=['GET'])
+def auth_recovery_question():
+    """Return the recovery security-question for a username (forgot-password flow).
+    Generic when the user/question is absent — don't confirm which names exist."""
+    try:
+        username = (request.args.get('username') or '').strip()
+        database = get_database()
+        profile = database.get_profile_by_name(username) if username else None
+        question = database.get_profile_recovery_question(profile['id']) if profile else None
+        if not question:
+            return jsonify({'success': False, 'error': 'No recovery question available'}), 404
+        return jsonify({'success': True, 'question': question})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/recovery-reset', methods=['POST'])
+def auth_recovery_reset():
+    """Reset a login password by answering the recovery question. Brute-force
+    limited; a correct answer sets the new password and authenticates the session."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        answer = data.get('answer') or ''
+        new_password = data.get('new_password') or ''
+        if not username or not answer or not new_password:
+            return jsonify({'success': False, 'error': 'Username, answer and new password are required'}), 400
+        if len(new_password) < 6:
+            return jsonify({'success': False, 'error': 'New password must be at least 6 characters'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        if not profile or not database.verify_profile_recovery_answer(profile['id'], answer):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Incorrect answer'}), 401
+
+        _login_limiter.record_success(_ip)
+        database.set_profile_password(profile['id'], new_password)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-recovery', methods=['POST'])
+def set_profile_recovery_endpoint(profile_id):
+    """Set or clear a profile's recovery question + answer (admin, or self)."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        ok = database.set_profile_recovery(profile_id, data.get('question', ''), data.get('answer', ''))
+        return jsonify({'success': bool(ok), 'has_recovery': database.profile_has_recovery(profile_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/profiles/reset-pin-via-credential', methods=['POST'])
 def reset_pin_via_credential():
@@ -25687,6 +25935,24 @@ def set_profile_pin(profile_id):
 
         success = database.update_profile(profile_id, pin_hash=pin_hash)
         return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-password', methods=['POST'])
+def set_profile_password_endpoint(profile_id):
+    """Set or clear a profile's LOGIN password (admin, or the profile itself).
+    Distinct from the quick-switch PIN."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        password = data.get('password', '')
+        ok = database.set_profile_password(profile_id, password)
+        return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 

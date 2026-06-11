@@ -3192,16 +3192,26 @@ function renderArtistMetaPanel(artist) {
             const res = await fetch(`/api/library/artist/${artist.id}/sync`, { method: 'POST' });
             const data = await res.json();
             if (data.success) {
-                const parts = [];
-                if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
-                if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
-                if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale removed`);
-                if (data.empty_albums_removed > 0) parts.push(`${data.empty_albums_removed} empty albums cleaned`);
-                if (data.name_updated) parts.push('name updated');
-                if (parts.length === 0) parts.push('Already in sync');
-                showToast(`${data.artist_name}: ${parts.join(', ')}`, 'success');
-                // Refresh enhanced view if anything changed
-                if (data.stale_removed > 0 || data.empty_albums_removed > 0) {
+                if (data.removal_skipped) {
+                    // Couldn't get a trustworthy server view — we deliberately did NOT delete.
+                    const parts = [];
+                    if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                    if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                    if (data.name_updated) parts.push('name updated');
+                    const added = parts.length ? ` (${parts.join(', ')})` : '';
+                    showToast(`${data.artist_name}: couldn't fully confirm against your media server — skipped removing tracks to be safe${added}.`, 'warning');
+                } else {
+                    const parts = [];
+                    if (data.new_albums > 0) parts.push(`+${data.new_albums} albums`);
+                    if (data.new_tracks > 0) parts.push(`+${data.new_tracks} tracks`);
+                    if (data.stale_removed > 0) parts.push(`${data.stale_removed} stale removed`);
+                    if (data.empty_albums_removed > 0) parts.push(`${data.empty_albums_removed} empty albums cleaned`);
+                    if (data.name_updated) parts.push('name updated');
+                    if (parts.length === 0) parts.push('Already in sync');
+                    showToast(`${data.artist_name}: ${parts.join(', ')}`, 'success');
+                }
+                // Refresh enhanced view if anything changed (additions OR removals)
+                if (data.new_albums > 0 || data.new_tracks > 0 || data.stale_removed > 0 || data.empty_albums_removed > 0) {
                     loadEnhancedViewData(artist.id);
                 }
             } else {

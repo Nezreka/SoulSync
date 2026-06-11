@@ -67936,3 +67936,44 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-detail-label { color: rgba(255,255,255,0.4); margin-right: 4px; }
 .verif-banner-spacer { flex: 1; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
+
+/* ── Security settings: grouped sub-sections + dependency visuals ── */
+.security-subgroup {
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 10px;
+    padding: 14px 16px 4px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.02);
+}
+.security-subhead {
+    margin: 0 0 12px;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.security-subhead-note {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.55;
+    letter-spacing: 0.02em;
+}
+.security-nested {
+    margin-left: 14px;
+    padding-left: 14px;
+    border-left: 2px solid rgba(255, 255, 255, 0.08);
+}
+.security-locked {
+    opacity: 0.5;
+}
+.security-locked .toggle-label {
+    cursor: not-allowed;
+}
+.security-saved-status {
+    font-size: 12px;
+    color: #4caf50;
+    font-weight: 500;
+    margin-bottom: 6px;
+}
