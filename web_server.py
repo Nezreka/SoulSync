@@ -7578,6 +7578,394 @@ def stream_quarantine_item(entry_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _get_library_history_row(history_id):
+    """Fetch one full library_history row as a dict (or None)."""
+    conn = get_database()._get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM library_history WHERE id = ?", (history_id,))
+    row = cursor.fetchone()
+    return dict(row) if row else None
+
+
+def _resolve_history_audio_path(row):
+    """Resolve a library_history row to a playable on-disk file.
+
+    The recorded path can go stale: Docker↔host prefix differences, or the
+    media server / organizer renaming files with exotic titles (e.g.
+    凸】♀】♂】←Titan) after import. Fallback chain:
+    1. the recorded path as-is,
+    2. `_resolve_library_file_path` (transfer/download/library prefix swap),
+    3. the tracks table — the media-server mirror knows the CURRENT path for
+       this title+artist even after a rename — resolved the same way.
+    """
+    raw_path = (row.get('file_path') or '').strip()
+    if raw_path and os.path.exists(raw_path):
+        return raw_path
+    resolved = _resolve_library_file_path(raw_path) if raw_path else None
+    if resolved and os.path.exists(resolved):
+        return resolved
+    title = (row.get('title') or '').strip()
+    if not title:
+        return None
+    artist = (row.get('artist_name') or '').strip()
+    try:
+        conn = get_database()._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_path FROM tracks WHERE file_path IS NOT NULL AND LOWER(title) = LOWER(?)",
+            (title,))
+        candidates = [r[0] for r in cursor.fetchall() if r[0]]
+    except Exception as e:
+        logger.debug(f"[Verification] tracks-table path fallback failed: {e}")
+        return None
+    # Same-title collisions across artists exist (and delete() trusts this
+    # path), so be strict: when the row names an artist, only accept
+    # candidates whose path mentions it; otherwise only an unambiguous
+    # single candidate.
+    artist_l = artist.lower()
+    if artist_l:
+        candidates = [p for p in candidates if artist_l in p.lower()]
+    elif len(candidates) != 1:
+        return None
+    for cand in candidates:
+        cand_resolved = _resolve_library_file_path(cand)
+        if cand_resolved and os.path.exists(cand_resolved):
+            return cand_resolved
+    return None
+
+
+@app.route('/api/verification/<int:history_id>/stream', methods=['GET'])
+def stream_verification_item(history_id):
+    """Stream a completed download for the verification review queue (listen
+    before approving). Path comes ONLY from the history row — no client paths."""
+    try:
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"error": "History entry not found"}), 404
+        file_path = _resolve_history_audio_path(row)
+        if not file_path:
+            return jsonify({"error": "File not found on disk"}), 404
+        # _AUDIO_MIME_TYPES keys keep the dot ('.flac') — don't strip it, or
+        # everything falls back to audio/mpeg and FLAC playback breaks.
+        ext = os.path.splitext(file_path)[1].lower()
+        mimetype = _AUDIO_MIME_TYPES.get(ext, 'audio/mpeg')
+        return _serve_audio_file_with_range(file_path, mimetype_override=mimetype)
+    except Exception as e:
+        logger.error(f"[Verification] Error streaming history {history_id}: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/entry', methods=['GET'])
+def get_verification_entry(history_id):
+    """Full library_history row for one review-queue item — feeds the Audit
+    Trail modal when opened from the Downloads page (where the history-page
+    entry cache is not populated)."""
+    try:
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        return jsonify({"success": True, "entry": row})
+    except Exception as e:
+        logger.error(f"[Verification] Entry fetch failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/config', methods=['GET'])
+def get_verification_config():
+    """Whether AcoustID/download-verification is enabled — if not, the review
+    queue collapses to quarantine-only in the UI."""
+    try:
+        enabled = bool(config_manager.get('acoustid.enabled', False))
+        return jsonify({"success": True, "acoustid_enabled": enabled})
+    except Exception as e:
+        return jsonify({"success": True, "acoustid_enabled": True, "error": str(e)})
+
+
+def _audio_file_duration_ms(path):
+    """Best-effort duration of an on-disk audio file (0 when unreadable).
+    mutagen detects the format from content, so this also works for
+    quarantined files whose extension was swapped to `.quarantined`."""
+    try:
+        import mutagen
+        mf = mutagen.File(path)
+        if mf and mf.info and getattr(mf.info, 'length', 0):
+            return int(mf.info.length * 1000)
+    except Exception:
+        pass
+    return 0
+
+
+def _set_review_play_session(file_path, title, artist, album, mimetype=None):
+    """Point THIS listener's media-player session at a local file — same
+    mechanism as /api/library/play, so the bottom player UI drives playback
+    (seek/stop/volume) instead of an invisible Audio element."""
+    sess = _current_stream_state()
+    with sess.lock:
+        sess.update({
+            "status": "ready",
+            "progress": 100,
+            "track_info": {
+                "title": title or os.path.basename(file_path),
+                "artist": artist or 'Unknown Artist',
+                "album": album or '',
+            },
+            "file_path": file_path,
+            "stream_url": None,
+            "error_message": None,
+            "is_library": True,
+            # Content-Type hint for /stream/audio — needed for quarantined
+            # files whose on-disk extension is `.quarantined`. Keyed to the
+            # exact path so a stale hint can never leak onto another file.
+            "mimetype_override": mimetype,
+            "mimetype_override_path": file_path if mimetype else None,
+        })
+
+
+@app.route('/api/verification/<int:history_id>/play', methods=['POST'])
+def play_verification_item(history_id):
+    """Load the downloaded file into the media player (review queue ▶)."""
+    try:
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        file_path = _resolve_history_audio_path(row)
+        if not file_path:
+            return jsonify({"success": False, "error": "File not found on disk"}), 404
+        _set_review_play_session(
+            file_path, row.get('title'), row.get('artist_name'), row.get('album_name'))
+        return jsonify({"success": True, "track_info": {
+            "title": row.get('title') or os.path.basename(file_path),
+            "artist": row.get('artist_name') or '',
+            "album": row.get('album_name') or '',
+            "image_url": row.get('thumb_url') or None,
+        }})
+    except Exception as e:
+        logger.error(f"[Verification] Play failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/compare-stream', methods=['POST'])
+def compare_stream_verification_item(history_id):
+    """Find the expected track on Soulseek/streaming sources for an A/B
+    comparison — the SAME pipeline as the /search page play button, but fed
+    server-side so the local file's duration guides candidate ranking (a
+    missing duration lets e.g. 10-hour YouTube loops win and time out)."""
+    try:
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        local = _resolve_history_audio_path(row)
+        duration_ms = _audio_file_duration_ms(local) if local else 0
+        result = _search_stream.stream_search_track(
+            track_name=row.get('title') or '',
+            artist_name=row.get('artist_name') or '',
+            album_name=row.get('album_name') or '',
+            duration_ms=duration_ms,
+            config_manager=config_manager,
+            download_orchestrator=download_orchestrator,
+            matching_engine=matching_engine,
+            run_async=run_async,
+        )
+        if result is None:
+            return jsonify({"success": False,
+                            "error": "No suitable stream candidate found"}), 404
+        result['title'] = row.get('title') or ''
+        result['artist'] = row.get('artist_name') or ''
+        result['album'] = row.get('album_name') or ''
+        result['image_url'] = row.get('thumb_url') or None
+        return jsonify({"success": True, "result": result})
+    except Exception as e:
+        logger.error(f"[Verification] Compare-stream failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _get_quarantine_entry(entry_id):
+    from core.imports.quarantine import list_quarantine_entries
+    for entry in list_quarantine_entries(_get_quarantine_dir()):
+        if entry.get('id') == entry_id:
+            return entry
+    return None
+
+
+@app.route('/api/quarantine/<entry_id>/play', methods=['POST'])
+def play_quarantine_item(entry_id):
+    """Load a quarantined file into the media player (review queue ▶)."""
+    try:
+        from core.imports.quarantine import get_quarantine_entry_stream_info
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        if info is None:
+            return jsonify({"success": False, "error": "Quarantined file not found"}), 404
+        file_path, extension = info
+        entry = _get_quarantine_entry(entry_id) or {}
+        title = entry.get('expected_track') or entry.get('original_filename') or os.path.basename(file_path)
+        _set_review_play_session(
+            file_path, f"{title} (quarantined)", entry.get('expected_artist'), '',
+            mimetype=_AUDIO_MIME_TYPES.get(extension, 'audio/mpeg'))
+        return jsonify({"success": True, "track_info": {
+            "title": f"{title} (quarantined)",
+            "artist": entry.get('expected_artist') or '',
+            "album": '',
+        }})
+    except Exception as e:
+        logger.error(f"[Quarantine] Play failed for {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/compare-stream', methods=['POST'])
+def compare_stream_quarantine_item(entry_id):
+    """Stream-search the EXPECTED track for a quarantined file (A/B compare),
+    using the quarantined file's duration to guide candidate ranking."""
+    try:
+        from core.imports.quarantine import get_quarantine_entry_stream_info
+        entry = _get_quarantine_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Quarantine entry not found"}), 404
+        track_name = entry.get('expected_track') or ''
+        artist_name = entry.get('expected_artist') or ''
+        if not track_name:
+            return jsonify({"success": False,
+                            "error": "Entry has no expected-track metadata"}), 400
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        duration_ms = _audio_file_duration_ms(info[0]) if info else 0
+        result = _search_stream.stream_search_track(
+            track_name=track_name,
+            artist_name=artist_name,
+            album_name='',
+            duration_ms=duration_ms,
+            config_manager=config_manager,
+            download_orchestrator=download_orchestrator,
+            matching_engine=matching_engine,
+            run_async=run_async,
+        )
+        if result is None:
+            return jsonify({"success": False,
+                            "error": "No suitable stream candidate found"}), 404
+        result['title'] = track_name
+        result['artist'] = artist_name
+        return jsonify({"success": True, "result": result})
+    except Exception as e:
+        logger.error(f"[Quarantine] Compare-stream failed for {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/entry', methods=['GET'])
+def get_quarantine_audit_entry(entry_id):
+    """Synthesize a library_history-shaped entry from a quarantine sidecar so
+    the review queue opens the SAME Audit Trail modal for quarantined files
+    (they were never imported, so no history row exists). ``id`` is None on
+    purpose — the modal fetches tags/lyrics through ``_file_tags_url``."""
+    try:
+        from core.imports.quarantine import (
+            get_quarantine_entry_context, get_quarantine_entry_stream_info)
+        entry = _get_quarantine_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Quarantine entry not found"}), 404
+        ctx = get_quarantine_entry_context(_get_quarantine_dir(), entry_id)
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        osr = ctx.get('original_search_result') if isinstance(ctx.get('original_search_result'), dict) else {}
+        username = (osr.get('username') or '') if isinstance(osr, dict) else ''
+        streaming = ('tidal', 'youtube', 'qobuz', 'hifi', 'deezer_dl',
+                     'lidarr', 'soundcloud', 'amazon')
+        ti = ctx.get('track_info') if isinstance(ctx.get('track_info'), dict) else {}
+        album_raw = ti.get('album', '')
+        album_name = album_raw.get('name', '') if isinstance(album_raw, dict) else str(album_raw or '')
+        synthetic = {
+            'id': None,
+            'event_type': 'download',
+            'title': entry.get('expected_track') or entry.get('original_filename') or '',
+            'artist_name': entry.get('expected_artist') or '',
+            'album_name': album_name,
+            'created_at': entry.get('timestamp') or '',
+            'thumb_url': entry.get('thumb_url') or '',
+            'file_path': info[0] if info else '',
+            'quality': ctx.get('_audio_quality') or '',
+            'download_source': username if username in streaming else ('soulseek' if username else ''),
+            'source_filename': entry.get('source_filename') or '',
+            'source_artist': (osr.get('artist') or '') if isinstance(osr, dict) else '',
+            'source_track_title': (osr.get('title') or osr.get('name') or '') if isinstance(osr, dict) else '',
+            'acoustid_result': 'fail' if entry.get('trigger') == 'acoustid' else None,
+            'verification_status': None,
+            '_quarantined': True,
+            '_quarantine_reason': entry.get('reason') or '',
+            '_file_tags_url': f"/api/quarantine/{entry_id}/file-tags",
+        }
+        return jsonify({"success": True, "entry": synthetic})
+    except Exception as e:
+        logger.error(f"[Quarantine] Audit entry failed for {entry_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quarantine/<entry_id>/file-tags', methods=['GET'])
+def get_quarantine_file_tags(entry_id):
+    """Embedded tags of a quarantined file — feeds the Audit modal's Tags /
+    Lyrics tabs. mutagen detects the format from content, so the swapped
+    `.quarantined` extension is no obstacle."""
+    try:
+        from core.imports.quarantine import get_quarantine_entry_stream_info
+        from core.library.file_tags import read_embedded_tags
+        info = get_quarantine_entry_stream_info(_get_quarantine_dir(), entry_id)
+        if info is None:
+            return jsonify({'success': False, 'error': 'Quarantined file not found'}), 404
+        result = read_embedded_tags(info[0])
+        return jsonify({'success': True, **result})
+    except Exception as e:
+        logger.error(f"[Quarantine] File-tags failed for {entry_id}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/approve', methods=['POST'])
+def approve_verification_item(history_id):
+    """User confirmed the file IS the right track: set human_verified on the
+    history row, the file tag, and (best-effort) the tracks row. The AcoustID
+    scanner skips human-verified files entirely."""
+    try:
+        from core.matching.verification_status import HUMAN_VERIFIED
+        from core.tag_writer import write_verification_status
+        db = get_database()
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        file_path = row.get('file_path') or ''
+        on_disk = _resolve_history_audio_path(row)
+        conn = db._get_connection()
+        conn.cursor().execute(
+            "UPDATE library_history SET verification_status = ? WHERE id = ?",
+            (HUMAN_VERIFIED, history_id))
+        # The tracks row may carry either the recorded or the resolved path.
+        for p in {p for p in (file_path, on_disk) if p}:
+            conn.cursor().execute(
+                "UPDATE tracks SET verification_status = ? WHERE file_path = ?",
+                (HUMAN_VERIFIED, p))
+        conn.commit()
+        tag_written = bool(on_disk) and write_verification_status(on_disk, HUMAN_VERIFIED)
+        return jsonify({"success": True, "tag_written": tag_written})
+    except Exception as e:
+        logger.error(f"[Verification] Approve failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/<int:history_id>/delete', methods=['POST'])
+def delete_verification_item(history_id):
+    """User decided the file is wrong: delete it from disk and drop the
+    history row (the media-server mirror cleans the tracks row on next scan)."""
+    try:
+        db = get_database()
+        row = _get_library_history_row(history_id)
+        if not row:
+            return jsonify({"success": False, "error": "History entry not found"}), 404
+        on_disk = _resolve_history_audio_path(row)
+        file_deleted = False
+        if on_disk and os.path.exists(on_disk):
+            os.remove(on_disk)
+            file_deleted = True
+            logger.info(f"[Verification] Deleted rejected file: {on_disk}")
+        db.delete_library_history_rows([history_id])
+        return jsonify({"success": True, "file_deleted": file_deleted})
+    except Exception as e:
+        logger.error(f"[Verification] Delete failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
 def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
@@ -12801,6 +13189,11 @@ def stream_audio():
             stream_url = sess.get("stream_url")
             if not file_path and not stream_url:
                 return jsonify({"error": "No audio file ready for streaming"}), 404
+            # Content-Type hint set by the quarantine player (on-disk extension
+            # is `.quarantined`). Path-keyed so it can't leak onto other files.
+            mimetype_override = (sess.get("mimetype_override")
+                                 if sess.get("mimetype_override_path") == file_path
+                                 else None)
 
         # Library track played via the media server's stream API (#809).
         if stream_url:
@@ -12808,7 +13201,7 @@ def stream_audio():
             return _proxy_stream_url_with_range(stream_url)
 
         logger.info(f"Serving audio file: {os.path.basename(file_path)}")
-        return _serve_audio_file_with_range(file_path)
+        return _serve_audio_file_with_range(file_path, mimetype_override=mimetype_override)
     except Exception as e:
         logger.error(f"Error serving audio file: {e}")
         return jsonify({"error": str(e)}), 500

@@ -56,6 +56,11 @@
       "playlist_path": "$playlist/$artist - $title"
     }
   },
+  "import": {
+    "staging_path": "./Staging",
+    "replace_lower_quality": false,
+    "folder_artist_override": true
+  },
   "lossy_copy": {
     "enabled": false,
     "bitrate": "320",

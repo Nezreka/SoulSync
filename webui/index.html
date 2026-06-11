@@ -2427,6 +2427,7 @@
                                         <button class="adl-pill" data-filter="queued" onclick="adlSetFilter('queued')">Queued</button>
                                         <button class="adl-pill" data-filter="completed" onclick="adlSetFilter('completed')">Completed</button>
                                         <button class="adl-pill" data-filter="failed" onclick="adlSetFilter('failed')">Failed</button>
+                                        <button class="adl-pill" data-filter="unverified" onclick="adlSetFilter('unverified')" title="Review queue: imported-but-unconfirmed downloads (unverified / force-imported) and quarantined files that were never imported.">⚠ Unverified/Quarantine</button>
                                     </div>
                                     <div style="display:flex;align-items:center;gap:10px;">
                                         <span class="adl-count" id="adl-count"></span>
@@ -6319,6 +6320,22 @@
                                     When importing from Staging, if a track already exists in your library at a lower quality
                                     (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
                                     If disabled, existing tracks are always kept and the import file is skipped.
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-folder-artist-override">
+                                        Use the top Staging folder as the artist
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    On by default (legacy behaviour). When enabled, files staged as
+                                    <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
+                                    folder as the album artist — handy for mixtapes/compilations whose embedded tags
+                                    carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
+                                    under one container folder: otherwise every file's artist gets overwritten with
+                                    that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
+                                    metadata-identified artist is always kept.
                                 </div>
                             </div>
 

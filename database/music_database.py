@@ -638,10 +638,28 @@ class MusicDatabase:
             if 'download_source' not in lh_cols:
                 cursor.execute("ALTER TABLE library_history ADD COLUMN download_source TEXT")
                 logger.info("Added download_source column to library_history")
-            for _col in ['source_track_id', 'source_track_title', 'source_filename', 'acoustid_result', 'source_artist']:
+            for _col in ['source_track_id', 'source_track_title', 'source_filename', 'acoustid_result', 'source_artist', 'verification_status']:
                 if _col not in lh_cols:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
+
+            # One-time backfill: derive verification_status for history rows
+            # written before the column existed (or by pipeline exits that
+            # missed it) from the acoustid_result those imports already
+            # recorded (pass->verified, skip->unverified). force_imported
+            # can't be derived retroactively. Idempotent: only fills NULLs.
+            cursor.execute("""
+                UPDATE library_history SET verification_status =
+                    CASE acoustid_result
+                        WHEN 'pass' THEN 'verified'
+                        WHEN 'skip' THEN 'unverified'
+                        WHEN 'fail' THEN 'force_imported'
+                    END
+                WHERE verification_status IS NULL
+                  AND acoustid_result IN ('pass', 'skip', 'fail')
+            """)
+            if cursor.rowcount:
+                logger.info("Backfilled verification_status from acoustid_result (%d rows)", cursor.rowcount)
 
             # Migration: download-origin provenance — what TRIGGERED a download
             # ('watchlist' + artist / 'playlist' + playlist name). Read by the
@@ -2410,6 +2428,11 @@ class MusicDatabase:
                 added_tracks = True
             if 'musicbrainz_match_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN musicbrainz_match_status TEXT")
+                added_tracks = True
+            if 'verification_status' not in tracks_columns:
+                # 'verified' / 'unverified' / 'force_imported' — set at import,
+                # refreshed by the AcoustID scan (which reads the file tag).
+                cursor.execute("ALTER TABLE tracks ADD COLUMN verification_status TEXT")
                 added_tracks = True
             if added_tracks:
                 columns_added = True
@@ -13016,7 +13039,7 @@ class MusicDatabase:
                                   quality=None, server_source=None, file_path=None, thumb_url=None,
                                   download_source=None, source_track_id=None, source_track_title=None,
                                   source_filename=None, acoustid_result=None, source_artist=None,
-                                  origin=None, origin_context=None):
+                                  origin=None, origin_context=None, verification_status=None):
         """Record a download or import event to the library history table.
 
         ``origin``/``origin_context`` record what TRIGGERED the download
@@ -13029,11 +13052,12 @@ class MusicDatabase:
                 INSERT INTO library_history (event_type, title, artist_name, album_name,
                                              quality, server_source, file_path, thumb_url, download_source,
                                              source_track_id, source_track_title, source_filename,
-                                             acoustid_result, source_artist, origin, origin_context)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                             acoustid_result, source_artist, origin, origin_context,
+                                             verification_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (event_type, title, artist_name, album_name, quality, server_source, file_path, thumb_url,
                   download_source, source_track_id, source_track_title, source_filename,
-                  acoustid_result, source_artist, origin, origin_context))
+                  acoustid_result, source_artist, origin, origin_context, verification_status))
             conn.commit()
             return True
         except Exception as e:

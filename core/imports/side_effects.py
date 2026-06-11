@@ -268,6 +268,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             source_artist=source_artist,
             origin=origin,
             origin_context=origin_context,
+            verification_status=context.get("_verification_status"),
         )
     except Exception as e:
         logger.debug("library history record failed: %s", e)
