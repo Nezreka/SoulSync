@@ -67,6 +67,11 @@ def normalize(text: str) -> str:
         '', s, flags=re.IGNORECASE,
     )
     s = re.sub(r'\s*-\s*from\s+.+$', '', s, flags=re.IGNORECASE)
+    # Path/separator punctuation -> space so a title keeps matching a source
+    # filename that substituted '_' for an illegal '/' or ':' (#851): the on-disk
+    # "You See Big Girl _ T_T" must normalize the same as "You See Big Girl / T:T".
+    # Done before the strip below so they become word boundaries, not joins.
+    s = re.sub(r'[\\/:_]+', ' ', s)
     # Drop remaining punctuation but keep word chars (incl. CJK) + spaces.
     s = re.sub(r'[^\w\s]', '', s)
     s = re.sub(r'\s+', ' ', s).strip()
