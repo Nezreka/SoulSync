@@ -13,14 +13,16 @@ from __future__ import annotations
 
 # GET endpoints the login screen itself needs before auth.
 _ALLOWED_GET = frozenset({
-    '/api/profiles/current',  # how the frontend detects login state
-    '/api/setup/status',      # first-run check runs before the login screen
+    '/api/profiles/current',         # how the frontend detects login state
+    '/api/setup/status',             # first-run check runs before the login screen
+    '/api/auth/recovery-question',   # forgot-password: fetch the security question
 })
 
 # POST endpoints that drive the login flow.
 _ALLOWED_POST = frozenset({
     '/api/auth/login',
     '/api/auth/logout',
+    '/api/auth/recovery-reset',      # forgot-password: answer + set a new password
 })
 
 

@@ -125,3 +125,41 @@ def test_everything_normal_when_both_off(client, monkeypatch):
     monkeypatch.setattr(web_server.config_manager, 'get',
         lambda k, d=None: False if k in ('security.require_login', 'security.require_pin_on_launch') else real_get(k, d))
     assert client.get('/api/profiles/me/connections').status_code == 200   # reachable, unguarded
+
+
+def test_recovery_flow_resets_password(client, monkeypatch):
+    db = web_server.get_database()
+    pid = db.create_profile(name='RecoverMe')
+    db.set_profile_password(pid, 'oldpassword')
+    db.set_profile_recovery(pid, 'First pet?', 'Rex')
+    _enable_login(monkeypatch)
+
+    # forgot-password flow is reachable pre-auth
+    q = client.get('/api/auth/recovery-question?username=RecoverMe').get_json()
+    assert q['success'] and q['question'] == 'First pet?'
+
+    # wrong answer → 401, password unchanged
+    bad = client.post('/api/auth/recovery-reset',
+                      json={'username': 'RecoverMe', 'answer': 'Fido', 'new_password': 'newpass1'})
+    assert bad.status_code == 401
+    assert db.verify_profile_password(pid, 'oldpassword') is True
+
+    # correct answer → password reset + authenticated
+    ok = client.post('/api/auth/recovery-reset',
+                     json={'username': 'RecoverMe', 'answer': 'rex', 'new_password': 'brandnew1'})
+    assert ok.status_code == 200 and ok.get_json()['success'] is True
+    assert db.verify_profile_password(pid, 'brandnew1') is True
+    assert db.verify_profile_password(pid, 'oldpassword') is False
+
+
+def test_recovery_question_404_for_unknown(client, monkeypatch):
+    _enable_login(monkeypatch)
+    assert client.get('/api/auth/recovery-question?username=ghost').status_code == 404
+
+
+def test_set_recovery_endpoint(client):
+    db = web_server.get_database()
+    pid = db.create_profile(name='SetRec')
+    r = client.post(f'/api/profiles/{pid}/set-recovery', json={'question': 'Q?', 'answer': 'A'})
+    assert r.get_json()['has_recovery'] is True
+    assert db.verify_profile_recovery_answer(pid, 'a') is True
