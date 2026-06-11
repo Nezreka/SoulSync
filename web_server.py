@@ -402,6 +402,36 @@ def inject_webui_assets():
 # PINs from one IP trips it — correct entry clears it instantly).
 from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
 _launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+_login_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+
+
+def _require_login_enabled():
+    try:
+        return bool(config_manager.get('security.require_login', False)) if config_manager else False
+    except Exception:
+        return False
+
+
+# --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
+@app.before_request
+def _enforce_login():
+    """Server-side enforcement of username/password login. No-op unless
+    security.require_login is on. When on, an unauthenticated session can only
+    reach the page shell + the login flow + the key-authed public API."""
+    if not _require_login_enabled():
+        return
+    from core.security.login_gate import login_request_is_blocked
+    from core.security.launch_lock import is_html_navigation
+    if login_request_is_blocked(
+        request.path, request.method,
+        require_login=True,
+        authenticated=bool(session.get('login_authenticated', False)),
+    ):
+        if is_html_navigation(request.method, request.headers.get('Accept', ''),
+                              request.headers.get('Sec-Fetch-Mode', '')):
+            return redirect('/')
+        return jsonify({"error": "login_required", "login_required": True}), 401
+
 
 # --- Launch PIN gate (before_request hook) ---
 @app.before_request
@@ -414,6 +444,10 @@ def _enforce_launch_pin():
     on, except the page shell + the unlock flow + the key-authed public API.
     No-ops entirely when ``security.require_pin_on_launch`` is off (the default).
     """
+    # Login mode replaces the launch PIN entirely — when it's on, _enforce_login
+    # owns the gate and this no-ops.
+    if _require_login_enabled():
+        return
     try:
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
     except Exception:
@@ -3078,6 +3112,14 @@ def handle_settings():
             new_settings = request.get_json()
             if not new_settings:
                 return jsonify({"success": False, "error": "No data received."}), 400
+
+            # Anti-lockout: refuse to turn ON login mode until the admin account
+            # has a password — otherwise enabling it would lock everyone out.
+            _sec_in = new_settings.get('security') or {}
+            if _sec_in.get('require_login') and not config_manager.get('security.require_login', False):
+                if not get_database().profile_has_password(1):
+                    return jsonify({"success": False,
+                                    "error": "Set an admin password before enabling login mode."}), 400
 
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
@@ -25296,6 +25338,57 @@ def verify_launch_pin():
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Username/password login (opt-in login mode). Username = profile name.
+    Brute-force limited per IP; a profile with no password set can't log in."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        # Same generic error + a recorded failure whether the name or password is
+        # wrong — don't leak which names exist.
+        if not profile or not database.verify_profile_password(profile['id'], password):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+
+        _login_limiter.record_success(_ip)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        # A fresh login also clears any stale launch-PIN flag.
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True, 'profile': {
+            'id': profile['id'], 'name': profile['name'], 'is_admin': profile['is_admin'],
+        }})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Log out — clears the authenticated session."""
+    try:
+        session.pop('login_authenticated', None)
+        session.pop('profile_id', None)
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/profiles/reset-pin-via-credential', methods=['POST'])
 def reset_pin_via_credential():
