@@ -3799,8 +3799,10 @@ function openDownloadAuditModal(entry) {
 
     // Live tag read for the Tags tab. Fire-and-forget on open so the
     // data is ready by the time the user switches to the Tags tab.
-    if (entry.id != null) {
-        fetchAndRenderEmbeddedTags(entry.id);
+    // Synthetic entries (quarantine review queue) have no history id but
+    // carry their own tags URL in _file_tags_url.
+    if (entry.id != null || entry._file_tags_url) {
+        fetchAndRenderEmbeddedTags(entry.id, entry._file_tags_url);
     }
 }
 
@@ -3814,11 +3816,9 @@ function switchAuditTab(tabName) {
     if (body) body.innerHTML = renderDownloadAuditTabPanel(tabName, _downloadAuditEntry);
     // Re-fire the live fetch when switching to Tags (in case it
     // raced past first mount before the user got there).
-    if (tabName === 'tags' && _downloadAuditEntry.id != null) {
-        fetchAndRenderEmbeddedTags(_downloadAuditEntry.id);
-    }
-    if (tabName === 'lyrics' && _downloadAuditEntry.id != null) {
-        fetchAndRenderEmbeddedTags(_downloadAuditEntry.id);
+    if ((tabName === 'tags' || tabName === 'lyrics') &&
+        (_downloadAuditEntry.id != null || _downloadAuditEntry._file_tags_url)) {
+        fetchAndRenderEmbeddedTags(_downloadAuditEntry.id, _downloadAuditEntry._file_tags_url);
     }
 }
 window.switchAuditTab = switchAuditTab;
@@ -3856,7 +3856,14 @@ function renderDownloadAuditHero(entry) {
     const pills = [];
     if (entry.download_source) pills.push(_auditHeroPill('source', entry.download_source));
     if (entry.quality) pills.push(_auditHeroPill('quality', entry.quality));
-    if (entry.acoustid_result) pills.push(_auditHeroPill('verify', formatAcoustidLabel(entry.acoustid_result), entry.acoustid_result));
+    const _vsLabels = { verified: 'Verified', unverified: 'Unverified', force_imported: 'Force-imported', human_verified: 'Human verified' };
+    if (entry.verification_status && _vsLabels[entry.verification_status]) {
+        pills.push(_auditHeroPill('verify', _vsLabels[entry.verification_status], entry.verification_status));
+    } else if (entry._quarantined) {
+        pills.push(_auditHeroPill('verify', 'Quarantined', 'fail'));
+    } else if (entry.acoustid_result) {
+        pills.push(_auditHeroPill('verify', formatAcoustidLabel(entry.acoustid_result), entry.acoustid_result));
+    }
 
     return `
         ${art}
@@ -3957,7 +3964,7 @@ function renderEmbeddedTagsSection(entry) {
     return renderDownloadAuditTagsTab(entry);
 }
 
-async function fetchAndRenderEmbeddedTags(historyId) {
+async function fetchAndRenderEmbeddedTags(historyId, urlOverride) {
     const tagsSlot = document.getElementById('download-audit-tags-body');
     const lyricsSlot = document.getElementById('download-audit-lyrics-body');
     if (!tagsSlot && !lyricsSlot) return;
@@ -3967,7 +3974,7 @@ async function fetchAndRenderEmbeddedTags(historyId) {
         if (lyricsSlot) lyricsSlot.innerHTML = html;
     };
     try {
-        const resp = await fetch(`/api/library/history/${historyId}/file-tags`);
+        const resp = await fetch(urlOverride || `/api/library/history/${historyId}/file-tags`);
         if (!resp.ok) { renderError(`Could not read file tags (HTTP ${resp.status}).`); return; }
         const data = await resp.json();
         if (!data.success) { renderError(data.error || 'Could not read file tags.'); return; }
@@ -4263,8 +4270,8 @@ function buildDownloadAuditSteps(entry) {
         {
             key: 'verify',
             title: 'Verification',
-            status: auditStatusFromAcoustid(entry.acoustid_result),
-            detail: buildAcoustidDetail(entry.acoustid_result),
+            status: auditVerifyStatus(entry),
+            detail: buildVerificationDetail(entry),
             meta: [],
         },
         (() => {
@@ -4379,6 +4386,37 @@ function buildSourceMatchMeta(entry) {
     if (entry.source_filename) out.push(`File: ${entry.source_filename}`);
     if (entry.source_track_id) out.push(`Source ID: ${entry.source_track_id}`);
     return out;
+}
+
+function auditVerifyStatus(entry) {
+    // The persisted verification status is the final word — it captures
+    // outcomes the raw acoustid_result can't express (force-imported after
+    // N retries, human approval via the review queue).
+    if (entry._quarantined) return 'error';
+    if (entry.verification_status === 'human_verified') return 'complete';
+    if (entry.verification_status === 'verified') return 'complete';
+    if (entry.verification_status === 'force_imported') return 'partial';
+    if (entry.verification_status === 'unverified') return 'partial';
+    return auditStatusFromAcoustid(entry.acoustid_result);
+}
+
+function buildVerificationDetail(entry) {
+    if (entry._quarantined) {
+        return `Quarantined — the file was NOT imported. ${entry._quarantine_reason || ''}`.trim();
+    }
+    if (entry.verification_status === 'force_imported') {
+        return 'Force-imported: accepted as the best available candidate after the retry budget was exhausted (version-mismatch fallback). The AcoustID check was bypassed for this final re-import — earlier attempts had failed it.';
+    }
+    if (entry.verification_status === 'human_verified') {
+        return 'Human verified: you confirmed this file via the review queue. The AcoustID scanner skips it.';
+    }
+    if (entry.verification_status === 'unverified') {
+        return 'Imported but not hard-confirmed: AcoustID could not verify this file (ambiguous / cross-script metadata / no fingerprint match). Review it under Unverified/Quarantine on the Downloads page.';
+    }
+    if (entry.verification_status === 'verified') {
+        return 'AcoustID fingerprint matched the expected track.';
+    }
+    return buildAcoustidDetail(entry.acoustid_result);
 }
 
 function auditStatusFromAcoustid(result) {

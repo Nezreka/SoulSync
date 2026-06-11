@@ -104,7 +104,13 @@ def cancel_sync(
     """
     try:
         if key not in states:
-            return {"error": not_found_message}, 404
+            # Idempotent: the live discovery state is gone (a restart wiped the
+            # in-memory state, or it was already cancelled). Cancelling a sync
+            # that isn't running is a no-op SUCCESS, not a 404 — otherwise a
+            # mirrored playlist (e.g. a ListenBrainz weekly) whose state vanished
+            # is permanently wedged with "playlist not found" and can never be
+            # re-synced or dismissed (#702).
+            return {"success": True, "message": f"No active {label} sync to cancel"}, 200
 
         state = states[key]
         state['last_accessed'] = time.time()

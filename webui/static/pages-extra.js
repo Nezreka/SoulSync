@@ -2288,6 +2288,7 @@ function _adlRenderBatchSummary(activeBatches) {
 }
 
 function loadActiveDownloadsPage() {
+    _verifLoadConfig();
     _adlFetch();
     _adlFetchBatchHistory();
     // Poll downloads every 2 seconds, history every 60 seconds
@@ -2348,6 +2349,506 @@ function _updateDlNavBadge(count) {
     }
 }
 
+function _adlVerifBadge(dl) {
+    // Verification badge for completed downloads — how this file passed
+    // verification (status comes from library_history / the live task):
+    // verified = clean AcoustID pass; unverified = imported but not
+    // hard-confirmed (cross-script/ambiguous/no fingerprint match);
+    // force_imported = accepted as best candidate after the retry budget was
+    // exhausted (version-mismatch fallback).
+    if (dl.status !== 'completed') return '';
+    if (dl.verification_status === 'force_imported') {
+        return ' <span class="verif-badge verif-force" title="Force-imported: accepted as best available candidate after repeated mismatches (version-mismatch fallback). Library AcoustID scans report these as informational.">⚑</span>';
+    }
+    if (dl.verification_status === 'unverified') {
+        return ' <span class="verif-badge verif-unverified" title="Imported but not hard-verified (AcoustID could not confirm — e.g. cross-script metadata or no fingerprint match).">⚠</span>';
+    }
+    if (dl.verification_status === 'verified') {
+        return ' <span class="verif-badge verif-ok" title="AcoustID verified: audio fingerprint matches the expected track.">✔</span>';
+    }
+    if (dl.verification_status === 'human_verified') {
+        return ' <span class="verif-badge verif-human" title="Human verified: you confirmed this file is the right track. The AcoustID scanner skips it.">🛡✔</span>';
+    }
+    return '';
+}
+
+// ---- Verification review queue (the ⚠ Unverified/Quarantine filter) ----
+
+function verifHistoryId(dl) {
+    // Persistent history rows carry task_id 'history-<dbid>'.
+    if (!dl.is_persistent_history || !dl.task_id) return null;
+    const m = String(dl.task_id).match(/^history-(\d+)$/);
+    return m ? m[1] : null;
+}
+
+function _verifTimeAgo(iso) {
+    return (typeof formatHistoryTime === 'function' && iso) ? formatHistoryTime(iso) : '';
+}
+
+function _verifReasonBadge(dl) {
+    // Glanceable badge in the style of the library-history quarantine tab.
+    if (dl.verification_status === 'force_imported') {
+        return '<span class="verif-reason-badge verif-rb-force" title="Accepted as best candidate after the retry budget was exhausted (version-mismatch fallback)">FORCE-IMPORTED</span>';
+    }
+    if (dl.verification_status === 'unverified') {
+        return '<span class="verif-reason-badge verif-rb-unv" title="AcoustID could not hard-confirm this file (ambiguous / cross-script / no fingerprint match)">ACOUSTID UNCONFIRMED</span>';
+    }
+    return '';
+}
+
+function _adlReviewActions(dl) {
+    if (_adlFilter !== 'unverified') return '';
+    const hid = verifHistoryId(dl);
+    if (!hid) return '';
+    const timeAgo = _verifTimeAgo(dl.created_at);
+    return `<div class="verif-actions" onclick="event.stopPropagation()">
+        ${_verifReasonBadge(dl)}
+        ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
+        <button class="verif-act verif-act-play" onclick="verifPlay('${hid}')" title="Play the downloaded file in the media player">▶</button>
+        <button class="verif-act" onclick="verifCompare('${hid}', this)" title="Find this track on Soulseek/streaming sources and play it in the media player — compare against your file">⇆</button>
+        <button class="verif-act" onclick="verifAudit('${hid}')" title="Open the audit trail for this download (lifecycle, embedded tags, lyrics)">🔍</button>
+        <button class="verif-act verif-act-ok" onclick="verifApprove('${hid}', this)" title="Approve: mark as human-verified (tag + DB). The AcoustID scanner will skip it.">✔</button>
+        <button class="verif-act verif-act-del" onclick="verifDelete('${hid}', this)" title="Wrong file: delete it from disk and remove this entry">🗑</button>
+    </div>`;
+}
+
+async function verifPlay(hid) {
+    // Plays the LOCAL file through the global media player (same machinery as
+    // library playback) — full player UI with seek/stop instead of an
+    // invisible Audio element that re-renders wiped.
+    const dl = _adlData.find(d => verifHistoryId(d) === String(hid));
+    try {
+        if (typeof setTrackInfo === 'function') {
+            setTrackInfo({
+                title: (dl && dl.title) || 'Review track',
+                artist: (dl && dl.artist) || '',
+                album: (dl && dl.album) || '',
+                is_library: true,
+                image_url: (dl && dl.artwork) || null,
+            });
+        }
+        if (typeof showLoadingAnimation === 'function') showLoadingAnimation();
+        const r = await fetch(`/api/verification/${hid}/play`, { method: 'POST' });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'Playback failed');
+        await startAudioPlayback();
+    } catch (e) {
+        if (typeof hideLoadingAnimation === 'function') hideLoadingAnimation();
+        showToast && showToast('Playback failed: ' + e.message, 'error');
+    }
+}
+
+async function verifCompare(hid, btn) {
+    // Same pipeline as the /search page play button — run server-side so the
+    // local file's duration guides candidate ranking (avoids e.g. 10-hour
+    // YouTube loops winning the match and timing out).
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    showToast && showToast('Searching stream for comparison…', 'info');
+    try {
+        const res = await fetch(`/api/verification/${hid}/compare-stream`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success && data.result && typeof startStream === 'function') {
+            await startStream(data.result);
+        } else {
+            showToast && showToast(data.error || 'No stream candidate found for comparison', 'error');
+        }
+    } catch (e) {
+        showToast && showToast('Stream failed: ' + e.message, 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '⇆'; }
+}
+
+async function verifAudit(hid) {
+    try {
+        const r = await fetch(`/api/verification/${hid}/entry`);
+        const d = await r.json();
+        if (d.success && d.entry && typeof openDownloadAuditModal === 'function') {
+            openDownloadAuditModal(d.entry);
+        } else {
+            showToast && showToast(d.error || 'Audit data not available', 'error');
+        }
+    } catch (e) {
+        showToast && showToast('Audit load failed', 'error');
+    }
+}
+
+async function verifApprove(hid, btn) {
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/verification/${hid}/approve`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) { showToast && showToast('Marked as human-verified 🛡✔', 'success'); _adlFetch(); }
+        else showToast && showToast(d.error || 'Approve failed', 'error');
+    } catch (e) { showToast && showToast('Approve failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
+async function verifDelete(hid, btn) {
+    if (!await showConfirmDialog({
+        title: 'Delete Unverified File',
+        message: 'This permanently deletes the downloaded file from disk and removes the review entry. Cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/verification/${hid}/delete`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) { showToast && showToast('File deleted', 'success'); _adlFetch(); }
+        else showToast && showToast(d.error || 'Delete failed', 'error');
+    } catch (e) { showToast && showToast('Delete failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+// ---- Quarantine sub-view inside the ⚠ filter ----
+// The review queue covers BOTH kinds of suspect files: imported-but-
+// unconfirmed (unverified/force_imported) and not-imported-at-all
+// (quarantined). One place to listen, compare, approve or delete.
+let _verifSubView = 'unverified';
+let _verifQuarEntries = [];
+let _verifQuarLoaded = false;
+let _verifQuarLoading = false;
+// Expanded 🔍 detail panels, keyed by quarantine entry id — survives the
+// polling re-render (which rebuilds the rows every few seconds).
+const _verifQuarOpenDetails = new Set();
+// null = not fetched yet (assume enabled). Without an AcoustID API key
+// nothing ever gets a verification status, so the review queue collapses
+// to quarantine-only.
+let _verifAcoustidEnabled = null;
+let _verifConfigLoading = false;
+
+async function _verifLoadConfig() {
+    if (_verifAcoustidEnabled !== null || _verifConfigLoading) return;
+    _verifConfigLoading = true;
+    try {
+        const r = await fetch('/api/verification/config');
+        const d = await r.json();
+        _verifAcoustidEnabled = !!(d && d.acoustid_enabled);
+    } catch (e) { _verifAcoustidEnabled = true; }
+    _verifConfigLoading = false;
+    if (_verifAcoustidEnabled === false) {
+        _verifSubView = 'quarantine';
+        const pill = document.querySelector('.adl-pill[data-filter="unverified"]');
+        if (pill) {
+            pill.textContent = '🛡 Quarantine';
+            pill.title = 'Files that failed import checks and were NOT imported. (AcoustID is not configured, so there is no unverified review queue.)';
+        }
+        if (_adlFilter === 'unverified') { _verifLoadQuarantine(true); _adlRender(); }
+    }
+}
+
+function verifSetSubView(v) {
+    if (_verifAcoustidEnabled === false) v = 'quarantine';
+    _verifSubView = v === 'quarantine' ? 'quarantine' : 'unverified';
+    if (_verifSubView === 'quarantine') _verifLoadQuarantine(true);
+    _adlRender();
+}
+
+async function _verifLoadQuarantine(force) {
+    if (_verifQuarLoading || (_verifQuarLoaded && !force)) return;
+    _verifQuarLoading = true;
+    try {
+        const r = await fetch('/api/quarantine/list');
+        const d = await r.json();
+        _verifQuarEntries = (d.success && Array.isArray(d.entries)) ? d.entries : [];
+    } catch (e) { _verifQuarEntries = []; }
+    _verifQuarLoaded = true;
+    _verifQuarLoading = false;
+    if (_adlFilter === 'unverified') _adlRender();
+}
+
+const _VERIF_QUAR_TRIGGERS = {
+    integrity: ['DURATION / INTEGRITY', 'verif-rb-int'],
+    acoustid: ['ACOUSTID MISMATCH', 'verif-rb-force'],
+    bit_depth: ['BIT DEPTH FILTER', 'verif-rb-int'],
+};
+
+function _verifQuarRows() {
+    if (!_verifQuarLoaded) return '<div class="adl-section-header">Loading quarantine…</div>';
+    if (!_verifQuarEntries.length) return '';
+    let html = '';
+    _verifQuarEntries.forEach((q, idx) => {
+        const title = _adlEsc(q.expected_track || q.original_filename || q.filename || 'Unknown file');
+        const meta = [_adlEsc(q.expected_artist || ''), _adlEsc(q.original_filename || '')].filter(Boolean).join(' — ');
+        const [trigLabel, trigClass] = _VERIF_QUAR_TRIGGERS[q.trigger] || ['QUARANTINED', 'verif-rb-unv'];
+        const timeAgo = _verifTimeAgo(q.timestamp);
+        const approveBtn = q.has_full_context
+            ? `<button class="verif-act verif-act-ok" onclick="verifQuarApprove(${idx}, this)" title="Approve: re-import this exact file into the library, marked human-verified">✔</button>`
+            : `<button class="verif-act verif-act-ok" onclick="verifQuarRecover(${idx}, this)" title="Recover to Staging for a manual import (legacy entry without embedded context)">⤴</button>`;
+        const details = [
+            q.reason ? `<div><span class="verif-detail-label">Reason:</span> ${_adlEsc(q.reason)}</div>` : '',
+            q.source_username ? `<div><span class="verif-detail-label">Source uploader:</span> ${_adlEsc(q.source_username)}</div>` : '',
+            q.source_filename ? `<div><span class="verif-detail-label">Original Soulseek file:</span> ${_adlEsc(q.source_filename)}</div>` : '',
+            q.timestamp ? `<div><span class="verif-detail-label">Quarantined:</span> ${_adlEsc(q.timestamp)}</div>` : '',
+        ].filter(Boolean).join('');
+        const detailsOpen = _verifQuarOpenDetails.has(q.id);
+        const artHtml = q.thumb_url
+            ? `<img class="adl-row-art" src="${_adlEsc(q.thumb_url)}" alt="" onerror="this.style.display='none'">`
+            : '<div class="adl-row-art adl-row-art-empty"></div>';
+        html += `<div class="adl-row adl-row-failed verif-quar-row" data-quarantine-id="${_adlEsc(q.id)}" onclick="verifQuarInspect(${idx})" title="Click to show/hide details (reason, source uploader, original filename)">
+            ${artHtml}
+            <div class="adl-row-info">
+                <div class="adl-row-title">${title}</div>
+                ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+                <div class="verif-quar-details" id="verif-quar-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${details || 'No further details in the sidecar.'}</div>
+            </div>
+            <div class="verif-actions" onclick="event.stopPropagation()">
+                <span class="verif-reason-badge ${trigClass}" title="${_adlEsc(q.reason || '')}">${trigLabel}</span>
+                ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
+                <button class="verif-act verif-act-play" onclick="verifQuarPlay(${idx})" title="Play the quarantined file in the media player">▶</button>
+                <button class="verif-act" onclick="verifQuarCompare(${idx}, this)" title="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file">⇆</button>
+                <button class="verif-act" onclick="verifQuarAudit(${idx})" title="Open the audit trail for this quarantined file (details, embedded tags, lyrics)">🔍</button>
+                ${approveBtn}
+                <button class="verif-act verif-act-del" onclick="verifQuarDelete(${idx}, this)" title="Delete the quarantined file permanently">🗑</button>
+            </div>
+        </div>`;
+    });
+    return html;
+}
+
+function verifQuarInspect(idx) {
+    // Open-state lives in a Set keyed by entry id (not the DOM) — the polling
+    // re-render rebuilds the rows every few seconds and would collapse a
+    // DOM-only toggle right after the click.
+    const q = _verifQuarEntries[idx];
+    if (!q) return;
+    if (_verifQuarOpenDetails.has(q.id)) _verifQuarOpenDetails.delete(q.id);
+    else _verifQuarOpenDetails.add(q.id);
+    const el = document.getElementById(`verif-quar-details-${idx}`);
+    if (el) el.style.display = _verifQuarOpenDetails.has(q.id) ? '' : 'none';
+}
+
+async function verifQuarAudit(idx) {
+    // Same Audit Trail modal as the unverified rows — the backend synthesizes
+    // a history-shaped entry from the quarantine sidecar (these files were
+    // never imported, so no real history row exists).
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/entry`);
+        const d = await r.json();
+        if (d.success && d.entry && typeof openDownloadAuditModal === 'function') {
+            openDownloadAuditModal(d.entry);
+        } else {
+            showToast && showToast(d.error || 'Audit data not available', 'error');
+        }
+    } catch (e) {
+        showToast && showToast('Audit load failed', 'error');
+    }
+}
+
+async function verifQuarPlay(idx) {
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    try {
+        if (typeof setTrackInfo === 'function') {
+            setTrackInfo({
+                title: `${q.expected_track || q.original_filename || 'Quarantined file'} (quarantined)`,
+                artist: q.expected_artist || '',
+                album: '',
+                is_library: true,
+            });
+        }
+        if (typeof showLoadingAnimation === 'function') showLoadingAnimation();
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/play`, { method: 'POST' });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'Playback failed');
+        await startAudioPlayback();
+    } catch (e) {
+        if (typeof hideLoadingAnimation === 'function') hideLoadingAnimation();
+        showToast && showToast('Playback failed: ' + e.message, 'error');
+    }
+}
+
+async function verifQuarCompare(idx, btn) {
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    showToast && showToast(`Searching stream for "${q.expected_track || ''}"…`, 'info');
+    try {
+        const res = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/compare-stream`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success && data.result && typeof startStream === 'function') {
+            await startStream(data.result);
+        } else {
+            showToast && showToast(data.error || 'No stream candidate found for comparison', 'error');
+        }
+    } catch (e) {
+        showToast && showToast('Stream failed: ' + e.message, 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '⇆'; }
+}
+
+async function verifQuarApprove(idx, btn) {
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            showToast && showToast('Approved — re-importing, will be marked human-verified 🛡✔', 'success');
+            _verifLoadQuarantine(true);
+        } else {
+            showToast && showToast(d.error || 'Approve failed', 'error');
+        }
+    } catch (e) { showToast && showToast('Approve failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
+async function verifQuarRecover(idx, btn) {
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/recover`, { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            showToast && showToast('Moved to Staging — finish via the Import page', 'success');
+            _verifLoadQuarantine(true);
+        } else {
+            showToast && showToast(d.error || 'Recover failed', 'error');
+        }
+    } catch (e) { showToast && showToast('Recover failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
+async function verifQuarDelete(idx, btn) {
+    const q = _verifQuarEntries[idx]; if (!q) return;
+    if (!await showConfirmDialog({
+        title: 'Delete Quarantined File',
+        message: 'This permanently removes the file and its metadata sidecar. Cannot be undone.',
+        confirmText: 'Delete',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
+        const d = await r.json();
+        if (d.success) { showToast && showToast('Quarantined file deleted', 'success'); _verifLoadQuarantine(true); }
+        else showToast && showToast(d.error || 'Delete failed', 'error');
+    } catch (e) { showToast && showToast('Delete failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
+function _verifUnverifiedIds() {
+    const done = ['completed', 'skipped', 'already_owned'];
+    return _adlData
+        .filter(d => done.includes(d.status) &&
+            (d.verification_status === 'unverified' || d.verification_status === 'force_imported'))
+        .map(d => verifHistoryId(d))
+        .filter(Boolean);
+}
+
+async function verifApproveAll(btn) {
+    const ids = _verifUnverifiedIds();
+    if (!ids.length) return;
+    if (!await showConfirmDialog({
+        title: 'Approve Unverified Files',
+        message: `Mark all ${ids.length} unverified entries as human-verified? The AcoustID scanner will skip them from now on.`,
+        confirmText: 'Approve All',
+        cancelText: 'Cancel',
+    })) return;
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    for (const id of ids) {
+        try {
+            const r = await fetch(`/api/verification/${id}/approve`, { method: 'POST' });
+            const d = await r.json();
+            if (d.success) ok++;
+        } catch (e) {}
+    }
+    showToast && showToast(`Approved ${ok}/${ids.length} entries 🛡✔`, ok === ids.length ? 'success' : 'error');
+    if (btn) btn.disabled = false;
+    _adlFetch();
+}
+
+async function verifDeleteAll(btn) {
+    const ids = _verifUnverifiedIds();
+    if (!ids.length) return;
+    if (!await showConfirmDialog({
+        title: 'Delete Unverified Files',
+        message: `This permanently deletes all ${ids.length} unverified files from disk and removes their review entries. Cannot be undone.`,
+        confirmText: 'Delete All',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    for (const id of ids) {
+        try {
+            const r = await fetch(`/api/verification/${id}/delete`, { method: 'POST' });
+            const d = await r.json();
+            if (d.success) ok++;
+        } catch (e) {}
+    }
+    showToast && showToast(`Deleted ${ok}/${ids.length} files`, ok === ids.length ? 'success' : 'error');
+    if (btn) btn.disabled = false;
+    _adlFetch();
+}
+
+async function verifQuarApproveAll(btn) {
+    const entries = _verifQuarEntries.filter(q => q.has_full_context);
+    if (!entries.length) {
+        showToast && showToast('No one-click-approvable entries (legacy sidecars need Recover)', 'info');
+        return;
+    }
+    if (!await showConfirmDialog({
+        title: 'Approve Quarantined Files',
+        message: `Approve and re-import all ${entries.length} quarantined files? They will be imported into the library marked human-verified.`,
+        confirmText: 'Approve & Import All',
+        cancelText: 'Cancel',
+    })) return;
+    if (btn) btn.disabled = true;
+    let ok = 0;
+    for (const q of entries) {
+        try {
+            const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+            const d = await r.json();
+            if (d.success) ok++;
+        } catch (e) {}
+        // Each approve spawns a server-side re-import thread — stagger them.
+        await new Promise(res => setTimeout(res, 500));
+    }
+    showToast && showToast(`Approved ${ok}/${entries.length} — re-importing as human-verified`, ok === entries.length ? 'success' : 'error');
+    if (btn) btn.disabled = false;
+    _verifLoadQuarantine(true);
+}
+
+async function verifQuarClearAll(btn) {
+    if (!_verifQuarEntries.length) return;
+    if (!await showConfirmDialog({
+        title: 'Clear Quarantine',
+        message: `This permanently deletes all ${_verifQuarEntries.length} quarantined files and their metadata sidecars. Cannot be undone.`,
+        confirmText: 'Delete All',
+        cancelText: 'Cancel',
+        destructive: true,
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/quarantine/clear', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) showToast && showToast('Quarantine cleared', 'success');
+        else showToast && showToast(d.error || 'Clear failed', 'error');
+    } catch (e) { showToast && showToast('Clear failed', 'error'); }
+    if (btn) btn.disabled = false;
+    _verifLoadQuarantine(true);
+}
+
+window.verifPlay = verifPlay;
+window.verifApprove = verifApprove;
+window.verifDelete = verifDelete;
+window.verifCompare = verifCompare;
+window.verifAudit = verifAudit;
+window.verifSetSubView = verifSetSubView;
+window.verifApproveAll = verifApproveAll;
+window.verifDeleteAll = verifDeleteAll;
+window.verifQuarPlay = verifQuarPlay;
+window.verifQuarCompare = verifQuarCompare;
+window.verifQuarInspect = verifQuarInspect;
+window.verifQuarAudit = verifQuarAudit;
+window.verifQuarApprove = verifQuarApprove;
+window.verifQuarRecover = verifQuarRecover;
+window.verifQuarDelete = verifQuarDelete;
+window.verifQuarApproveAll = verifQuarApproveAll;
+window.verifQuarClearAll = verifQuarClearAll;
+
 function _adlRender() {
     const list = document.getElementById('adl-list');
     const empty = document.getElementById('adl-empty');
@@ -2370,6 +2871,10 @@ function _adlRender() {
     if (_adlFilter === 'active') filtered = filtered.filter(d => activeStatuses.includes(d.status));
     else if (_adlFilter === 'queued') filtered = filtered.filter(d => queuedStatuses.includes(d.status));
     else if (_adlFilter === 'completed') filtered = filtered.filter(d => completedStatuses.includes(d.status));
+    else if (_adlFilter === 'unverified') filtered = filtered.filter(d =>
+        completedStatuses.includes(d.status) &&
+        (d.verification_status === 'unverified' || d.verification_status === 'force_imported'));
+    // (review banner injected below when this filter is active)
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
     const completedN = _adlData.filter(d =>
@@ -2419,6 +2924,48 @@ function _adlRender() {
         existingBanner.style.display = 'none';
     }
 
+    // Review queue sub-view toggle: unverified imports ⇄ quarantined files.
+    let verifBanner = document.getElementById('verif-subview-banner');
+    if (_adlFilter === 'unverified') {
+        _verifLoadConfig(); // no-op once fetched
+        if (!verifBanner) {
+            verifBanner = document.createElement('div');
+            verifBanner.id = 'verif-subview-banner';
+            verifBanner.className = 'adl-batch-filter-banner';
+            list.parentNode.insertBefore(verifBanner, list);
+        }
+        const quarCount = _verifQuarLoaded ? ` (${_verifQuarEntries.length})` : '';
+        const bulkBtns = _verifSubView === 'quarantine'
+            ? `<button class="adl-filter-banner-clear" onclick="verifQuarApproveAll(this)" title="Approve + re-import every quarantined file (marked human-verified)">✔ Approve all</button>
+               <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifQuarClearAll(this)" title="Permanently delete every quarantined file">🗑 Clear all</button>`
+            : `<button class="adl-filter-banner-clear" onclick="verifApproveAll(this)" title="Mark every listed entry as human-verified">✔ Approve all</button>
+               <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifDeleteAll(this)" title="Delete every listed file from disk and remove its entry">🗑 Delete all</button>`;
+        // Without an AcoustID key nothing ever gets a verification status —
+        // hide the pointless Unverified pill and show quarantine only.
+        const unvPill = _verifAcoustidEnabled === false
+            ? ''
+            : `<button class="adl-pill${_verifSubView === 'unverified' ? ' active' : ''}" onclick="verifSetSubView('unverified')" title="Imported files that AcoustID could not hard-confirm">⚠ Unverified (${filtered.length})</button>`;
+        verifBanner.innerHTML = `
+            ${unvPill}
+            <button class="adl-pill${_verifSubView === 'quarantine' ? ' active' : ''}" onclick="verifSetSubView('quarantine')" title="Files that failed verification and were NOT imported">🛡 Quarantine${quarCount}</button>
+            <span class="verif-banner-spacer"></span>
+            ${bulkBtns}`;
+        verifBanner.style.display = '';
+        if (!_verifQuarLoaded) _verifLoadQuarantine(false); // count for the pill
+    } else if (verifBanner) {
+        verifBanner.style.display = 'none';
+    }
+
+    if (_adlFilter === 'unverified' && _verifSubView === 'quarantine') {
+        const qhtml = _verifQuarRows();
+        const qEmptyEl = document.getElementById('adl-empty');
+        const qEmptyHtml = qEmptyEl ? qEmptyEl.outerHTML : '';
+        list.innerHTML = qEmptyHtml + qhtml;
+        const qNewEmpty = document.getElementById('adl-empty');
+        if (qNewEmpty) qNewEmpty.style.display = qhtml ? 'none' : '';
+        return;
+    }
+
     if (filtered.length === 0) {
         if (empty) empty.style.display = '';
         // Clear any existing rows but keep the empty message
@@ -2455,6 +3002,7 @@ function _adlRender() {
         for (const dl of section.items) {
             const statusClass = _adlStatusClass(dl.status);
             const statusLabel = _adlStatusLabel(dl.status);
+            // (verification badge appended next to the label via _adlVerifBadge)
             const title = _adlEsc(dl.title || 'Unknown Track');
             const artist = _adlEsc(dl.artist || '');
             const album = _adlEsc(dl.album || '');
@@ -2494,8 +3042,9 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}
+                    ${statusLabel}${_adlVerifBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
                 </div>
+                ${_adlReviewActions(dl)}
                 ${cancelBtnHtml}
             </div>`;
         }
@@ -3126,4 +3675,3 @@ window.adlCancelRow = adlCancelRow;
 window.adlCancelAll = adlCancelAll;
 window.adlToggleBatchHistory = adlToggleBatchHistory;
 window.adlToggleBatchPanel = adlToggleBatchPanel;
-

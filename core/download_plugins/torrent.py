@@ -352,34 +352,60 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 self._finalize_download(download_id, last_save_path)
                 return
             if status.state == 'error':
+                # Clean the dead torrent out of the client, or it's left orphaned
+                # (active in qbit, untracked here) and re-grabbed as a duplicate.
+                self._cleanup_torrent(torrent_hash, get_stall_action())
                 self._mark_error(download_id, status.error or "Torrent client reported error")
                 return
 
-            if stall.is_stalled(status.downloaded, status.state, time.monotonic()):
+            if stall.is_stalled(status.downloaded, status.state, time.monotonic(),
+                                size=status.size):
                 self._handle_stalled(download_id, torrent_hash, get_stall_action())
                 return
 
             time.sleep(_POLL_INTERVAL_SECONDS)
 
+        # Deadline reached. One last status check closes the race where the
+        # torrent completed during the final poll interval — finalize it instead
+        # of deleting a just-finished download's files. Otherwise clean it out of
+        # the client, or it sits orphaned in qbit (e.g. a metadata-stuck magnet
+        # that escaped the stall timer) and gets re-grabbed as a duplicate.
+        try:
+            final = run_async(adapter.get_status(torrent_hash))
+        except Exception:
+            final = None
+        if final is not None and final.state in _COMPLETE_STATES:
+            self._finalize_download(download_id, final.save_path or last_save_path)
+            return
+        self._cleanup_torrent(torrent_hash, get_stall_action())
         self._mark_error(download_id, "Torrent download timed out")
+
+    def _cleanup_torrent(self, torrent_hash: str, action: str) -> None:
+        """Remove (abandon) or pause a dead/stalled/timed-out torrent in the
+        client so it isn't left ORPHANED — active in qbit but no longer tracked
+        here, which makes SoulSync re-grab the same dead torrent as a duplicate
+        on the next attempt (noldevin). Best-effort: a client error is logged,
+        not raised, so the download still fails cleanly."""
+        adapter = get_active_torrent_adapter()
+        if adapter is None or not torrent_hash:
+            return
+        try:
+            if action == "pause":
+                run_async(adapter.pause(torrent_hash))
+            else:
+                # delete_files: a stalled/failed torrent's partial data is junk
+                # (often just a metadata stub) — don't leave it on disk.
+                run_async(adapter.remove(torrent_hash, delete_files=True))
+        except Exception as e:
+            logger.warning("Torrent cleanup (%s) on %s failed: %s",
+                           action, torrent_hash[:8] if torrent_hash else "?", e)
 
     def _handle_stalled(self, download_id: str, torrent_hash: str, action: str) -> None:
         """A torrent made no progress past the stall timeout. Abandon it
         (remove from client + delete its partial data) or pause it for the
         user, then fail the download so the worker frees up."""
-        adapter = get_active_torrent_adapter()
         timeout_min = round(get_stall_timeout() / 60, 1)
-        if adapter is not None:
-            try:
-                if action == "pause":
-                    run_async(adapter.pause(torrent_hash))
-                else:
-                    # delete_files: a stalled torrent's partial data is junk
-                    # (often just a metadata stub) — don't leave it on disk.
-                    run_async(adapter.remove(torrent_hash, delete_files=True))
-            except Exception as e:
-                logger.warning("Stalled-torrent %s on %s failed: %s",
-                               action, torrent_hash[:8] if torrent_hash else "?", e)
+        self._cleanup_torrent(torrent_hash, action)
         verb = "paused" if action == "pause" else "removed"
         self._mark_error(
             download_id,

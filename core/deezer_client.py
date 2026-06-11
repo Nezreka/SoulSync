@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Any
 from functools import wraps
 from dataclasses import dataclass
 from utils.logging_config import get_logger
+from core.metadata.artist_album_cache import get_cached_artist_album_items, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("deezer_client")
@@ -873,17 +874,41 @@ class DeezerClient:
 
         Matches iTunesClient.get_artist_albums() interface.
         Paginates through all results up to the requested limit."""
+        cache = get_metadata_cache()
+        cached_items = get_cached_artist_album_items(cache, 'deezer', artist_id, album_type=album_type, limit=limit)
+        if cached_items:
+            try:
+                requested_types = [t.strip() for t in album_type.split(',')]
+                cached_albums = []
+                for album_data in cached_items:
+                    album = Album.from_deezer_album(album_data)
+                    if album_type != 'album,single':
+                        if album.album_type not in requested_types:
+                            if not (album.album_type == 'ep' and 'single' in requested_types):
+                                continue
+                    cached_albums.append(album)
+                return cached_albums[:limit]
+            except Exception as e:
+                logger.debug("Deezer artist albums cache reuse failed: %s", e)
+
         albums = []
         all_raw = []
         requested_types = [t.strip() for t in album_type.split(',')]
         offset = 0
         page_size = 100  # Deezer API max per request
+        complete = True  # cleared if pagination breaks on a transient/malformed error
 
         while offset < limit:
             fetch_limit = min(page_size, limit - offset)
             data = self._api_get(f'artist/{artist_id}/albums', {'limit': fetch_limit, 'index': offset})
-            if not data or 'data' not in data or len(data['data']) == 0:
+            if not data or 'data' not in data:
+                # Malformed/transient response mid-pagination — what we have is a
+                # PARTIAL discography. Don't cache it as the full list (mirrors the
+                # Spotify truncated-fetch guard). #853 follow-up.
+                complete = False
                 break
+            if len(data['data']) == 0:
+                break  # No more albums — a clean end of pagination.
 
             for album_data in data['data']:
                 all_raw.append(album_data)
@@ -900,7 +925,6 @@ class DeezerClient:
                 break  # Last page
             offset += len(data['data'])
 
-        cache = get_metadata_cache()
         # Deezer's /artist/{id}/albums endpoint doesn't include artist info on each album.
         # Inject it so cached album entities have artist_name for discover page display.
         artist_stub = None
@@ -914,6 +938,11 @@ class DeezerClient:
                 entries.append((str(ad['id']), ad))
         if entries:
             cache.store_entities_bulk('deezer', 'album', entries, skip_if_exists=True)
+        # Only cache the artist→album-LIST when pagination finished cleanly; a
+        # partial list would otherwise serve an incomplete discography until TTL.
+        # (Individual album entities above are complete, so they cache regardless.)
+        if complete:
+            store_artist_album_items(cache, 'deezer', artist_id, all_raw, album_type=album_type, limit=limit)
 
         logger.info(f"Retrieved {len(albums)} albums for artist {artist_id}")
         return albums[:limit]
