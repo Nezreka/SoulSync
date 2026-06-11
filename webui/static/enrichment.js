@@ -3583,6 +3583,9 @@ function _promptAcoustidAction() {
                     <button id="_acid-retag" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(102,126,234,0.4);background:rgba(102,126,234,0.15);color:#667eea;font-weight:600;cursor:pointer;font-family:inherit;">
                         Retag
                     </button>
+                    <button id="_acid-relocate" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(245,158,11,0.4);background:rgba(245,158,11,0.12);color:#f59e0b;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Relocate
+                    </button>
                     <button id="_acid-redownload" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
                         Re-download
                     </button>
@@ -3591,7 +3594,7 @@ function _promptAcoustidAction() {
                     </button>
                 </div>
                 <div style="margin-top:12px;font-size:0.78em;color:rgba(255,255,255,0.35);line-height:1.4;">
-                    Retag = update metadata to match actual audio &bull; Re-download = add correct track to wishlist &amp; delete wrong file &bull; Delete = remove file and DB entry
+                    Retag = update metadata in place &bull; Relocate = retag + move to Staging so it's re-imported into the correct artist/album &bull; Re-download = add correct track to wishlist &amp; delete wrong file &bull; Delete = remove file and DB entry
                 </div>
                 <button id="_acid-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
                     Cancel
@@ -3601,6 +3604,7 @@ function _promptAcoustidAction() {
         document.body.appendChild(overlay);
 
         overlay.querySelector('#_acid-retag').onclick = () => { overlay.remove(); resolve('retag'); };
+        overlay.querySelector('#_acid-relocate').onclick = () => { overlay.remove(); resolve('relocate'); };
         overlay.querySelector('#_acid-redownload').onclick = () => { overlay.remove(); resolve('redownload'); };
         overlay.querySelector('#_acid-delete').onclick = () => { overlay.remove(); resolve('delete'); };
         overlay.querySelector('#_acid-cancel').onclick = () => { overlay.remove(); resolve(null); };

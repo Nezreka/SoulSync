@@ -1983,6 +1983,57 @@ class RepairWorker:
             return {'success': True, 'action': 'redownload',
                     'message': f'Added "{expected_title}" to wishlist, removed wrong file'}
 
+        if fix_action == 'relocate':
+            # #704: retag fixes the file's tags but leaves it in the WRONG
+            # artist/album folder. AcoustID gives only title+artist (no reliable
+            # album), so move the retagged file into staging and let auto-import
+            # re-file it correctly with full metadata. Drop the stale tracks row.
+            resolved = _resolve_file_path(file_path, self.transfer_folder,
+                                          config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                return {'success': False, 'error': f'File not found: {file_path}'}
+            staging_path = './Staging'
+            if self._config_manager:
+                staging_path = self._config_manager.get('import.staging_path', './Staging')
+            staging_path = self._resolve_path(staging_path)
+            try:
+                os.makedirs(staging_path, exist_ok=True)
+            except OSError as e:
+                return {'success': False, 'error': f'Staging folder unavailable: {e}'}
+
+            aid_title = details.get('acoustid_title', '')
+            aid_artist = details.get('acoustid_artist', '')
+            tag_updates = {}
+            if aid_title:
+                tag_updates['title'] = aid_title
+            if aid_artist:
+                tag_updates['artist_name'] = aid_artist
+                tag_updates['artists_list'] = _split_acoustid_credit(aid_artist)
+
+            def _drop_row():
+                if not track_id:
+                    return
+                conn = self.db._get_connection()
+                try:
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (track_id,))
+                    conn.commit()
+                finally:
+                    conn.close()
+
+            from core.repair_jobs.relocate import relocate_mismatch_to_staging
+            from core.tag_writer import write_tags_to_file
+            from core.imports.file_ops import safe_move_file
+            try:
+                dest = relocate_mismatch_to_staging(
+                    resolved, staging_path, tag_updates,
+                    write_tags=write_tags_to_file, move_file=safe_move_file,
+                    drop_db_row=_drop_row, exists=os.path.exists)
+            except Exception as e:
+                return {'success': False, 'error': f'Relocate failed: {e}'}
+            self._cleanup_empty_parents(resolved)   # remove the now-empty wrong folder
+            return {'success': True, 'action': 'relocated',
+                    'message': f'Moved to staging for re-import: {os.path.basename(dest)}'}
+
         # Default: retag — update DB record to match the actual audio content
         aid_title = details.get('acoustid_title', '')
         aid_artist = details.get('acoustid_artist', '')
