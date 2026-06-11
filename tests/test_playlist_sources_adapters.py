@@ -915,3 +915,34 @@ def test_mirror_dict_spotify_public_emits_spotify_hint():
     extra = _json.loads(d["extra_data"])
     assert extra["discovered"] is False
     assert extra["spotify_hint"]["id"] == "sptrk"
+
+
+def test_spotify_public_adapter_paginates_past_100(monkeypatch):
+    """#838: auto-sync truncated >100-track playlists to 100 because the adapter
+    called the embed scraper (≤100) directly instead of the full-fetch wrapper.
+    With the wrapper, a playlist whose full fetch returns 150 tracks keeps all 150."""
+    src = SpotifyPublicPlaylistSource()
+
+    monkeypatch.setattr(
+        "core.spotify_public_scraper.parse_spotify_url",
+        lambda url: {"type": "playlist", "id": "big"},
+    )
+    full = {
+        "id": "big", "type": "playlist", "name": "Big PL", "subtitle": "owner",
+        "url": "https://open.spotify.com/playlist/big", "url_hash": "bighash",
+        "tracks": [
+            {"id": f"t{i}", "name": f"Song {i}", "artists": [{"name": "A"}],
+             "duration_ms": 1000, "is_explicit": False, "track_number": i + 1}
+            for i in range(150)
+        ],
+    }
+    # The full paginated path succeeds → wrapper returns all 150 (no embed cap).
+    monkeypatch.setattr(
+        "core.spotify_public_api.fetch_public_playlist_full",
+        lambda spotify_id: full,
+    )
+
+    detail = src.get_playlist("https://open.spotify.com/playlist/big")
+    assert detail is not None
+    assert len(detail.tracks) == 150, "pre-#838 the adapter capped this at 100"
+    assert detail.meta.track_count == 150

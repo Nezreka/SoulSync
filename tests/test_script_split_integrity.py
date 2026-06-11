@@ -52,7 +52,8 @@ SPLIT_MODULES = [
 
 # Other JS files that exist in static/ but are NOT part of the split
 NON_SPLIT_JS = {"setup-wizard.js", "docs.js", "helper.js", "particles.js", "worker-orbs.js",
-                "enrichment-manager.js", "origin-history.js", "blocklist.js"}
+                "enrichment-manager.js", "origin-history.js", "blocklist.js",
+                "watchlist-history.js", "service-switch.js", "my-accounts.js"}
 
 # Pre-existing duplicate helper functions that lived in the original monolith.
 # In a plain <script> context the last-loaded declaration wins.  These are NOT

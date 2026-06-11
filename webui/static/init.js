@@ -340,8 +340,20 @@ async function initProfileSystem() {
         // Check if a session already has a profile selected
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
+        // Login mode: show the sign-in screen and defer everything else until
+        // the user authenticates.
+        if (currentData.login_required) {
+            showLoginScreen();
+            return false;
+        }
         if (currentData.success && currentData.profile) {
             setCurrentProfile(currentData.profile);
+
+            // Login mode → reveal the Sign out button in the profile bar.
+            if (currentData.login_mode) {
+                const lb = document.getElementById('logout-btn');
+                if (lb) lb.style.display = '';
+            }
 
             // Check if launch PIN is required
             if (currentData.launch_pin_required) {
@@ -385,6 +397,109 @@ async function initProfileSystem() {
         console.error('Profile init error:', e);
         return true; // Fall through to normal init
     }
+}
+
+// ── Login Screen (username/password mode) ──────────────────────────────
+
+function showLoginScreen() {
+    const overlay = document.getElementById('login-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    const u = document.getElementById('login-username');
+    if (u) setTimeout(() => u.focus(), 50);
+}
+
+async function submitLogin() {
+    const username = (document.getElementById('login-username')?.value || '').trim();
+    const password = document.getElementById('login-password')?.value || '';
+    const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-submit');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username || !password) { showErr('Enter your username and password'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();   // authenticated → reload into the app
+        } else {
+            showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Sign in failed'));
+            if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+        }
+    } catch (e) {
+        showErr('Connection error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+    }
+}
+
+async function soulsyncLogout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) { /* reload anyway */ }
+    window.location.reload();
+}
+
+function showLoginRecovery() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (entry) entry.style.display = 'none';
+    if (rec) rec.style.display = 'block';
+    const u = document.getElementById('recovery-username');
+    const lu = document.getElementById('login-username');
+    if (u && lu && lu.value) u.value = lu.value;
+    const errEl = document.getElementById('recovery-error');
+    if (errEl) errEl.style.display = 'none';
+}
+
+function showLoginEntry() {
+    const entry = document.getElementById('login-entry');
+    const rec = document.getElementById('login-recovery');
+    if (rec) rec.style.display = 'none';
+    if (entry) entry.style.display = 'block';
+}
+
+async function fetchRecoveryQuestion() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const errEl = document.getElementById('recovery-error');
+    const section = document.getElementById('recovery-answer-section');
+    const qText = document.getElementById('recovery-question-text');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username) { showErr('Enter your username'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-question?username=' + encodeURIComponent(username));
+        const data = await res.json();
+        if (data.success && data.question) {
+            if (qText) qText.textContent = data.question;
+            if (section) section.style.display = 'block';
+        } else {
+            showErr('No recovery question is set for that account.');
+        }
+    } catch (e) { showErr('Connection error'); }
+}
+
+async function submitRecoveryReset() {
+    const username = (document.getElementById('recovery-username')?.value || '').trim();
+    const answer = document.getElementById('recovery-answer')?.value || '';
+    const newPassword = document.getElementById('recovery-new-password')?.value || '';
+    const confirmPassword = document.getElementById('recovery-new-password-confirm')?.value || '';
+    const errEl = document.getElementById('recovery-error');
+    const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!answer || !newPassword) { showErr('Enter your answer and a new password'); return; }
+    if (newPassword.length < 6) { showErr('New password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { showErr('Passwords do not match'); return; }
+    try {
+        const res = await fetch('/api/auth/recovery-reset', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, answer, new_password: newPassword }),
+        });
+        const data = await res.json();
+        if (data.success) { window.location.reload(); }
+        else { showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Reset failed')); }
+    } catch (e) { showErr('Connection error'); }
 }
 
 // ── Launch PIN Lock Screen ─────────────────────────────────────────────
@@ -450,6 +565,133 @@ function showLaunchPinScreen() {
 }
 
 // ── Security Settings Helpers ──────────────────────────────────────────
+
+async function saveLoginPassword() {
+    const input = document.getElementById('security-login-password');
+    const confirmInput = document.getElementById('security-login-password-confirm');
+    const msg = document.getElementById('security-login-password-msg');
+    const password = input?.value || '';
+    const confirm = confirmInput?.value || '';
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
+    if (password !== confirm) { show('Passwords do not match', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            show('Admin login password saved', true);
+            if (input) { input.value = ''; input.placeholder = 'Enter a new password to change it'; }
+            if (confirmInput) confirmInput.value = '';
+            updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
+            const st = document.getElementById('security-login-password-status');
+            if (st) st.style.display = 'block';
+        }
+        else show(data.error || 'Failed to save password', false);
+    } catch (e) { show('Connection error', false); }
+}
+
+// Lock/unlock the "Require login" toggle based on whether the admin has a
+// password — makes the prerequisite (anti-lockout) visible instead of a
+// surprise 400 on save.
+function updateRequireLoginGate(hasPassword) {
+    const toggle = document.getElementById('security-require-login');
+    const wrap = document.getElementById('security-login-toggle-wrap');
+    const help = document.getElementById('security-require-login-help');
+    if (!toggle) return;
+    toggle.disabled = !hasPassword;
+    if (!hasPassword) toggle.checked = false;
+    if (wrap) wrap.classList.toggle('security-locked', !hasPassword);
+    if (help) {
+        help.innerHTML = hasPassword
+            ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
+            : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
+    }
+}
+
+// Reflect already-saved login credentials. Passwords are never sent to the
+// browser, so instead of an empty field (which looks unset after a refresh) we
+// show that one is set and pre-fill the saved recovery question.
+function applyLoginSavedState(profile) {
+    const hasPassword = profile?.has_password || false;
+    const hasRecovery = profile?.has_recovery || false;
+    const question = profile?.recovery_question || '';
+
+    const pwStatus = document.getElementById('security-login-password-status');
+    const pwField = document.getElementById('security-login-password');
+    const pwConfirm = document.getElementById('security-login-password-confirm');
+    if (pwStatus) pwStatus.style.display = hasPassword ? 'block' : 'none';
+    if (hasPassword) {
+        if (pwField) pwField.placeholder = 'Enter a new password to change it';
+        if (pwConfirm) pwConfirm.placeholder = 'Confirm new password';
+    }
+
+    const recStatus = document.getElementById('security-recovery-status');
+    const recSel = document.getElementById('security-recovery-question');
+    const recCustom = document.getElementById('security-recovery-custom');
+    const recAnswer = document.getElementById('security-recovery-answer');
+    if (recStatus) {
+        recStatus.style.display = hasRecovery ? 'block' : 'none';
+        recStatus.textContent = hasRecovery
+            ? ('✓ Recovery question saved' + (question ? ': “' + question + '”' : ''))
+            : '';
+    }
+    if (hasRecovery) {
+        if (recSel && question) {
+            recSel.value = question;            // preset options default value = their text
+            if (recSel.value !== question) {    // not a preset → custom question
+                recSel.value = '__custom__';
+                if (recCustom) { recCustom.style.display = 'block'; recCustom.value = question; }
+            }
+        }
+        if (recAnswer) recAnswer.placeholder = 'Enter a new answer to change it';
+    }
+}
+
+function handleRecoveryQuestionChange() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    if (sel && custom) custom.style.display = (sel.value === '__custom__') ? 'block' : 'none';
+}
+
+async function saveRecoveryQuestion() {
+    const sel = document.getElementById('security-recovery-question');
+    const custom = document.getElementById('security-recovery-custom');
+    const answer = document.getElementById('security-recovery-answer')?.value || '';
+    const msg = document.getElementById('security-recovery-msg');
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    let question = sel?.value || '';
+    if (question === '__custom__') question = (custom?.value || '').trim();
+    if (!question) { show('Pick or type a question', false); return; }
+    if (!answer.trim()) { show('Enter an answer', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-recovery', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question, answer }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            show('Recovery question saved', true);
+            const a = document.getElementById('security-recovery-answer');
+            if (a) { a.value = ''; a.placeholder = 'Enter a new answer to change it'; }
+            const rst = document.getElementById('security-recovery-status');
+            if (rst) { rst.style.display = 'block'; rst.textContent = '✓ Recovery question saved: “' + question + '”'; }
+        }
+        else show(data.error || 'Failed to save', false);
+    } catch (e) { show('Connection error', false); }
+}
 
 async function saveSecurityPin() {
     const pin = document.getElementById('security-new-pin').value;
@@ -863,6 +1105,11 @@ function updateProfileIndicator() {
     name.textContent = currentProfile.name;
     indicator.style.display = 'flex';
 
+    // Service Status quick-switch is admin-only — drop the clickable affordance
+    // for non-admins so it doesn't look interactive.
+    const statusSection = document.querySelector('.status-section--clickable');
+    if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
+
     indicator.onclick = async () => {
         const res = await fetch('/api/profiles');
         const data = await res.json();
@@ -909,56 +1156,16 @@ async function openPersonalSettings() {
     body.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.4);">Loading...</div>';
 
     try {
-        // Load all per-profile service data in parallel
-        const [lbRes, spotifyRes] = await Promise.all([
-            fetch('/api/profiles/me/listenbrainz'),
-            fetch('/api/profiles/me/spotify'),
-        ]);
-        const lbData = await lbRes.json();
-        const spotifyData = await spotifyRes.json();
-
         body.innerHTML = '';
         const isNonAdmin = currentProfile && !currentProfile.is_admin;
 
+        // Streaming-account connections now live in the My Accounts modal (the ♫
+        // button). Personal Settings keeps only the per-profile server library.
         if (isNonAdmin) {
-            // Tabbed layout for non-admin with multiple sections
-            const tabs = [
-                { id: 'music', label: 'Music Services' },
-                { id: 'server', label: 'Server' },
-                { id: 'scrobble', label: 'Scrobbling' },
-            ];
-            const tabBar = document.createElement('div');
-            tabBar.className = 'ps-tabbar';
-            tabs.forEach((t, i) => {
-                const btn = document.createElement('button');
-                btn.className = 'ps-tab' + (i === 0 ? ' active' : '');
-                btn.textContent = t.label;
-                btn.onclick = () => {
-                    tabBar.querySelectorAll('.ps-tab').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    body.querySelectorAll('.ps-tab-content').forEach(c => c.classList.remove('active'));
-                    const target = document.getElementById(`ps-tab-${t.id}`);
-                    if (target) target.classList.add('active');
-                };
-                tabBar.appendChild(btn);
-            });
-            body.appendChild(tabBar);
-
-            // Music Services tab
-            const musicTab = document.createElement('div');
-            musicTab.id = 'ps-tab-music';
-            musicTab.className = 'ps-tab-content active';
-            renderPersonalSettingsSpotify(musicTab, spotifyData);
-            renderPersonalSettingsTidal(musicTab);
-            body.appendChild(musicTab);
-
-            // Server tab
             const serverTab = document.createElement('div');
-            serverTab.id = 'ps-tab-server';
-            serverTab.className = 'ps-tab-content';
+            serverTab.style.padding = '18px 22px 22px';
             serverTab.innerHTML = '<div style="text-align:center;padding:20px;color:rgba(255,255,255,0.3);">Loading libraries...</div>';
             body.appendChild(serverTab);
-            // Load server libraries async (don't block modal)
             fetch('/api/profiles/me/server-library').then(r => r.json()).then(libData => {
                 serverTab.innerHTML = '';
                 renderPersonalSettingsServerLibrary(serverTab, libData);
@@ -966,21 +1173,13 @@ async function openPersonalSettings() {
                 serverTab.innerHTML = '';
                 renderPersonalSettingsServerLibrary(serverTab, {});
             });
-
-            // Scrobbling tab
-            const scrobbleTab = document.createElement('div');
-            scrobbleTab.id = 'ps-tab-scrobble';
-            scrobbleTab.className = 'ps-tab-content';
-            body.appendChild(scrobbleTab);
-            // Render LB into the scrobble tab
-            const origBody = body;
-            renderPersonalSettingsLB(lbData, scrobbleTab);
         } else {
-            // Admin: just ListenBrainz, no tabs
             const content = document.createElement('div');
-            content.style.padding = '18px 22px 22px';
+            content.style.padding = '24px';
+            content.innerHTML = '<div style="color:rgba(255,255,255,0.55);font-size:0.9rem;line-height:1.7;">'
+                + 'Your streaming accounts are in <b>My Accounts</b> (the ♫ button next to your profile).<br>'
+                + 'Global service setup lives in <b>Settings</b>.</div>';
             body.appendChild(content);
-            renderPersonalSettingsLB(lbData, content);
         }
     } catch (e) {
         body.innerHTML = '<div style="color:#ef4444;padding:16px;">Failed to load settings</div>';
@@ -1669,6 +1868,8 @@ async function loadProfileManageList() {
     profiles.forEach(p => {
         const item = document.createElement('div');
         item.className = 'profile-manage-item';
+        const isCurrent = currentProfile && currentProfile.id === p.id;
+        if (isCurrent) item.classList.add('is-current');
 
         const av = document.createElement('div');
         renderProfileAvatar(av, p);
@@ -1680,14 +1881,21 @@ async function loadProfileManageList() {
         nameDiv.className = 'name';
         nameDiv.textContent = p.name + (p.has_pin ? ' 🔒' : '');
         info.appendChild(nameDiv);
-        const roleTags = [];
-        if (p.is_admin) roleTags.push('Admin');
-        if (p.can_download === false) roleTags.push('No Downloads');
-        if (p.allowed_pages) roleTags.push(`${p.allowed_pages.length} pages`);
-        if (roleTags.length) {
+        // Role/status as pills
+        const pills = [];
+        if (isCurrent) pills.push({ text: 'You', cls: 'profile-role-pill--current' });
+        if (p.is_admin) pills.push({ text: 'Admin', cls: 'profile-role-pill--admin' });
+        if (p.can_download === false) pills.push({ text: 'No Downloads', cls: '' });
+        if (p.allowed_pages) pills.push({ text: `${p.allowed_pages.length} pages`, cls: '' });
+        if (pills.length) {
             const roleDiv = document.createElement('div');
             roleDiv.className = 'role';
-            roleDiv.textContent = roleTags.join(' · ');
+            pills.forEach(pill => {
+                const span = document.createElement('span');
+                span.className = ('profile-role-pill ' + pill.cls).trim();
+                span.textContent = pill.text;
+                roleDiv.appendChild(span);
+            });
             info.appendChild(roleDiv);
         }
         item.appendChild(info);
@@ -1706,7 +1914,7 @@ async function loadProfileManageList() {
         editBtn.dataset.canDownload = p.can_download !== false ? '1' : '0';
         editBtn.dataset.isAdmin = p.is_admin ? '1' : '0';
         editBtn.title = 'Edit profile';
-        editBtn.textContent = '✏️';
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
         actions.appendChild(editBtn);
 
         if (!p.is_admin) {
@@ -1714,7 +1922,7 @@ async function loadProfileManageList() {
             delBtn.className = 'profile-delete-btn';
             delBtn.dataset.id = p.id;
             delBtn.title = 'Delete profile';
-            delBtn.textContent = '🗑️';
+            delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
             actions.appendChild(delBtn);
         }
 
@@ -2072,10 +2280,16 @@ document.addEventListener('DOMContentLoaded', async function () {
     if (!forceSetup) {
         try {
             const setupResp = await fetch('/api/setup/status');
-            const setupData = await setupResp.json();
-            if (!setupData.setup_complete) {
-                showWizard = true;
-                localStorage.removeItem('soulsync_setup_complete');
+            // Fail-safe (#842): only launch the wizard when the server DEFINITIVELY
+            // says setup isn't done. A non-OK response (e.g. 401 while the launch
+            // PIN is locked) must NOT trigger the wizard — otherwise a PIN-gated
+            // returning user gets the full setup flow every visit.
+            if (setupResp.ok) {
+                const setupData = await setupResp.json();
+                if (setupData.setup_complete === false) {
+                    showWizard = true;
+                    localStorage.removeItem('soulsync_setup_complete');
+                }
             }
         } catch (e) {
             console.warn('Setup status check failed, continuing normal init:', e);

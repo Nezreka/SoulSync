@@ -761,3 +761,66 @@ def test_unified_response_caps_persistent_history_tail():
     assert requested_limits == [50]
     assert len(out['downloads']) == 50
     assert out['total'] == 50
+
+
+# ---------------------------------------------------------------------------
+# #836 — a rejected slskd transfer must not hang the task at 'downloading'
+# forever. The monitor normally retries; when it can't make progress, a backstop
+# in the status formatter marks the task failed after a grace window so the
+# worker frees and the batch can complete.
+# ---------------------------------------------------------------------------
+
+def test_rejected_within_grace_keeps_downloading_for_monitor():
+    import time
+    deps, _ = _build_deps()
+    now = time.time()
+    download_tasks['t1'] = {
+        'track_index': 0, 'status': 'downloading', 'track_info': {},
+        'filename': 'song.flac', 'username': 'u1',
+        'status_change_time': now - 5,
+    }
+    live = {'u1::song.flac': {'state': 'Completed, Rejected', 'percentComplete': 0}}
+    batch = {'phase': 'downloading', 'queue': ['t1']}
+    out = st.build_batch_status_data('b1', batch, live, deps)
+    # inside the grace window — give the monitor its chance, don't fail yet
+    assert out['tasks'][0]['status'] == 'downloading'
+    assert download_tasks['t1']['status'] == 'downloading'
+
+
+def test_rejected_beyond_grace_marks_failed_and_frees_worker():
+    import time
+    completed = []
+    deps, _ = _build_deps()
+    deps.on_download_completed = lambda b, t, s: completed.append((b, t, s))
+    now = time.time()
+    download_tasks['t1'] = {
+        'track_index': 0, 'status': 'downloading', 'track_info': {},
+        'filename': 'song.flac', 'username': 'u1',
+        # error persisted past the grace, no monitor transition since
+        'status_change_time': now - 130,
+        '_error_state_since': now - (st.ERROR_STATE_TERMINAL_GRACE_SECONDS + 30),
+    }
+    live = {'u1::song.flac': {'state': 'Completed, Rejected', 'errorMessage': 'peer rejected'}}
+    batch = {'phase': 'downloading', 'queue': ['t1']}
+    out = st.build_batch_status_data('b1', batch, live, deps)
+    assert out['tasks'][0]['status'] == 'failed'
+    assert download_tasks['t1']['status'] == 'failed'
+    assert download_tasks['t1']['error_message'] == 'peer rejected'
+    time.sleep(0.05)  # completion callback runs on a daemon thread
+    assert completed == [('b1', 't1', False)]  # batch can now finish
+
+
+def test_manual_pick_rejected_fails_immediately_without_grace():
+    import time
+    deps, _ = _build_deps()
+    now = time.time()
+    download_tasks['t1'] = {
+        'track_index': 0, 'status': 'downloading', 'track_info': {},
+        'filename': 'song.flac', 'username': 'u1',
+        '_user_manual_pick': True, 'status_change_time': now,
+    }
+    live = {'u1::song.flac': {'state': 'Completed, Rejected'}}
+    batch = {'phase': 'downloading', 'queue': ['t1']}
+    out = st.build_batch_status_data('b1', batch, live, deps)
+    assert out['tasks'][0]['status'] == 'failed'  # immediate, no 60s wait
+    assert download_tasks['t1']['status'] == 'failed'

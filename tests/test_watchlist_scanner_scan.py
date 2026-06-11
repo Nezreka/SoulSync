@@ -1177,3 +1177,57 @@ def test_match_to_spotify_uses_strict_lookup():
 
     assert result is None
     assert spotify_client.search_calls == [("Artist One", 5, False)]
+
+
+def test_scan_records_per_run_track_ledger(monkeypatch):
+    """#831: the scan keeps a full per-run ledger (scan_track_events) of found
+    tracks — 'added' vs 'skipped' (wishlist dup / blocklisted) — so the UI can
+    list WHICH tracks the 'New tracks / Added to wishlist' counts refer to."""
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ALBUMS", 0)
+
+    artist = _build_artist()
+    album = types.SimpleNamespace(id="album-1", name="Album One")
+    album_data = {
+        "name": "Album One",
+        "images": [{"url": "https://example.com/album.jpg"}],
+        "tracks": {
+            "items": [
+                {"id": "t1", "name": "Added Track", "track_number": 1,
+                 "disc_number": 1, "artists": [{"name": "Artist One"}]},
+                {"id": "t2", "name": "Skipped Track", "track_number": 2,
+                 "disc_number": 1, "artists": [{"name": "Artist One"}]},
+            ]
+        },
+    }
+    scanner = _build_scanner(album_data, [artist])
+    scanner._database.has_fresh_similar_artists = lambda *args, **kwargs: False
+
+    monkeypatch.setattr(scanner, "_backfill_missing_ids", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scanner, "get_artist_image_url", lambda *_a, **_k: "")
+    monkeypatch.setattr(scanner, "get_artist_discography_for_watchlist", lambda *_a, **_k: [album])
+    monkeypatch.setattr(scanner, "_get_lookback_period_setting", lambda: "30")
+    monkeypatch.setattr(scanner, "_get_rescan_cutoff", lambda: None)
+    monkeypatch.setattr(scanner, "_should_include_release", lambda *_a, **_k: True)
+    monkeypatch.setattr(scanner, "_should_include_track", lambda *_a, **_k: True)
+    monkeypatch.setattr(scanner, "is_track_missing_from_library", lambda *_a, **_k: True)
+    # First add succeeds, second is declined (already queued / blocklisted).
+    _add_results = iter([True, False])
+    monkeypatch.setattr(scanner, "add_track_to_wishlist",
+                        lambda *_a, **_k: next(_add_results))
+    monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *_a, **_k: True)
+    monkeypatch.setattr(scanner, "update_similar_artists", lambda *_a, **_k: True)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *_a, **_k: 0)
+
+    scan_state = {"scan_run_id": "20260609-1"}
+    scanner.scan_watchlist_artists([artist], scan_state=scan_state)
+
+    events = scan_state["scan_track_events"]
+    assert [(e["track_name"], e["status"]) for e in events] == [
+        ("Added Track", "added"),
+        ("Skipped Track", "skipped"),
+    ]
+    assert events[0]["album_name"] == "Album One"
+    assert events[0]["artist_name"] == "Artist One"
+    # The 10-item live FIFO only carries the ADDED one, as before.
+    assert [a["track_name"] for a in scan_state["recent_wishlist_additions"]] == ["Added Track"]
