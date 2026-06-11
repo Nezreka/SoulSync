@@ -12,6 +12,7 @@ import re
 import time
 import threading
 import requests
+from core.metadata.artist_album_cache import get_cached_artist_album_payload, store_artist_album_items
 from core.metadata.cache import get_metadata_cache
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -728,26 +729,45 @@ class DiscogsClient:
 
     def get_artist_albums(self, artist_id: str, album_type: str = 'album,single', limit: int = 50) -> List[Album]:
         """Get releases by an artist. Prefers master releases, filters features."""
-        # First get the artist name for feature filtering. Strip Discogs
-        # disambiguation suffix so feature-vs-primary matching below
-        # compares against the canonical name, not "Beyoncé*".
-        artist_data = self._api_get(f'/artists/{artist_id}')
-        artist_name = _clean_discogs_artist_name(
-            artist_data.get('name', '') if artist_data else ''
-        ).lower()
+        cache = get_metadata_cache()
+        cached_payload = get_cached_artist_album_payload(cache, 'discogs', artist_id, album_type=album_type, limit=limit)
+        releases = cached_payload.get('_releases') if cached_payload else None
+        artist_name = ''
+        if cached_payload:
+            artist_name = str(cached_payload.get('artist_name') or '').lower()
 
-        data = self._api_get(f'/artists/{artist_id}/releases', {
-            'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
-        })
-        if not data or not data.get('releases'):
-            return []
+        if not isinstance(releases, list) or not releases:
+            # First get the artist name for feature filtering. Strip Discogs
+            # disambiguation suffix so feature-vs-primary matching below
+            # compares against the canonical name, not "Beyoncé*".
+            artist_data = self._api_get(f'/artists/{artist_id}')
+            artist_name = _clean_discogs_artist_name(
+                artist_data.get('name', '') if artist_data else ''
+            ).lower()
+
+            data = self._api_get(f'/artists/{artist_id}/releases', {
+                'sort': 'year', 'sort_order': 'desc', 'per_page': min(limit * 3, 200),
+            })
+            if not data or not data.get('releases'):
+                return []
+            releases = data.get('releases') or []
+            store_artist_album_items(
+                cache,
+                'discogs',
+                artist_id,
+                releases,
+                album_type=album_type,
+                limit=limit,
+                items_field='_releases',
+                extra_fields={'artist_name': artist_name},
+            )
 
         # Separate masters from individual releases — prefer masters (canonical versions)
         masters = []
         releases_no_master = []
         master_titles = set()
 
-        for item in data['releases']:
+        for item in releases:
             # Skip non-main roles
             role = item.get('role', 'Main').lower()
             if role not in ('main', ''):
