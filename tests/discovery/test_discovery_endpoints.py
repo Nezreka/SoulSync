@@ -157,11 +157,15 @@ def test_spotify_data_takes_precedence_over_auto_fields():
 # cancel_sync
 # ---------------------------------------------------------------------------
 
-def test_cancel_sync_not_found_returns_404():
+def test_cancel_sync_missing_state_is_idempotent_success():
+    # #702: a sync whose in-memory state was wiped (e.g. a restart) must cancel
+    # cleanly — cancelling a sync that isn't running is a no-op SUCCESS, not a
+    # 404 that permanently wedges the playlist.
     body, code = cancel_sync({}, 'missing', label='Tidal',
                              not_found_message='Tidal playlist not found', **_cancel_infra())
-    assert code == 404
-    assert body == {"error": "Tidal playlist not found"}
+    assert code == 200
+    assert body.get('success') is True
+    assert 'not found' not in str(body).lower()
 
 
 def test_cancel_sync_cancels_active_worker_and_reverts_state():

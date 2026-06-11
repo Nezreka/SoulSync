@@ -24662,7 +24662,10 @@ def reset_youtube_playlist(url_hash):
     """Reset YouTube playlist to fresh phase (clear discovery/sync data)"""
     try:
         if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
+            # Idempotent: live state gone (restart/eviction) — already "fresh".
+            # 404 here permanently wedges a mirrored playlist whose state vanished
+            # (#702); treat a reset of nothing as a success so the UI recovers.
+            return jsonify({"success": True, "message": "Playlist already reset"})
         
         state = youtube_playlist_states[url_hash]
         
@@ -24694,7 +24697,9 @@ def delete_youtube_playlist(url_hash):
     """Remove YouTube playlist from backend storage entirely"""
     try:
         if url_hash not in youtube_playlist_states:
-            return jsonify({"error": "YouTube playlist not found"}), 404
+            # Idempotent: already gone (restart/eviction) — deleting nothing is a
+            # success, not a 404 that wedges the UI (#702).
+            return jsonify({"success": True, "message": "Playlist already removed"})
         
         state = youtube_playlist_states[url_hash]
         
