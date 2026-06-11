@@ -340,8 +340,20 @@ async function initProfileSystem() {
         // Check if a session already has a profile selected
         const currentRes = await fetch('/api/profiles/current');
         const currentData = await currentRes.json();
+        // Login mode: show the sign-in screen and defer everything else until
+        // the user authenticates.
+        if (currentData.login_required) {
+            showLoginScreen();
+            return false;
+        }
         if (currentData.success && currentData.profile) {
             setCurrentProfile(currentData.profile);
+
+            // Login mode → reveal the Sign out button in the profile bar.
+            if (currentData.login_mode) {
+                const lb = document.getElementById('logout-btn');
+                if (lb) lb.style.display = '';
+            }
 
             // Check if launch PIN is required
             if (currentData.launch_pin_required) {
@@ -385,6 +397,48 @@ async function initProfileSystem() {
         console.error('Profile init error:', e);
         return true; // Fall through to normal init
     }
+}
+
+// ── Login Screen (username/password mode) ──────────────────────────────
+
+function showLoginScreen() {
+    const overlay = document.getElementById('login-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'flex';
+    const u = document.getElementById('login-username');
+    if (u) setTimeout(() => u.focus(), 50);
+}
+
+async function submitLogin() {
+    const username = (document.getElementById('login-username')?.value || '').trim();
+    const password = document.getElementById('login-password')?.value || '';
+    const errEl = document.getElementById('login-error');
+    const btn = document.getElementById('login-submit');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+    if (errEl) errEl.style.display = 'none';
+    if (!username || !password) { showErr('Enter your username and password'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Signing in...'; }
+    try {
+        const res = await fetch('/api/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            window.location.reload();   // authenticated → reload into the app
+        } else {
+            showErr(res.status === 429 ? 'Too many attempts — wait a moment.' : (data.error || 'Sign in failed'));
+            if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+        }
+    } catch (e) {
+        showErr('Connection error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Sign in'; }
+    }
+}
+
+async function soulsyncLogout() {
+    try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) { /* reload anyway */ }
+    window.location.reload();
 }
 
 // ── Launch PIN Lock Screen ─────────────────────────────────────────────
@@ -450,6 +504,28 @@ function showLaunchPinScreen() {
 }
 
 // ── Security Settings Helpers ──────────────────────────────────────────
+
+async function saveLoginPassword() {
+    const input = document.getElementById('security-login-password');
+    const msg = document.getElementById('security-login-password-msg');
+    const password = input?.value || '';
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.style.color = ok ? '#4caf50' : '#ff5252';
+        msg.style.display = 'block';
+    };
+    if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
+    try {
+        const res = await fetch('/api/profiles/1/set-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (data.success) { show('Admin login password saved', true); if (input) input.value = ''; }
+        else show(data.error || 'Failed to save password', false);
+    } catch (e) { show('Connection error', false); }
+}
 
 async function saveSecurityPin() {
     const pin = document.getElementById('security-new-pin').value;

@@ -1403,6 +1403,8 @@ async function loadSettingsData() {
             if (trustProxy) trustProxy.checked = settings.security?.trust_reverse_proxy || false;
             const authHeader = document.getElementById('security-auth-proxy-header');
             if (authHeader) authHeader.value = settings.security?.auth_proxy_header || '';
+            const reqLogin = document.getElementById('security-require-login');
+            if (reqLogin) reqLogin.checked = settings.security?.require_login || false;
 
             // Check if admin has a PIN set
             const profilesRes = await fetch('/api/profiles');
@@ -3154,6 +3156,7 @@ async function saveSettings(quiet = false) {
             cors_origins: document.getElementById('security-cors-origins')?.value?.trim() || '',
             trust_reverse_proxy: document.getElementById('security-trust-proxy')?.checked || false,
             auth_proxy_header: document.getElementById('security-auth-proxy-header')?.value?.trim() || '',
+            require_login: document.getElementById('security-require-login')?.checked || false,
         }
     };
 
