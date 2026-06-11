@@ -355,3 +355,27 @@ def test_real_app_not_in_reverse_proxy_mode_by_default():
     assert not isinstance(web_server.app.wsgi_app, ProxyFix)
     assert web_server.app.config.get('SESSION_COOKIE_SECURE') in (None, False)
     assert web_server.app.config.get('SESSION_COOKIE_SAMESITE') is None
+
+
+def test_verify_launch_pin_rate_limited_after_flood(client):
+    # A flood of WRONG PINs from one IP gets 429; cleaned up so neither the lock
+    # nor the temp PIN leaks to other tests (the limiter is a process singleton).
+    from werkzeug.security import generate_password_hash
+    db = web_server.get_database()
+    with db._get_connection() as conn:   # admin needs a PIN so wrong ones actually fail
+        conn.execute("UPDATE profiles SET pin_hash = ? WHERE id = 1",
+                     (generate_password_hash('1234', method='pbkdf2:sha256'),))
+        conn.commit()
+    web_server._launch_pin_limiter.record_success('127.0.0.1')  # clean slate
+    try:
+        for _ in range(10):
+            assert client.post('/api/profiles/verify-launch-pin',
+                               json={'pin': 'definitely-wrong'}).status_code == 401
+        r = client.post('/api/profiles/verify-launch-pin', json={'pin': 'definitely-wrong'})
+        assert r.status_code == 429
+        assert 'Retry-After' in r.headers
+    finally:
+        web_server._launch_pin_limiter.record_success('127.0.0.1')
+        with db._get_connection() as conn:
+            conn.execute("UPDATE profiles SET pin_hash = NULL WHERE id = 1")
+            conn.commit()
