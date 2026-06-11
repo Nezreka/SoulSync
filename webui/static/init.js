@@ -581,9 +581,31 @@ async function saveLoginPassword() {
             body: JSON.stringify({ password }),
         });
         const data = await res.json();
-        if (data.success) { show('Admin login password saved', true); if (input) input.value = ''; }
+        if (data.success) {
+            show('Admin login password saved', true);
+            if (input) input.value = '';
+            updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
+        }
         else show(data.error || 'Failed to save password', false);
     } catch (e) { show('Connection error', false); }
+}
+
+// Lock/unlock the "Require login" toggle based on whether the admin has a
+// password — makes the prerequisite (anti-lockout) visible instead of a
+// surprise 400 on save.
+function updateRequireLoginGate(hasPassword) {
+    const toggle = document.getElementById('security-require-login');
+    const wrap = document.getElementById('security-login-toggle-wrap');
+    const help = document.getElementById('security-require-login-help');
+    if (!toggle) return;
+    toggle.disabled = !hasPassword;
+    if (!hasPassword) toggle.checked = false;
+    if (wrap) wrap.classList.toggle('security-locked', !hasPassword);
+    if (help) {
+        help.innerHTML = hasPassword
+            ? 'Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.'
+            : '🔒 Set the admin password in <strong>Step 1</strong> first — then you can turn this on.';
+    }
 }
 
 function handleRecoveryQuestionChange() {

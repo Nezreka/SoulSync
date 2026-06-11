@@ -5993,100 +5993,119 @@
 
                             </div><!-- end Library Preferences body -->
 
-                            <!-- Security Settings -->
+                            <!-- Security & Access Settings -->
                             <div class="settings-group" data-stg="advanced">
-                                <h3>🔒 Security</h3>
+                                <h3>🔒 Security &amp; Access</h3>
+                                <div class="setting-help-text" style="margin-bottom: 18px;">
+                                    By default, anyone who can reach SoulSync on your network can use it. Protect access below with a simple shared <strong>PIN</strong>, or full <strong>user accounts</strong> with passwords — you only need one. The last group is just for exposing SoulSync over the internet.
+                                </div>
 
-                                <div class="form-group" id="security-pin-setup" style="display: none;">
-                                    <label>Set Admin PIN:</label>
-                                    <div class="setting-help-text" style="margin-bottom: 8px;">
-                                        You need to set a PIN before enabling the lock screen.
+                                <!-- ── Method A: PIN ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">🔑 Lock with a PIN <span class="security-subhead-note">simple · one shared PIN</span></h4>
+
+                                    <div class="form-group" id="security-pin-setup" style="display: none;">
+                                        <label>Step 1 — Set admin PIN:</label>
+                                        <div class="setting-help-text" style="margin-bottom: 8px;">
+                                            Set a PIN before you can turn on the lock screen.
+                                        </div>
+                                        <input type="password" id="security-new-pin" placeholder="Enter PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                        <input type="password" id="security-confirm-pin" placeholder="Confirm PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                        <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">Save PIN</button>
+                                        <p id="security-pin-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
                                     </div>
-                                    <input type="password" id="security-new-pin" placeholder="Enter PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
-                                    <input type="password" id="security-confirm-pin" placeholder="Confirm PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
-                                    <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">Save PIN</button>
-                                    <p id="security-pin-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
-                                </div>
 
-                                <div class="form-group">
-                                    <label class="toggle-label">
-                                        <input type="checkbox" id="security-require-pin" onchange="handleSecurityPinToggle(this)">
-                                        <span>Require PIN to access SoulSync</span>
-                                    </label>
-                                    <div class="setting-help-text">
-                                        When enabled, a lock screen appears on every page load. PIN is verified against the admin account. Closing the browser tab requires re-entry.
+                                    <div class="form-group">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-require-pin" onchange="handleSecurityPinToggle(this)">
+                                            <span>Require PIN to access SoulSync</span>
+                                        </label>
+                                        <div class="setting-help-text">
+                                            A lock screen appears on every page load, verified against the admin PIN. Closing the tab requires re-entry.
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div class="form-group" id="security-change-pin-section" style="display: none;">
-                                    <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
-                                </div>
-
-                                <div class="form-group">
-                                    <label for="security-cors-origins">Allowed WebSocket Origins:</label>
-                                    <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
-                                    <div class="setting-help-text">
-                                        Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="toggle-label">
-                                        <input type="checkbox" id="security-trust-proxy">
-                                        <span>Behind a reverse proxy</span>
-                                    </label>
-                                    <div class="setting-help-text">
-                                        Enable only if SoulSync runs behind nginx / Caddy / Traefik that terminates HTTPS. Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie HTTPS-only, and adds security headers. <strong>Leave OFF for direct or LAN access over http://</strong> — turning it on would make the session cookie HTTPS-only and break plain-HTTP access. <strong>Takes effect after a restart.</strong> See <code>Support/REVERSE-PROXY.md</code>.
+                                    <div class="form-group" id="security-change-pin-section" style="display: none;">
+                                        <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
                                     </div>
                                 </div>
 
-                                <div class="form-group">
-                                    <label for="security-auth-proxy-header">Auth proxy user header <span style="opacity:0.6">(optional)</span>:</label>
-                                    <input type="text" id="security-auth-proxy-header" placeholder="Remote-User" autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
-                                    <div class="setting-help-text">
-                                        If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in <em>in front of</em> SoulSync, enter the header it sets (e.g. <code>Remote-User</code>) and SoulSync will skip the launch PIN for already-authenticated requests. <strong>Only set this behind a proxy that strips any client-supplied copy of the header</strong> — otherwise it can be spoofed. Leave blank to disable (the default).
+                                <!-- ── Method B: Login accounts ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">👤 User accounts (login) <span class="security-subhead-note">per-person · best for public access</span></h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px;">
+                                        Everyone signs in with their account name + password. Turning this on <strong>replaces</strong> the PIN and the profile picker. Set passwords for other people in <strong>Manage Profiles</strong>.
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Step 1 — Admin login password:</label>
+                                        <input type="password" id="security-login-password" placeholder="Set admin login password" maxlength="200" autocomplete="new-password" style="margin: 6px 0;">
+                                        <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
+                                        <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Step 2 <span style="opacity:0.6">(recommended)</span> — Password recovery question:</label>
+                                        <div class="setting-help-text" style="margin-bottom: 8px;">
+                                            So you can reset a forgotten password by answering it on the sign-in screen.
+                                        </div>
+                                        <select id="security-recovery-question" class="form-select" onchange="handleRecoveryQuestionChange()" style="margin-bottom: 6px;">
+                                            <option value="">— Select a question —</option>
+                                            <option>What was the name of your first pet?</option>
+                                            <option>What city were you born in?</option>
+                                            <option>What was your first concert?</option>
+                                            <option>What is your all-time favorite album?</option>
+                                            <option>What was the make of your first car?</option>
+                                            <option value="__custom__">Custom question…</option>
+                                        </select>
+                                        <input type="text" id="security-recovery-custom" placeholder="Type your own question" maxlength="120" style="display:none; margin-bottom: 6px;">
+                                        <input type="text" id="security-recovery-answer" placeholder="Your answer" maxlength="120" autocomplete="off" style="margin-bottom: 6px;">
+                                        <button class="auth-button" onclick="saveRecoveryQuestion()">Save Recovery Question</button>
+                                        <p id="security-recovery-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                    </div>
+
+                                    <div class="form-group" id="security-login-toggle-wrap">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-require-login">
+                                            <span>Step 3 — Require login (username + password)</span>
+                                        </label>
+                                        <div class="setting-help-text" id="security-require-login-help">
+                                            Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.
+                                        </div>
                                     </div>
                                 </div>
 
-                                <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:18px 0 14px;">
-
-                                <div class="form-group">
-                                    <label>Login password (admin account):</label>
-                                    <div class="setting-help-text" style="margin-bottom: 8px;">
-                                        Set a password for the admin account, then turn on "Require login" below. Your username is your profile name. Set passwords for other profiles in <strong>Manage Profiles</strong>.
+                                <!-- ── Reverse proxy & remote access ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">🌐 Reverse proxy &amp; remote access</h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px;">
+                                        Only needed if you expose SoulSync to the internet behind nginx / Caddy / Traefik. See <code>Support/REVERSE-PROXY.md</code>.
                                     </div>
-                                    <input type="password" id="security-login-password" placeholder="Set admin login password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
-                                    <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
-                                    <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
-                                </div>
 
-                                <div class="form-group">
-                                    <label for="security-recovery-question">Password recovery question:</label>
-                                    <div class="setting-help-text" style="margin-bottom: 8px;">
-                                        Lets you reset a forgotten login password by answering this. Recommended if you enable login. (You can set one per profile in <strong>Manage Profiles</strong> too.)
+                                    <div class="form-group">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-trust-proxy">
+                                            <span>Behind a reverse proxy</span>
+                                        </label>
+                                        <div class="setting-help-text">
+                                            Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie HTTPS-only, and adds security headers. <strong>Leave OFF for direct / LAN access over http://</strong> — it would otherwise break plain-HTTP login. <strong>Takes effect after a restart.</strong>
+                                        </div>
                                     </div>
-                                    <select id="security-recovery-question" class="form-select" onchange="handleRecoveryQuestionChange()" style="margin-bottom: 6px;">
-                                        <option value="">— Select a question —</option>
-                                        <option>What was the name of your first pet?</option>
-                                        <option>What city were you born in?</option>
-                                        <option>What was your first concert?</option>
-                                        <option>What is your all-time favorite album?</option>
-                                        <option>What was the make of your first car?</option>
-                                        <option value="__custom__">Custom question…</option>
-                                    </select>
-                                    <input type="text" id="security-recovery-custom" placeholder="Type your own question" maxlength="120" style="display:none; margin-bottom: 6px;">
-                                    <input type="text" id="security-recovery-answer" placeholder="Your answer" maxlength="120" autocomplete="off" style="margin-bottom: 6px;">
-                                    <button class="auth-button" onclick="saveRecoveryQuestion()">Save Recovery Question</button>
-                                    <p id="security-recovery-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
-                                </div>
 
-                                <div class="form-group">
-                                    <label class="toggle-label">
-                                        <input type="checkbox" id="security-require-login">
-                                        <span>Require login (username + password)</span>
-                                    </label>
-                                    <div class="setting-help-text">
-                                        When enabled, a sign-in screen replaces the profile picker + launch PIN — everyone signs in with their account name + password. <strong>Set the admin password above first</strong> (you can't enable this without one, to avoid locking yourself out). Best for instances exposed to the internet.
+                                    <div class="form-group security-nested">
+                                        <label for="security-auth-proxy-header">↳ Auth proxy user header <span style="opacity:0.6">(optional)</span>:</label>
+                                        <input type="text" id="security-auth-proxy-header" placeholder="Remote-User" autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                        <div class="setting-help-text">
+                                            If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in in front of SoulSync, enter the header it sets and SoulSync trusts it. <strong>Only set this behind a proxy that strips any client-supplied copy of the header.</strong> Blank = off.
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="security-cors-origins">Allowed WebSocket Origins:</label>
+                                        <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                        <div class="setting-help-text">
+                                            Origins (full URL, no trailing slash) allowed to open WebSocket connections — one per line or comma-separated. Empty = same-origin only (the secure default; fine for direct access and most reverse-proxy setups). Add your public domain if live updates fail behind a proxy. <code>*</code> on its own line allows any origin (insecure).
+                                        </div>
                                     </div>
                                 </div>
                             </div>

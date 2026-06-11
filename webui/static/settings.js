@@ -1421,6 +1421,10 @@ async function loadSettingsData() {
                 document.getElementById('security-require-pin').checked = false;
                 document.getElementById('security-require-pin').disabled = true;
             }
+
+            // Login: the "Require login" toggle is gated on an admin password —
+            // visually locked until Step 1 is done (anti-lockout, made obvious).
+            updateRequireLoginGate(adminProfile?.has_password || false);
         } catch (error) {
             console.error('Error loading security settings:', error);
         }
