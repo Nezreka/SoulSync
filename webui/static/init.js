@@ -484,11 +484,13 @@ async function submitRecoveryReset() {
     const username = (document.getElementById('recovery-username')?.value || '').trim();
     const answer = document.getElementById('recovery-answer')?.value || '';
     const newPassword = document.getElementById('recovery-new-password')?.value || '';
+    const confirmPassword = document.getElementById('recovery-new-password-confirm')?.value || '';
     const errEl = document.getElementById('recovery-error');
     const showErr = (m) => { if (errEl) { errEl.textContent = m; errEl.style.display = 'block'; } };
     if (errEl) errEl.style.display = 'none';
     if (!answer || !newPassword) { showErr('Enter your answer and a new password'); return; }
     if (newPassword.length < 6) { showErr('New password must be at least 6 characters'); return; }
+    if (newPassword !== confirmPassword) { showErr('Passwords do not match'); return; }
     try {
         const res = await fetch('/api/auth/recovery-reset', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -566,8 +568,10 @@ function showLaunchPinScreen() {
 
 async function saveLoginPassword() {
     const input = document.getElementById('security-login-password');
+    const confirmInput = document.getElementById('security-login-password-confirm');
     const msg = document.getElementById('security-login-password-msg');
     const password = input?.value || '';
+    const confirm = confirmInput?.value || '';
     const show = (text, ok) => {
         if (!msg) return;
         msg.textContent = text;
@@ -575,6 +579,7 @@ async function saveLoginPassword() {
         msg.style.display = 'block';
     };
     if (!password || password.length < 6) { show('Password must be at least 6 characters', false); return; }
+    if (password !== confirm) { show('Passwords do not match', false); return; }
     try {
         const res = await fetch('/api/profiles/1/set-password', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -584,6 +589,7 @@ async function saveLoginPassword() {
         if (data.success) {
             show('Admin login password saved', true);
             if (input) input.value = '';
+            if (confirmInput) confirmInput.value = '';
             updateRequireLoginGate(true);   // Step 1 done → unlock Step 3
         }
         else show(data.error || 'Failed to save password', false);
