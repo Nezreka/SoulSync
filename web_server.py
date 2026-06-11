@@ -7677,7 +7677,7 @@ def _audio_file_duration_ms(path):
         mf = mutagen.File(path)
         if mf and mf.info and getattr(mf.info, 'length', 0):
             return int(mf.info.length * 1000)
-    except Exception:
+    except Exception:  # noqa: S110 — duration probe is best-effort; fall through to 0
         pass
     return 0
 

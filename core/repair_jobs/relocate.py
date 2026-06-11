@@ -55,8 +55,7 @@ def relocate_mismatch_to_staging(
     if tag_updates:
         try:
             write_tags(resolved_path, tag_updates)
-        except Exception:
-            # Tags are best-effort — re-import re-derives them from the source.
+        except Exception:  # noqa: S110 — tags are best-effort; re-import re-derives them
             # The relocation itself is the point, so don't abort over a tag write.
             pass
 

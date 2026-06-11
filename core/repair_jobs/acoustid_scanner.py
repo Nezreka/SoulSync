@@ -233,7 +233,7 @@ class AcoustIDScannerJob(RepairJob):
         try:
             from core.tag_writer import read_file_tags as _rft
             file_verif_status = (_rft(fpath) or {}).get('verification_status')
-        except Exception:
+        except Exception:  # noqa: S110 — verification tag is optional context; None is fine
             pass
         if file_verif_status == 'human_verified':
             # The user explicitly confirmed this file via the review queue —
