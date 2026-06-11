@@ -25,10 +25,20 @@ terminates TLS, opt in by setting this in your `config.json`:
 }
 ```
 
-When enabled, SoulSync trusts `X-Forwarded-For/Proto/Host/Port` from **one** proxy
-hop and marks its session cookie `Secure` (HTTPS-only) + `SameSite=Lax`. **Leave
-it off if you access SoulSync directly over http:// on your LAN** — turning it on
-would make the session cookie HTTPS-only and break plain-HTTP access.
+When enabled, SoulSync:
+- trusts `X-Forwarded-For/Proto/Host/Port` from **one** proxy hop (correct client
+  IP, HTTPS detection, redirects),
+- marks its session cookie `Secure` (HTTPS-only) + `SameSite=Lax`, and
+- sends conservative security headers (`X-Content-Type-Options: nosniff`,
+  `X-Frame-Options: SAMEORIGIN`, `Strict-Transport-Security`). No CSP is set — tune
+  one at your proxy if you want it.
+
+**Leave it off if you access SoulSync directly over http:// on your LAN** — turning
+it on would make the session cookie HTTPS-only and break plain-HTTP access. With it
+off, none of the above applies and SoulSync behaves exactly as before.
+
+> The launch PIN is also brute-force limited (10 wrong attempts from an IP → a
+> short cooldown), regardless of this setting — a correct PIN is never affected.
 
 Restart SoulSync after changing it.
 

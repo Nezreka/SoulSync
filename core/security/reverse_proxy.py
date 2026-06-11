@@ -35,6 +35,22 @@ def apply_reverse_proxy_mode(app, config_get) -> bool:
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
         app.config["SESSION_COOKIE_SECURE"] = True
         app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+        # Security headers — registered ONLY in proxy mode (so a direct/LAN install
+        # gets none of them). Conservative set that won't break a same-origin app:
+        # nosniff, clickjacking protection, and HSTS (safe: only honoured over the
+        # HTTPS the proxy terminates). No CSP here — it needs per-deployment tuning
+        # and is better added at the proxy. setdefault() so we never clobber a
+        # header the proxy already set.
+        @app.after_request
+        def _security_headers(response):
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+            return response
+
         return True
     except Exception:
         # If anything goes wrong, behave like off — never break startup over this.
