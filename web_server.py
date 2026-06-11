@@ -346,6 +346,14 @@ def _init_flask_secret_key():
 
 app.secret_key = _init_flask_secret_key()
 
+# --- Reverse-proxy mode (opt-in, default OFF) ---
+# OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
+# the operator sets security.trust_reverse_proxy=true (behind nginx/Caddy/Traefik
+# with TLS) does this trust X-Forwarded-* + mark the session cookie Secure.
+from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
+if _apply_reverse_proxy_mode(app, config_manager.get):
+    logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
     resolve_cors_origins as _resolve_socketio_cors_origins,

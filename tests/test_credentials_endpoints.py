@@ -346,3 +346,12 @@ def test_tidal_source_adapter_resolves_per_profile():
     from core.playlists.sources.tidal import TidalPlaylistSource
     src = TidalPlaylistSource(web_server.get_tidal_client_for_profile)
     assert src._client() is web_server.tidal_client   # admin -> global, unchanged
+
+
+def test_real_app_not_in_reverse_proxy_mode_by_default():
+    # Direct/LAN installs (no security.trust_reverse_proxy set) must not get
+    # ProxyFix or a forced-Secure cookie — proves zero impact for normal users.
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    assert not isinstance(web_server.app.wsgi_app, ProxyFix)
+    assert web_server.app.config.get('SESSION_COOKIE_SECURE') in (None, False)
+    assert web_server.app.config.get('SESSION_COOKIE_SAMESITE') is None
