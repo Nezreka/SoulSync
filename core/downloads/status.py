@@ -36,6 +36,15 @@ from utils.logging_config import get_logger
 # Project logger factory so these lines reach app.log (soulsync.* namespace).
 logger = get_logger("downloads.status")
 
+# #836 backstop: how long an slskd error state (Rejected/Failed/Errored/TimedOut)
+# may persist on a non-manual task before the status formatter gives up on the
+# retry monitor and marks it failed. The monitor's own retry window is ~15s
+# (3 × 5s); this is well beyond it so a healthy retry always wins, and it only
+# fires when the monitor genuinely can't make progress (e.g. a rejected transfer
+# with no other source) — which otherwise hangs the task at 'downloading 0%'
+# forever and blocks the whole batch from completing.
+ERROR_STATE_TERMINAL_GRACE_SECONDS = 60
+
 
 def _schedule_completion_callback(deps, batch_id: str, task_id: str, success: bool) -> None:
     """Fire ``deps.on_download_completed`` on a one-shot daemon thread so
@@ -394,17 +403,59 @@ def build_batch_status_data(batch_id: str, batch: dict, live_transfers_lookup: d
                                 # release the lock.
                                 _schedule_completion_callback(deps, batch_id, task_id, False)
                             else:
-                                # UNIFIED ERROR HANDLING: Let monitor handle errors for consistency
-                                # Monitor will detect errored state and trigger retry within 5 seconds
-                                logger.error(f"Task {task_id} API shows error state: {state_str} - letting monitor handle retry")
+                                # Normally the retry monitor picks up an errored state and
+                                # retries within ~15s. But if it can't make progress — e.g. an
+                                # slskd transfer rejected with no other source — the task would
+                                # otherwise sit at 'downloading 0%' forever, spam an ERROR every
+                                # poll, AND block its batch from ever completing (#836: a rejected
+                                # wishlist track, or rejected tracks in an album download).
+                                #
+                                # Backstop: measure how long the ERROR state has persisted (not
+                                # how long the task has downloaded, so a slow-but-healthy transfer
+                                # isn't failed). Once it exceeds the monitor's retry window with no
+                                # resolution, mark the task failed so the worker frees and the
+                                # batch can finish. A working retry transitions the task out of the
+                                # error state first, clearing the timer below — so the healthy path
+                                # never hits this.
+                                # A monitor retry transitions the task (newer
+                                # status_change_time), which restarts the window so each
+                                # error EPISODE gets a fresh grace. If the monitor never
+                                # transitions it (the stuck case), the window keeps growing.
+                                err_since = task.get('_error_state_since')
+                                if err_since is None or task.get('status_change_time', 0) > err_since:
+                                    task['_error_state_since'] = err_since = current_time
+                                    task.pop('_error_state_logged', None)
+                                error_age = current_time - err_since
 
-                                # Keep task in current status (downloading/queued) so monitor can detect error
-                                # Don't mark as failed here - let the unified retry system handle it
-                                if task['status'] in ['searching', 'downloading', 'queued']:
-                                    task_status['status'] = task['status']  # Keep current status for monitor
+                                if error_age > ERROR_STATE_TERMINAL_GRACE_SECONDS:
+                                    err_msg = live_info.get('errorMessage') or live_info.get('error') or ''
+                                    task['status'] = 'failed'
+                                    task['error_message'] = (
+                                        str(err_msg) if err_msg
+                                        else f'Download failed (state: {state_str})'
+                                    )
+                                    task_status['status'] = 'failed'
+                                    task_status['error_message'] = task['error_message']
+                                    logger.warning(
+                                        f"Task {task_id} stuck in error state '{state_str}' for "
+                                        f"{error_age:.0f}s with no retry progress — marking failed (#836)"
+                                    )
+                                    _schedule_completion_callback(deps, batch_id, task_id, False)
                                 else:
-                                    task_status['status'] = 'downloading'  # Default to downloading for error detection
-                                    task['status'] = 'downloading'
+                                    # Within the retry window — keep current status so the monitor
+                                    # can act. Log once per episode, not every poll, to stop the
+                                    # 2-second ERROR spam the reporter saw.
+                                    if not task.get('_error_state_logged'):
+                                        logger.warning(
+                                            f"Task {task_id} API shows error state: {state_str} "
+                                            f"- letting monitor handle retry"
+                                        )
+                                        task['_error_state_logged'] = True
+                                    if task['status'] in ['searching', 'downloading', 'queued']:
+                                        task_status['status'] = task['status']  # Keep current status for monitor
+                                    else:
+                                        task_status['status'] = 'downloading'  # Default to downloading for error detection
+                                        task['status'] = 'downloading'
                         elif 'Completed' in state_str or 'Succeeded' in state_str:
                             # Verify bytes actually transferred before trusting state string
                             expected_size = live_info.get('size', 0)

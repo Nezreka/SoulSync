@@ -343,3 +343,56 @@ def test_fuzzy_rejects_low_similarity(tmp_path):
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+# ---------------------------------------------------------------------------
+# Issue #835 — a '/' in a YouTube/Tidal title is part of the NAME, not a path
+# separator. The encoded ``id||title`` finder previously basename-split the
+# title ("YouSeeBIGGIRL/T:T" -> "T:T"), so the real on-disk file (with the
+# slash sanitised) never matched and valid downloads got quarantined.
+# ---------------------------------------------------------------------------
+
+from core.downloads.file_finder import _extract_basename
+
+
+def test_encoded_title_with_slash_is_not_basename_split():
+    # The Sawano AoT track. The id||title encoding must keep the whole title.
+    assert _extract_basename('vy63u2hKoPE||YouSeeBIGGIRL/T:T') == 'YouSeeBIGGIRL/T:T'
+
+
+def test_finds_youtube_file_whose_title_contains_a_slash(tmp_path):
+    downloads = tmp_path / 'downloads'
+    # On disk the slash is sanitised to a look-alike and the colon spaced out,
+    # exactly as in the issue screenshot.
+    target = downloads / 'YouSeeBIGGIRL∕T: T.mp3'
+    _touch(target)
+
+    found, location = find_completed_audio_file(
+        str(downloads), 'vy63u2hKoPE||YouSeeBIGGIRL/T:T',
+    )
+
+    assert found == str(target), 'pre-#835 this truncated the target to "T:T" and missed the file'
+    assert location == 'downloads'
+
+
+def test_slash_title_does_not_match_an_unrelated_file(tmp_path):
+    # Guard against the fix being too loose: a different track must NOT match.
+    downloads = tmp_path / 'downloads'
+    _touch(downloads / 'Some Totally Different Song.mp3')
+
+    found, _ = find_completed_audio_file(
+        str(downloads), 'vy63u2hKoPE||YouSeeBIGGIRL/T:T',
+    )
+    assert found is None
+
+
+def test_real_soulseek_path_still_basenamed(tmp_path):
+    # Regression: a genuine remote PATH must still resolve to its last segment.
+    downloads = tmp_path / 'downloads'
+    target = downloads / '01 - Suddenly.flac'
+    _touch(target)
+    assert _extract_basename(r'shared\Billy Ocean\Very Best Of\01 - Suddenly.flac') == '01 - Suddenly.flac'
+    found, _ = find_completed_audio_file(
+        str(downloads), r'shared\Billy Ocean\Very Best Of\01 - Suddenly.flac',
+    )
+    assert found == str(target)

@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.6.9"
+_SOULSYNC_BASE_VERSION = "2.7.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -346,6 +346,14 @@ def _init_flask_secret_key():
 
 app.secret_key = _init_flask_secret_key()
 
+# --- Reverse-proxy mode (opt-in, default OFF) ---
+# OFF by default → a strict no-op, so direct/LAN installs are unchanged. Only when
+# the operator sets security.trust_reverse_proxy=true (behind nginx/Caddy/Traefik
+# with TLS) does this trust X-Forwarded-* + mark the session cookie Secure.
+from core.security.reverse_proxy import apply_reverse_proxy_mode as _apply_reverse_proxy_mode
+if _apply_reverse_proxy_mode(app, config_manager.get):
+    logger.info("[Security] Reverse-proxy mode ON: trusting X-Forwarded-* and Secure session cookie")
+
 # --- WebSocket (Socket.IO) Setup ---
 from core.socketio_cors import (
     resolve_cors_origins as _resolve_socketio_cors_origins,
@@ -390,6 +398,41 @@ def inject_webui_assets():
         'vite_assets': build_webui_vite_assets,
     }
 
+# Brute-force limiter for the launch-PIN unlock (lenient; only a flood of wrong
+# PINs from one IP trips it — correct entry clears it instantly).
+from core.security.rate_limit import AttemptLimiter as _AttemptLimiter
+_launch_pin_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+_login_limiter = _AttemptLimiter(max_attempts=10, window_seconds=300)
+
+
+def _require_login_enabled():
+    try:
+        return bool(config_manager.get('security.require_login', False)) if config_manager else False
+    except Exception:
+        return False
+
+
+# --- Login gate (opt-in username/password mode; replaces the launch PIN) ---
+@app.before_request
+def _enforce_login():
+    """Server-side enforcement of username/password login. No-op unless
+    security.require_login is on. When on, an unauthenticated session can only
+    reach the page shell + the login flow + the key-authed public API."""
+    if not _require_login_enabled():
+        return
+    from core.security.login_gate import login_request_is_blocked
+    from core.security.launch_lock import is_html_navigation
+    if login_request_is_blocked(
+        request.path, request.method,
+        require_login=True,
+        authenticated=bool(session.get('login_authenticated', False)),
+    ):
+        if is_html_navigation(request.method, request.headers.get('Accept', ''),
+                              request.headers.get('Sec-Fetch-Mode', '')):
+            return redirect('/')
+        return jsonify({"error": "login_required", "login_required": True}), 401
+
+
 # --- Launch PIN gate (before_request hook) ---
 @app.before_request
 def _enforce_launch_pin():
@@ -401,6 +444,10 @@ def _enforce_launch_pin():
     on, except the page shell + the unlock flow + the key-authed public API.
     No-ops entirely when ``security.require_pin_on_launch`` is off (the default).
     """
+    # Login mode replaces the launch PIN entirely — when it's on, _enforce_login
+    # owns the gate and this no-ops.
+    if _require_login_enabled():
+        return
     try:
         require_pin = bool(config_manager.get('security.require_pin_on_launch', False)) if config_manager else False
     except Exception:
@@ -408,10 +455,21 @@ def _enforce_launch_pin():
     if not require_pin:
         return
     from core.security.launch_lock import request_is_locked, is_html_navigation
+    # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
+    # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
+    # by default so a direct install is unaffected.
+    from core.security.auth_proxy import trusted_proxy_user
+    try:
+        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
+    except Exception:
+        _proxy_header = ''
+    _verified = bool(session.get('launch_pin_verified', False)) or bool(
+        trusted_proxy_user(request.headers.get, _proxy_header)
+    )
     if request_is_locked(
         request.path, request.method,
         require_pin=require_pin,
-        pin_verified=bool(session.get('launch_pin_verified', False)),
+        pin_verified=_verified,
     ):
         # A browser navigating to a sub-page (deep link / refresh) should land
         # on the lock screen, not raw JSON — bounce it to the root, which serves
@@ -529,11 +587,19 @@ def get_current_profile_id() -> int:
     scanner) have no request context, so `g.profile_id` raises
     `RuntimeError("Working outside of application context")` rather
     than `AttributeError`. Catch both so non-request callers degrade
-    to the admin profile instead of crashing the handler."""
+    to the admin profile instead of crashing the handler.
+
+    A real web request always wins. Only when there's NO request do we honour a
+    background-profile override (set by the automation engine to the automation's
+    owner) — so a non-admin's scheduled job acts as them, while admin/system jobs
+    (profile 1) and anything with no override resolve to admin exactly as before."""
     try:
         return g.profile_id
     except (AttributeError, RuntimeError):
-        return 1
+        pass
+    from core.profile_context import get_background_profile
+    pid = get_background_profile()
+    return pid if pid is not None else 1
 
 
 def admin_only(view_fn):
@@ -571,6 +637,60 @@ def get_spotify_client_for_profile(profile_id=None):
     if profile_id is None:
         profile_id = get_current_profile_id()
     return metadata_registry.get_spotify_client_for_profile(profile_id)
+
+
+_profile_tidal_clients = {}
+_profile_tidal_lock = threading.Lock()
+
+
+def get_tidal_client_for_profile(profile_id=None):
+    """Get the Tidal client for a profile's OWN playlists, or the global one.
+
+    A profile that has connected its own Tidal account gets a dedicated client
+    seeded with its tokens (refreshed via the shared/global app creds). Crucially
+    its token refresh is redirected to the profile row, so a per-profile refresh
+    never overwrites the global tidal_tokens the app runs on. Admin (profile 1)
+    and unconnected profiles use the global client unchanged."""
+    if profile_id is None:
+        profile_id = get_current_profile_id()
+    if not profile_id or profile_id == 1:
+        return tidal_client
+    try:
+        toks = get_database().get_profile_tidal(profile_id) or {}
+    except Exception:
+        return tidal_client
+    if not toks.get('access_token') and not toks.get('refresh_token'):
+        return tidal_client
+    with _profile_tidal_lock:
+        cached = _profile_tidal_clients.get(profile_id)
+        if cached is not None:
+            return cached
+        try:
+            c = TidalClient()
+            c.access_token = toks.get('access_token') or None
+            c.refresh_token = toks.get('refresh_token') or None
+            c.token_expires_at = 0  # force a refresh check on first use
+            if c.access_token:
+                c.session.headers['Authorization'] = f'Bearer {c.access_token}'
+            # Redirect token persistence to the PROFILE, never the global slot.
+            _pid = profile_id
+            def _save_to_profile(_c=c, _p=_pid):
+                try:
+                    get_database().set_profile_tidal_tokens(_p, _c.access_token, _c.refresh_token)
+                except Exception as e:
+                    logger.debug("per-profile Tidal token save failed: %s", e)
+            c._save_tokens = _save_to_profile
+            _profile_tidal_clients[profile_id] = c
+            return c
+        except Exception as e:
+            logger.error("per-profile Tidal client build failed for %s: %s", profile_id, e)
+            return tidal_client
+
+
+def clear_profile_tidal_client(profile_id):
+    """Evict a profile's cached Tidal client (after (dis)connect)."""
+    with _profile_tidal_lock:
+        _profile_tidal_clients.pop(profile_id, None)
 
 # Valid page IDs for profile permission validation
 VALID_PAGE_IDS = {
@@ -1076,8 +1196,14 @@ def _register_automation_handlers():
         return match_mb_tracks(tracks, _mb_match_deps)
 
     _playlist_source_registry = build_playlist_source_registry(
-        spotify_client_getter=lambda: spotify_client,
-        tidal_client_getter=lambda: tidal_client,
+        # Per-profile source reads: the adapter calls these fresh on every read,
+        # so they resolve the CURRENT profile's account (their session
+        # interactively, their automation's owner in the background — via
+        # core.profile_context). Admin/profile 1 → the global client, so the
+        # admin's existing auto-sync pipelines are unchanged. (Deezer/Qobuz stay
+        # global for now — their playlist login is tangled with downloads.)
+        spotify_client_getter=get_spotify_client_for_profile,
+        tidal_client_getter=get_tidal_client_for_profile,
         qobuz_client_getter=_get_qobuz_client_for_sync,
         deezer_client_getter=_get_deezer_client,
         youtube_parser=parse_youtube_playlist,
@@ -2927,6 +3053,7 @@ def get_activity_logs():
 
 # --- Internal API Key Management (browser-only, no auth) ---
 @app.route('/api/v1/api-keys-internal', methods=['GET'])
+@admin_only
 def list_api_keys_internal():
     """List API keys for the settings page (no auth required — same as all UI routes)."""
     keys = config_manager.get('api_keys', [])
@@ -2943,6 +3070,7 @@ def list_api_keys_internal():
     return jsonify({"success": True, "data": {"keys": safe_keys}})
 
 @app.route('/api/v1/api-keys-internal/generate', methods=['POST'])
+@admin_only
 def generate_api_key_internal():
     """Generate API key from settings page (no auth required)."""
     from api.auth import generate_api_key
@@ -2961,6 +3089,7 @@ def generate_api_key_internal():
     }}), 201
 
 @app.route('/api/v1/api-keys-internal/revoke/<key_id>', methods=['DELETE'])
+@admin_only
 def revoke_api_key_internal(key_id):
     """Revoke API key from settings page (no auth required)."""
     keys = config_manager.get('api_keys', [])
@@ -2983,6 +3112,14 @@ def handle_settings():
             new_settings = request.get_json()
             if not new_settings:
                 return jsonify({"success": False, "error": "No data received."}), 400
+
+            # Anti-lockout: refuse to turn ON login mode until the admin account
+            # has a password — otherwise enabling it would lock everyone out.
+            _sec_in = new_settings.get('security') or {}
+            if _sec_in.get('require_login') and not config_manager.get('security.require_login', False):
+                if not get_database().profile_has_password(1):
+                    return jsonify({"success": False,
+                                    "error": "Set an admin password before enabling login mode."}), 400
 
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
@@ -4040,6 +4177,7 @@ def get_plex_pin_status():
 
 
 @app.route('/api/plex/clear-library', methods=['POST'])
+@admin_only
 def clear_plex_library_preference():
     try:
         from database.music_database import MusicDatabase
@@ -4401,6 +4539,33 @@ def detect_soulseek_endpoint():
 
 # --- Authentication Routes ---
 
+def _profile_spotify_oauth(profile_id_int):
+    """Build a SpotifyOAuth for a profile's connect/callback.
+
+    Shared-app model (#profiles): a profile authenticates its OWN account through
+    the GLOBAL app credentials and gets its own token cache. A profile that set
+    its own app creds (legacy) still works. show_dialog forces Spotify's account
+    chooser so a user can't silently inherit whatever Spotify session is active
+    in their browser (e.g. the admin's). Returns None if no app creds exist."""
+    from spotipy.oauth2 import SpotifyOAuth
+    creds = (get_database().get_profile_spotify(profile_id_int) or {})
+    cfg = config_manager.get_spotify_config()
+    client_id = creds.get('client_id') or cfg.get('client_id')
+    client_secret = creds.get('client_secret') or cfg.get('client_secret')
+    redirect_uri = creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
+    if not client_id or not client_secret:
+        return None
+    return SpotifyOAuth(
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
+        state=f'profile_{profile_id_int}',
+        show_dialog=True,
+    )
+
+
 @app.route('/auth/spotify')
 def auth_spotify():
     """
@@ -4410,23 +4575,12 @@ def auth_spotify():
     try:
         profile_id = request.args.get('profile_id', '')
 
-        # Per-profile auth: use profile's own credentials
+        # Per-profile auth: the profile's own account via the shared (global) app.
         if profile_id and profile_id != '1':
             try:
                 profile_id_int = int(profile_id)
-                db = get_database()
-                creds = db.get_profile_spotify(profile_id_int)
-                if creds and creds.get('client_id'):
-                    from spotipy.oauth2 import SpotifyOAuth
-                    redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
-                    auth_manager = SpotifyOAuth(
-                        client_id=creds['client_id'],
-                        client_secret=creds['client_secret'],
-                        redirect_uri=redirect_uri,
-                        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                        cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
-                        state=f'profile_{profile_id_int}'
-                    )
+                auth_manager = _profile_spotify_oauth(profile_id_int)
+                if auth_manager:
                     auth_url = auth_manager.get_authorize_url()
                     logger.info(f"Per-profile Spotify auth initiated for profile {profile_id_int}")
                     return redirect(auth_url)
@@ -4801,20 +4955,10 @@ def spotify_callback():
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
-        # Per-profile callback: use profile's credentials
+        # Per-profile callback: the profile's own account via the shared app.
         if profile_id_from_state and profile_id_from_state != 1:
-            db = get_database()
-            creds = db.get_profile_spotify(profile_id_from_state)
-            if creds and creds.get('client_id'):
-                redirect_uri = creds.get('redirect_uri') or config_manager.get_spotify_config().get('redirect_uri', 'http://127.0.0.1:8888/callback')
-                auth_manager = SpotifyOAuth(
-                    client_id=creds['client_id'],
-                    client_secret=creds['client_secret'],
-                    redirect_uri=redirect_uri,
-                    scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
-                    cache_path=f'config/.spotify_cache_profile_{profile_id_from_state}',
-                    state=f'profile_{profile_id_from_state}'
-                )
+            auth_manager = _profile_spotify_oauth(profile_id_from_state)
+            if auth_manager:
                 token_info = auth_manager.get_access_token(auth_code)
                 if token_info:
                     metadata_registry.clear_cached_profile_spotify_client(profile_id_from_state)
@@ -4975,20 +5119,9 @@ def tidal_callback():
             if profile_id_for_tidal:
                 try:
                     profile_id_int = int(profile_id_for_tidal)
-                    db = get_database()
-                    # Store Tidal tokens on the profile
-                    from config.settings import config_manager as _cm
-                    enc_access = _cm._encrypt_value(temp_tidal_client.access_token) if temp_tidal_client.access_token else None
-                    enc_refresh = _cm._encrypt_value(temp_tidal_client.refresh_token) if temp_tidal_client.refresh_token else None
-                    with db._get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            UPDATE profiles
-                            SET tidal_access_token = ?, tidal_refresh_token = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE id = ?
-                        """, (enc_access, enc_refresh, profile_id_int))
-                        conn.commit()
+                    get_database().set_profile_tidal_tokens(
+                        profile_id_int, temp_tidal_client.access_token, temp_tidal_client.refresh_token)
+                    clear_profile_tidal_client(profile_id_int)  # rebuild with fresh tokens
                     add_activity_item("", "Tidal Auth Complete", f"Profile {profile_id_int} authenticated with Tidal", "Now")
                     return "<h1>Tidal Authentication Successful!</h1><p>Your personal Tidal account is now connected. You can close this window.</p>"
                 except Exception as profile_err:
@@ -11636,6 +11769,7 @@ def library_manual_match():
         logger.error(f"Error manual matching: {e}")
 
 @app.route('/api/library/clear-match', methods=['PUT'])
+@admin_only
 def library_clear_match():
     """Clear a service ID match for an entity, reverting it to not_found.
     Body: { entity_type: str, entity_id: str, service: str }
@@ -11751,6 +11885,7 @@ def library_import_existing_track_for_missing_slot(album_id):
 
 
 @app.route('/api/library/track/<track_id>', methods=['DELETE'])
+@admin_only
 def library_delete_track(track_id):
     """Delete a track from the database, optionally deleting the file and blacklisting the source."""
     try:
@@ -12156,6 +12291,7 @@ def redownload_start(track_id):
 
 
 @app.route('/api/library/artist/<artist_id>/sync', methods=['POST'])
+@admin_only
 def sync_artist_library(artist_id):
     """Bidirectional sync: pull new content from media server AND remove stale entries."""
     try:
@@ -12201,6 +12337,11 @@ def sync_artist_library(artist_id):
         new_albums = 0
         new_tracks = 0
         name_updated = False
+        # Single-artist deep scan: collect the server track IDs we see during the
+        # pull. Stale removal (Phase 2) is a server-diff against this set — the SAME
+        # mechanism the whole-library deep scan uses, just scoped to one artist.
+        seen_track_ids = set()
+        pull_succeeded = False
 
         if server_source:
             media_client = None
@@ -12255,55 +12396,77 @@ def sync_artist_library(artist_id):
                             artist_name = new_name
                             name_updated = True
 
-                        # Process artist content (deep scan mode — skip existing, preserve enrichment)
+                        # Process artist content (deep scan mode — skip existing,
+                        # preserve enrichment) and collect the server's track IDs
+                        # for this artist into seen_track_ids.
                         success, details, new_albums, new_tracks = worker._process_artist_with_content(
-                            server_artist, skip_existing_tracks=True
+                            server_artist, skip_existing_tracks=True, seen_track_ids=seen_track_ids
                         )
+                        # Only a successful pull gives a trustworthy 'seen' set; a
+                        # failure/partial would make every track look stale.
+                        pull_succeeded = bool(success)
                         logger.info(f"[Artist Sync] Server pull for {artist_name}: {details}")
 
                 except Exception as e:
                     logger.error(f"[Artist Sync] Server pull failed for {artist_name}: {e}")
 
-        # ── Phase 2: Remove stale entries (files no longer on disk) ──
+        # ── Phase 2: Remove stale entries (tracks the server no longer has) ──
+        # Server-diff, exactly like the whole-library deep scan: stale = this
+        # artist's DB tracks that were NOT seen on the server during the pull.
         stale_removed = 0
         empty_albums_removed = 0
+        removal_skipped = False
 
-        with database._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, file_path FROM tracks WHERE artist_id = ?", (db_artist_id,))
-            tracks = cursor.fetchall()
+        if not pull_succeeded:
+            # No trustworthy server view (no server configured, unreachable, or the
+            # pull failed) — without it we can't tell stale from "server was down",
+            # so we remove nothing rather than risk wiping the artist.
+            removal_skipped = True
+            logger.info(f"[Artist Sync] {artist_name}: server pull unavailable — skipping stale removal")
+        else:
+            with database._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM tracks WHERE artist_id = ? AND server_source = ?",
+                    (db_artist_id, server_source),
+                )
+                artist_track_ids = {row['id'] for row in cursor.fetchall()}
+                stale = artist_track_ids - seen_track_ids
 
-            stale_ids = []
-            for track in tracks:
-                fp = track['file_path']
-                if not fp:
-                    stale_ids.append(track['id'])
-                    continue
-                resolved = _resolve_library_file_path(fp)
-                if not resolved or not os.path.exists(resolved):
-                    stale_ids.append(track['id'])
+                # Same safety net as deep scan (#828): if an implausibly large share
+                # of the artist's tracks went unseen, treat it as a flaky server
+                # response and skip rather than mass-delete.
+                from core.library.stale_guard import is_implausible_stale_removal
+                if is_implausible_stale_removal(len(stale), len(artist_track_ids)):
+                    removal_skipped = True
+                    logger.warning(
+                        f"[Artist Sync] {artist_name}: {len(stale)}/{len(artist_track_ids)} tracks "
+                        f"unseen on server — skipping stale removal (likely a flaky response)"
+                    )
+                elif stale:
+                    stale_removed = database.delete_stale_tracks(stale, server_source)
 
-            if stale_ids:
-                placeholders = ','.join('?' for _ in stale_ids)
-                cursor.execute(f"DELETE FROM tracks WHERE id IN ({placeholders})", stale_ids)
-                stale_removed = len(stale_ids)
-
-            cursor.execute("""
-                DELETE FROM albums WHERE artist_id = ?
-                AND id NOT IN (SELECT DISTINCT album_id FROM tracks)
-            """, (db_artist_id,))
-            empty_albums_removed = cursor.rowcount
-
-            cursor.execute("""
-                UPDATE albums SET track_count = (
-                    SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
-                ) WHERE artist_id = ?
-            """, (db_artist_id,))
-
-            conn.commit()
+            if not removal_skipped:
+                with database._get_connection() as conn:
+                    cursor = conn.cursor()
+                    # Prune albums left with no tracks. ``album_id IS NOT NULL``
+                    # avoids the NOT IN-with-NULL gotcha that would otherwise no-op
+                    # this whenever a track has a null album_id.
+                    cursor.execute("""
+                        DELETE FROM albums WHERE artist_id = ?
+                        AND id NOT IN (SELECT DISTINCT album_id FROM tracks WHERE album_id IS NOT NULL)
+                    """, (db_artist_id,))
+                    empty_albums_removed = cursor.rowcount
+                    cursor.execute("""
+                        UPDATE albums SET track_count = (
+                            SELECT COUNT(*) FROM tracks WHERE tracks.album_id = albums.id
+                        ) WHERE artist_id = ?
+                    """, (db_artist_id,))
+                    conn.commit()
 
         logger.warning(f"[Artist Sync] {artist_name}: +{new_albums} albums, +{new_tracks} tracks, "
-              f"-{stale_removed} stale, -{empty_albums_removed} empty albums")
+              f"-{stale_removed} stale, -{empty_albums_removed} empty albums"
+              f"{' (removal skipped — storage unreachable)' if removal_skipped else ''}")
 
         return jsonify({
             "success": True,
@@ -12313,6 +12476,7 @@ def sync_artist_library(artist_id):
             "new_tracks": new_tracks,
             "stale_removed": stale_removed,
             "empty_albums_removed": empty_albums_removed,
+            "removal_skipped": removal_skipped,
         })
 
     except Exception as e:
@@ -12322,6 +12486,7 @@ def sync_artist_library(artist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/library/album/<album_id>', methods=['DELETE'])
+@admin_only
 def library_delete_album(album_id):
     """Delete an album and all its tracks from the database, optionally deleting files on disk."""
     try:
@@ -12399,6 +12564,7 @@ def library_delete_album(album_id):
 
 
 @app.route('/api/library/tracks/delete-batch', methods=['POST'])
+@admin_only
 def library_delete_tracks_batch():
     """Delete multiple track records from the database (does NOT delete files on disk).
     Body: { track_ids: [int] }
@@ -16055,6 +16221,7 @@ def add_album_track_to_wishlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/update', methods=['POST'])
+@admin_only
 def start_database_update():
     """Endpoint to start the database update process."""
     global db_update_worker
@@ -16096,6 +16263,7 @@ def get_database_update_status():
         return jsonify(db_update_state)
 
 @app.route('/api/database/update/stop', methods=['POST'])
+@admin_only
 def stop_database_update():
     """Endpoint to stop the current database update."""
     global db_update_worker
@@ -16111,6 +16279,7 @@ def stop_database_update():
 _BACKUP_FILENAME_RE = re.compile(r'^music_library\.db\.backup_\d{8}_\d{6}$')
 
 @app.route('/api/database/backup', methods=['POST'])
+@admin_only
 def backup_database_endpoint():
     """Create a rolling backup of the database (max 5)."""
     try:
@@ -16202,6 +16371,7 @@ def list_backups_endpoint():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/backups/<filename>', methods=['DELETE'])
+@admin_only
 def delete_backup_endpoint(filename):
     """Delete a specific database backup."""
     try:
@@ -16224,6 +16394,7 @@ def delete_backup_endpoint(filename):
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/database/backups/<filename>/restore', methods=['POST'])
+@admin_only
 def restore_backup_endpoint(filename):
     """Restore the database from a specific backup."""
     try:
@@ -16367,6 +16538,7 @@ def database_maintenance_info():
 
 
 @app.route('/api/database/maintenance/vacuum', methods=['POST'])
+@admin_only
 def database_vacuum():
     """Run VACUUM to compact the database. Locks DB during operation."""
     try:
@@ -16556,6 +16728,7 @@ def metadata_cache_browse_musicbrainz():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/metadata-cache/clear', methods=['DELETE'])
+@admin_only
 def metadata_cache_clear():
     """Clear cached metadata. Optional query params: source, type."""
     try:
@@ -16572,6 +16745,7 @@ def metadata_cache_clear():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata-cache/evict', methods=['POST'])
+@admin_only
 def metadata_cache_evict():
     """Evict expired entries from the metadata cache."""
     try:
@@ -16583,6 +16757,7 @@ def metadata_cache_evict():
         return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/api/metadata-cache/clear-musicbrainz', methods=['DELETE'])
+@admin_only
 def metadata_cache_clear_musicbrainz():
     """Clear MusicBrainz cache entries. Optional query param: failed_only=true."""
     try:
@@ -18976,14 +19151,24 @@ def server_playlist_add_track(playlist_id):
 
         elif active_server == 'jellyfin' and media_server_engine.client('jellyfin'):
             from core.sync.playlist_edit import plan_playlist_add
-            current_tracks = media_server_engine.client('jellyfin').get_playlist_tracks(playlist_id) or []
+            jf = media_server_engine.client('jellyfin')
+            current_tracks = jf.get_playlist_tracks(playlist_id) or []
             track_ids = [str(t.ratingKey) for t in current_tracks]
             # Matching an unmatched source to a track already in the playlist
             # is a LINK, not a second copy — don't duplicate it (#768).
             plan = plan_playlist_add(track_ids, track_id, is_link=bool(source_track_id), position=position)
             if plan['should_insert']:
-                new_track_objs = [type('T', (), {'ratingKey': tid, 'title': ''})() for tid in plan['new_ids']]
-                media_server_engine.client('jellyfin').update_playlist(playlist_name, new_track_objs)
+                # #837: append the ONE found track IN PLACE. The old path called
+                # update_playlist(full track list), which on Jellyfin/Emby deletes
+                # and recreates the playlist — wiping its description + cover image.
+                # append_to_playlist adds in place (dedupe-safe), the same
+                # non-destructive op the 'append' sync mode already uses. It reads
+                # `.id` (not ratingKey) off each track, so set both.
+                new_track_obj = type('T', (), {
+                    'id': str(track_id), 'ratingKey': str(track_id),
+                    'title': server_track_title or '',
+                })()
+                jf.append_to_playlist(playlist_name, [new_track_obj])
             _persist_find_and_add_match(source_track_id, active_server, track_id, server_track_title, source_title, source_artist, source_provider)
             return jsonify({"success": True, "message": "Track linked" if not plan['should_insert'] else "Track added"})
 
@@ -19094,6 +19279,10 @@ def library_search_tracks():
     """Search SoulSync's local database for tracks (for manual match correction)."""
     try:
         query = request.args.get('q', '').strip()
+        # Optional source-artist relevance hint (Find & Add knows the artist of
+        # the track it's matching) — used only to rank exact title+artist matches
+        # to the top, NOT to filter.
+        artist_hint = request.args.get('artist', '').strip()
         limit = int(request.args.get('limit', 10))
         if not query:
             return jsonify({"success": True, "tracks": []})
@@ -19123,7 +19312,8 @@ def library_search_tracks():
                 return f"{_art_prefix}{url}{_art_suffix}"
             return url
 
-        results = database.search_tracks(title=query, artist='', limit=limit, server_source=active_server)
+        results = database.search_tracks(title=query, artist='', limit=limit,
+                                         server_source=active_server, rank_artist=artist_hint)
 
         tracks = []
         for t in results:
@@ -19608,7 +19798,7 @@ def get_spotify_playlists():
 
         # Add virtual "Liked Songs" playlist at the END (just count, no full fetch)
         try:
-            liked_songs_count = spotify_client.get_saved_tracks_count()
+            liked_songs_count = client.get_saved_tracks_count()
             if liked_songs_count > 0:
                 liked_songs_id = "spotify:liked-songs"
                 status_info = sync_statuses.get(liked_songs_id, {})
@@ -19619,7 +19809,7 @@ def get_spotify_playlists():
                     sync_status = f"Synced: {last_sync_time}"
 
                 # Get user info for owner name
-                user_info = spotify_client.get_user_info()
+                user_info = client.get_user_info()
                 owner_name = user_info.get('display_name', 'You') if user_info else 'You'
 
                 # Add Liked Songs as LAST playlist
@@ -19644,12 +19834,15 @@ def get_spotify_playlists():
 @app.route('/api/spotify/playlist/<playlist_id>', methods=['GET'])
 def get_playlist_tracks(playlist_id):
     """Fetches full track details for a specific playlist."""
-    if not spotify_client or not spotify_client.is_authenticated():
+    # Use THIS profile's own Spotify (their playlists/private content); falls
+    # back to the global/admin client for admin + unconnected profiles.
+    client = get_spotify_client_for_profile() or spotify_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
         # Handle special "Liked Songs" virtual playlist
         if playlist_id == "spotify:liked-songs":
-            user_info = spotify_client.get_user_info()
+            user_info = client.get_user_info()
             owner_name = user_info.get('display_name', 'You') if user_info else 'You'
 
             # Fetch raw saved tracks with full album data
@@ -19662,7 +19855,7 @@ def get_playlist_tracks(playlist_id):
                     return jsonify({"error": "Spotify is currently rate limited. Please try again later."}), 429
                 from core.api_call_tracker import api_call_tracker
                 api_call_tracker.record_call('spotify', endpoint='current_user_saved_tracks')
-                results = spotify_client.sp.current_user_saved_tracks(limit=limit, offset=offset)
+                results = client.sp.current_user_saved_tracks(limit=limit, offset=offset)
 
                 if not results or 'items' not in results:
                     break
@@ -19706,7 +19899,7 @@ def get_playlist_tracks(playlist_id):
         # Fetch raw playlist data to preserve full album objects
         from core.api_call_tracker import api_call_tracker
         api_call_tracker.record_call('spotify', endpoint='playlist')
-        playlist_data = spotify_client.sp.playlist(playlist_id)
+        playlist_data = client.sp.playlist(playlist_id)
 
         # Fetch all tracks with full album data
         tracks = []
@@ -19717,7 +19910,7 @@ def get_playlist_tracks(playlist_id):
         items_err = None
         for _attempt in range(2):
             try:
-                results = spotify_client._get_playlist_items_page(playlist_id, limit=100)
+                results = client._get_playlist_items_page(playlist_id, limit=100)
                 break
             except Exception as _e:
                 items_err = _e
@@ -19781,7 +19974,7 @@ def get_playlist_tracks(playlist_id):
 
             if results.get('next'):
                 api_call_tracker.record_call('spotify', endpoint='playlist_tracks_page')
-                results = spotify_client.sp.next(results)
+                results = client.sp.next(results)
             else:
                 results = None
 
@@ -21137,11 +21330,12 @@ def tidal_disconnect():
 @app.route('/api/tidal/playlists', methods=['GET'])
 def get_tidal_playlists():
     """Fetches all user playlists from Tidal with full track data (like sync.py)."""
-    if not tidal_client or not tidal_client.is_authenticated():
+    client = get_tidal_client_for_profile() or tidal_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
         # Use same method as sync.py - this already includes all track data
-        playlists = tidal_client.get_user_playlists_metadata_only()
+        playlists = client.get_user_playlists_metadata_only()
         
         playlist_data = []
         for p in playlists:
@@ -21186,8 +21380,8 @@ def get_tidal_playlists():
                 COLLECTION_PLAYLIST_NAME,
                 COLLECTION_PLAYLIST_DESCRIPTION,
             )
-            collection_count = tidal_client.get_collection_tracks_count()
-            needs_reconnect = tidal_client.collection_needs_reconnect()
+            collection_count = client.get_collection_tracks_count()
+            needs_reconnect = client.collection_needs_reconnect()
 
             if needs_reconnect:
                 playlist_data.append({
@@ -21228,7 +21422,8 @@ def get_tidal_playlists():
 @app.route('/api/tidal/playlist/<playlist_id>', methods=['GET'])
 def get_tidal_playlist_tracks(playlist_id):
     """Fetches full track details for a specific Tidal playlist (matches sync.py pattern)."""
-    if not tidal_client or not tidal_client.is_authenticated():
+    client = get_tidal_client_for_profile() or tidal_client
+    if not client or not client.is_authenticated():
         return jsonify({"error": "Tidal not authenticated."}), 401
     try:
         logger.info(f"Getting full Tidal playlist with tracks for: {playlist_id}")
@@ -21237,7 +21432,7 @@ def get_tidal_playlist_tracks(playlist_id):
         # `get_playlist` recognizes the virtual `tidal-favorites` ID and
         # dispatches to the userCollectionTracks endpoint internally, so
         # the rest of this handler treats it identically to a real playlist.
-        full_playlist = tidal_client.get_playlist(playlist_id)
+        full_playlist = client.get_playlist(playlist_id)
         if not full_playlist:
             return jsonify({"error": "Playlist not found or unable to access. This may be due to privacy settings or Tidal API restrictions."}), 404
             
@@ -25087,6 +25282,12 @@ def select_profile():
 def get_current_profile():
     """Get the currently selected profile from session"""
     try:
+        # Login mode: when on and the session isn't authenticated, tell the
+        # frontend to show the sign-in screen (this is checked before profile
+        # selection, since there's no profile until you log in).
+        if _require_login_enabled() and not session.get('login_authenticated', False):
+            return jsonify({'success': False, 'login_required': True}), 200
+
         pid = session.get('profile_id')
         if not pid:
             return jsonify({'success': False, 'error': 'No profile selected'}), 200
@@ -25110,6 +25311,7 @@ def get_current_profile():
             'success': True,
             'profile': profile,
             'launch_pin_required': bool(require_pin) and not pin_verified,
+            'login_mode': _require_login_enabled(),
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -25118,6 +25320,15 @@ def get_current_profile():
 def verify_launch_pin():
     """Verify PIN for launch lock screen"""
     try:
+        # Brute-force guard: only a flood of WRONG PINs from one IP trips this; a
+        # correct entry clears it instantly, so normal use is never affected.
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _launch_pin_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
         data = request.json or {}
         pin = data.get('pin', '')
         if not pin:
@@ -25126,12 +25337,134 @@ def verify_launch_pin():
         database = get_database()
         # Validate against admin profile (ID 1)
         if not database.verify_profile_pin(1, pin):
+            _launch_pin_limiter.record_failure(_ip, _now)
             return jsonify({'success': False, 'error': 'Invalid PIN'}), 401
 
+        _launch_pin_limiter.record_success(_ip)
         session['launch_pin_verified'] = True
         return jsonify({'success': True})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/login', methods=['POST'])
+def auth_login():
+    """Username/password login (opt-in login mode). Username = profile name.
+    Brute-force limited per IP; a profile with no password set can't log in."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+        if not username or not password:
+            return jsonify({'success': False, 'error': 'Username and password required'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        # Same generic error + a recorded failure whether the name or password is
+        # wrong — don't leak which names exist.
+        if not profile or not database.verify_profile_password(profile['id'], password):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Invalid username or password'}), 401
+
+        _login_limiter.record_success(_ip)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        # A fresh login also clears any stale launch-PIN flag.
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True, 'profile': {
+            'id': profile['id'], 'name': profile['name'], 'is_admin': profile['is_admin'],
+        }})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/logout', methods=['POST'])
+def auth_logout():
+    """Log out — clears the authenticated session."""
+    try:
+        session.pop('login_authenticated', None)
+        session.pop('profile_id', None)
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/recovery-question', methods=['GET'])
+def auth_recovery_question():
+    """Return the recovery security-question for a username (forgot-password flow).
+    Generic when the user/question is absent — don't confirm which names exist."""
+    try:
+        username = (request.args.get('username') or '').strip()
+        database = get_database()
+        profile = database.get_profile_by_name(username) if username else None
+        question = database.get_profile_recovery_question(profile['id']) if profile else None
+        if not question:
+            return jsonify({'success': False, 'error': 'No recovery question available'}), 404
+        return jsonify({'success': True, 'question': question})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/auth/recovery-reset', methods=['POST'])
+def auth_recovery_reset():
+    """Reset a login password by answering the recovery question. Brute-force
+    limited; a correct answer sets the new password and authenticates the session."""
+    try:
+        _ip = request.remote_addr or 'unknown'
+        _now = time.time()
+        _locked, _retry_after = _login_limiter.is_locked(_ip, _now)
+        if _locked:
+            return (jsonify({'success': False, 'error': 'Too many attempts — please wait and try again'}),
+                    429, {'Retry-After': str(_retry_after)})
+
+        data = request.json or {}
+        username = (data.get('username') or '').strip()
+        answer = data.get('answer') or ''
+        new_password = data.get('new_password') or ''
+        if not username or not answer or not new_password:
+            return jsonify({'success': False, 'error': 'Username, answer and new password are required'}), 400
+        if len(new_password) < 6:
+            return jsonify({'success': False, 'error': 'New password must be at least 6 characters'}), 400
+
+        database = get_database()
+        profile = database.get_profile_by_name(username)
+        if not profile or not database.verify_profile_recovery_answer(profile['id'], answer):
+            _login_limiter.record_failure(_ip, _now)
+            return jsonify({'success': False, 'error': 'Incorrect answer'}), 401
+
+        _login_limiter.record_success(_ip)
+        database.set_profile_password(profile['id'], new_password)
+        session['login_authenticated'] = True
+        session['profile_id'] = profile['id']
+        session.pop('launch_pin_verified', None)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-recovery', methods=['POST'])
+def set_profile_recovery_endpoint(profile_id):
+    """Set or clear a profile's recovery question + answer (admin, or self)."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        ok = database.set_profile_recovery(profile_id, data.get('question', ''), data.get('answer', ''))
+        return jsonify({'success': bool(ok), 'has_recovery': database.profile_has_recovery(profile_id)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/api/profiles/reset-pin-via-credential', methods=['POST'])
 def reset_pin_via_credential():
@@ -25209,6 +25542,24 @@ def set_profile_pin(profile_id):
 
         success = database.update_profile(profile_id, pin_hash=pin_hash)
         return jsonify({'success': success})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/<int:profile_id>/set-password', methods=['POST'])
+def set_profile_password_endpoint(profile_id):
+    """Set or clear a profile's LOGIN password (admin, or the profile itself).
+    Distinct from the quick-switch PIN."""
+    try:
+        database = get_database()
+        current_pid = get_current_profile_id()
+        current = database.get_profile(current_pid)
+        if not current or (not current['is_admin'] and current_pid != profile_id):
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 403
+        data = request.json or {}
+        password = data.get('password', '')
+        ok = database.set_profile_password(profile_id, password)
+        return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
@@ -25327,6 +25678,126 @@ def test_profile_listenbrainz():
 
 # --- Per-Profile Service Credentials API ---
 
+def _profile_spotify_connection(profile_id):
+    """(connected, account_name) for a profile's OWN connected Spotify — not the
+    global/admin fallback. A profile is connected only when its own token cache
+    exists and authenticates."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    if not os.path.exists(f"config/.spotify_cache_profile_{profile_id}"):
+        return (False, None)
+    try:
+        client = metadata_registry.get_spotify_client_for_profile(profile_id)
+        if client and client.is_spotify_authenticated():
+            info = client.get_user_info() or {}
+            return (True, info.get('display_name') or info.get('id'))
+    except Exception as e:
+        logger.debug("profile %s spotify connection check failed: %s", profile_id, e)
+    return (False, None)
+
+
+def _profile_tidal_connection(profile_id):
+    """(connected, account_name) for a profile's OWN Tidal. Connected = it has
+    stored tokens; validity is checked (and refreshed) on actual use, so this
+    stays a cheap no-network check for the modal."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    try:
+        toks = get_database().get_profile_tidal(profile_id) or {}
+        return (bool(toks.get('refresh_token') or toks.get('access_token')), None)
+    except Exception as e:
+        logger.debug("profile %s tidal connection check failed: %s", profile_id, e)
+        return (False, None)
+
+
+def _profile_listenbrainz_connection(profile_id):
+    """(connected, username) for a profile's OWN ListenBrainz token."""
+    if not profile_id or profile_id == 1:
+        return (False, None)
+    try:
+        s = get_database().get_profile_listenbrainz(profile_id) or {}
+        if s.get('token'):
+            return (True, s.get('username'))
+    except Exception as e:
+        logger.debug("profile %s listenbrainz connection check failed: %s", profile_id, e)
+    return (False, None)
+
+
+@app.route('/api/profiles/me/connections', methods=['GET'])
+def get_my_connections():
+    """Per-profile playlist-service connection status for the My Accounts modal.
+    Readable by any profile; reports only this profile's own connections."""
+    try:
+        pid = get_current_profile_id()
+        sp_connected, sp_account = _profile_spotify_connection(pid)
+        td_connected, td_account = _profile_tidal_connection(pid)
+        lb_connected, lb_account = _profile_listenbrainz_connection(pid)
+        return jsonify({
+            'success': True,
+            'is_admin': pid == 1,
+            'connections': {
+                'spotify': {'connected': sp_connected, 'account': sp_account},
+                'tidal': {'connected': td_connected, 'account': td_account},
+                'listenbrainz': {'connected': lb_connected, 'account': lb_account},
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _disconnect_profile_spotify(pid):
+    cache_path = f"config/.spotify_cache_profile_{pid}"
+    try:
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
+    except Exception as e:
+        logger.debug("could not remove profile spotify cache: %s", e)
+    try:
+        get_database().set_profile_spotify_tokens(pid, '', '')
+    except Exception as e:
+        logger.debug("could not clear profile spotify tokens: %s", e)
+    metadata_registry.clear_cached_profile_spotify_client(pid)
+
+
+def _disconnect_profile_tidal(pid):
+    try:
+        get_database().set_profile_tidal_tokens(pid, '', '')
+    except Exception as e:
+        logger.debug("could not clear profile tidal tokens: %s", e)
+    clear_profile_tidal_client(pid)
+
+
+def _disconnect_profile_listenbrainz(pid):
+    try:
+        get_database().clear_profile_listenbrainz(pid)
+    except Exception as e:
+        logger.debug("could not clear profile listenbrainz: %s", e)
+
+
+_PROFILE_DISCONNECTORS = {
+    'spotify': _disconnect_profile_spotify,
+    'tidal': _disconnect_profile_tidal,
+    'listenbrainz': _disconnect_profile_listenbrainz,
+}
+
+
+@app.route('/api/profiles/me/connections/<service>/disconnect', methods=['POST'])
+def disconnect_my_connection(service):
+    """Disconnect the current profile's OWN account for a service (clears its
+    per-profile tokens + cached client). The global/admin auth is untouched."""
+    try:
+        pid = get_current_profile_id()
+        fn = _PROFILE_DISCONNECTORS.get(service)
+        if not fn:
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
+        if pid == 1:
+            return jsonify({'success': False, 'error': 'The admin account is managed in Settings'}), 400
+        fn(pid)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/profiles/me/spotify', methods=['GET'])
 def get_profile_spotify_creds():
     """Get current profile's Spotify credentials (if set)"""
@@ -25420,6 +25891,304 @@ def save_profile_server_library():
         return jsonify({'success': False, 'error': 'Failed to save library selection'}), 500
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================================================================================
+# SERVICE CREDENTIAL SETS  (admin-created named "pills" per auth service; #profiles)
+# ----------------------------------------------------------------------------------
+# Admin manages the named credential sets; any profile only SELECTS among them
+# (see /api/credentials/active + /select below). Payloads (the actual secrets)
+# are NEVER returned to the browser — only id/service/label.
+# ==================================================================================
+
+@app.route('/api/credentials', methods=['GET'])
+@admin_only
+def list_service_credentials_endpoint():
+    """List all credential sets grouped by service (metadata only, no secrets)."""
+    try:
+        from core.credentials.store import SERVICE_CREDENTIAL_SCHEMA
+        rows = get_database().list_service_credentials()
+        grouped = {svc: [] for svc in SERVICE_CREDENTIAL_SCHEMA}
+        for r in rows:
+            grouped.setdefault(r['service'], []).append(
+                {'id': r['id'], 'label': r['label'], 'updated_at': r['updated_at']}
+            )
+        return jsonify({'success': True, 'services': grouped})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials', methods=['POST'])
+@admin_only
+def create_service_credential_endpoint():
+    """Create a named credential set for a service. Body: {service, label, payload}."""
+    try:
+        from core.credentials.store import is_supported_service, validate_credential_payload
+        data = request.json or {}
+        service = (data.get('service') or '').strip()
+        label = (data.get('label') or '').strip()
+        payload = data.get('payload') or {}
+
+        if not is_supported_service(service):
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
+        if not label:
+            return jsonify({'success': False, 'error': 'A name is required'}), 400
+        ok, missing = validate_credential_payload(service, payload)
+        if not ok:
+            return jsonify({'success': False, 'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+        cred_id = get_database().create_service_credential(service, label, payload)
+        if cred_id is None:
+            return jsonify({'success': False, 'error': f'A "{label}" set already exists for {service}'}), 409
+        return jsonify({'success': True, 'id': cred_id})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials/<int:credential_id>', methods=['PUT'])
+@admin_only
+def update_service_credential_endpoint(credential_id):
+    """Update a credential set's label and/or payload. Only provided fields change."""
+    try:
+        from core.credentials.store import validate_credential_payload
+        data = request.json or {}
+        label = data.get('label')
+        payload = data.get('payload')  # None = leave secrets untouched
+
+        existing = get_database().get_service_credential(credential_id)
+        if not existing:
+            return jsonify({'success': False, 'error': 'Credential set not found'}), 404
+
+        if label is not None and not str(label).strip():
+            return jsonify({'success': False, 'error': 'Name cannot be empty'}), 400
+        if payload is not None:
+            ok, missing = validate_credential_payload(existing['service'], payload)
+            if not ok:
+                return jsonify({'success': False, 'error': f'Missing required fields: {", ".join(missing)}'}), 400
+
+        updated = get_database().update_service_credential(
+            credential_id,
+            label=str(label).strip() if label is not None else None,
+            payload=payload,
+        )
+        if not updated:
+            return jsonify({'success': False, 'error': 'Nothing to update or name already in use'}), 400
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/credentials/<int:credential_id>', methods=['DELETE'])
+@admin_only
+def delete_service_credential_endpoint(credential_id):
+    """Delete a credential set. Any profile that had it selected falls back to
+    the global/admin default automatically (selection is cleared in the DB)."""
+    try:
+        ok = get_database().delete_service_credential(credential_id)
+        if not ok:
+            return jsonify({'success': False, 'error': 'Credential set not found'}), 404
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/me/services', methods=['GET'])
+def get_my_service_selections():
+    """For the current profile: the available credential sets per service (id +
+    label, never secrets) and which one this profile has selected. Drives the
+    quick-switch modal's pills. Any profile may read this — it exposes no
+    secrets, only the admin-created set names. Stale-safe: a selection whose set
+    was deleted reports as None (fall back to the global/admin default)."""
+    try:
+        from core.credentials.store import SERVICE_CREDENTIAL_SCHEMA
+        db = get_database()
+        profile_id = get_current_profile_id()
+        out = {}
+        for service in SERVICE_CREDENTIAL_SCHEMA:
+            options = db.list_service_credentials(service)
+            selected = db.get_profile_service_credential_id(profile_id, service)
+            if selected not in {o['id'] for o in options}:
+                selected = None
+            out[service] = {
+                'options': [{'id': o['id'], 'label': o['label']} for o in options],
+                'selected_id': selected,
+            }
+        return jsonify({'success': True, 'services': out})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/me/services/select', methods=['POST'])
+def select_my_service_credential():
+    """Set which admin-created credential set is active for the current profile
+    on a service. ``credential_id=null`` clears it (fall back to the global/admin
+    default). The caller can only pick an EXISTING set for that service — never
+    create one — so a non-admin can switch their account but not configure new
+    credentials. Not admin-gated by design: it only writes a per-profile pointer
+    and exposes no secrets."""
+    try:
+        from core.credentials.store import is_supported_service
+        data = request.json or {}
+        service = (data.get('service') or '').strip()
+        credential_id = data.get('credential_id')
+
+        if not is_supported_service(service):
+            return jsonify({'success': False, 'error': f'Unsupported service: {service}'}), 400
+
+        db = get_database()
+        if credential_id is not None:
+            cred = db.get_service_credential(credential_id)
+            if not cred or cred['service'] != service:
+                return jsonify({'success': False, 'error': 'No such credential set for this service'}), 400
+
+        ok = db.set_profile_service_credential(get_current_profile_id(), service, credential_id)
+        if ok:
+            return jsonify({'success': True})
+        return jsonify({'success': False, 'error': 'Failed to save selection'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ==================================================================================
+# QUICK-SWITCH: active metadata source / media server / download source
+# ----------------------------------------------------------------------------------
+# The read is open to any profile (so the sidebar modal renders). Setting is
+# admin-only and writes the GLOBAL config (same as the Settings page) — the
+# per-profile override for non-admins is a separate, later layer. `editable`
+# tells the UI whether to allow changes for the current profile.
+# ==================================================================================
+
+# Selectable metadata sources (mirrors the Settings <select>).
+_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+_QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
+# Single download sources (everything the mode accepts except 'hybrid').
+_QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
+
+
+def _qs_metadata_available(source):
+    try:
+        if source == 'spotify':
+            return bool(spotify_client and spotify_client.is_spotify_authenticated())
+        if source == 'discogs':
+            return bool(config_manager.get('discogs.token'))
+        return True
+    except Exception:
+        return True
+
+
+def _qs_server_available(server):
+    try:
+        if server == 'soulsync':
+            return True
+        if server == 'plex':
+            return bool(config_manager.get('plex.base_url') or config_manager.get('plex.token'))
+        return bool(config_manager.get(f'{server}.base_url'))
+    except Exception:
+        return True
+
+
+@app.route('/api/profiles/me/active-sources', methods=['GET'])
+def get_active_sources():
+    """Current active metadata source / media server / download source + the
+    available options, for the quick-switch modal. Readable by any profile;
+    reflects the global config (per-profile override is a later layer)."""
+    try:
+        mode = config_manager.get('download_source.mode', 'soulseek') or 'soulseek'
+        hybrid_order = config_manager.get('download_source.hybrid_order', []) or []
+        # "Spotify (no auth)" is a COMPOSITE the Settings page uses: it stores
+        # fallback_source='spotify' + metadata.spotify_free=true, NOT a literal
+        # 'spotify_free' fallback value. Mirror that mapping so the modal agrees
+        # with the Settings dropdown (settings.js _metaSel / save logic).
+        _fb = config_manager.get('metadata.fallback_source', 'deezer') or 'deezer'
+        _free = config_manager.get('metadata.spotify_free', False)
+        meta_active = 'spotify_free' if (_fb == 'spotify' and _free) else _fb
+        meta_effective = 'spotify_free' if meta_active == 'spotify_free' else _get_metadata_fallback_source()
+        return jsonify({
+            'success': True,
+            'editable': get_current_profile_id() == 1,  # admin writes the global default
+            'metadata': {
+                # `active` = the configured choice (what the user picked / edits).
+                # `effective` = what's actually used after auth/availability
+                # fallback (e.g. configured 'spotify' but not authenticated →
+                # the app falls back). Surfacing both stops the modal disagreeing
+                # with the sidebar/Settings status.
+                'active': meta_active,
+                'effective': meta_effective,
+                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
+            },
+            'server': {
+                'active': config_manager.get_active_media_server(),
+                'options': [{'id': s, 'available': _qs_server_available(s)} for s in _QS_MEDIA_SERVERS],
+            },
+            'download': {
+                'mode': mode,
+                'hybrid_order': hybrid_order,
+                'options': [{'id': s} for s in _QS_DOWNLOAD_SOURCES],
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/profiles/active-sources', methods=['POST'])
+@admin_only
+def set_active_sources():
+    """Set the GLOBAL active metadata source / media server / download mode +
+    hybrid order (whichever fields are present). Admin-only; reuses the same
+    setters + client reloads the Settings save performs so changes take effect
+    immediately."""
+    try:
+        data = request.json or {}
+        changed = []
+
+        if 'metadata_source' in data:
+            src = data['metadata_source']
+            if src not in _QS_METADATA_SOURCES:
+                return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
+            # Same composite the Settings save uses: 'spotify_free' is stored as
+            # fallback_source='spotify' + metadata.spotify_free=true.
+            if src == 'spotify_free':
+                config_manager.set('metadata.fallback_source', 'spotify')
+                config_manager.set('metadata.spotify_free', True)
+            else:
+                config_manager.set('metadata.fallback_source', src)
+                config_manager.set('metadata.spotify_free', False)
+            invalidate_metadata_status_caches()
+            changed.append('metadata')
+
+        if 'media_server' in data:
+            srv = data['media_server']
+            if srv not in _QS_MEDIA_SERVERS:
+                return jsonify({'success': False, 'error': 'Unknown media server'}), 400
+            config_manager.set_active_media_server(srv)
+            for s in ('plex', 'jellyfin', 'navidrome'):
+                c = media_server_engine.client(s)
+                if c:
+                    if s == 'plex':
+                        c.server = None
+                    else:
+                        c.reload_config()
+            changed.append('server')
+
+        if 'download_mode' in data:
+            mode = data['download_mode']
+            if mode not in (_QS_DOWNLOAD_SOURCES + ['hybrid']):
+                return jsonify({'success': False, 'error': 'Unknown download mode'}), 400
+            config_manager.set('download_source.mode', mode)
+            changed.append('download')
+
+        if 'hybrid_order' in data and isinstance(data['hybrid_order'], list):
+            clean = [s for s in data['hybrid_order'] if s in _QS_DOWNLOAD_SOURCES]
+            config_manager.set('download_source.hybrid_order', clean)
+            changed.append('download')
+
+        if 'download' in changed and download_orchestrator:
+            download_orchestrator.reload_settings()
+
+        return jsonify({'success': True, 'changed': sorted(set(changed))})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 # --- Watchlist API Endpoints ---
 

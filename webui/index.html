@@ -51,6 +51,40 @@
         </div>
     </div>
 
+    <!-- Login Screen (username/password mode) -->
+    <div id="login-overlay" class="launch-pin-overlay" style="display: none;">
+        <div class="launch-pin-container">
+            <!-- Sign-in view -->
+            <div id="login-entry">
+                <div class="launch-pin-icon">🔐</div>
+                <h2 class="launch-pin-title">Sign in to SoulSync</h2>
+                <p class="launch-pin-subtitle">Enter your account name and password</p>
+                <input type="text" id="login-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                <input type="password" id="login-password" class="launch-pin-input" placeholder="Password" autocomplete="current-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitLogin()">
+                <button id="login-submit" class="launch-pin-submit" onclick="submitLogin()">Sign in</button>
+                <p id="login-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showLoginRecovery()">Forgot password?</button>
+            </div>
+            <!-- Recovery view -->
+            <div id="login-recovery" style="display: none;">
+                <div class="launch-pin-icon">🔑</div>
+                <h2 class="launch-pin-title">Reset your password</h2>
+                <p class="launch-pin-subtitle">Answer your recovery question</p>
+                <input type="text" id="recovery-username" class="launch-pin-input" placeholder="Username" autocomplete="username" maxlength="40" style="margin-bottom: 8px; letter-spacing: normal;">
+                <button id="recovery-fetch-btn" class="launch-pin-submit" onclick="fetchRecoveryQuestion()">Continue</button>
+                <div id="recovery-answer-section" style="display: none;">
+                    <p id="recovery-question-text" class="launch-pin-subtitle" style="margin-top: 12px; font-weight: 600;"></p>
+                    <input type="text" id="recovery-answer" class="launch-pin-input" placeholder="Your answer" autocomplete="off" maxlength="120" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="recovery-new-password" class="launch-pin-input" placeholder="New password (min 6)" autocomplete="new-password" maxlength="200" style="margin-bottom: 8px; letter-spacing: normal;">
+                    <input type="password" id="recovery-new-password-confirm" class="launch-pin-input" placeholder="Confirm new password" autocomplete="new-password" maxlength="200" style="letter-spacing: normal;" onkeydown="if(event.key==='Enter') submitRecoveryReset()">
+                    <button class="launch-pin-submit" onclick="submitRecoveryReset()">Reset password</button>
+                </div>
+                <p id="recovery-error" class="launch-pin-error" style="display: none;"></p>
+                <button class="launch-pin-forgot" onclick="showLoginEntry()">← Back to sign in</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Profile Picker Overlay -->
     <div id="profile-picker-overlay" class="profile-picker-overlay" style="display: none;">
         <div class="profile-picker-container">
@@ -78,7 +112,7 @@
         <div id="profile-manage-panel" class="profile-manage-panel" style="display: none;">
             <div class="profile-manage-content">
                 <div class="profile-manage-header">
-                    <h3>Manage Profiles</h3>
+                    <h3>Manage Profiles<small>Create, edit & control access for everyone on this instance</small></h3>
                     <button id="profile-manage-close" class="profile-manage-close-btn">&times;</button>
                 </div>
                 <div id="profile-manage-list" class="profile-manage-list"></div>
@@ -187,8 +221,14 @@
                 <div id="profile-indicator" class="profile-indicator" style="display: none;" title="Switch profile">
                     <div id="profile-indicator-avatar" class="profile-indicator-avatar"></div>
                     <span id="profile-indicator-name" class="profile-indicator-name"></span>
+                    <button id="my-accounts-btn" class="personal-settings-trigger" onclick="event.stopPropagation(); openMyAccountsModal()" title="My Accounts">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                    </button>
                     <button id="personal-settings-btn" class="personal-settings-trigger" onclick="event.stopPropagation(); openPersonalSettings()" title="My Settings">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    </button>
+                    <button id="logout-btn" class="personal-settings-trigger" style="display:none" onclick="event.stopPropagation(); soulsyncLogout()" title="Sign out">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
                     </button>
                 </div>
             </div>
@@ -283,17 +323,17 @@
             </div>
 
             <!-- Status Section -->
-            <div class="status-section">
+            <div class="status-section status-section--clickable" onclick="openServiceSwitchModal('metadata')" title="Change active sources for your profile" role="button" tabindex="0">
                 <h4 class="status-title">Service Status</h4>
-                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false">
+                <div class="status-indicator" id="metadata-source-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('metadata')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="metadata-source-name">Metadata Source</span>
                 </div>
-                <div class="status-indicator" id="media-server-indicator" data-status-ready="false">
+                <div class="status-indicator" id="media-server-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('server')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="media-server-name">Media Server</span>
                 </div>
-                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false">
+                <div class="status-indicator" id="soulseek-indicator" data-status-ready="false" onclick="event.stopPropagation(); openServiceSwitchModal('download')">
                     <span class="status-dot disconnected"></span>
                     <span class="status-name" id="download-source-name">Download Source</span>
                 </div>
@@ -4293,7 +4333,7 @@
                                     </button>
                                     <button class="server-toggle-btn" id="jellyfin-toggle"
                                         onclick="toggleServer('jellyfin')">
-                                        <img src="https://jellyfin.org/images/logo.svg" alt="Jellyfin"
+                                        <img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png" alt="Jellyfin"
                                             class="server-logo">
                                     </button>
                                     <button class="server-toggle-btn" id="navidrome-toggle"
@@ -5954,40 +5994,122 @@
 
                             </div><!-- end Library Preferences body -->
 
-                            <!-- Security Settings -->
+                            <!-- Security & Access Settings -->
                             <div class="settings-group" data-stg="advanced">
-                                <h3>🔒 Security</h3>
+                                <h3>🔒 Security &amp; Access</h3>
+                                <div class="setting-help-text" style="margin-bottom: 18px;">
+                                    By default, anyone who can reach SoulSync on your network can use it. Protect access below with a simple shared <strong>PIN</strong>, or full <strong>user accounts</strong> with passwords — you only need one. The last group is just for exposing SoulSync over the internet.
+                                </div>
 
-                                <div class="form-group" id="security-pin-setup" style="display: none;">
-                                    <label>Set Admin PIN:</label>
-                                    <div class="setting-help-text" style="margin-bottom: 8px;">
-                                        You need to set a PIN before enabling the lock screen.
+                                <!-- ── Method A: PIN ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">🔑 Lock with a PIN <span class="security-subhead-note">simple · one shared PIN</span></h4>
+
+                                    <div class="form-group" id="security-pin-setup" style="display: none;">
+                                        <label>Step 1 — Set admin PIN:</label>
+                                        <div class="setting-help-text" style="margin-bottom: 8px;">
+                                            Set a PIN before you can turn on the lock screen.
+                                        </div>
+                                        <input type="password" id="security-new-pin" placeholder="Enter PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                        <input type="password" id="security-confirm-pin" placeholder="Confirm PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
+                                        <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">Save PIN</button>
+                                        <p id="security-pin-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
                                     </div>
-                                    <input type="password" id="security-new-pin" placeholder="Enter PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
-                                    <input type="password" id="security-confirm-pin" placeholder="Confirm PIN" maxlength="20" autocomplete="off" style="margin-bottom: 6px;">
-                                    <button class="auth-button" id="security-save-pin-btn" onclick="saveSecurityPin()">Save PIN</button>
-                                    <p id="security-pin-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
-                                </div>
 
-                                <div class="form-group">
-                                    <label class="toggle-label">
-                                        <input type="checkbox" id="security-require-pin" onchange="handleSecurityPinToggle(this)">
-                                        <span>Require PIN to access SoulSync</span>
-                                    </label>
-                                    <div class="setting-help-text">
-                                        When enabled, a lock screen appears on every page load. PIN is verified against the admin account. Closing the browser tab requires re-entry.
+                                    <div class="form-group">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-require-pin" onchange="handleSecurityPinToggle(this)">
+                                            <span>Require PIN to access SoulSync</span>
+                                        </label>
+                                        <div class="setting-help-text">
+                                            A lock screen appears on every page load, verified against the admin PIN. Closing the tab requires re-entry.
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group" id="security-change-pin-section" style="display: none;">
+                                        <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
                                     </div>
                                 </div>
 
-                                <div class="form-group" id="security-change-pin-section" style="display: none;">
-                                    <button class="auth-button" onclick="showChangeSecurityPin()">Change PIN</button>
+                                <!-- ── Method B: Login accounts ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">👤 User accounts (login) <span class="security-subhead-note">per-person · best for public access</span></h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px;">
+                                        Everyone signs in with their account name + password. Turning this on <strong>replaces</strong> the PIN and the profile picker. Set passwords for other people in <strong>Manage Profiles</strong>.
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Step 1 — Admin login password:</label>
+                                        <div class="security-saved-status" id="security-login-password-status" style="display:none;">✓ A login password is set</div>
+                                        <input type="password" id="security-login-password" placeholder="Enter password (min 6)" maxlength="200" autocomplete="new-password" style="margin: 6px 0;">
+                                        <input type="password" id="security-login-password-confirm" placeholder="Confirm password" maxlength="200" autocomplete="new-password" style="margin-bottom: 6px;">
+                                        <button class="auth-button" onclick="saveLoginPassword()">Save Password</button>
+                                        <p id="security-login-password-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>Step 2 <span style="opacity:0.6">(recommended)</span> — Password recovery question:</label>
+                                        <div class="setting-help-text" style="margin-bottom: 8px;">
+                                            So you can reset a forgotten password by answering it on the sign-in screen.
+                                        </div>
+                                        <div class="security-saved-status" id="security-recovery-status" style="display:none;"></div>
+                                        <select id="security-recovery-question" class="form-select" onchange="handleRecoveryQuestionChange()" style="margin-bottom: 6px;">
+                                            <option value="">— Select a question —</option>
+                                            <option>What was the name of your first pet?</option>
+                                            <option>What city were you born in?</option>
+                                            <option>What was your first concert?</option>
+                                            <option>What is your all-time favorite album?</option>
+                                            <option>What was the make of your first car?</option>
+                                            <option value="__custom__">Custom question…</option>
+                                        </select>
+                                        <input type="text" id="security-recovery-custom" placeholder="Type your own question" maxlength="120" style="display:none; margin-bottom: 6px;">
+                                        <input type="text" id="security-recovery-answer" placeholder="Your answer" maxlength="120" autocomplete="off" style="margin-bottom: 6px;">
+                                        <button class="auth-button" onclick="saveRecoveryQuestion()">Save Recovery Question</button>
+                                        <p id="security-recovery-msg" class="setting-help-text" style="margin-top: 6px; display: none;"></p>
+                                    </div>
+
+                                    <div class="form-group" id="security-login-toggle-wrap">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-require-login">
+                                            <span>Step 3 — Require login (username + password)</span>
+                                        </label>
+                                        <div class="setting-help-text" id="security-require-login-help">
+                                            Replaces the profile picker + PIN with a sign-in screen. Best for instances exposed to the internet.
+                                        </div>
+                                    </div>
                                 </div>
 
-                                <div class="form-group">
-                                    <label for="security-cors-origins">Allowed WebSocket Origins:</label>
-                                    <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
-                                    <div class="setting-help-text">
-                                        Origins (full URL, no trailing slash) allowed to open WebSocket connections to this instance — one per line, or comma-separated. Leave empty for same-origin only (the secure default; works for direct access and most reverse-proxy setups). Add your public domain here if you reach SoulSync via a reverse proxy or custom domain and the WebSocket fails to connect. Use <code>*</code> on its own line to allow any origin (insecure — only do this if you understand why you need it).
+                                <!-- ── Reverse proxy & remote access ── -->
+                                <div class="security-subgroup">
+                                    <h4 class="security-subhead">🌐 Reverse proxy &amp; remote access</h4>
+                                    <div class="setting-help-text" style="margin-bottom: 12px;">
+                                        Only needed if you expose SoulSync to the internet behind nginx / Caddy / Traefik. See <code>Support/REVERSE-PROXY.md</code>.
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="toggle-label">
+                                            <input type="checkbox" id="security-trust-proxy">
+                                            <span>Behind a reverse proxy</span>
+                                        </label>
+                                        <div class="setting-help-text">
+                                            Trusts the proxy's <code>X-Forwarded-*</code> headers, marks the session cookie HTTPS-only, and adds security headers. <strong>Leave OFF for direct / LAN access over http://</strong> — it would otherwise break plain-HTTP login. <strong>Takes effect after a restart.</strong>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group security-nested">
+                                        <label for="security-auth-proxy-header">↳ Auth proxy user header <span style="opacity:0.6">(optional)</span>:</label>
+                                        <input type="text" id="security-auth-proxy-header" placeholder="Remote-User" autocomplete="off" style="width: 100%; font-family: monospace; font-size: 12px;">
+                                        <div class="setting-help-text">
+                                            If an auth proxy (Authelia / Authentik / oauth2-proxy) logs users in in front of SoulSync, enter the header it sets and SoulSync trusts it. <strong>Only set this behind a proxy that strips any client-supplied copy of the header.</strong> Blank = off.
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="security-cors-origins">Allowed WebSocket Origins:</label>
+                                        <textarea id="security-cors-origins" rows="3" placeholder="https://soulsync.example.com&#10;http://192.168.1.5:8888" style="width: 100%; font-family: monospace; font-size: 12px;"></textarea>
+                                        <div class="setting-help-text">
+                                            Origins (full URL, no trailing slash) allowed to open WebSocket connections — one per line or comma-separated. Empty = same-origin only (the secure default; fine for direct access and most reverse-proxy setups). Add your public domain if live updates fail behind a proxy. <code>*</code> on its own line allows any origin (insecure).
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -8190,6 +8312,8 @@
     <script src="{{ url_for('static', filename='origin-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='watchlist-history.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='blocklist.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='service-switch.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='my-accounts.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-services.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-listenbrainz.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='sync-lastfm.js', v=static_v) }}"></script>

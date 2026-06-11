@@ -77,6 +77,12 @@ def test_locked_allows_unlock_flow():
     assert L('/api/profiles/logout', 'POST') is False
 
 
+def test_locked_allows_setup_status():
+    # #842: the first-run check runs before the PIN screen. Blocking it made the
+    # frontend think setup was incomplete and relaunch the wizard every visit.
+    assert L('/api/setup/status', 'GET') is False
+
+
 def test_locked_allows_keyauthed_public_api():
     # The public REST API carries its own @require_api_key, so a launch-locked
     # UI must not break a legitimate headless key holder.
