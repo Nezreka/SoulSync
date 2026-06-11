@@ -955,3 +955,39 @@ def test_snapshot_exception_returns_500():
             raise RuntimeError('db down')
     body, code = save_bubble_snapshot(lambda: {'bubbles': [1]}, **_snap_kwargs(_BoomDB()))
     assert code == 500 and body == {'success': False, 'error': 'db down'}
+
+
+def test_update_match_no_state_but_originals_saves_cache():
+    """#843: the in-memory discovery state can be gone (server restart, or an
+    imported playlist not discovered this run) while the card is still shown from
+    persisted data. A manual fix must still save the match to the discovery cache
+    from the client-provided originals instead of 404ing."""
+    from core.discovery.endpoints import update_discovery_match
+    db = _FakeCacheDB()
+    gj, kw, _ = _update_kwargs(cache_db=db, json_data={
+        'identifier': 'gone-from-memory', 'track_index': 0,
+        'original_name': 'Acid Dream', 'original_artist': 'Cherrymoon Traxx',
+        'spotify_track': {
+            'id': 'sp1', 'name': 'Acid Dream (The Prophet remix)',
+            'artists': ['Cherry Moon Trax'], 'album': 'X', 'duration_ms': 1000,
+        },
+    })
+    body, code = update_discovery_match({}, gj, **kw)  # empty in-memory states
+
+    assert code == 200 and body['success'] is True
+    assert body['result'] is None  # nothing to update in memory
+    # the durable cache match WAS written, keyed by the original track
+    assert len(db.saved) == 1
+    saved = db.saved[0]
+    assert saved[0] == 'acid dream'                 # cache_key from get_discovery_cache_key
+    assert saved[5] == 'Acid Dream' and saved[6] == 'Cherrymoon Traxx'  # original name/artist
+
+
+def test_update_match_no_state_and_no_originals_still_404():
+    """Without an in-memory state AND without originals to key the cache, there's
+    genuinely nothing to do — keep the 404 (the existing safety)."""
+    from core.discovery.endpoints import update_discovery_match
+    gj, kw, _ = _update_kwargs(json_data={
+        'identifier': 'gone', 'track_index': 0, 'spotify_track': {'id': 'x'}})
+    body, code = update_discovery_match({}, gj, **kw)
+    assert code == 404 and body == {'error': 'Discovery state not found'}

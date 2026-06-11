@@ -410,6 +410,11 @@ async function selectDiscoveryFixTrack(track) {
         const requestBody = {
             identifier: backendIdentifier,
             track_index: trackIndex,
+            // #843: send the original (source) track so the backend can still save
+            // the match to the discovery cache when its in-memory discovery state
+            // is gone (server restart / imported playlist not discovered this run).
+            original_name: currentDiscoveryFix.sourceTrack || '',
+            original_artist: currentDiscoveryFix.sourceArtist || '',
             spotify_track: {
                 id: track.id,
                 name: track.name,
