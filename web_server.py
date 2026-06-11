@@ -421,10 +421,21 @@ def _enforce_launch_pin():
     if not require_pin:
         return
     from core.security.launch_lock import request_is_locked, is_html_navigation
+    # An auth proxy (Authelia/Authentik/oauth2-proxy) that already authenticated the
+    # user counts as verified — opt-in via security.auth_proxy_header, OFF (empty)
+    # by default so a direct install is unaffected.
+    from core.security.auth_proxy import trusted_proxy_user
+    try:
+        _proxy_header = config_manager.get('security.auth_proxy_header', '') or ''
+    except Exception:
+        _proxy_header = ''
+    _verified = bool(session.get('launch_pin_verified', False)) or bool(
+        trusted_proxy_user(request.headers.get, _proxy_header)
+    )
     if request_is_locked(
         request.path, request.method,
         require_pin=require_pin,
-        pin_verified=bool(session.get('launch_pin_verified', False)),
+        pin_verified=_verified,
     ):
         # A browser navigating to a sub-page (deep link / refresh) should land
         # on the lock screen, not raw JSON — bounce it to the root, which serves
