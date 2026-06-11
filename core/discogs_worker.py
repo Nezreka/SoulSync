@@ -17,7 +17,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
-from core.discogs_client import DiscogsClient
+from core.discogs_client import DiscogsClient, _discogs_album_kind, _tag_discogs_album_id
 from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
 
 logger = get_logger("discogs_worker")
@@ -436,7 +436,9 @@ class DiscogsWorker:
             conn = self.db._get_connection()
             cursor = conn.cursor()
 
-            discogs_id = str(data.get('id', ''))
+            # Tag the ID with its Discogs type so later re-fetches hit the right
+            # endpoint (master vs release share one numeric space).
+            discogs_id = _tag_discogs_album_id(data.get('id', ''), _discogs_album_kind(data))
             genres = json.dumps(data.get('genres', []))
             styles = json.dumps(data.get('styles', []))
             labels = data.get('labels', [])
