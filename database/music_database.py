@@ -460,6 +460,7 @@ class MusicDatabase:
             self._add_profile_support_v4(cursor)
             self._add_profile_settings(cursor)
             self._add_profile_listenbrainz_support(cursor)
+            self._add_profile_password_support(cursor)
             self._add_profile_service_credentials(cursor)
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
@@ -5374,6 +5375,85 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error verifying PIN for profile {profile_id}: {e}")
             return False
+
+    # ── Per-profile LOGIN password (opt-in username/password mode) ────────────
+    # Separate from the quick-switch PIN on purpose: the PIN is a low-stakes
+    # convenience on a trusted LAN; the password authenticates an account for
+    # public exposure. Conflating them would make logins as weak as a 4-digit PIN.
+
+    def set_profile_password(self, profile_id: int, password: str) -> bool:
+        """Set (or clear, when password is falsy) a profile's login password."""
+        try:
+            from werkzeug.security import generate_password_hash
+            pwd_hash = generate_password_hash(password, method='pbkdf2:sha256') if password else None
+            with self._get_connection() as conn:
+                conn.execute("UPDATE profiles SET password_hash = ? WHERE id = ?", (pwd_hash, profile_id))
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Error setting password for profile {profile_id}: {e}")
+            return False
+
+    def verify_profile_password(self, profile_id: int, password: str) -> bool:
+        """Verify a profile's login password. Unlike the PIN, a profile with NO
+        password set is NOT loginable (returns False) — you can't authenticate to
+        an account that has no credential."""
+        try:
+            from werkzeug.security import check_password_hash
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT password_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                if not row or not row['password_hash']:
+                    return False  # no password set → cannot log in
+                return check_password_hash(row['password_hash'], password)
+        except Exception as e:
+            logger.error(f"Error verifying password for profile {profile_id}: {e}")
+            return False
+
+    def profile_has_password(self, profile_id: int) -> bool:
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT password_hash FROM profiles WHERE id = ?", (profile_id,))
+                row = cursor.fetchone()
+                return bool(row and row['password_hash'])
+        except Exception as e:
+            logger.error(f"Error checking password for profile {profile_id}: {e}")
+            return False
+
+    def get_profile_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Look up a profile by name (the login username), case-insensitive."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, name, is_admin FROM profiles WHERE LOWER(name) = LOWER(?)",
+                    (name or '',))
+                row = cursor.fetchone()
+                if not row:
+                    return None
+                return {'id': row['id'], 'name': row['name'], 'is_admin': bool(row['is_admin'])}
+        except Exception as e:
+            logger.error(f"Error looking up profile by name '{name}': {e}")
+            return None
+
+    def _add_profile_password_support(self, cursor):
+        """Add a per-profile login password column (separate from pin_hash)."""
+        try:
+            cursor.execute("SELECT value FROM metadata WHERE key = 'profiles_password_v1' LIMIT 1")
+            if cursor.fetchone():
+                return  # Already migrated
+            logger.info("Applying per-profile login-password migration...")
+            try:
+                cursor.execute("ALTER TABLE profiles ADD COLUMN password_hash TEXT DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES ('profiles_password_v1', '1')")
+            logger.info("Per-profile login-password migration completed")
+        except Exception as e:
+            logger.error(f"Error in login-password migration: {e}")
 
     def close(self):
         """Close database connection (no-op since we create connections per operation)"""
