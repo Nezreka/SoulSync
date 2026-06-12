@@ -791,11 +791,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             # Gated + non-fatal; runs once after analysis, not in the per-track loop.
             if effective_playlist_folder_mode:
                 try:
-                    from core.playlists.materialize_service import materialize_playlist_from_batch
+                    from core.playlists.materialize_service import reconcile_batch_playlists
                     _batch = download_batches.get(batch_id)
                     if _batch is not None:
-                        _mat = materialize_playlist_from_batch(_batch, download_tasks, deps.config_manager)
-                        if _mat:
+                        for _pl_name, _mat in reconcile_batch_playlists(_batch, download_tasks, deps.config_manager):
                             logger.info(
                                 f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}' (all owned): "
                                 f"{_mat.linked} linked, {_mat.copied} copied, {_mat.removed_stale} stale removed"

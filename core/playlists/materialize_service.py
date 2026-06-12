@@ -74,6 +74,58 @@ def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_ma
     return rebuild_playlist_folder(root, name, real_paths, mode)
 
 
+def reconcile_batch_playlists(batch: dict, download_tasks: dict, config_manager):
+    """One post-batch step: drop the batch's newly-resolved tracks into the right
+    ``Playlists/<name>/`` folders. Path-independent — covers an organize-by-playlist
+    download AND a late wishlist arrival — using the per-track playlist provenance
+    each download already carries, plus the file paths the batch already captured
+    (so it needs no DB re-match and no waiting on the server scan/sync).
+
+      - The batch's OWN organize playlist is fully rebuilt from the batch payload
+        (owned + downloaded), pruning tracks no longer present.
+      - A track that completed for a DIFFERENT playlist (e.g. a wishlist
+        fulfillment) is ADDED to that playlist's folder — no prune, since this
+        batch isn't that playlist's full membership (removals are handled by a
+        full rebuild on the next sync / the manual button).
+
+    Returns a list of ``(playlist_name, RebuildSummary)``. Callers wrap non-fatally."""
+    from core.library.path_resolver import resolve_library_file_path
+
+    results = []
+    root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
+    mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
+    batch_name = batch.get("playlist_name") if batch.get("playlist_folder_mode") else None
+
+    # 1. The batch's own organize playlist → full materialize (prunes removed).
+    if batch_name:
+        summary = materialize_playlist_from_batch(batch, download_tasks, config_manager)
+        if summary:
+            results.append((batch_name, summary))
+
+    # 2. Tracks that completed for OTHER playlists (e.g. wishlist fulfilling a
+    #    track that belongs to an organize playlist) → add-only into that folder.
+    extra: dict = {}
+    for tid in (batch.get("queue") or []):
+        task = (download_tasks or {}).get(tid) or {}
+        if task.get("status") != "completed" or not task.get("final_file_path"):
+            continue
+        pname = (task.get("track_info") or {}).get("_playlist_name")
+        if pname and pname != batch_name:
+            extra.setdefault(pname, []).append(task["final_file_path"])
+
+    for name, stored in extra.items():
+        real, seen = [], set()
+        for p in stored:
+            r = resolve_library_file_path(str(p), config_manager=config_manager)
+            if r and r not in seen:
+                seen.add(r)
+                real.append(r)
+        if real:
+            results.append((name, rebuild_playlist_folder(root, name, real, mode, prune_stale=False)))
+
+    return results
+
+
 def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
     """Rebuild every "organize by playlist" folder from CURRENT library ownership —
     for the manual "Rebuild" button. Unlike the post-download path (which uses the
@@ -115,5 +167,6 @@ def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int =
 __all__ = [
     "collect_batch_real_paths",
     "materialize_playlist_from_batch",
+    "reconcile_batch_playlists",
     "rebuild_organized_playlists_from_db",
 ]

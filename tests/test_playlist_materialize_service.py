@@ -11,6 +11,7 @@ from core.playlists.materialize_service import (
     collect_batch_real_paths,
     materialize_playlist_from_batch,
     rebuild_organized_playlists_from_db,
+    reconcile_batch_playlists,
 )
 
 
@@ -131,6 +132,62 @@ def test_materialize_from_batch_owned_plus_downloaded(tmp_path: Path):
 def test_materialize_skipped_when_not_organize(tmp_path: Path):
     batch = {"playlist_folder_mode": False, "playlist_name": "X", "analysis_results": [], "queue": []}
     assert materialize_playlist_from_batch(batch, {}, _Cfg(str(tmp_path / "Playlists"))) is None
+    assert not (tmp_path / "Playlists").exists()
+
+
+def test_reconcile_organize_batch_full_rebuild(tmp_path: Path):
+    """An organize-by-playlist batch → its own folder is fully (re)built from the
+    batch payload."""
+    owned, fresh = _mk(tmp_path, "Owned.mp3"), _mk(tmp_path, "Fresh.mp3")
+    batch = {
+        "playlist_folder_mode": True,
+        "playlist_name": "Mix",
+        "analysis_results": [{"found": True, "matched_file_path": owned[0]}],
+        "queue": ["t1"],
+    }
+    tasks = {"t1": {"status": "completed", "final_file_path": fresh[0],
+                    "track_info": {"_playlist_name": "Mix"}}}   # same playlist as batch
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+    results = reconcile_batch_playlists(batch, tasks, cfg)
+    assert len(results) == 1                                     # only Mix (no double-add)
+    name, s = results[0]
+    assert name == "Mix" and s.linked == 2
+    pdir = Path(s.playlist_dir)
+    assert (pdir / "Owned.mp3").exists() and (pdir / "Fresh.mp3").exists()
+
+
+def test_reconcile_wishlist_adds_to_other_playlist_without_pruning(tmp_path: Path):
+    """The wishlist gap: a wishlist batch (not organize) downloads a track that
+    belongs to an organize playlist → it's ADDED to that playlist's folder, and
+    the folder's existing entries are NOT pruned."""
+    # Pre-seed Smack That with an existing symlink (a track from a prior batch).
+    existing = _mk(tmp_path, "Existing.mp3")[0]
+    from core.playlists.materialize import rebuild_playlist_folder
+    rebuild_playlist_folder(str(tmp_path / "Playlists"), "Smack That", [existing], "symlink")
+
+    # A WISHLIST batch (playlist_folder_mode False) completes a track tagged for
+    # the "Smack That" organize playlist.
+    late = _mk(tmp_path, "Late.mp3")[0]
+    batch = {"playlist_folder_mode": False, "playlist_name": "wishlist",
+             "analysis_results": [], "queue": ["w1"]}
+    tasks = {"w1": {"status": "completed", "final_file_path": late,
+                    "track_info": {"_playlist_name": "Smack That"}}}
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+
+    results = reconcile_batch_playlists(batch, tasks, cfg)
+    assert len(results) == 1 and results[0][0] == "Smack That"
+    pdir = tmp_path / "Playlists" / "Smack That"
+    assert (pdir / "Late.mp3").exists()        # the wishlist track was ADDED
+    assert (pdir / "Existing.mp3").exists()    # and the prior entry was NOT pruned
+
+
+def test_reconcile_noop_for_plain_batch(tmp_path: Path):
+    """A normal (non-organize, no provenance) batch → nothing happens."""
+    f = _mk(tmp_path, "X.mp3")[0]
+    batch = {"playlist_folder_mode": False, "playlist_name": "album",
+             "analysis_results": [], "queue": ["a1"]}
+    tasks = {"a1": {"status": "completed", "final_file_path": f, "track_info": {}}}
+    assert reconcile_batch_playlists(batch, tasks, _Cfg(str(tmp_path / "Playlists"))) == []
     assert not (tmp_path / "Playlists").exists()
 
 
