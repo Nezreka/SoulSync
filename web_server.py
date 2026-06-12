@@ -26729,7 +26729,7 @@ def export_watchlist():
     as json / csv / txt. Returns the content for the export modal to preview +
     download (X-Export-Count / X-Export-Ext headers carry the metadata)."""
     try:
-        from core.exports.watchlist_export import build_watchlist_export, export_mime_and_ext
+        from core.exports.artist_export import build_artist_export, export_mime_and_ext
         fmt = (request.args.get('format', 'json') or 'json').lower()
         include_links = request.args.get('links', '') in ('1', 'true', 'yes')
         database = get_database()
@@ -26742,12 +26742,78 @@ def export_watchlist():
             'musicbrainz_artist_id': getattr(a, 'musicbrainz_artist_id', None),
             'amazon_artist_id': getattr(a, 'amazon_artist_id', None),
         } for a in database.get_watchlist_artists(profile_id=get_current_profile_id())]
-        content = build_watchlist_export(artists, fmt=fmt, include_links=include_links)
+        content = build_artist_export(artists, fmt=fmt, include_links=include_links)
         mime, ext = export_mime_and_ext(fmt)
         return Response(content, mimetype=mime,
                         headers={'X-Export-Count': str(len(artists)), 'X-Export-Ext': ext})
     except Exception as e:
         logger.error(f"Watchlist export failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/artists/export', methods=['GET'])
+def export_library_artists():
+    """Export the WHOLE library artist roster (name + every source id/url we have,
+    optional external links, optional owned album/track counts) as json/csv/txt."""
+    try:
+        from core.exports.artist_export import build_artist_export, export_mime_and_ext
+        fmt = (request.args.get('format', 'json') or 'json').lower()
+        include_links = request.args.get('links', '') in ('1', 'true', 'yes')
+        include_contents = request.args.get('contents', '') in ('1', 'true', 'yes')
+        database = get_database()
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, name, spotify_artist_id, musicbrainz_id, deezer_id,
+                       discogs_id, itunes_artist_id, tidal_id, qobuz_id, amazon_id,
+                       lastfm_url, genius_url, soul_id
+                FROM artists ORDER BY name COLLATE NOCASE
+            """)
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r, strict=False)) for r in cur.fetchall()]
+
+            counts = {}
+            if include_contents:
+                for table, key in (('albums', 'album_count'), ('tracks', 'track_count')):
+                    try:
+                        for aid, n in cur.execute(
+                                f"SELECT artist_id, COUNT(*) FROM {table} GROUP BY artist_id"):
+                            counts.setdefault(str(aid), {})[key] = n
+                    except Exception:  # noqa: S110 — counts are best-effort
+                        pass
+        finally:
+            conn.close()
+
+        # Normalize onto the canonical *_artist_id keys the exporter expects.
+        artists = []
+        for r in rows:
+            c = counts.get(str(r['id']), {})
+            artists.append({
+                'name': r['name'],
+                'spotify_artist_id': r['spotify_artist_id'],
+                'musicbrainz_artist_id': r['musicbrainz_id'],
+                'deezer_artist_id': r['deezer_id'],
+                'discogs_artist_id': r['discogs_id'],
+                'itunes_artist_id': r['itunes_artist_id'],
+                'tidal_artist_id': r['tidal_id'],
+                'qobuz_artist_id': r['qobuz_id'],
+                'amazon_artist_id': r['amazon_id'],
+                'lastfm_url': r['lastfm_url'],
+                'genius_url': r['genius_url'],
+                'soul_id': r['soul_id'],
+                'album_count': c.get('album_count'),
+                'track_count': c.get('track_count'),
+            })
+        extra = ['lastfm_url', 'genius_url', 'soul_id']
+        if include_contents:
+            extra += ['album_count', 'track_count']
+        content = build_artist_export(artists, fmt=fmt, include_links=include_links, extra_fields=extra)
+        mime, ext = export_mime_and_ext(fmt)
+        return Response(content, mimetype=mime,
+                        headers={'X-Export-Count': str(len(artists)), 'X-Export-Ext': ext})
+    except Exception as e:
+        logger.error(f"Library artist export failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

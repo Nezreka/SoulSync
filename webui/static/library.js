@@ -9017,7 +9017,14 @@ function _arecEscAttr(s) {
 // optional external discography links. Reuses the DB-record modal aesthetic +
 // helpers (_jsonSyntaxHighlight / _arecCopy / _arecEsc). #export-request
 // ════════════════════════════════════════════════════════════════════════════
-async function openWatchlistExportModal() {
+function openWatchlistExportModal() { return openArtistExportModal('watchlist'); }
+
+async function openArtistExportModal(scope) {
+    scope = scope || 'watchlist';
+    const isLib = scope === 'library';
+    const endpoint = isLib ? '/api/library/artists/export' : '/api/watchlist/export';
+    const fileBase = isLib ? 'library_artists' : 'watchlist';
+
     const existing = document.getElementById('wl-export-overlay');
     if (existing) existing.remove();
 
@@ -9025,11 +9032,13 @@ async function openWatchlistExportModal() {
     overlay.id = 'wl-export-overlay';
     overlay.className = 'arec-overlay';
     overlay.innerHTML =
-        '<div class="arec-card" role="dialog" aria-label="Export watchlist">' +
+        '<div class="arec-card" role="dialog" aria-label="Export artists">' +
             '<div class="arec-header">' +
                 '<div class="arec-title-wrap">' +
-                    '<div class="arec-title"><span class="arec-dot"></span>Export Watchlist</div>' +
-                    '<div class="arec-sub">your watchlist artists — name, source IDs, optional links</div>' +
+                    '<div class="arec-title"><span class="arec-dot"></span>' + (isLib ? 'Export Library' : 'Export Watchlist') + '</div>' +
+                    '<div class="arec-sub">' + (isLib
+                        ? 'every library artist — name, source IDs, optional links + owned counts'
+                        : 'your watchlist artists — name, source IDs, optional links') + '</div>' +
                 '</div>' +
                 '<button class="arec-close" id="wlx-close" title="Close (Esc)">&times;</button>' +
             '</div>' +
@@ -9040,6 +9049,7 @@ async function openWatchlistExportModal() {
                     '<button class="arec-tab" data-fmt="txt">Text</button>' +
                 '</div>' +
                 '<label class="wlx-opt"><input type="checkbox" id="wlx-links"> external links</label>' +
+                (isLib ? '<label class="wlx-opt"><input type="checkbox" id="wlx-contents"> library counts</label>' : '') +
                 '<div class="arec-actions">' +
                     '<button class="arec-btn" id="wlx-copy">Copy</button>' +
                     '<button class="arec-btn" id="wlx-download">Download</button>' +
@@ -9051,7 +9061,7 @@ async function openWatchlistExportModal() {
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('visible'));
 
-    let fmt = 'json', links = false, content = '';
+    let fmt = 'json', links = false, contents = false, content = '';
 
     const close = () => {
         overlay.classList.remove('visible');
@@ -9067,7 +9077,8 @@ async function openWatchlistExportModal() {
         const body = document.getElementById('wlx-body');
         body.innerHTML = '<div class="arec-loading">Building export…</div>';
         try {
-            const res = await fetch('/api/watchlist/export?format=' + fmt + '&links=' + (links ? '1' : '0'));
+            const res = await fetch(endpoint + '?format=' + fmt + '&links=' + (links ? '1' : '0')
+                + (isLib && contents ? '&contents=1' : ''));
             content = await res.text();
             const count = res.headers.get('X-Export-Count') || '?';
             document.getElementById('wlx-footer').innerHTML =
@@ -9092,6 +9103,8 @@ async function openWatchlistExportModal() {
         };
     });
     document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
+    const _contentsEl = document.getElementById('wlx-contents');
+    if (_contentsEl) _contentsEl.addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
     document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
     document.getElementById('wlx-download').onclick = () => {
         const ext = fmt;
@@ -9099,10 +9112,10 @@ async function openWatchlistExportModal() {
         const blob = new Blob([content || ''], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = 'watchlist_export.' + ext;
+        a.href = url; a.download = fileBase + '_export.' + ext;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        if (typeof showToast === 'function') showToast('Saved watchlist_export.' + ext, 'success');
+        if (typeof showToast === 'function') showToast('Saved ' + fileBase + '_export.' + ext, 'success');
     };
 
     refresh();
