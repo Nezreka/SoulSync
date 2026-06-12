@@ -695,6 +695,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     if task_id in download_tasks:
                         download_tasks[task_id]['stream_processed'] = True
                         download_tasks[task_id]['status'] = 'completed'
+                        download_tasks[task_id]['final_file_path'] = context.get('_final_processed_path')
                         logger.info(f"[Playlist Folder Mode] Marked task {task_id} as completed")
                 _notify_download_completed(batch_id, task_id, success=True)
             return
@@ -1026,6 +1027,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 if task_id in download_tasks:
                     download_tasks[task_id]['stream_processed'] = True
                     download_tasks[task_id]['status'] = 'completed'
+                    # Additive: record where the imported file landed so downstream
+                    # (playlist materialization) knows the real path of a freshly
+                    # downloaded track without re-resolving it.
+                    download_tasks[task_id]['final_file_path'] = context.get('_final_processed_path')
                     logger.info(f"[Post-Process] Marked task {task_id} as completed")
             _notify_download_completed(batch_id, task_id, success=True)
 
