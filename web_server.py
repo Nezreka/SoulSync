@@ -33682,6 +33682,15 @@ def mirror_playlist_endpoint():
         if playlist_id is None:
             return jsonify({"error": "Failed to mirror playlist"}), 500
 
+        # Membership just changed — if organize-by-playlist, rebuild its folder
+        # (with prune) so a removed track's symlink is cleaned up now. Gated +
+        # non-fatal, so it can never break the mirror response.
+        try:
+            from core.playlists.materialize_service import rebuild_mirrored_playlist_if_organized
+            rebuild_mirrored_playlist_if_organized(database, config_manager, playlist_id, profile_id=profile_id)
+        except Exception as _mat_err:
+            logger.debug("[Playlist Folder] mirror-time cleanup skipped: %s", _mat_err)
+
         try:
             if automation_engine:
                 automation_engine.emit('mirrored_playlist_created', {
