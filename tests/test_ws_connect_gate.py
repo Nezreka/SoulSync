@@ -82,3 +82,26 @@ def test_socket_allowed_when_pin_verified(monkeypatch):
         s['launch_pin_verified'] = True
     sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
     assert sio.is_connected() is True
+
+
+# ── login mode (the "Sign in to SoulSync" path — #852 report was this one) ──
+def _login_on(monkeypatch):
+    real = web_server.config_manager.get
+    monkeypatch.setattr(web_server.config_manager, 'get',
+                        lambda k, d=None: True if k == 'security.require_login' else real(k, d))
+
+
+def test_socket_rejected_when_login_required_and_unauthenticated(monkeypatch):
+    _login_on(monkeypatch)
+    flask_client = web_server.app.test_client()          # no login_authenticated
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is False                   # login overlay can't be bypassed via WS
+
+
+def test_socket_allowed_when_login_authenticated(monkeypatch):
+    _login_on(monkeypatch)
+    flask_client = web_server.app.test_client()
+    with flask_client.session_transaction() as s:
+        s['login_authenticated'] = True
+    sio = web_server.socketio.test_client(web_server.app, flask_test_client=flask_client)
+    assert sio.is_connected() is True
