@@ -4550,6 +4550,32 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Playlists Folder:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="playlists-materialize-path" placeholder="./Playlists" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('playlists-materialize', this)">Unlock</button>
+                                    </div>
+                                    <div class="setting-help-text" style="margin-top: 6px;">
+                                        Where <strong>Organize by playlist</strong> builds playlist folders — as shortcuts into your library, so songs are never stored twice. Keep this <strong>outside</strong> your music library folder so your media server doesn't scan the same tracks twice.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlist Folder Style:</label>
+                                    <select id="playlists-materialize-mode">
+                                        <option value="symlink">Symlinks — no extra disk, point to your library</option>
+                                        <option value="copy">Copies — real duplicates (USB sticks / players that can't follow links)</option>
+                                    </select>
+                                    <div class="setting-help-text" style="margin-top: 6px;">
+                                        Symlinks use almost no space. Copies are self-contained. Symlinks fall back to copies automatically where the filesystem can't link (Windows without privileges, some network shares, FAT/exFAT drives).
+                                    </div>
+                                    <button class="test-button" id="playlists-rebuild-btn" onclick="rebuildPlaylistFolders()" style="margin-top: 10px;">
+                                        Rebuild playlist folders now
+                                    </button>
+                                    <div class="setting-help-text" id="playlists-rebuild-status" style="margin-top: 6px;"></div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>M3U Entry Base Path:</label>
                                     <div class="path-input-group">
                                         <input type="text" id="m3u-entry-base-path" placeholder="e.g. /mnt/music (leave empty for relative paths)" readonly>

@@ -3135,7 +3135,7 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
@@ -3817,6 +3817,30 @@ def get_mirrored_playlists_list():
         })
     except Exception as e:
         return jsonify({"playlists": [], "spotify_authenticated": False}), 200
+
+@app.route('/api/playlists/materialize/rebuild', methods=['POST'])
+def rebuild_playlist_materialization_endpoint():
+    """(Re)build every "organize by playlist" folder from current library ownership
+    (the manual Settings button). Safe to call any time — it's a derived view and
+    only links tracks the user actually owns."""
+    try:
+        from core.playlists.materialize_service import rebuild_organized_playlists_from_db
+        database = get_database()
+        profile_id = get_current_profile_id()
+        results = rebuild_organized_playlists_from_db(database, config_manager, profile_id=profile_id)
+        return jsonify({
+            'success': True,
+            'count': len(results),
+            'results': [{
+                'playlist': name, 'folder': s.playlist_dir,
+                'linked': s.linked, 'copied': s.copied, 'unchanged': s.unchanged,
+                'removed_stale': s.removed_stale, 'missing_source': s.missing_source,
+                'failed': s.failed, 'fellback': s.fellback,
+            } for name, s in results],
+        })
+    except Exception as e:
+        logger.error(f"[Playlist Materialize] Rebuild endpoint failed: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/setup/status', methods=['GET'])
 def setup_status_endpoint():
