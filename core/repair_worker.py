@@ -965,6 +965,7 @@ class RepairWorker:
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
             'missing_replaygain': self._fix_missing_replaygain,
+            'empty_folder': self._fix_empty_folder,
             'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
@@ -1506,6 +1507,29 @@ class RepairWorker:
             return {'success': False, 'error': 'Could not write ReplayGain tags'}
         return {'success': True, 'action': 'applied_replaygain',
                 'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
+
+    def _fix_empty_folder(self, entity_type, entity_id, file_path, details):
+        """Apply an empty-folder finding: re-check the folder is still empty/junk-
+        only (anything that gained a real file since the scan is left alone), then
+        remove it. The library root + symlinked dirs are refused."""
+        from core.repair_jobs.empty_folder_cleaner import remove_empty_folder
+        raw = details.get('folder_path') or file_path
+        if not raw:
+            return {'success': False, 'error': 'No folder path in finding'}
+        resolved = self._resolve_path(raw) if hasattr(self, '_resolve_path') else raw
+        res = remove_empty_folder(
+            resolved,
+            junk_files=details.get('junk_files') or [],
+            remove_junk=bool(details.get('remove_junk', True)),
+            root=self.transfer_folder,
+            listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
+            remove_file=os.remove, rmdir=os.rmdir,
+        )
+        if not res.get('removed'):
+            return {'success': False, 'error': res.get('error') or 'Could not remove folder'}
+        _name = os.path.basename(resolved.rstrip('/\\')) or resolved
+        return {'success': True, 'action': 'removed_empty_folder',
+                'message': f'Removed empty folder: {_name}'}
 
     def _fix_expired_download(self, entity_type, entity_id, file_path, details):
         """Apply an expired-download finding: delete the file + library row +
@@ -3312,7 +3336,7 @@ class RepairWorker:
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
-                             'missing_lossy_copy', 'missing_replaygain',
+                             'missing_lossy_copy', 'missing_replaygain', 'empty_folder',
                              'missing_discography_track', 'acoustid_mismatch')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
