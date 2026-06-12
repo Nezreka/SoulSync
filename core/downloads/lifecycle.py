@@ -549,6 +549,24 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                     except Exception as m3u_err:
                         logger.error(f"[M3U] Error regenerating M3U on batch complete: {m3u_err}")
 
+                # PLAYLIST MATERIALIZE: if this was an organize-by-playlist batch,
+                # (re)build the playlist's folder of links/copies now that every
+                # track is imported. Built from the batch's own payload (owned +
+                # downloaded real paths) — non-fatal, derived view. (materialize.py)
+                if batch.get('playlist_folder_mode'):
+                    try:
+                        from core.playlists.materialize_service import materialize_playlist_from_batch
+                        _mat = materialize_playlist_from_batch(batch, download_tasks, deps.config_manager)
+                        if _mat:
+                            logger.info(
+                                f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}': "
+                                f"{_mat.linked} linked, {_mat.copied} copied, "
+                                f"{_mat.unchanged} unchanged, {_mat.removed_stale} stale removed"
+                                + (" (symlinks unsupported here → copied)" if _mat.fellback else "")
+                            )
+                    except Exception as _mat_err:
+                        logger.error(f"[Playlist Folder] Materialize failed (non-fatal): {_mat_err}")
+
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if deps.repair_worker:
                     deps.repair_worker.process_batch(batch_id)
