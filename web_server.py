@@ -2695,6 +2695,15 @@ def generate_playlist_m3u():
         save_to_disk = data.get('save_to_disk', False)
         force = data.get('force', False)
 
+        # The download modal auto-saves an M3U (save_to_disk, no force) on every
+        # render. When M3U export is disabled it would do nothing anyway — but only
+        # AFTER ~30s of per-track DB search + fuzzy matching below, which it then
+        # throws away (and which, fired repeatedly, jams the analysis). Bail out
+        # immediately for that case. The manual "Export as M3U" sends force=True and
+        # is unaffected; a content-only request (save_to_disk False) also proceeds.
+        if save_to_disk and not force and not config_manager.get('m3u_export.enabled', False):
+            return jsonify({"success": True, "skipped": True, "reason": "m3u_export disabled"})
+
         raw_base = config_manager.get('m3u_export.entry_base_path', '') or ''
         entry_base_path = raw_base.rstrip('/\\')
 
