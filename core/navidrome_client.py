@@ -1,6 +1,7 @@
 import requests
 import hashlib
 import secrets
+import time
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from urllib.parse import urlencode
@@ -161,6 +162,7 @@ class NavidromeClient(MediaServerClient):
         self.music_folder_id: Optional[str] = None
         self._connection_attempted = False
         self._is_connecting = False
+        self._last_connect_attempt = 0.0   # monotonic time of the last connect try
 
         # Cache for performance
         self._artist_cache = {}
@@ -245,15 +247,32 @@ class NavidromeClient(MediaServerClient):
             logger.error(f"Error setting music folder: {e}")
             return False
 
+    # A failed connect used to latch the client "disconnected" until the user hit
+    # the manual Test button (a transient ping failure nukes the creds in
+    # _setup_client). Re-attempt at most this often so it self-heals on its own.
+    _RECONNECT_THROTTLE_S = 20.0
+
     def ensure_connection(self) -> bool:
-        """Ensure connection to Navidrome server with lazy initialization."""
-        if self._connection_attempted:
-            return self.base_url is not None and self.username is not None
+        """Ensure connection to Navidrome with lazy init + self-healing retry.
+
+        Already connected → return True. A prior FAILED attempt no longer latches
+        forever: once _RECONNECT_THROTTLE_S has elapsed it re-attempts, so a
+        transient ping failure (network blip, Navidrome busy mid-scan) recovers by
+        itself instead of needing the manual "Test" reconnect."""
+        if self.base_url is not None and self.username is not None:
+            return True
 
         if self._is_connecting:
             return False
 
+        # Disconnected but attempted recently → don't hammer; let it heal on the
+        # next check past the throttle window.
+        if self._connection_attempted and \
+                (time.monotonic() - self._last_connect_attempt) < self._RECONNECT_THROTTLE_S:
+            return False
+
         self._is_connecting = True
+        self._last_connect_attempt = time.monotonic()
         try:
             self._setup_client()
             return self.base_url is not None and self.username is not None
@@ -462,10 +481,11 @@ class NavidromeClient(MediaServerClient):
             return None
 
     def is_connected(self) -> bool:
-        """Check if connected to Navidrome server"""
-        if not self._connection_attempted:
-            if not self._is_connecting:
-                self.ensure_connection()
+        """Connected = configured + last connect OK. When NOT connected, trigger a
+        (throttled) reconnect attempt so the status self-heals instead of staying
+        latched disconnected until a manual Test."""
+        if not (self.base_url and self.username and self.password) and not self._is_connecting:
+            self.ensure_connection()
         return (self.base_url is not None and
                 self.username is not None and
                 self.password is not None)
