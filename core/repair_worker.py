@@ -964,6 +964,7 @@ class RepairWorker:
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
+            'missing_replaygain': self._fix_missing_replaygain,
             'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
@@ -1478,6 +1479,33 @@ class RepairWorker:
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
+
+    def _fix_missing_replaygain(self, entity_type, entity_id, file_path, details):
+        """Apply a missing-ReplayGain finding: run the same ffmpeg ebur128 loudness
+        analysis the import pipeline uses and write the RG tags in place (#437)."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        try:
+            from core.replaygain import (analyze_track, write_replaygain_tags,
+                                         is_ffmpeg_available, RG_REFERENCE_LUFS)
+            if not is_ffmpeg_available():
+                return {'success': False, 'error': 'ffmpeg not available — cannot analyze ReplayGain'}
+            lufs, peak_dbfs = analyze_track(resolved)
+            gain_db = RG_REFERENCE_LUFS - lufs   # same formula as the import pipeline
+            ok = write_replaygain_tags(resolved, gain_db, peak_dbfs)
+        except Exception as e:
+            logger.error("ReplayGain fix failed for %s: %s", os.path.basename(raw_path), e)
+            return {'success': False, 'error': str(e)}
+        if not ok:
+            return {'success': False, 'error': 'Could not write ReplayGain tags'}
+        return {'success': True, 'action': 'applied_replaygain',
+                'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
 
     def _fix_expired_download(self, entity_type, entity_id, file_path, details):
         """Apply an expired-download finding: delete the file + library row +
@@ -3284,7 +3312,7 @@ class RepairWorker:
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
-                             'missing_lossy_copy',
+                             'missing_lossy_copy', 'missing_replaygain',
                              'missing_discography_track', 'acoustid_mismatch')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
