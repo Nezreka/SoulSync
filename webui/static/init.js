@@ -1794,6 +1794,7 @@ function initProfileManagement() {
             const name = document.getElementById('new-profile-name').value.trim();
             const avatarUrl = document.getElementById('new-profile-avatar-url').value.trim();
             const pin = document.getElementById('new-profile-pin').value;
+            const loginPassword = (document.getElementById('new-profile-password') || {}).value || '';
             if (!name) return;
 
             // Collect profile settings
@@ -1810,6 +1811,7 @@ function initProfileManagement() {
                     name, avatar_color: selectedColor,
                     avatar_url: avatarUrl || undefined,
                     pin: pin || undefined,
+                    password: loginPassword || undefined,
                     home_page: homePage,
                     allowed_pages: allowedPages,
                     can_download: canDl
@@ -1820,6 +1822,7 @@ function initProfileManagement() {
                 document.getElementById('new-profile-name').value = '';
                 document.getElementById('new-profile-avatar-url').value = '';
                 document.getElementById('new-profile-pin').value = '';
+                if (document.getElementById('new-profile-password')) document.getElementById('new-profile-password').value = '';
                 document.getElementById('new-profile-home-page').value = '';
                 pageCheckboxes.forEach(cb => cb.checked = true);
                 document.getElementById('new-profile-can-download').checked = true;
