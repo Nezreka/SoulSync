@@ -505,13 +505,19 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             track_name = track_data.get('name', '')
             artists = track_data.get('artists', [])
             found, confidence = False, 0.0
+            # Additive payload: the owned library track (DatabaseTrack) when this
+            # item is found in the library, so downstream (playlist materialization)
+            # knows WHERE the real file is without re-matching. None when not owned.
+            matched_track = None
 
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
             _stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
-            if not ignore_manual_matches and _stid and _mlm.get_match_for_track(
-                db, batch_profile_id, track_data, default_source=batch_source
-            ):
+            _manual_match = (
+                _mlm.get_match_for_track(db, batch_profile_id, track_data, default_source=batch_source)
+                if (not ignore_manual_matches and _stid) else None
+            )
+            if _manual_match:
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:
                     deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
@@ -523,6 +529,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     'found': True,
                     'confidence': 1.0,
                     'match_reason': 'manual_library_match',
+                    'matched_file_path': _manual_match.get('library_file_path'),
+                    'matched_track_id': _manual_match.get('library_track_id'),
                 })
                 continue
 
@@ -568,8 +576,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 # Direct title match (try both raw and normalized)
                 if track_name_lower in album_tracks_map:
                     found, confidence = True, 1.0
+                    matched_track = album_tracks_map[track_name_lower]
                 elif _normalized_source_title and _normalized_source_title in album_tracks_map:
                     found, confidence = True, 1.0
+                    matched_track = album_tracks_map[_normalized_source_title]
                 else:
                     # Fuzzy match against album tracks using string similarity.
                     # Compare BOTH the raw and normalized source titles —
@@ -577,14 +587,17 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     # matching when the album doesn't imply version
                     # context (helper returns the input unchanged).
                     best_sim = 0.0
+                    best_track = None
                     for db_title_lower, _db_track in album_tracks_map.items():
                         sim_raw = db._string_similarity(track_name_lower, db_title_lower)
                         sim_norm = db._string_similarity(_normalized_source_title, db_title_lower) if _normalized_source_title else 0.0
                         sim = max(sim_raw, sim_norm)
                         if sim > best_sim:
                             best_sim = sim
+                            best_track = _db_track
                     if best_sim >= 0.7:
                         found, confidence = True, best_sim
+                        matched_track = best_track
                     else:
                         # Fall back to global per-track search for this track
                         # When allow_duplicates is on for album downloads, skip global
@@ -605,6 +618,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 )
                                 if db_track and track_confidence >= 0.7:
                                     found, confidence = True, track_confidence
+                                    matched_track = db_track
                                     break
             elif allow_duplicates and batch_is_album:
                 # Allow duplicates + album download + album not in DB yet → treat all as missing
@@ -624,10 +638,15 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     )
                     if db_track and track_confidence >= 0.7:
                         found, confidence = True, track_confidence
+                        matched_track = db_track
                         break
 
             analysis_results.append({
-                'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence
+                'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence,
+                # Additive: real on-disk location of the owned track (None when not
+                # owned), so playlist materialization links the right file.
+                'matched_file_path': getattr(matched_track, 'file_path', None),
+                'matched_track_id': getattr(matched_track, 'id', None),
             })
             
             # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
