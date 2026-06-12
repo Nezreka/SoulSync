@@ -52,6 +52,64 @@ def _seed_library(db_path: Path) -> None:
         conn.close()
 
 
+def test_mass_orphan_path_mismatch_creates_no_findings(tmp_path: Path) -> None:
+    """The "transferred to staging" footgun: when the DB's stored paths no longer
+    match the filesystem (remount / Docker volume change) EVERY file looks
+    orphaned. The detector must create NO findings then — otherwise a user
+    batch-applying "move to staging" relocates their whole library. Mirrors the
+    hard skip the stale-removal paths use.
+    """
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)  # DB tracks live under /old/prefix/... — nothing on disk matches
+
+    # Drop 30 untracked files (> the 20 absolute floor, and 100% > 50%).
+    music = tmp_path / "Some Artist" / "Some Album"
+    music.mkdir(parents=True)
+    for i in range(30):
+        (music / f"{i:02d} - Track {i}.mp3").write_bytes(b"unreadable tags; no DB match")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 30
+    assert result.findings_created == 0
+    assert findings == []          # hard skip — not even flagged as warnings
+
+
+def test_small_orphan_set_still_surfaces(tmp_path: Path) -> None:
+    """Below the absolute floor, genuine orphans must still be reported — the
+    guard only suppresses an implausibly large flood, not normal stray files.
+    """
+    db_path = tmp_path / "library.sqlite"
+    _seed_library(db_path)
+
+    music = tmp_path / "Stray" / "Files"
+    music.mkdir(parents=True)
+    for i in range(3):             # 3 orphans — under the 20-file floor
+        (music / f"{i:02d} - Stray {i}.mp3").write_bytes(b"no DB match")
+
+    findings = []
+    context = JobContext(
+        db=_DB(db_path),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kwargs: findings.append(kwargs) or True,
+    )
+
+    result = OrphanFileDetectorJob().scan(context)
+
+    assert result.scanned == 3
+    assert result.findings_created == 3
+    assert all(f['finding_type'] == 'orphan_file' for f in findings)
+
+
 def test_orphan_detector_accepts_picard_albumartist_folder_match(tmp_path: Path) -> None:
     """Picard paths use albumartist/album (year)/track - title.
 

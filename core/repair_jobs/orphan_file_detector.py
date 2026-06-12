@@ -218,17 +218,33 @@ class OrphanFileDetectorJob(RepairJob):
             if context.update_progress and (i + 1) % 50 == 0:
                 context.update_progress(i + 1, total)
 
-        # Safety check: if most files look like orphans, it's probably a path
-        # mismatch between the DB and filesystem — not actual orphans.
-        orphan_ratio = len(orphan_files) / total if total else 0
-        mass_orphan = orphan_ratio > 0.5 and len(orphan_files) > 20
-
-        if mass_orphan:
+        # Safety: if most files look like orphans, it's almost certainly a path
+        # mismatch between the DB and filesystem (remount / Docker volume change),
+        # NOT real orphans. Creating findings anyway is dangerous — a user batch-
+        # applying "move to staging" / "delete" on them would relocate or wipe the
+        # whole library. So we create NO findings here, the same hard skip the
+        # stale-removal paths use. Fix the path mismatch and real orphans surface.
+        from core.library.stale_guard import is_implausible_orphan_flood
+        if is_implausible_orphan_flood(len(orphan_files), total):
+            pct = (len(orphan_files) / total * 100) if total else 0
             logger.warning(
-                "Mass orphan warning: %d of %d files (%.0f%%) flagged as orphans — "
-                "this likely indicates a DB path mismatch, not actual orphans",
-                len(orphan_files), total, orphan_ratio * 100
+                "Mass orphan guard: %d of %d files (%.0f%%) flagged as orphans — "
+                "almost certainly a DB↔filesystem path mismatch, not real orphans. "
+                "Creating no findings so a batch move/delete can't wipe the library.",
+                len(orphan_files), total, pct,
             )
+            if context.report_progress:
+                context.report_progress(
+                    log_line=(f'Skipped: {len(orphan_files)} of {total} files look '
+                              'orphaned — likely a DB path mismatch, not real orphans. '
+                              'No findings created.'),
+                    log_type='skip',
+                )
+            if context.update_progress:
+                context.update_progress(total, total)
+            logger.info("Orphan file scan: %d files scanned, mass-orphan guard tripped "
+                        "(0 findings)", result.scanned)
+            return result
 
         for fpath in orphan_files:
             if context.report_progress:
@@ -243,16 +259,12 @@ class OrphanFileDetectorJob(RepairJob):
                     inserted = context.create_finding(
                         job_id=self.job_id,
                         finding_type='orphan_file',
-                        severity='warning' if mass_orphan else 'info',
+                        severity='info',
                         entity_type='file',
                         entity_id=None,
                         file_path=fpath,
                         title=f'Orphan file: {os.path.basename(fpath)}',
                         description=(
-                            'Audio file in transfer folder is not tracked in the database. '
-                            'WARNING: Mass orphan detection triggered — this may be a path '
-                            'mismatch, not actual orphans. Verify before deleting!'
-                        ) if mass_orphan else (
                             'Audio file in transfer folder is not tracked in the database'
                         ),
                         details={
@@ -261,7 +273,6 @@ class OrphanFileDetectorJob(RepairJob):
                             'modified': time.strftime('%Y-%m-%d %H:%M:%S',
                                                       time.localtime(stat.st_mtime)),
                             'folder': os.path.dirname(fpath),
-                            'mass_orphan': mass_orphan,
                         }
                     )
                     if inserted:
