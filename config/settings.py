@@ -696,6 +696,17 @@ class ConfigManager:
                 "enabled": False,
                 "entry_base_path": ""
             },
+            "playlists": {
+                # Where "Organize by playlist" materializes playlist folders.
+                # MUST be a separate root from the music library so the media
+                # server (and the maintenance jobs) never scan it — otherwise the
+                # same track would show up twice. Mapped separately for Docker.
+                "materialize_path": "./Playlists",
+                # "symlink" (relative links, ~zero disk) or "copy" (real
+                # duplicates for FAT/USB/DAPs that can't follow links). Symlink
+                # auto-falls back to copy when the filesystem can't link.
+                "materialize_mode": "symlink"
+            },
             "youtube": {
                 "cookies_browser": "",      # "", "chrome", "firefox", "edge", "brave", "opera", "safari"
                 "download_delay": 3,        # seconds between sequential downloads
