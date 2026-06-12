@@ -68187,3 +68187,59 @@ body.em-scroll-lock { overflow: hidden; }
 body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not(style):not(noscript) {
     display: none !important;
 }
+
+
+/* Login-password clarity in Manage Profiles (#login-mode) */
+.profile-manage-login-banner {
+    margin: 0 0 12px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #fcd9a8;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.30);
+}
+.profile-role-pill--warn {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.40);
+    text-transform: none;
+}
+.profile-role-pill--ok {
+    background: rgba(16, 185, 129, 0.14);
+    color: #6ee7b7;
+    border-color: rgba(16, 185, 129, 0.30);
+    text-transform: none;
+}
+/* The set-login-password button (lock icon) + an attention pulse when a member
+   can't sign in yet (login on, no password). */
+.profile-manage-item .profile-password-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: #9ca3af;
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .15s ease;
+}
+.profile-manage-item .profile-password-btn svg { width: 15px; height: 15px; }
+.profile-manage-item .profile-password-btn:hover {
+    background: rgba(99, 102, 241, 0.18);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #c7d2fe;
+}
+.profile-manage-item .profile-password-btn.has-password { color: #6ee7b7; }
+.profile-manage-item .profile-password-btn.needs-password {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.45);
+    background: rgba(239, 68, 68, 0.12);
+    animation: arecPwPulse 1.8s ease-in-out infinite;
+}
+@keyframes arecPwPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); }
+    50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18); }
+}

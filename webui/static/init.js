@@ -1873,6 +1873,22 @@ async function loadProfileManageList() {
     const data = await res.json();
     const profiles = data.profiles || [];
 
+    // Login-mode aware: when it's on, surface which members can't sign in yet
+    // (no login password) so the lock button's purpose is obvious.
+    let loginMode = false;
+    try { loginMode = !!(await (await fetch('/api/profiles/current')).json()).login_mode; } catch (e) { /* ignore */ }
+
+    // Banner when login mode is on (explains the password requirement up front).
+    const banner = document.getElementById('profile-manage-login-banner');
+    if (banner) banner.remove();
+    if (loginMode) {
+        const b = document.createElement('div');
+        b.id = 'profile-manage-login-banner';
+        b.className = 'profile-manage-login-banner';
+        b.textContent = '🔐 Login mode is on — every member needs a login password to sign in. Use the lock button to set one.';
+        list.parentNode.insertBefore(b, list);
+    }
+
     list.innerHTML = '';
     profiles.forEach(p => {
         const item = document.createElement('div');
@@ -1896,6 +1912,12 @@ async function loadProfileManageList() {
         if (p.is_admin) pills.push({ text: 'Admin', cls: 'profile-role-pill--admin' });
         if (p.can_download === false) pills.push({ text: 'No Downloads', cls: '' });
         if (p.allowed_pages) pills.push({ text: `${p.allowed_pages.length} pages`, cls: '' });
+        // Login-password status (only meaningful while login mode is on).
+        if (loginMode && !p.is_admin) {
+            pills.push(p.has_password
+                ? { text: '🔒 Login ready', cls: 'profile-role-pill--ok' }
+                : { text: '⚠ No login password', cls: 'profile-role-pill--warn' });
+        }
         if (pills.length) {
             const roleDiv = document.createElement('div');
             roleDiv.className = 'role';
@@ -1931,7 +1953,9 @@ async function loadProfileManageList() {
             // used when "Require login" is on). A member with no password can't
             // sign in and can't self-bootstrap one, so the admin sets it here.
             const pwBtn = document.createElement('button');
-            pwBtn.className = 'profile-password-btn' + (p.has_password ? ' has-password' : '');
+            // Pulse the button when login's on and this member can't sign in yet.
+            const needsPw = loginMode && !p.has_password;
+            pwBtn.className = 'profile-password-btn' + (p.has_password ? ' has-password' : '') + (needsPw ? ' needs-password' : '');
             pwBtn.dataset.id = p.id;
             pwBtn.dataset.name = p.name;
             pwBtn.dataset.hasPassword = p.has_password ? '1' : '0';
