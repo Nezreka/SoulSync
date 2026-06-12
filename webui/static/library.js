@@ -9017,13 +9017,11 @@ function _arecEscAttr(s) {
 // optional external discography links. Reuses the DB-record modal aesthetic +
 // helpers (_jsonSyntaxHighlight / _arecCopy / _arecEsc). #export-request
 // ════════════════════════════════════════════════════════════════════════════
-function openWatchlistExportModal() { return openArtistExportModal('watchlist'); }
-
-async function openArtistExportModal(scope) {
-    scope = scope || 'watchlist';
-    const isLib = scope === 'library';
-    const endpoint = isLib ? '/api/library/artists/export' : '/api/watchlist/export';
-    const fileBase = isLib ? 'library_artists' : 'watchlist';
+async function openArtistExportModal(initialScope) {
+    // One export modal for both rosters — pick Watchlist or Library inside.
+    let scope = initialScope || 'watchlist';
+    const epOf = (s) => s === 'library' ? '/api/library/artists/export' : '/api/watchlist/export';
+    const fileOf = (s) => s === 'library' ? 'library_artists' : 'watchlist';
 
     const existing = document.getElementById('wl-export-overlay');
     if (existing) existing.remove();
@@ -9035,10 +9033,11 @@ async function openArtistExportModal(scope) {
         '<div class="arec-card" role="dialog" aria-label="Export artists">' +
             '<div class="arec-header">' +
                 '<div class="arec-title-wrap">' +
-                    '<div class="arec-title"><span class="arec-dot"></span>' + (isLib ? 'Export Library' : 'Export Watchlist') + '</div>' +
-                    '<div class="arec-sub">' + (isLib
-                        ? 'every library artist — name, source IDs, optional links + owned counts'
-                        : 'your watchlist artists — name, source IDs, optional links') + '</div>' +
+                    '<div class="arec-title"><span class="arec-dot"></span>Export Artists</div>' +
+                    '<div class="arec-tabs" id="wlx-scope" style="margin-top:7px;">' +
+                        '<button class="arec-tab' + (scope === 'watchlist' ? ' active' : '') + '" data-scope="watchlist">Watchlist</button>' +
+                        '<button class="arec-tab' + (scope === 'library' ? ' active' : '') + '" data-scope="library">Library</button>' +
+                    '</div>' +
                 '</div>' +
                 '<button class="arec-close" id="wlx-close" title="Close (Esc)">&times;</button>' +
             '</div>' +
@@ -9049,7 +9048,7 @@ async function openArtistExportModal(scope) {
                     '<button class="arec-tab" data-fmt="txt">Text</button>' +
                 '</div>' +
                 '<label class="wlx-opt"><input type="checkbox" id="wlx-links"> external links</label>' +
-                (isLib ? '<label class="wlx-opt"><input type="checkbox" id="wlx-contents"> library counts</label>' : '') +
+                '<label class="wlx-opt" id="wlx-contents-wrap" style="display:none;"><input type="checkbox" id="wlx-contents"> library counts</label>' +
                 '<div class="arec-actions">' +
                     '<button class="arec-btn" id="wlx-copy">Copy</button>' +
                     '<button class="arec-btn" id="wlx-download">Download</button>' +
@@ -9062,6 +9061,17 @@ async function openArtistExportModal(scope) {
     requestAnimationFrame(() => overlay.classList.add('visible'));
 
     let fmt = 'json', links = false, contents = false, content = '';
+
+    const applyScopeUI = () => {
+        // "library counts" only applies to the library roster.
+        document.getElementById('wlx-contents-wrap').style.display = (scope === 'library') ? '' : 'none';
+        if (scope !== 'library') {
+            contents = false;
+            const cb = document.getElementById('wlx-contents');
+            if (cb) cb.checked = false;
+        }
+    };
+    applyScopeUI();
 
     const close = () => {
         overlay.classList.remove('visible');
@@ -9077,12 +9087,13 @@ async function openArtistExportModal(scope) {
         const body = document.getElementById('wlx-body');
         body.innerHTML = '<div class="arec-loading">Building export…</div>';
         try {
-            const res = await fetch(endpoint + '?format=' + fmt + '&links=' + (links ? '1' : '0')
-                + (isLib && contents ? '&contents=1' : ''));
+            const res = await fetch(epOf(scope) + '?format=' + fmt + '&links=' + (links ? '1' : '0')
+                + (scope === 'library' && contents ? '&contents=1' : ''));
             content = await res.text();
             const count = res.headers.get('X-Export-Count') || '?';
             document.getElementById('wlx-footer').innerHTML =
-                '<span><b>' + count + '</b> artists</span><span class="arec-id">' + fmt.toUpperCase() + '</span>';
+                '<span><b>' + count + '</b> ' + (scope === 'library' ? 'library' : 'watchlist') + ' artists</span>' +
+                '<span class="arec-id">' + fmt.toUpperCase() + '</span>';
             if (fmt === 'json') {
                 let parsed; try { parsed = JSON.parse(content || '[]'); } catch (e) { parsed = []; }
                 body.innerHTML = '<pre class="arec-code">' + _jsonSyntaxHighlight(parsed) + '</pre>';
@@ -9094,6 +9105,16 @@ async function openArtistExportModal(scope) {
         }
     };
 
+    overlay.querySelectorAll('#wlx-scope .arec-tab').forEach(t => {
+        t.onclick = () => {
+            if (t.dataset.scope === scope) return;
+            overlay.querySelectorAll('#wlx-scope .arec-tab').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            scope = t.dataset.scope;
+            applyScopeUI();
+            refresh();
+        };
+    });
     overlay.querySelectorAll('#wlx-format .arec-tab').forEach(t => {
         t.onclick = () => {
             overlay.querySelectorAll('#wlx-format .arec-tab').forEach(x => x.classList.remove('active'));
@@ -9103,8 +9124,7 @@ async function openArtistExportModal(scope) {
         };
     });
     document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
-    const _contentsEl = document.getElementById('wlx-contents');
-    if (_contentsEl) _contentsEl.addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
+    document.getElementById('wlx-contents').addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
     document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
     document.getElementById('wlx-download').onclick = () => {
         const ext = fmt;
@@ -9112,10 +9132,10 @@ async function openArtistExportModal(scope) {
         const blob = new Blob([content || ''], { type: mime });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = fileBase + '_export.' + ext;
+        a.href = url; a.download = fileOf(scope) + '_export.' + ext;
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        if (typeof showToast === 'function') showToast('Saved ' + fileBase + '_export.' + ext, 'success');
+        if (typeof showToast === 'function') showToast('Saved ' + fileOf(scope) + '_export.' + ext, 'success');
     };
 
     refresh();
