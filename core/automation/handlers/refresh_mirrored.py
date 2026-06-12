@@ -292,6 +292,18 @@ def _commit_refresh(
         image_url=pl.get('image_url'),
     )
 
+    # Membership just changed — if this playlist is organize-by-playlist, rebuild
+    # its folder (with prune) so a track that LEFT the playlist has its symlink
+    # cleaned up now. Gated to organized playlists, non-fatal — never disturbs
+    # the refresh. (Additions are handled by the post-download reconcile.)
+    try:
+        from core.playlists.materialize_service import rebuild_mirrored_playlist_if_organized
+        rebuild_mirrored_playlist_if_organized(
+            db, deps.config_manager, pl.get('id'), profile_id=pl.get('profile_id', 1)
+        )
+    except Exception as _mat_err:
+        deps.logger.debug(f"[Playlist Folder] mirror-refresh cleanup skipped: {_mat_err}")
+
     if old_ids != new_ids:
         added = len(new_ids - old_ids)
         removed = len(old_ids - new_ids)

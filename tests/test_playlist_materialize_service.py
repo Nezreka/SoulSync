@@ -10,6 +10,7 @@ from pathlib import Path
 from core.playlists.materialize_service import (
     collect_batch_real_paths,
     materialize_playlist_from_batch,
+    rebuild_mirrored_playlist_if_organized,
     rebuild_organized_playlists_from_db,
     reconcile_batch_playlists,
 )
@@ -38,6 +39,12 @@ class _RebuildDB:
             return [{"track_name": "A", "artist_name": "x"},
                     {"track_name": "Gone", "artist_name": "y"}]   # not owned
         return [{"track_name": "B", "artist_name": "z"}]
+
+    def get_mirrored_playlist(self, playlist_id):
+        for pl in self.get_mirrored_playlists():
+            if pl["id"] == playlist_id:
+                return pl
+        return None
 
     def check_track_exists(self, title, artist, confidence_threshold=0.8,
                            server_source=None, album=None, candidate_tracks=None):
@@ -189,6 +196,45 @@ def test_reconcile_noop_for_plain_batch(tmp_path: Path):
     tasks = {"a1": {"status": "completed", "final_file_path": f, "track_info": {}}}
     assert reconcile_batch_playlists(batch, tasks, _Cfg(str(tmp_path / "Playlists"))) == []
     assert not (tmp_path / "Playlists").exists()
+
+
+def test_mirror_cleanup_prunes_removed_track(tmp_path: Path):
+    """Mirror-update hook: after a track LEAVES the playlist, its symlink is pruned."""
+    a = tmp_path / "Music" / "A.mp3"
+    gone = tmp_path / "Music" / "Gone.mp3"
+    for f in (a, gone):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"audio")
+
+    class _DB:
+        def get_mirrored_playlist(self, pid):
+            return {"id": 1, "name": "Mix", "organize_by_playlist": True} if pid == 1 else None
+
+        def get_mirrored_playlist_tracks(self, pid):
+            return [{"track_name": "A", "artist_name": "x"}]   # 'Gone' was removed upstream
+
+        def check_track_exists(self, title, artist, confidence_threshold=0.8,
+                               server_source=None, album=None, candidate_tracks=None):
+            fp = {"A": str(a), "Gone": str(gone)}.get(title)
+            return (_Track(fp), 1.0) if fp else (None, 0.0)
+
+    from core.playlists.materialize import rebuild_playlist_folder
+    rebuild_playlist_folder(str(tmp_path / "Playlists"), "Mix", [str(a), str(gone)], "symlink")
+    assert (tmp_path / "Playlists" / "Mix" / "Gone.mp3").exists()   # both present before
+
+    summary = rebuild_mirrored_playlist_if_organized(_DB(), _Cfg(str(tmp_path / "Playlists")), 1, profile_id=1)
+    assert summary is not None
+    pdir = tmp_path / "Playlists" / "Mix"
+    assert (pdir / "A.mp3").exists()
+    assert not (pdir / "Gone.mp3").exists()                        # pruned on mirror update
+
+
+def test_mirror_cleanup_skips_non_organized(tmp_path: Path):
+    db = _RebuildDB({})
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+    assert rebuild_mirrored_playlist_if_organized(db, cfg, 2, profile_id=1) is None     # Off (organize=0)
+    assert rebuild_mirrored_playlist_if_organized(db, cfg, 999, profile_id=1) is None   # unknown
+    assert rebuild_mirrored_playlist_if_organized(db, cfg, None, profile_id=1) is None
 
 
 def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):

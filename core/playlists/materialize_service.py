@@ -126,42 +126,61 @@ def reconcile_batch_playlists(batch: dict, download_tasks: dict, config_manager)
     return results
 
 
-def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
-    """Rebuild every "organize by playlist" folder from CURRENT library ownership —
-    for the manual "Rebuild" button. Unlike the post-download path (which uses the
-    batch's payload), there's no batch here, so each playlist's owned files are
-    re-derived via the app's own matcher — ``check_track_exists`` (by name+artist),
-    NOT source IDs — then resolved to disk and handed to the materializer. This
-    self-heals the folders after a library reorganize moves files or membership
-    changes. Returns a list of ``(playlist_name, RebuildSummary)``."""
+def _rebuild_one_from_db(db, config_manager, playlist: dict):
+    """Rebuild ONE playlist's folder from its CURRENT membership × ownership —
+    re-matching each member via the app's own ``check_track_exists`` (by name, not
+    source IDs), resolving to disk, and rebuilding WITH prune. Because it's driven
+    by current membership, a track that has LEFT the playlist drops out of the set
+    and its symlink is pruned. Returns ``(playlist_name, RebuildSummary)``."""
     from core.library.path_resolver import resolve_library_file_path
 
     root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
     mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
-    results = []
-    for pl in (db.get_mirrored_playlists(profile_id) or []):
-        if not pl.get("organize_by_playlist"):
+    real_paths: List[str] = []
+    seen = set()
+    for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
+        title = (t.get("track_name") or "").strip()
+        artist = (t.get("artist_name") or "").strip()
+        if not title:
             continue
-        real_paths: List[str] = []
-        seen = set()
-        for t in (db.get_mirrored_playlist_tracks(pl["id"]) or []):
-            title = (t.get("track_name") or "").strip()
-            artist = (t.get("artist_name") or "").strip()
-            if not title:
-                continue
-            try:
-                db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
-            except Exception:
-                continue
-            if db_track is None or conf < 0.7:
-                continue
-            real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
-            if real and real not in seen:
-                seen.add(real)
-                real_paths.append(real)
-        name = pl.get("name") or "Unnamed Playlist"
-        results.append((name, rebuild_playlist_folder(root, name, real_paths, mode)))
-    return results
+        try:
+            db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
+        except Exception:
+            continue
+        if db_track is None or conf < 0.7:
+            continue
+        real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
+        if real and real not in seen:
+            seen.add(real)
+            real_paths.append(real)
+    name = playlist.get("name") or "Unnamed Playlist"
+    return name, rebuild_playlist_folder(root, name, real_paths, mode)   # prune_stale=True
+
+
+def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
+    """Rebuild EVERY "organize by playlist" folder from current library ownership —
+    for the manual "Rebuild" button. Self-heals after a library reorganize moves
+    files or membership changes. Returns a list of ``(playlist_name, summary)``."""
+    return [
+        _rebuild_one_from_db(db, config_manager, pl)
+        for pl in (db.get_mirrored_playlists(profile_id) or [])
+        if pl.get("organize_by_playlist")
+    ]
+
+
+def rebuild_mirrored_playlist_if_organized(db, config_manager, playlist_id, *, profile_id: int = 1):
+    """Mirror-update hook: after a playlist's membership is re-synced, rebuild its
+    folder (with prune) IF it's organize-by-playlist — so a track that just LEFT
+    the playlist has its symlink cleaned up the instant membership changes (the
+    mirror image of the post-download reconcile that handles additions). Returns
+    the summary, or ``None`` when the playlist isn't organized / can't be found."""
+    if playlist_id is None:
+        return None
+    pl = db.get_mirrored_playlist(playlist_id)
+    if not pl or not pl.get("organize_by_playlist"):
+        return None
+    _name, summary = _rebuild_one_from_db(db, config_manager, pl)
+    return summary
 
 
 __all__ = [
@@ -169,4 +188,5 @@ __all__ = [
     "materialize_playlist_from_batch",
     "reconcile_batch_playlists",
     "rebuild_organized_playlists_from_db",
+    "rebuild_mirrored_playlist_if_organized",
 ]
