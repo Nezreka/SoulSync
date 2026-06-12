@@ -752,6 +752,22 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                 deps.download_monitor.stop_monitoring(batch_id)
                 _cleanup_private_album_bundle_staging(batch_id, batch)
 
+                # PLAYLIST MATERIALIZE: same reconcile as the primary completion path
+                # (on_download_completed). Monitor-detected downloads complete via THIS
+                # V2 path, so the reconcile must run here too or playlist folders never
+                # get built for them. Path-independent, non-fatal, derived view.
+                try:
+                    from core.playlists.materialize_service import reconcile_batch_playlists
+                    for _pl_name, _mat in reconcile_batch_playlists(batch, download_tasks, deps.config_manager):
+                        logger.info(
+                            f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}': "
+                            f"{_mat.linked} linked, {_mat.copied} copied, "
+                            f"{_mat.unchanged} unchanged, {_mat.removed_stale} stale removed"
+                            + (" (symlinks unsupported here → copied)" if _mat.fellback else "")
+                        )
+                except Exception as _mat_err:
+                    logger.error(f"[Playlist Folder] Materialize failed (non-fatal): {_mat_err}")
+
                 # REPAIR: Scan all album folders from this batch for track number issues
                 if deps.repair_worker:
                     deps.repair_worker.process_batch(batch_id)
