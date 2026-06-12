@@ -3120,6 +3120,17 @@ def handle_settings():
                 if not get_database().profile_has_password(1):
                     return jsonify({"success": False,
                                     "error": "Set an admin password before enabling login mode."}), 400
+                # No-gaps: every member must have a password too, or they'd be
+                # locked out the moment login turns on.
+                from core.security.login_provisioning import members_without_password
+                _stranded = members_without_password(get_database().get_all_profiles())
+                if _stranded:
+                    _names = ', '.join(str(m.get('name') or '?') for m in _stranded)
+                    return jsonify({"success": False,
+                                    "error": f"These members have no login password and "
+                                             f"couldn't sign in: {_names}. Set their passwords "
+                                             f"in Manage Profiles first.",
+                                    "members_without_password": _stranded}), 400
 
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
@@ -25562,6 +25573,15 @@ def create_profile():
             from werkzeug.security import generate_password_hash
             pin_hash = generate_password_hash(pin, method='pbkdf2:sha256')
 
+        # No-gaps: while login mode is on, a new member must be born with a login
+        # password or they could never sign in.
+        password = (data.get('password') or '').strip()
+        from core.security.login_provisioning import create_needs_password
+        if create_needs_password(_require_login_enabled()) and not password:
+            return jsonify({'success': False,
+                            'error': 'Login mode is on — give this profile a login '
+                                     'password so they can sign in.'}), 400
+
         # Profile settings: home_page, allowed_pages, can_download
         home_page = data.get('home_page') or None
         allowed_pages = data.get('allowed_pages')  # list or None
@@ -25585,6 +25605,9 @@ def create_profile():
         )
         if profile_id is None:
             return jsonify({'success': False, 'error': 'Profile name already exists'}), 409
+
+        if password:
+            database.set_profile_password(profile_id, password)
 
         return jsonify({'success': True, 'profile_id': profile_id})
     except Exception as e:
@@ -26000,6 +26023,13 @@ def set_profile_password_endpoint(profile_id):
             return jsonify({'success': False, 'error': 'Unauthorized'}), 403
         data = request.json or {}
         password = data.get('password', '')
+        # No-gaps: clearing a password while login mode is on would lock that
+        # profile out — refuse it (delete the profile instead if that's intended).
+        from core.security.login_provisioning import removing_password_strands
+        if not (password or '').strip() and removing_password_strands(_require_login_enabled()):
+            return jsonify({'success': False,
+                            'error': "Can't remove this password while login mode is on — "
+                                     "that profile couldn't sign in."}), 400
         ok = database.set_profile_password(profile_id, password)
         return jsonify({'success': bool(ok), 'has_password': database.profile_has_password(profile_id)})
     except Exception as e:
