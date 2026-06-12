@@ -10,7 +10,38 @@ from pathlib import Path
 from core.playlists.materialize_service import (
     collect_batch_real_paths,
     materialize_playlist_from_batch,
+    rebuild_organized_playlists_from_db,
 )
+
+
+class _Track:
+    """Mimics database.DatabaseTrack — what check_track_exists returns."""
+    def __init__(self, file_path):
+        self.file_path = file_path
+
+
+class _RebuildDB:
+    """One organized playlist (Mix) + one not (Off); check_track_exists matches
+    by NAME via `owned` (track_name -> file_path), so no source IDs involved."""
+    def __init__(self, owned):
+        self.owned = owned
+
+    def get_mirrored_playlists(self, profile_id=1):
+        return [
+            {"id": 1, "name": "Mix", "organize_by_playlist": True},
+            {"id": 2, "name": "Off", "organize_by_playlist": False},
+        ]
+
+    def get_mirrored_playlist_tracks(self, pid):
+        if pid == 1:
+            return [{"track_name": "A", "artist_name": "x"},
+                    {"track_name": "Gone", "artist_name": "y"}]   # not owned
+        return [{"track_name": "B", "artist_name": "z"}]
+
+    def check_track_exists(self, title, artist, confidence_threshold=0.8,
+                           server_source=None, album=None, candidate_tracks=None):
+        fp = self.owned.get(title)
+        return (_Track(fp), 1.0) if fp else (None, 0.0)
 
 
 class _Cfg:
@@ -101,3 +132,19 @@ def test_materialize_skipped_when_not_organize(tmp_path: Path):
     batch = {"playlist_folder_mode": False, "playlist_name": "X", "analysis_results": [], "queue": []}
     assert materialize_playlist_from_batch(batch, {}, _Cfg(str(tmp_path / "Playlists"))) is None
     assert not (tmp_path / "Playlists").exists()
+
+
+def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):
+    """The manual button: rebuild every organized playlist by re-matching with
+    check_track_exists (name), linking only owned tracks."""
+    f = tmp_path / "Music" / "A.mp3"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_bytes(b"audio")
+    db = _RebuildDB({"A": str(f)})                  # 'Gone' + the 'Off' playlist's 'B' not owned
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+    results = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+    assert len(results) == 1                         # only Mix (organize on)
+    name, s = results[0]
+    assert name == "Mix" and s.linked == 1           # only A owned; Gone skipped
+    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
+    assert not (tmp_path / "Playlists" / "Off").exists()

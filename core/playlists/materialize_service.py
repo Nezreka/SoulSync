@@ -74,4 +74,46 @@ def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_ma
     return rebuild_playlist_folder(root, name, real_paths, mode)
 
 
-__all__ = ["collect_batch_real_paths", "materialize_playlist_from_batch"]
+def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
+    """Rebuild every "organize by playlist" folder from CURRENT library ownership —
+    for the manual "Rebuild" button. Unlike the post-download path (which uses the
+    batch's payload), there's no batch here, so each playlist's owned files are
+    re-derived via the app's own matcher — ``check_track_exists`` (by name+artist),
+    NOT source IDs — then resolved to disk and handed to the materializer. This
+    self-heals the folders after a library reorganize moves files or membership
+    changes. Returns a list of ``(playlist_name, RebuildSummary)``."""
+    from core.library.path_resolver import resolve_library_file_path
+
+    root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
+    mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
+    results = []
+    for pl in (db.get_mirrored_playlists(profile_id) or []):
+        if not pl.get("organize_by_playlist"):
+            continue
+        real_paths: List[str] = []
+        seen = set()
+        for t in (db.get_mirrored_playlist_tracks(pl["id"]) or []):
+            title = (t.get("track_name") or "").strip()
+            artist = (t.get("artist_name") or "").strip()
+            if not title:
+                continue
+            try:
+                db_track, conf = db.check_track_exists(title, artist, confidence_threshold=0.7)
+            except Exception:
+                continue
+            if db_track is None or conf < 0.7:
+                continue
+            real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
+            if real and real not in seen:
+                seen.add(real)
+                real_paths.append(real)
+        name = pl.get("name") or "Unnamed Playlist"
+        results.append((name, rebuild_playlist_folder(root, name, real_paths, mode)))
+    return results
+
+
+__all__ = [
+    "collect_batch_real_paths",
+    "materialize_playlist_from_batch",
+    "rebuild_organized_playlists_from_db",
+]
