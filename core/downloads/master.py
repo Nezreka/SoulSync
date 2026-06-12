@@ -785,6 +785,25 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 logger.warning("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
                 deps.missing_download_executor.submit(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
 
+            # Organize-by-playlist with NOTHING to download (every track already
+            # owned): the batch never enters the download/lifecycle path, so build
+            # the playlist folder here from the owned files the analysis matched.
+            # Gated + non-fatal; runs once after analysis, not in the per-track loop.
+            if effective_playlist_folder_mode:
+                try:
+                    from core.playlists.materialize_service import materialize_playlist_from_batch
+                    _batch = download_batches.get(batch_id)
+                    if _batch is not None:
+                        _mat = materialize_playlist_from_batch(_batch, download_tasks, deps.config_manager)
+                        if _mat:
+                            logger.info(
+                                f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}' (all owned): "
+                                f"{_mat.linked} linked, {_mat.copied} copied, {_mat.removed_stale} stale removed"
+                                + (" (symlinks unsupported here → copied)" if _mat.fellback else "")
+                            )
+                except Exception as _mat_err:
+                    logger.error(f"[Playlist Folder] All-owned materialize failed (non-fatal): {_mat_err}")
+
             return
 
         logger.warning(f" transitioning batch {batch_id} to download phase with {len(missing_tracks)} tracks.")
@@ -1163,7 +1182,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             task_pl_folder_mode = True
                             task_pl_name = wl_pl_name or wl_mirrored.get('name') or batch_playlist_name
                 if task_pl_folder_mode:
-                    track_info['_playlist_folder_mode'] = True
+                    # Organize-by-playlist now imports each track NORMALLY into the
+                    # Artist/Album library (i.e. exactly what a normal download does)
+                    # — the playlist folder is built as links/copies AFTER the batch
+                    # from the real library files. So we deliberately DON'T set
+                    # `_playlist_folder_mode` (which routed the real file into a flat
+                    # Music/<playlist>/ dump). We keep `_playlist_name` + source_info
+                    # — they're download provenance (core/downloads/origin.py).
                     track_info['_playlist_name'] = task_pl_name
                     if batch_source_playlist_ref:
                         track_info['source_info'] = {
@@ -1172,8 +1197,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             'source': batch_source,
                         }
                     logger.info(
-                        f"[Task Creation] Added playlist folder mode for: "
-                        f"{track_info.get('name')} → {task_pl_name}"
+                        f"[Task Creation] Organize-by-playlist (normal import + "
+                        f"materialize after batch): {track_info.get('name')} → {task_pl_name}"
                     )
                 else:
                     logger.debug(
