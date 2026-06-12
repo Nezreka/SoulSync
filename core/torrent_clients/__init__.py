@@ -15,6 +15,7 @@ from typing import Optional
 
 from config.settings import config_manager
 
+from core.torrent_clients.aria2 import Aria2Adapter
 from core.torrent_clients.base import TorrentClientAdapter, TorrentStatus
 from core.torrent_clients.deluge import DelugeAdapter
 from core.torrent_clients.qbittorrent import QBittorrentAdapter
@@ -26,6 +27,7 @@ __all__ = [
     "QBittorrentAdapter",
     "TransmissionAdapter",
     "DelugeAdapter",
+    "Aria2Adapter",
     "get_active_adapter",
     "adapter_for_type",
 ]
@@ -43,6 +45,8 @@ def adapter_for_type(client_type: str) -> Optional[TorrentClientAdapter]:
         return TransmissionAdapter()
     if client_type == "deluge":
         return DelugeAdapter()
+    if client_type == "aria2":
+        return Aria2Adapter()
     return None
 
 
