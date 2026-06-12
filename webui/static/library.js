@@ -9010,3 +9010,100 @@ function _arecEsc(s) {
 function _arecEscAttr(s) {
     return _arecEsc(s).replace(/"/g, '&quot;');
 }
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// Watchlist export — bulk export the watchlist roster to JSON / CSV / text, with
+// optional external discography links. Reuses the DB-record modal aesthetic +
+// helpers (_jsonSyntaxHighlight / _arecCopy / _arecEsc). #export-request
+// ════════════════════════════════════════════════════════════════════════════
+async function openWatchlistExportModal() {
+    const existing = document.getElementById('wl-export-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wl-export-overlay';
+    overlay.className = 'arec-overlay';
+    overlay.innerHTML =
+        '<div class="arec-card" role="dialog" aria-label="Export watchlist">' +
+            '<div class="arec-header">' +
+                '<div class="arec-title-wrap">' +
+                    '<div class="arec-title"><span class="arec-dot"></span>Export Watchlist</div>' +
+                    '<div class="arec-sub">your watchlist artists — name, source IDs, optional links</div>' +
+                '</div>' +
+                '<button class="arec-close" id="wlx-close" title="Close (Esc)">&times;</button>' +
+            '</div>' +
+            '<div class="arec-toolbar">' +
+                '<div class="arec-tabs" id="wlx-format">' +
+                    '<button class="arec-tab active" data-fmt="json">JSON</button>' +
+                    '<button class="arec-tab" data-fmt="csv">CSV</button>' +
+                    '<button class="arec-tab" data-fmt="txt">Text</button>' +
+                '</div>' +
+                '<label class="wlx-opt"><input type="checkbox" id="wlx-links"> external links</label>' +
+                '<div class="arec-actions">' +
+                    '<button class="arec-btn" id="wlx-copy">Copy</button>' +
+                    '<button class="arec-btn" id="wlx-download">Download</button>' +
+                '</div>' +
+            '</div>' +
+            '<div class="arec-body" id="wlx-body"><div class="arec-loading">Building export…</div></div>' +
+            '<div class="arec-footer" id="wlx-footer"></div>' +
+        '</div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    let fmt = 'json', links = false, content = '';
+
+    const close = () => {
+        overlay.classList.remove('visible');
+        document.removeEventListener('keydown', onKey);
+        setTimeout(() => overlay.remove(), 220);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('#wlx-close').onclick = close;
+
+    const refresh = async () => {
+        const body = document.getElementById('wlx-body');
+        body.innerHTML = '<div class="arec-loading">Building export…</div>';
+        try {
+            const res = await fetch('/api/watchlist/export?format=' + fmt + '&links=' + (links ? '1' : '0'));
+            content = await res.text();
+            const count = res.headers.get('X-Export-Count') || '?';
+            document.getElementById('wlx-footer').innerHTML =
+                '<span><b>' + count + '</b> artists</span><span class="arec-id">' + fmt.toUpperCase() + '</span>';
+            if (fmt === 'json') {
+                let parsed; try { parsed = JSON.parse(content || '[]'); } catch (e) { parsed = []; }
+                body.innerHTML = '<pre class="arec-code">' + _jsonSyntaxHighlight(parsed) + '</pre>';
+            } else {
+                body.innerHTML = '<pre class="arec-code">' + _arecEsc(content || '(empty)') + '</pre>';
+            }
+        } catch (err) {
+            body.innerHTML = '<div class="arec-error">Export failed: ' + _arecEsc(err.message || String(err)) + '</div>';
+        }
+    };
+
+    overlay.querySelectorAll('#wlx-format .arec-tab').forEach(t => {
+        t.onclick = () => {
+            overlay.querySelectorAll('#wlx-format .arec-tab').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            fmt = t.dataset.fmt;
+            refresh();
+        };
+    });
+    document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
+    document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
+    document.getElementById('wlx-download').onclick = () => {
+        const ext = fmt;
+        const mime = fmt === 'json' ? 'application/json' : (fmt === 'csv' ? 'text/csv' : 'text/plain');
+        const blob = new Blob([content || ''], { type: mime });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'watchlist_export.' + ext;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        if (typeof showToast === 'function') showToast('Saved watchlist_export.' + ext, 'success');
+    };
+
+    refresh();
+}

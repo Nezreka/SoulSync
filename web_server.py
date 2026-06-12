@@ -26722,6 +26722,35 @@ def get_watchlist_artists():
         logger.error(f"Error getting watchlist artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+@app.route('/api/watchlist/export', methods=['GET'])
+def export_watchlist():
+    """Export the watchlist roster (name + source IDs, optionally external links)
+    as json / csv / txt. Returns the content for the export modal to preview +
+    download (X-Export-Count / X-Export-Ext headers carry the metadata)."""
+    try:
+        from core.exports.watchlist_export import build_watchlist_export, export_mime_and_ext
+        fmt = (request.args.get('format', 'json') or 'json').lower()
+        include_links = request.args.get('links', '') in ('1', 'true', 'yes')
+        database = get_database()
+        artists = [{
+            'artist_name': a.artist_name,
+            'spotify_artist_id': a.spotify_artist_id,
+            'itunes_artist_id': a.itunes_artist_id,
+            'deezer_artist_id': getattr(a, 'deezer_artist_id', None),
+            'discogs_artist_id': getattr(a, 'discogs_artist_id', None),
+            'musicbrainz_artist_id': getattr(a, 'musicbrainz_artist_id', None),
+            'amazon_artist_id': getattr(a, 'amazon_artist_id', None),
+        } for a in database.get_watchlist_artists(profile_id=get_current_profile_id())]
+        content = build_watchlist_export(artists, fmt=fmt, include_links=include_links)
+        mime, ext = export_mime_and_ext(fmt)
+        return Response(content, mimetype=mime,
+                        headers={'X-Export-Count': str(len(artists)), 'X-Export-Ext': ext})
+    except Exception as e:
+        logger.error(f"Watchlist export failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/watchlist/add', methods=['POST'])
 def add_to_watchlist():
     """Add an artist to the watchlist"""

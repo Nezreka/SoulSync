@@ -68243,3 +68243,13 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); }
     50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18); }
 }
+
+
+/* Watchlist export modal — reuses the .arec-* card; just the option label + button */
+.wlx-opt {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 12px/1 'JetBrains Mono', ui-monospace, monospace;
+    color: #8b93b0; cursor: pointer; user-select: none;
+}
+.wlx-opt input { accent-color: #7aa2f7; }
+.watchlist-export-btn .watchlist-all-icon { font-weight: 700; }
