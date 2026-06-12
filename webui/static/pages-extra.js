@@ -1916,11 +1916,28 @@ setInterval(() => {
 }, 30000);
 
 async function loadDashboardSyncHistory() {
+    // Don't poll the auth-gated sync-history endpoint while the app is locked —
+    // it would 401 every 30s cycle (the result is discarded anyway). Resumes
+    // automatically on unlock (init.js removes 'app-locked').
+    if (document.body.classList.contains('app-locked')) return;
     const container = document.getElementById('sync-history-cards');
     if (!container) return;
 
     try {
         const response = await fetch('/api/sync/history?limit=10');
+        if (response.status === 401) {
+            // Session lapsed (e.g. the server restarted) while this tab still
+            // believed it was unlocked, so the guard above couldn't fire. Surface
+            // the correct unlock screen — both add 'app-locked', which stops the
+            // poll until the user re-authenticates (same as a fresh page load).
+            const info = await response.json().catch(() => ({}));
+            if (info.login_required && typeof showLoginScreen === 'function') {
+                showLoginScreen();
+            } else if (typeof showLaunchPinScreen === 'function') {
+                showLaunchPinScreen();
+            }
+            return;
+        }
         if (!response.ok) return;
 
         const data = await response.json();
