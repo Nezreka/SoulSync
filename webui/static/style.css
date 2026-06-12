@@ -68177,3 +68177,13 @@ body.em-scroll-lock { overflow: hidden; }
     .arec-row { grid-template-columns: 1fr; gap: 2px; }
     .arec-rowcopy { opacity: 1; justify-self: end; margin-top: -22px; }
 }
+
+
+/* #852: while the launch-PIN / login lock screen is up, hide EVERYTHING in the
+   body except the lock overlays themselves — so removing the overlay (Safari
+   "Hide Distracting Items", devtools) reveals a blank page, not the empty chrome
+   or any of the on-demand modals/sidebars. The hide-element trick can only ADD
+   hiding, never undo this rule. initApp() drops body.app-locked once authenticated. */
+body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not(style):not(noscript) {
+    display: none !important;
+}

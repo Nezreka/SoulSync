@@ -404,6 +404,10 @@ async function initProfileSystem() {
 function showLoginScreen() {
     const overlay = document.getElementById('login-overlay');
     if (!overlay) return;
+    // Hide the entire app while locked, so removing the overlay (Safari "Hide
+    // Distracting Items", devtools) reveals nothing — not even the empty chrome.
+    // initApp() reveals it again on a successful sign-in (#852).
+    document.body.classList.add('app-locked');
     overlay.style.display = 'flex';
     const u = document.getElementById('login-username');
     if (u) setTimeout(() => u.focus(), 50);
@@ -507,6 +511,8 @@ async function submitRecoveryReset() {
 function showLaunchPinScreen() {
     const overlay = document.getElementById('launch-pin-overlay');
     if (!overlay) return;
+    // Hide the whole app while locked — bypassing the overlay reveals nothing (#852).
+    document.body.classList.add('app-locked');
     overlay.style.display = 'flex';
 
     const input = document.getElementById('launch-pin-input');
@@ -2322,6 +2328,10 @@ async function _continueAppInit() {
 }
 
 function initApp() {
+    // Unlocked / authenticated — reveal the app (the lock screens hide it via
+    // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
+    // component init below measures real layout, not a display:none container.
+    document.body.classList.remove('app-locked');
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();
