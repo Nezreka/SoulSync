@@ -3,7 +3,11 @@
 from pathlib import Path
 import os
 
-bind = "127.0.0.1:8008"
+# Localhost-only by default (a dev server shouldn't expose itself to the LAN
+# without asking). To reach it from another device on your network, opt in with
+#   SOULSYNC_WEB_BIND_HOST=0.0.0.0 python dev.py
+# then browse to http://<this-pc-lan-ip>:8008 (and allow port 8008 in the firewall).
+bind = f"{os.environ.get('SOULSYNC_WEB_BIND_HOST', '127.0.0.1')}:{os.environ.get('SOULSYNC_WEB_BIND_PORT', '8008')}"
 worker_class = "gthread"
 workers = 1
 threads = 4
