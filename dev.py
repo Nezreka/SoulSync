@@ -316,6 +316,14 @@ def watch_and_run_backend() -> None:
 
 
 def main() -> int:
+    # `--lan` exposes the dev server on the network (binds 0.0.0.0) so you can
+    # reach it from another device at http://<this-pc-ip>:8008. Default stays
+    # localhost-only. Set before build_backend_env() so both backend modes see it.
+    if '--lan' in sys.argv:
+        os.environ['SOULSYNC_WEB_BIND_HOST'] = '0.0.0.0'
+        print('LAN mode ON — dev server reachable from other devices on your network '
+              '(http://<this-pc-ip>:8008). Allow port 8008 through the firewall if needed.')
+
     if not (ROOT_DIR / 'webui' / 'node_modules').is_dir():
         print('webui/node_modules is missing.')
         print('Run: cd webui && npm ci')
