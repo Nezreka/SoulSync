@@ -1007,9 +1007,11 @@ function normalizePlaylistOrganizeRef(playlistRef, source = 'spotify') {
 }
 
 function downloadMissingModalOrganizeCheckboxHtml(playlistId) {
+    const safeId = String(playlistId).replace(/'/g, "\\'");
     return `
         <label class="force-download-toggle">
-            <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync">
+            <input type="checkbox" id="playlist-folder-mode-${playlistId}" class="playlist-folder-mode-sync"
+                onchange="onPlaylistOrganizePreferenceChange('${safeId}', this.checked, playlistOrganizeSourceForRef('${safeId}'))">
             <span>Organize by Playlist (Downloads/Playlist/Artist - Track.ext)</span>
         </label>`;
 }
