@@ -1688,6 +1688,18 @@ async function exportServerPlaylistM3U() {
         if (!res.ok || data.success === false) {
             throw new Error(data.error || 'Export failed');
         }
+        // Download the .m3u to the browser (same as the other Export-as-M3U
+        // buttons) — force=true also saved it server-side for media servers.
+        const name = (st.playlistName || 'Playlist').replace(/[/\\?%*:|"<>]/g, '-');
+        const blob = new Blob([data.m3u_content || ''], { type: 'audio/x-mpegurl;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${name}.m3u`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
         // `found` = server tracks resolved to a real library file path; any not in
         // SoulSync's library are skipped (can't write a path for them).
         const found = data.stats && data.stats.found != null ? data.stats.found : tracks.length;
