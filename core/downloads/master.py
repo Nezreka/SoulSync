@@ -795,7 +795,23 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     from database.music_database import MusicDatabase as _MDB
                     _batch = download_batches.get(batch_id)
                     if _batch is not None:
-                        for _pl_name, _mat in reconcile_batch_playlists(_MDB(), _batch, download_tasks, deps.config_manager):
+                        # We KNOW the intent is organize-by-playlist here (the gate
+                        # above). The line-431 sync only writes the dict field when
+                        # effective and NOT batch_playlist_folder_mode, so when the
+                        # toggle itself drove it the dict field can still be falsy —
+                        # which makes reconcile build no batch ref. Make the dict
+                        # authoritative so reconcile sees the batch's own playlist.
+                        _batch['playlist_folder_mode'] = True
+                        if effective_playlist_name:
+                            _batch['playlist_name'] = effective_playlist_name
+                        _results = reconcile_batch_playlists(_MDB(), _batch, download_tasks, deps.config_manager)
+                        if not _results:
+                            logger.info(
+                                f"[Playlist Folder] All-owned: nothing rebuilt for "
+                                f"ref={_batch.get('source_playlist_ref') or _batch.get('playlist_id')} "
+                                f"source={_batch.get('batch_source')}"
+                            )
+                        for _pl_name, _mat in _results:
                             logger.info(
                                 f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}' (all owned): "
                                 f"{_mat.linked} linked, {_mat.copied} copied, {_mat.removed_stale} stale removed"
