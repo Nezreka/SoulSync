@@ -540,6 +540,17 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
 
     // Only start discovery if not already discovered AND not currently discovering
     if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        // Open the modal FIRST so it appears instantly. The discovery-start POST
+        // below fetches the ENTIRE playlist server-side before it responds (Tidal
+        // sleeps 1s per page → ~10s for a large playlist). Previously the modal
+        // was only opened AFTER this await, so the user stared at nothing for those
+        // ~10s. Now the modal shows immediately with a loading note and tracks
+        // stream in once discovery starts. We return early so the shared open at
+        // the bottom isn't reached for this path. (#867 UX)
+        openYouTubeDiscoveryModal(fakeUrlHash);
+        const _descEl = document.querySelector(`#youtube-discovery-modal-${fakeUrlHash} .modal-description`);
+        if (_descEl) _descEl.textContent = 'Loading playlist from Tidal…';
+
         // Start Tidal discovery process automatically (like sync.py)
         try {
             console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
@@ -553,10 +564,12 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
             if (result.error) {
                 console.error('❌ Error starting Tidal discovery:', result.error);
                 showToast(`Error starting discovery: ${result.error}`, 'error');
+                if (_descEl) _descEl.textContent = 'Could not start discovery.';
                 return;
             }
 
             console.log('✅ Tidal discovery started, beginning polling...');
+            if (_descEl) _descEl.textContent = 'Discovering tracks…';
 
             // Update phase to discovering now that backend discovery is actually started
             tidalPlaylistStates[playlistId].phase = 'discovering';
@@ -571,7 +584,9 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         } catch (error) {
             console.error('❌ Error starting Tidal discovery:', error);
             showToast(`Error starting discovery: ${error.message}`, 'error');
+            if (_descEl) _descEl.textContent = 'Could not start discovery.';
         }
+        return;
     } else if (isCurrentlyDiscovering) {
         // Resume polling if discovery is already in progress (like YouTube)
         console.log(`🔄 Resuming Tidal discovery polling for: ${playlistData.name}`);
