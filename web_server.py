@@ -990,21 +990,8 @@ def _set_db_update_automation_id(value):
     global _db_update_automation_id
     _db_update_automation_id = value
 
-# Quality Scanner state
-quality_scanner_state = {
-    "status": "idle",  # idle, running, finished, error
-    "phase": "Ready to scan",
-    "progress": 0,
-    "processed": 0,
-    "total": 0,
-    "quality_met": 0,
-    "low_quality": 0,
-    "matched": 0,
-    "error_message": "",
-    "results": [],  # List of low quality tracks with match status
-}
-quality_scanner_lock = threading.Lock()
-quality_scanner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="QualityScanner")
+# Quality scanning is now the 'quality_upgrade' library-maintenance repair job
+# (core/repair_jobs/quality_upgrade.py) — no standalone state/executor here.
 
 # Duplicate Cleaner state
 duplicate_cleaner_state = {
@@ -1253,10 +1240,7 @@ def _register_automation_handlers():
         duplicate_cleaner_lock=duplicate_cleaner_lock,
         duplicate_cleaner_executor=duplicate_cleaner_executor,
         run_duplicate_cleaner=_run_duplicate_cleaner,
-        get_quality_scanner_state=lambda: quality_scanner_state,
-        quality_scanner_lock=quality_scanner_lock,
-        quality_scanner_executor=quality_scanner_executor,
-        run_quality_scanner=_run_quality_scanner,
+        run_repair_job_now=lambda job_id: repair_worker.run_job_now(job_id) if repair_worker else None,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -1859,7 +1843,6 @@ def _shutdown_runtime_components():
     for executor, name in [
         (stream_executor, "stream executor"),
         (db_update_executor, "db update executor"),
-        (quality_scanner_executor, "quality scanner executor"),
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
@@ -17639,28 +17622,7 @@ def _get_quality_tier_from_extension(file_path):
 
     return ('unknown', 999)
 
-# Quality scanner worker logic lives in core/discovery/quality_scanner.py.
-from core.discovery import quality_scanner as _discovery_quality_scanner
-
-
-def _build_quality_scanner_deps():
-    """Build the QualityScannerDeps bundle from web_server.py globals on each call."""
-    return _discovery_quality_scanner.QualityScannerDeps(
-        quality_scanner_state=quality_scanner_state,
-        quality_scanner_lock=quality_scanner_lock,
-        QUALITY_TIERS=QUALITY_TIERS,
-        matching_engine=matching_engine,
-        automation_engine=automation_engine,
-        get_quality_tier_from_extension=_get_quality_tier_from_extension,
-        add_activity_item=add_activity_item,
-    )
-
-
-def _run_quality_scanner(scope='watchlist', profile_id=1):
-    return _discovery_quality_scanner.run_quality_scanner(
-        scope, profile_id, _build_quality_scanner_deps()
-    )
-
+# (Quality scanning moved to the 'quality_upgrade' library-maintenance repair job.)
 
 from core.library.duplicate_cleaner import (
     _run_duplicate_cleaner,
@@ -17672,55 +17634,6 @@ _init_duplicate_cleaner(
     resolve_path_fn=docker_resolve_path,
     engine=automation_engine,
 )
-
-@app.route('/api/quality-scanner/start', methods=['POST'])
-def start_quality_scan():
-    """Start the quality scanner"""
-    with quality_scanner_lock:
-        if quality_scanner_state["status"] == "running":
-            return jsonify({"success": False, "error": "A scan is already in progress"}), 409
-
-        data = request.get_json() or {}
-        scope = data.get('scope', 'watchlist')  # 'watchlist' or 'all'
-
-        logger.info(f"[Quality Scanner API] Starting scan with scope: {scope}")
-
-        # Reset state
-        quality_scanner_state["status"] = "running"
-        quality_scanner_state["phase"] = "Initializing..."
-        quality_scanner_state["progress"] = 0
-        quality_scanner_state["processed"] = 0
-        quality_scanner_state["total"] = 0
-        quality_scanner_state["quality_met"] = 0
-        quality_scanner_state["low_quality"] = 0
-        quality_scanner_state["matched"] = 0
-        quality_scanner_state["results"] = []
-        quality_scanner_state["error_message"] = ""
-
-        # Submit worker (capture profile_id before thread)
-        scan_profile_id = get_current_profile_id()
-        quality_scanner_executor.submit(_run_quality_scanner, scope, scan_profile_id)
-
-        add_activity_item("", "Quality Scan Started", f"Scanning {scope} tracks", "Now")
-
-        return jsonify({"success": True, "message": "Quality scan started"})
-
-@app.route('/api/quality-scanner/status', methods=['GET'])
-def get_quality_scanner_status():
-    """Get current quality scanner status"""
-    with quality_scanner_lock:
-        return jsonify(quality_scanner_state)
-
-@app.route('/api/quality-scanner/stop', methods=['POST'])
-def stop_quality_scan():
-    """Stop the quality scanner (sets a stop flag)"""
-    with quality_scanner_lock:
-        if quality_scanner_state["status"] == "running":
-            quality_scanner_state["status"] = "finished"
-            quality_scanner_state["phase"] = "Scan stopped by user"
-            return jsonify({"success": True, "message": "Stop request sent"})
-        else:
-            return jsonify({"success": False, "error": "No scan is currently running"}), 404
 
 @app.route('/api/duplicate-cleaner/start', methods=['POST'])
 def start_duplicate_cleaner():
@@ -37341,12 +37254,6 @@ def _emit_tool_progress_loop():
         # (which skipped HTTP polling while the socket was up) never learned
         # its stream was ready. Each client polls /api/stream/status instead,
         # which resolves its own session from the cookie.
-        # Quality Scanner
-        try:
-            with quality_scanner_lock:
-                socketio.emit('tool:quality-scanner', dict(quality_scanner_state))
-        except Exception as e:
-            logger.debug(f"Error emitting quality scanner status: {e}")
         # Duplicate Cleaner (add computed space_freed_mb)
         try:
             with duplicate_cleaner_lock:
