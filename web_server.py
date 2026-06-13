@@ -33841,6 +33841,7 @@ def get_mirrored_playlists_endpoint():
     """List all mirrored playlists for the active profile."""
     try:
         from core.playlists.source_refs import describe_mirrored_source_ref
+        from core.playlists.naming import effective_mirrored_name
         database = get_database()
         profile_id = get_current_profile_id()
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -33859,6 +33860,9 @@ def get_mirrored_playlists_endpoint():
             pl['source_ref_kind'] = source_ref.source_ref_kind
             pl['source_ref_status'] = source_ref.source_ref_status
             pl['source_ref_error'] = source_ref.source_ref_error
+            # The name the UI should show / sync uses: custom alias if set, else
+            # the upstream name. Single source of truth so card + sync agree.
+            pl['display_name'] = effective_mirrored_name(pl)
             pl['pipeline_state'] = _snapshot_playlist_pipeline_state(pl['id'])
         return jsonify(playlists)
     except Exception as e:
@@ -33870,6 +33874,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
     """Get a mirrored playlist with its tracks."""
     try:
         from core.playlists.source_refs import describe_mirrored_source_ref
+        from core.playlists.naming import effective_mirrored_name
         database = get_database()
         playlist = database.get_mirrored_playlist(playlist_id)
         if not playlist:
@@ -33879,6 +33884,7 @@ def get_mirrored_playlist_endpoint(playlist_id):
         playlist['source_ref_kind'] = source_ref.source_ref_kind
         playlist['source_ref_status'] = source_ref.source_ref_status
         playlist['source_ref_error'] = source_ref.source_ref_error
+        playlist['display_name'] = effective_mirrored_name(playlist)
         playlist['pipeline_state'] = _snapshot_playlist_pipeline_state(playlist_id)
         playlist['tracks'] = database.get_mirrored_playlist_tracks(playlist_id)
         return jsonify(playlist)
@@ -33933,6 +33939,32 @@ def update_mirrored_playlist_source_ref_endpoint(playlist_id):
         return jsonify({"success": True, "playlist": updated})
     except Exception as e:
         logger.error(f"Error updating mirrored playlist source reference: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/mirrored-playlists/<int:playlist_id>/custom-name', methods=['PATCH'])
+def update_mirrored_playlist_custom_name_endpoint(playlist_id):
+    """Set or clear a user alias (custom display + sync name) for a mirrored
+    playlist. A blank/missing custom_name CLEARS the alias (falls back to the
+    upstream name). The upstream name keeps tracking on refresh either way."""
+    try:
+        from core.playlists.naming import effective_mirrored_name
+        data = request.get_json() or {}
+        database = get_database()
+        playlist = database.get_mirrored_playlist(playlist_id)
+        if not playlist:
+            return jsonify({"error": "Playlist not found"}), 404
+
+        # `custom_name` may be '' / null to CLEAR the alias.
+        ok = database.set_mirrored_playlist_custom_name(playlist_id, data.get('custom_name'))
+        if not ok:
+            return jsonify({"error": "Failed to update name"}), 500
+
+        updated = database.get_mirrored_playlist(playlist_id) or {}
+        updated['display_name'] = effective_mirrored_name(updated)
+        return jsonify({"success": True, "playlist": updated})
+    except Exception as e:
+        logger.error(f"Error updating mirrored playlist custom name: {e}")
         return jsonify({"error": str(e)}), 500
 
 

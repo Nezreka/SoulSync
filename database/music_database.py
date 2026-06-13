@@ -579,6 +579,7 @@ class MusicDatabase:
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
+            self._add_mirrored_playlist_custom_name_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1250,6 +1251,23 @@ class MusicDatabase:
                 logger.info("Added organize_by_playlist column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_custom_name_column(self, cursor):
+        """Add custom_name (a user alias) for a mirrored playlist.
+
+        Overrides the upstream ``name`` for both UI display and sync-to-server,
+        while staying tied to the original — the upstream ``name`` keeps tracking
+        on refresh, ``custom_name`` just overrides what's shown/synced. Stored in
+        its OWN column (not ``name``) precisely so ``mirror_playlist`` — which
+        rewrites ``name`` from upstream on every refresh — never clobbers it."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'custom_name' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN custom_name TEXT DEFAULT NULL")
+                logger.info("Added custom_name column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -13733,6 +13751,32 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_custom_name(self, playlist_id: int, custom_name) -> bool:
+        """Set or clear a user alias for a mirrored playlist.
+
+        A blank/None value CLEARS the alias (display + sync fall back to the
+        upstream name). Touches only ``custom_name`` + ``updated_at``, leaving the
+        upstream ``name`` and the tracks untouched — so the alias survives upstream
+        refresh and never disturbs anything else (mirrors the source-ref/organize
+        update pattern)."""
+        value = (str(custom_name).strip() or None) if custom_name is not None else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE mirrored_playlists
+                    SET custom_name = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (value, playlist_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating custom_name for playlist {playlist_id}: {e}")
             return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:
