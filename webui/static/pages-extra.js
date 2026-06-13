@@ -1648,6 +1648,58 @@ function _serverEditorRefresh() {
     _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
 }
 
+/**
+ * Export the currently-open server playlist as an M3U file. Takes the tracks
+ * physically present ON the server (matched + extra) and reuses the shared M3U
+ * writer, which resolves each to its real library file path (+ the configured
+ * entry_base_path prefix) so media servers like Music Assistant can read it.
+ * force:true bypasses the auto-save "m3u_export.enabled" gate — this is a manual
+ * on-demand export.
+ */
+async function exportServerPlaylistM3U() {
+    const st = _serverEditorState;
+    const btn = document.getElementById('server-editor-export-btn');
+    const tracks = (st && Array.isArray(st.tracks) ? st.tracks : [])
+        .filter(t => t.server_track)
+        .map(t => ({
+            name: t.server_track.title,
+            artist: t.server_track.artist || '',
+            duration_ms: t.server_track.duration || 0,
+        }));
+    if (!tracks.length) {
+        showToast('No server tracks to export', 'warning');
+        return;
+    }
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
+    try {
+        const res = await fetch('/api/generate-playlist-m3u', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: st.playlistName || 'Playlist',
+                tracks,
+                context_type: 'playlist',
+                save_to_disk: true,
+                force: true,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+            throw new Error(data.error || 'Export failed');
+        }
+        // `found` = server tracks resolved to a real library file path; any not in
+        // SoulSync's library are skipped (can't write a path for them).
+        const found = data.stats && data.stats.found != null ? data.stats.found : tracks.length;
+        const note = found < tracks.length ? ` (${found}/${tracks.length} in library)` : ` (${found} tracks)`;
+        showToast(`Exported M3U: ${st.playlistName}${note}`, 'success');
+    } catch (e) {
+        showToast(`M3U export failed: ${e.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig || '📋 Export M3U'; }
+    }
+}
+
 function serverEditorBack() {
     const container = document.getElementById('server-playlist-container');
     const editor = document.getElementById('server-editor');
