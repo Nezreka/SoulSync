@@ -153,6 +153,9 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     )
     fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
                   'album': {'name': 'Album X', 'images': []}}
+    # No ISRC / album hit → exercise the search tier.
+    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_find_best_match',
                         lambda *a, **k: (fake_match, 0.95, 'spotify', True))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda track, src: dict(fake_match))
@@ -230,6 +233,7 @@ def test_scan_falls_back_to_search_without_isrc(monkeypatch):
     monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
     monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
     monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')  # un-enriched
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))  # no album hit
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (fake, 0.88, 'spotify', True))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -239,6 +243,42 @@ def test_scan_falls_back_to_search_without_isrc(monkeypatch):
     result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
     assert result.findings_created == 1
     assert findings[0]['details']['matched_via'] == 'search'
+
+
+def test_scan_uses_album_tier_when_no_isrc(monkeypatch):
+    """No ISRC, but the album→track lookup resolves it → matched_via 'album',
+    and the fuzzy search is never reached."""
+    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
+    db = _FakeDB(rows, BALANCED)
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
+    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')
+    fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (fake, 'spotify'))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    def _boom(*a, **k):
+        raise AssertionError("fuzzy search must not run when the album tier matches")
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_via'] == 'album'
+    assert findings[0]['details']['match_confidence'] == 1.0
+
+
+def test_find_track_in_album_exact_title_with_track_number(monkeypatch):
+    items = [
+        {'id': 'a', 'name': 'Intro', 'track_number': 1},
+        {'id': 'b', 'name': 'Karma Police', 'track_number': 6},
+        {'id': 'c', 'name': 'Karma Police (Live)', 'track_number': 12},
+    ]
+    eng = types.SimpleNamespace(similarity_score=lambda a, b: 0.0, normalize_string=lambda s: s)
+    got = qu._find_track_in_album(items, 'Karma Police', 6, eng)
+    assert got['id'] == 'b'
 
 
 def test_scan_skips_tracks_meeting_quality(monkeypatch):
