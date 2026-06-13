@@ -2736,43 +2736,41 @@ def generate_playlist_m3u():
             s = _re.sub(r'\s*remaster(ed)?.*', '', s)
             return _re.sub(r'\s+', ' ', s).strip()
 
-        # Group tracks by primary artist to minimise DB queries
+        # Resolve each track's library file path. We bulk-load the library ONCE and
+        # match in memory, keyed by cleaned artist, instead of issuing a
+        # search_tracks() query per distinct artist. The per-artist loop could
+        # block for a long time behind the enrichment/scan writers (SQLite lock
+        # contention) — which is exactly why "Export M3U" hung with nothing in the
+        # logs. One WAL-concurrent read can't be starved that way.
         from collections import defaultdict
-        artist_groups = defaultdict(list)
-        for idx, t in enumerate(tracks):
-            artist_groups[t.get('artist', '') or ''].append((idx, t))
+        lib_by_artist = defaultdict(list)
+        for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
+            lib_by_artist[_clean(row['artist'])].append(
+                (_norm(row['title']), _clean(row['title']), row['file_path'])
+            )
 
         file_path_map = {}
-        for artist, group in artist_groups.items():
-            if not artist:
-                for idx, _ in group:
-                    file_path_map[idx] = None
+        for idx, track in enumerate(tracks):
+            name = track.get('name', '') or ''
+            artist = track.get('artist', '') or ''
+            if not name or not artist:
+                file_path_map[idx] = None
                 continue
-
-            db_tracks = db.search_tracks(artist=artist, limit=500, server_source=active_server)
-            if not db_tracks:
-                for idx, _ in group:
-                    file_path_map[idx] = None
+            candidates = lib_by_artist.get(_clean(artist))
+            if not candidates:
+                file_path_map[idx] = None
                 continue
-
-            db_entries = [(_norm(t.title), _clean(t.title), t) for t in db_tracks]
-
-            for idx, track in group:
-                name = track.get('name', '')
-                if not name:
-                    file_path_map[idx] = None
-                    continue
-                s_norm, s_clean = _norm(name), _clean(name)
-                matched = None
-                for db_n, db_c, db_t in db_entries:
-                    if s_norm == db_n or s_clean == db_c:
-                        matched = db_t
-                        break
-                    if max(SequenceMatcher(None, s_norm, db_n).ratio(),
-                           SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
-                        matched = db_t
-                        break
-                file_path_map[idx] = matched.file_path if matched else None
+            s_norm, s_clean = _norm(name), _clean(name)
+            matched_path = None
+            for db_n, db_c, fp in candidates:
+                if s_norm == db_n or s_clean == db_c:
+                    matched_path = fp
+                    break
+                if max(SequenceMatcher(None, s_norm, db_n).ratio(),
+                       SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
+                    matched_path = fp
+                    break
+            file_path_map[idx] = matched_path
 
         # --- build M3U content ---
         import datetime as _dt

@@ -6926,6 +6926,31 @@ class MusicDatabase:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
     
+    def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
+        """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
+
+        ONE indexed read instead of a per-artist search loop. SQLite WAL allows it
+        to run concurrently with the enrichment/scan writers, so M3U export no
+        longer blocks behind them (the 'Export M3U hangs forever' report). Only
+        rows that actually have a file_path are returned (the rest can't go in an
+        M3U anyway)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            sql = ("SELECT tracks.title AS title, artists.name AS artist_name, tracks.file_path AS file_path "
+                   "FROM tracks JOIN artists ON tracks.artist_id = artists.id "
+                   "WHERE tracks.file_path IS NOT NULL AND tracks.file_path != ''")
+            params: list = []
+            if server_source:
+                sql += " AND tracks.server_source = ?"
+                params.append(server_source)
+            cursor.execute(sql, params)
+            return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
+                    for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error bulk-loading tracks for M3U resolution: {e}")
+            return []
+
     def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None,
                              rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
