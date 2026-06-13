@@ -7367,10 +7367,22 @@ def manual_search_for_task(task_id):
         # source isn't connected or the link can't be resolved — so the user is
         # never worse off than typing the query themselves.
         from core.downloads.track_link import parse_download_track_link
+        from core.soundcloud_client import is_soundcloud_url
         link = parse_download_track_link(query)
         link_source = None
         link_track_id = None
-        if link:
+        # A pasted SoundCloud link can't be turned into an "artist title" query
+        # and searched — unlisted/private tracks aren't searchable. Instead force
+        # the SoundCloud source and keep the URL as the query; the SoundCloud
+        # client resolves the link directly (#865).
+        if is_soundcloud_url(query):
+            if 'soundcloud' not in valid_source_ids:
+                return jsonify({
+                    "error": "SoundCloud isn't connected — enable it in Settings to "
+                             "resolve a SoundCloud link."
+                }), 400
+            source = 'soundcloud'
+        elif link:
             _src, _tid = link
             # A parsed link is unambiguously a Tidal/Qobuz track URL, never a
             # name a user would type — so if we can't use it, say why clearly
@@ -14744,7 +14756,7 @@ def _youtube_cookie_opts():
         cb = config_manager.get('youtube.cookies_browser', '')
         if cb:
             opts['cookiesfrombrowser'] = (cb,)
-    except Exception:
+    except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
         pass
     return opts
 
