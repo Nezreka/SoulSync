@@ -6887,10 +6887,25 @@ class MusicDatabase:
 
             # STRATEGY 1: Try basic SQL LIKE search first (fastest)
             basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
-            
+
             if basic_results:
                 logger.debug(f"Basic search found {len(basic_results)} results")
                 return basic_results
+
+            # STRATEGY 1b: Spotify renders versions as "Title - Qualifier"
+            # ("Calma - Remix") but libraries usually store just the base
+            # ("Calma"), so the literal search misses. Retry on the base title
+            # BEFORE the OR-fuzzy fallback (which would flood on the common
+            # qualifier word — every "... remix" matches "remix"). #: Calma - Remix
+            if title:
+                from core.text.title_match import base_title_before_dash
+                base_title = base_title_before_dash(title)
+                if base_title and base_title != title:
+                    base_results = self._search_tracks_basic(
+                        cursor, base_title, artist, limit, server_source, rank_artist)
+                    if base_results:
+                        logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
+                        return base_results
 
             # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
             fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
@@ -6919,6 +6934,17 @@ class MusicDatabase:
             basic_rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
             if basic_rows:
                 return [dict(r) for r in basic_rows]
+
+            # Base-title fallback for Spotify "Title - Qualifier" forms (see
+            # search_tracks STRATEGY 1b) before the OR-fuzzy flood.
+            if title:
+                from core.text.title_match import base_title_before_dash
+                base_title = base_title_before_dash(title)
+                if base_title and base_title != title:
+                    base_rows = self._search_tracks_basic_rows(
+                        cursor, base_title, artist, limit, server_source)
+                    if base_rows:
+                        return [dict(r) for r in base_rows]
 
             fuzzy_rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
             return [dict(r) for r in fuzzy_rows]
