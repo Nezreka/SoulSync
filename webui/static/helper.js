@@ -3415,16 +3415,21 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.1': [
-        { date: 'June 2026 — 2.7.1 release' },
-        { title: 'Download verification & review', desc: 'every download is fingerprint-checked (acoustid) against what you actually asked for, and the result sticks — a verified / unverified badge on the Downloads completed list, persisted to the db, a SOULSYNC_VERIFICATION file tag, and history. import + scan now share one verification core so they stop disagreeing about the same file.', page: 'active-downloads' },
-        { title: 'Unverified review queue', desc: 'questionable downloads land in a review queue where you can listen, compare, approve, or delete them — with visible retry progress. approve/delete are admin-only.', page: 'active-downloads' },
-        { title: 'Security: login bypass closed (#852)', desc: 'hiding the login/PIN overlay (safari "hide distracting items", devtools) could still stream live data over the websocket — the socket connection now enforces the same login/PIN gate the rest of the app does. every other surface was audited too; the socket was the one hole.', page: 'settings' },
-        { title: 'AcoustID "Relocate" fix action (#704)', desc: 'when an acoustid scan flags a wrong song, retag alone left the file in the wrong artist/album folder. the new Relocate option retags it and moves it to staging so auto-import re-files it under the correct artist/album.', page: 'tools' },
-        { title: 'Faster artist pages (#853)', desc: 'deezer / itunes / discogs now cache the artist→album list like spotify already did, so reopening an artist stops refetching the entire discography. thanks ramonskie!', page: 'library' },
-        { title: 'Fixes', desc: 'listenbrainz weekly playlists can no longer wedge in an unrecoverable sync state — cancel now clears it so you can re-sync (#702); magnets stuck "downloading metadata" actually hit the stall timeout now, and dead torrents are cleaned out of qbittorrent instead of orphaned + re-grabbed as duplicates; a "/" or ":" in a title matches sources that use "_" (#851); "&" is available as an artist tag separator (#840); search auto-selects spotify when "spotify (no auth)" is the active source.', page: 'active-downloads' },
-        { title: 'Contributor fixes', desc: 'opt-in import-folder artist override (#845), discogs master/release ID collision fetching the wrong album (#848), and the cover-art cache no longer hard-fails on first load (#850). thanks nick2000713 + RollingBase!' },
-        { title: 'Earlier versions', desc: '2.7.0 brought multi-user for real — per-profile streaming accounts (My Accounts), auto-sync running as its owner, opt-in username/password login with recovery, reverse-proxy support, and admin quick-switch for active sources. before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, server-side launch-PIN enforcement, Spotify-no-auth metadata, Library Re-tag, and a large pile of import / library / watchlist fixes.' },
+    '2.7.2': [
+        { date: 'June 2026 — 2.7.2 release' },
+        { title: 'Organize playlists into folders', desc: 'optionally mirror each playlist into its own folder on disk — symlink (no extra space) or copy — so external players (plex / jellyfin / music assistant) see your soulsync playlists as real folders. rebuilds itself after every sync, prunes removed tracks, and there\'s a manual rebuild button in settings.', page: 'settings' },
+        { title: 'Export server playlists as M3U', desc: 'one-click "Export M3U" button in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist\'s tracks and downloads it to your browser. handy for music assistant and friends.', page: 'sync' },
+        { title: 'Follow-only watchlist', desc: 'each watchlist artist now has an "auto-download" toggle (on by default). turn it off to just follow an artist — scans still discover and surface new releases, they just don\'t get auto-added to the wishlist.', page: 'artists' },
+        { title: 'Download from a SoundCloud link (#865)', desc: 'paste a soundcloud track url — including unlisted / private share links — into manual search and it resolves + downloads directly.', page: 'downloads' },
+        { title: 'YouTube playlists keep the artist (#863)', desc: 'youtube / youtube-music playlists that used to import as "Unknown Artist" now recover the real artist from the track\'s music metadata, the "Artist - Title" pattern, or the uploading channel — and fall back to the matched artist when youtube gives nothing.', page: 'sync' },
+        { title: 'Rename mirrored playlists', desc: 'a mirrored playlist now has a rename (✏️) button — set a custom name that changes how it shows in soulsync and how it syncs, survives upstream refreshes, and still tracks the same server playlist.', page: 'sync' },
+        { title: 'New maintenance jobs', desc: 'ReplayGain Filler (#437) computes + writes missing replaygain tags across your library, and Empty Folder Cleaner sweeps out leftover empty directories. both under Tools → library maintenance.', page: 'tools' },
+        { title: 'Export your watchlist + library', desc: 'one Export button with a scope selector dumps your watchlist roster and/or whole library roster to JSON / CSV / text.', page: 'artists' },
+        { title: 'Custom completed-download path for Torrent/Usenet (#857)', desc: 'point soulsync at the in-container folder your torrent/usenet client drops finished files into (e.g. a category subfolder), so completed grabs are found instead of going missing.', page: 'settings' },
+        { title: 'HiFi instances: restore + new working instance', desc: 'a "Restore Defaults" button re-adds any built-in instances you removed (keeps your own), the ✔/✖ controls have bigger tap targets, and a freshly-confirmed working instance is auto-pushed to everyone (thanks Sokhi).', page: 'settings' },
+        { title: 'Artist DB Record inspector', desc: 'an artist\'s detail page can now show the raw "DB Record" — everything the database knows about that artist — for debugging metadata.', page: 'library' },
+        { title: 'Fixes', desc: 'a hung database update self-heals now instead of wedging on "Starting..." forever (#859); Library Reorganize finally works on media-server libraries by falling back to tag mode (#862); spotify (no-auth) shows as connected and the dashboard test reports it correctly instead of claiming deezer; navidrome reconnects itself instead of latching disconnected; the orphan detector hard-bails on a mass-orphan flood; plus more #852 lock-screen hardening and login-password management in Manage Profiles.', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.7.1 added download verification & a review queue (acoustid fingerprint-checks every download), closed the websocket login-bypass (#852), and the acoustid Relocate fix. 2.7.0 brought multi-user for real — per-profile streaming accounts, opt-in login, reverse-proxy support. before that the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.' },
     ],
 };
 
@@ -3455,38 +3460,58 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Download verification & review",
-        description: "every download is fingerprint-checked (acoustid) against what you actually asked for, and the result sticks. import + scan now share one verification core, so the two stop disagreeing about the same file.",
+        title: "Organize playlists into folders",
+        description: "soulsync can now mirror each of your playlists into its own folder on disk, so external players (plex / jellyfin / music assistant) see them as real folders instead of just living inside soulsync.",
         features: [
-            "verified / unverified badge on the Downloads completed list",
-            "status persisted to the db, a SOULSYNC_VERIFICATION file tag, and history",
-            "Unverified review queue: listen, compare, approve, or delete questionable downloads (approve/delete are admin-only)",
-            "visible retry progress while a questionable download re-fetches",
+            "symlink (no extra disk space) or copy — your choice",
+            "rebuilds itself after every sync and prunes tracks you removed",
+            "separate output root + a manual rebuild button in settings",
         ],
-        usage_note: "Downloads page → the Unverified filter",
+        usage_note: "Settings → Playlists → organize into folders",
     },
     {
-        title: "Security fix — login bypass closed (#852)",
-        description: "hiding the login/PIN overlay (safari \"hide distracting items\", devtools, curl) could still stream live data over the websocket, because the gate was http-only. the socket connection now enforces the same login/PIN check the rest of the app does — every other surface was audited too; the socket was the one hole. covers both the launch PIN and the native login.",
+        title: "Better YouTube & SoundCloud imports",
+        description: "the two weak spots in playlist/link importing got fixed.",
+        features: [
+            "#863 — youtube / youtube-music playlists that imported as \"Unknown Artist\" now recover the real artist from music metadata, the \"Artist - Title\" pattern, or the uploading channel (and fall back to the matched artist)",
+            "#865 — paste a soundcloud track link, including unlisted / private share urls, into manual search to download it directly",
+        ],
+    },
+    {
+        title: "Export server playlists as M3U",
+        description: "a one-click \"Export M3U\" button now sits in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist and downloads it to your browser. great for music assistant.",
         features: [],
+        usage_note: "Sync → Server Playlists → Export M3U",
+    },
+    {
+        title: "Follow-only watchlist + more",
+        description: "a grab-bag of requested features.",
+        features: [
+            "per-artist \"auto-download\" toggle: turn it off to just follow an artist — scans still surface new releases, they just don't auto-add to the wishlist",
+            "rename mirrored playlists (✏️): a custom name that changes the display + sync name, survives refreshes, still tracks the server playlist",
+            "export your watchlist and/or whole library roster to JSON / CSV / text",
+            "ReplayGain Filler (#437) and Empty Folder Cleaner library-maintenance jobs",
+            "custom in-container completed-download path for Torrent / Usenet sources (#857)",
+            "HiFi instances: Restore Defaults button, bigger tap targets, and a new confirmed-working instance pushed to everyone",
+            "Artist detail \"DB Record\" inspector for debugging metadata",
+        ],
     },
     {
         title: "Fixes this release",
-        description: "a stack of issue fixes on top of 2.7.0.",
+        description: "a stack of issue fixes on top of 2.7.1.",
         features: [
-            "#704 — new acoustid Relocate action: retags a wrong song AND moves it to staging so auto-import re-files it under the correct artist/album",
-            "#702 — listenbrainz weekly playlists can no longer wedge in an unrecoverable sync state; cancel clears it so you can re-sync",
-            "torrents stuck \"downloading metadata\" actually hit the stall timeout now, and dead torrents are cleaned out of qbittorrent instead of orphaned + re-grabbed as duplicates",
-            "#853 — artist pages load way faster on reopen: deezer / itunes / discogs now cache the artist→album list instead of refetching the whole discography (thanks ramonskie!)",
-            "#851 — a \"/\" or \":\" in a title now matches sources that use \"_\"",
-            "#840 — \"&\" is available as an artist tag separator (musicbrainz/picard style)",
-            "search auto-selects spotify when \"spotify (no auth)\" is the active metadata source",
-            "#845 / #848 / #850 — opt-in import-folder artist override, discogs wrong-album collision, cover-art cache first-load failure (thanks nick2000713 + RollingBase!)",
+            "#859 — a hung database update self-heals instead of wedging on \"Starting...\" forever",
+            "#862 — Library Reorganize now works on media-server libraries (falls back to tag mode when there are no source IDs)",
+            "spotify (no-auth) shows as connected and the dashboard test reports it correctly, instead of claiming a deezer fallback",
+            "navidrome reconnects itself instead of latching \"disconnected\"",
+            "the orphan detector hard-bails on a mass-orphan flood instead of plowing ahead",
+            "more #852 lock-screen hardening + login-password management in Manage Profiles",
+            "Aria2 added to the torrent client list",
         ],
     },
     {
-        title: "Earlier in 2.7.0",
-        description: "the release just before this one made multi-user real: per-profile streaming accounts (My Accounts — connect your own spotify / tidal / listenbrainz), auto-sync running as its owner profile, an opt-in username/password login with forgot-password recovery, reverse-proxy + auth-proxy support, admin quick-switch for active sources, and a round of fixes (#835–#843). before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, server-side launch-PIN enforcement, Spotify-no-auth metadata, and Library Re-tag.",
+        title: "Earlier in 2.7.1 / 2.7.0",
+        description: "2.7.1 added download verification & an unverified review queue (acoustid fingerprint-checks every download against what you asked for), closed the websocket login-bypass (#852), and added the acoustid Relocate fix action. 2.7.0 made multi-user real: per-profile streaming accounts (My Accounts), auto-sync running as its owner, opt-in username/password login with recovery, and reverse-proxy support. before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.",
         features: [],
     },
 ];
