@@ -551,6 +551,26 @@ def test_resolve_skips_mapping_when_target_missing_then_tries_basename(tmp_path:
     assert resolved == str(tmp_path / "MyAlbum")
 
 
+def test_resolve_uses_custom_torrent_download_path(tmp_path: Path) -> None:
+    """#857: the user's torrent client saves to a category folder (e.g. a
+    'Music' category) mounted here at a custom in-container path. Setting
+    download_source.torrent_download_path lets SoulSync find the release there."""
+    music_mount = tmp_path / "downloads" / "music"
+    (music_mount / "MyAlbum").mkdir(parents=True)
+    cfg = _cfg({'download_source.torrent_download_path': str(music_mount)})
+    resolved = resolve_reported_save_path('/data/Downloads/Music/MyAlbum', config_get=cfg)
+    assert resolved == str(music_mount / "MyAlbum")
+
+
+def test_resolve_uses_custom_usenet_download_path(tmp_path: Path) -> None:
+    """#857: same for the usenet source's custom completed-downloads path."""
+    nzb_mount = tmp_path / "nzb" / "music"
+    (nzb_mount / "MyAlbum").mkdir(parents=True)
+    cfg = _cfg({'download_source.usenet_download_path': str(nzb_mount)})
+    resolved = resolve_reported_save_path('/config/Downloads/complete/MyAlbum', config_get=cfg)
+    assert resolved == str(nzb_mount / "MyAlbum")
+
+
 # ---------------------------------------------------------------------------
 # poll_album_download — lifted poll loop for both torrent + usenet plugins.
 # ---------------------------------------------------------------------------

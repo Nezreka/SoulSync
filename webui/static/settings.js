@@ -1179,6 +1179,8 @@ async function loadSettingsData() {
             _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
         }
         if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
+        const _tcDlPath = document.getElementById('torrent-download-path');
+        if (_tcDlPath) _tcDlPath.value = settings.download_source?.torrent_download_path || '';
         const _ucType = document.getElementById('usenet-client-type');
         const _ucUrl = document.getElementById('usenet-client-url');
         const _ucKey = document.getElementById('usenet-client-api-key');
@@ -1191,6 +1193,8 @@ async function loadSettingsData() {
         if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
         if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
         if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        const _ucDlPath = document.getElementById('usenet-download-path');
+        if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
         if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
@@ -3001,6 +3005,10 @@ async function saveSettings(quiet = false) {
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
             torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            // In-container path(s) where SoulSync reads finished torrent/usenet
+            // downloads (#857). Rendered in the torrent/usenet client sections.
+            torrent_download_path: document.getElementById('torrent-download-path')?.value || '',
+            usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless',
