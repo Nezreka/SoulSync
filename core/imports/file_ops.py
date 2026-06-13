@@ -225,6 +225,79 @@ def get_audio_quality_string(file_path):
         return ""
 
 
+def probe_audio_quality(file_path: str):
+    """Read the actual file and return an AudioQuality with real measured values.
+
+    Uses mutagen to extract sample_rate, bit_depth, and bitrate from the
+    downloaded file — these are ground-truth values, not estimates.
+    Returns None when the file cannot be read.
+    """
+    from core.quality.model import AudioQuality
+    try:
+        ext = os.path.splitext(file_path)[1].lower().lstrip('.')
+
+        if ext == 'flac':
+            from mutagen.flac import FLAC
+            audio = FLAC(file_path)
+            return AudioQuality(
+                format='flac',
+                bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                sample_rate=audio.info.sample_rate,
+                bit_depth=audio.info.bits_per_sample,
+            )
+
+        if ext == 'mp3':
+            from mutagen.mp3 import MP3
+            audio = MP3(file_path)
+            return AudioQuality(
+                format='mp3',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext in ('m4a', 'aac', 'mp4'):
+            from mutagen.mp4 import MP4
+            audio = MP4(file_path)
+            return AudioQuality(
+                format='aac',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext == 'ogg':
+            from mutagen.oggvorbis import OggVorbis
+            audio = OggVorbis(file_path)
+            return AudioQuality(
+                format='ogg',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext == 'opus':
+            from mutagen.oggopus import OggOpus
+            audio = OggOpus(file_path)
+            return AudioQuality(
+                format='opus',
+                bitrate=audio.info.bitrate // 1000,
+                sample_rate=audio.info.sample_rate,
+            )
+
+        if ext in ('wav', 'aiff', 'aif'):
+            from mutagen.wave import WAVE
+            audio = WAVE(file_path)
+            return AudioQuality(
+                format='wav',
+                bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
+                sample_rate=audio.info.sample_rate,
+                bit_depth=getattr(audio.info, 'bits_per_sample', None),
+            )
+
+        return None
+    except Exception as e:
+        logger.debug("probe_audio_quality failed for %s: %s", file_path, e)
+        return None
+
+
 def get_quality_tier_from_extension(file_path):
     """Classify a file extension into a quality tier."""
     if not file_path:
