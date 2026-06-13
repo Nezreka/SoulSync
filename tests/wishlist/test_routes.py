@@ -435,6 +435,41 @@ def test_get_wishlist_cycle_returns_stored_value():
     assert payload == {"cycle": "singles"}
 
 
+def test_add_album_track_to_wishlist_preserves_playlist_modal_context():
+    runtime, service, _db, _logger, _activity_calls = _build_runtime()
+    track = {
+        "id": "track-1",
+        "name": "Song One",
+        "artists": [{"name": "Artist One"}],
+        "duration_ms": 1234,
+    }
+    artist = {"id": "artist-1", "name": "Artist One"}
+    album = {"id": "album-1", "name": "Album One"}
+
+    payload, status = add_album_track_to_wishlist(
+        runtime,
+        track=track,
+        artist=artist,
+        album=album,
+        source_type="playlist",
+        source_context={
+            "playlist_id": "37i9dQZF1DX0XUsuxWHRQd",
+            "playlist_name": "Daily Mix",
+            "organize_by_playlist": True,
+            "added_from": "download_modal",
+        },
+    )
+
+    assert status == 200
+    assert payload["success"] is True
+    add_call = service.add_calls[0]
+    assert add_call["source_type"] == "playlist"
+    assert add_call["source_context"]["playlist_id"] == "37i9dQZF1DX0XUsuxWHRQd"
+    assert add_call["source_context"]["playlist_name"] == "Daily Mix"
+    assert add_call["source_context"]["organize_by_playlist"] is True
+    assert add_call["source_context"]["added_from"] == "download_modal"
+
+
 def test_add_album_track_to_wishlist_builds_spotify_payload_and_merges_context():
     runtime, service, _db, _logger, _activity_calls = _build_runtime()
     track = {
