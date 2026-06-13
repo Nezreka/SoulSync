@@ -21578,7 +21578,10 @@ def deezer_download_test():
     """Test Deezer ARL token authentication."""
     try:
         data = request.get_json() or {}
-        arl = data.get('arl', '')
+        # An empty/redaction-sentinel value means "test the SAVED token" — the
+        # settings field round-trips a mask for a saved-but-untouched secret, so
+        # testing it must use the stored ARL, not the mask (#870).
+        arl = config_manager.resolve_secret('deezer_download.arl', data.get('arl'))
         if not arl:
             return jsonify({'success': False, 'error': 'No ARL token provided'})
 
