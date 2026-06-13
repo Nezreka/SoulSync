@@ -24,6 +24,7 @@ from core.download_plugins.album_bundle import (
     get_poll_timeout,
 )
 from core.download_plugins.base import DownloadSourcePlugin
+from core.quality.model import QualityTarget, filter_and_rank, v2_qualities_to_ranked_targets
 from utils.async_helpers import run_async
 
 logger = get_logger("soulseek_client")
@@ -433,16 +434,19 @@ class SoulseekClient(DownloadSourcePlugin):
                 raw_duration = file_data.get('length')
                 duration_ms = raw_duration * 1000 if raw_duration else None
 
+                slskd_attrs = {a['type']: a['value'] for a in file_data.get('attributes', [])}
                 track = TrackResult(
                     username=username,
                     filename=filename,
                     size=size,
-                    bitrate=file_data.get('bitRate'),
+                    bitrate=file_data.get('bitRate') or slskd_attrs.get(0),
                     duration=duration_ms,
                     quality=quality,
                     free_upload_slots=response_data.get('freeUploadSlots', 0),
                     upload_speed=response_data.get('uploadSpeed', 0),
-                    queue_length=response_data.get('queueLength', 0)
+                    queue_length=response_data.get('queueLength', 0),
+                    sample_rate=slskd_attrs.get(4),
+                    bit_depth=slskd_attrs.get(5),
                 )
 
                 all_tracks.append(track)
@@ -1150,10 +1154,14 @@ class SoulseekClient(DownloadSourcePlugin):
             quality = ext.lstrip('.') if ext.lstrip('.') in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
             raw_duration = file_data.get('length')
             duration_ms = raw_duration * 1000 if raw_duration else None
+            slskd_attrs = {a['type']: a['value'] for a in file_data.get('attributes', [])}
             results.append(TrackResult(
                 username=username, filename=filename, size=file_data.get('size', 0),
-                bitrate=file_data.get('bitRate'), duration=duration_ms, quality=quality,
-                free_upload_slots=free_slots, upload_speed=upload_speed, queue_length=queue_length
+                bitrate=file_data.get('bitRate') or slskd_attrs.get(0),
+                duration=duration_ms, quality=quality,
+                free_upload_slots=free_slots, upload_speed=upload_speed, queue_length=queue_length,
+                sample_rate=slskd_attrs.get(4),
+                bit_depth=slskd_attrs.get(5),
             ))
         return results
 
@@ -2002,177 +2010,46 @@ class SoulseekClient(DownloadSourcePlugin):
         return kept
 
     def filter_results_by_quality_preference(self, results: List[TrackResult]) -> List[TrackResult]:
-        """
-        Filter candidates based on user's quality profile with bitrate density constraints.
-        Uses priority waterfall logic: tries highest priority quality first, falls back to lower priorities.
-        Returns candidates matching quality profile constraints, sorted by confidence and effective bitrate.
+        """Filter and rank candidates using the global quality target list.
 
-        Issue #652: also drops candidates whose `(username, filename)`
-        matches a previously-quarantined download. Without this pre-filter
-        the auto-wishlist processor's ranking is deterministic — the same
-        `(uploader, file)` keeps winning the quality picker, downloading,
-        failing AcoustID, quarantining, and re-queueing in an infinite
-        loop. Users wake up to hundreds of duplicate `.quarantined` files
-        for the same source URL.
+        Replaces the old bucket+heuristic approach with ``core.quality.model``
+        so every download source shares the same ranking logic.
+
+        Issue #652: also drops candidates whose ``(username, filename)``
+        matches a previously-quarantined download to break infinite retry loops.
         """
         from database.music_database import MusicDatabase
 
         if not results:
             return []
 
-        # Drop sources already quarantined — bypass the quality picker
-        # entirely so the same bad upload doesn't get re-selected on the
-        # next wishlist cycle. Filesystem read is bounded (~few hundred
-        # sidecars in practical use × <1ms each).
-        results = self._drop_quarantined_sources(results)
-        if not results:
-            return []
-
-        # Get quality profile from database
         db = MusicDatabase()
         profile = db.get_quality_profile()
 
-        logger.debug(f"Quality Filter: Using profile preset '{profile.get('preset', 'custom')}', filtering {len(results)} candidates")
+        # Build ranked target list — v3 profiles carry it directly;
+        # v2 profiles are converted on the fly (no DB write needed here).
+        raw_targets = profile.get('ranked_targets')
+        if not raw_targets and 'qualities' in profile:
+            raw_targets = v2_qualities_to_ranked_targets(profile['qualities'])
 
-        # Categorize candidates by quality with bitrate density constraints
-        quality_buckets = {
-            'flac': [],
-            'mp3_320': [],
-            'mp3_256': [],
-            'mp3_192': [],
-            'other': []
-        }
+        targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
+        fallback_enabled = profile.get('fallback_enabled', True)
 
-        # Track all candidates that pass checks (for fallback)
-        density_filtered_all = []
+        logger.debug(
+            "Quality Filter: profile='%s', %d targets, %d candidates",
+            profile.get('preset', 'custom'), len(targets), len(results),
+        )
 
-        for candidate in results:
-            if not candidate.quality:
-                quality_buckets['other'].append(candidate)
-                continue
+        ranked = filter_and_rank(results, targets, fallback_enabled=fallback_enabled)
 
-            track_format = candidate.quality.lower()
-            track_bitrate = candidate.bitrate or 0
-
-            # Determine quality key
-            if track_format == 'flac':
-                quality_key = 'flac'
-            elif track_format == 'mp3':
-                if track_bitrate >= 320:
-                    quality_key = 'mp3_320'
-                elif track_bitrate >= 256:
-                    quality_key = 'mp3_256'
-                elif track_bitrate >= 192:
-                    quality_key = 'mp3_192'
-                else:
-                    quality_buckets['other'].append(candidate)
-                    continue
-            else:
-                quality_buckets['other'].append(candidate)
-                continue
-
-            quality_config = profile['qualities'].get(quality_key, {})
-            min_kbps = quality_config.get('min_kbps', 0)
-            max_kbps = quality_config.get('max_kbps', 99999)
-
-            effective_kbps = self._calculate_effective_kbps(candidate.size, candidate.duration)
-
-            if effective_kbps is not None:
-                # Primary: bitrate density check
-                if min_kbps <= effective_kbps <= max_kbps:
-                    if quality_config.get('enabled', False):
-                        quality_buckets[quality_key].append(candidate)
-                    density_filtered_all.append(candidate)
-                else:
-                    logger.debug(f"Quality Filter: {quality_key} rejected - {effective_kbps:.0f} kbps outside {min_kbps}-{max_kbps} kbps range")
-            else:
-                # Fallback: duration unavailable, use generous raw-size sanity check
-                file_size_mb = candidate.size / (1024 * 1024)
-                size_min, size_max = self._FALLBACK_SIZE_LIMITS.get(quality_key, (0, 500))
-                if size_min <= file_size_mb <= size_max:
-                    if quality_config.get('enabled', False):
-                        quality_buckets[quality_key].append(candidate)
-                    density_filtered_all.append(candidate)
-                    logger.debug(f"Quality Filter: {quality_key} accepted via size fallback ({file_size_mb:.1f} MB, no duration available)")
-                else:
-                    logger.debug(f"Quality Filter: {quality_key} rejected via size fallback - {file_size_mb:.1f} MB outside {size_min}-{size_max} MB safety limits")
-
-        # Sort each bucket: effective bitrate first (prefer highest audio quality),
-        # then peer quality score as tiebreaker (prefer fastest peer at same quality)
-        for bucket in quality_buckets.values():
-            bucket.sort(key=lambda x: (self._calculate_effective_kbps(x.size, x.duration) or 0, x.quality_score), reverse=True)
-
-        # Enforce FLAC bit depth preference from quality profile
-        flac_config = profile['qualities'].get('flac', {})
-        bit_depth_pref = flac_config.get('bit_depth', 'any')
-        bit_depth_fallback = flac_config.get('bit_depth_fallback', True)
-
-        if bit_depth_pref != 'any' and quality_buckets['flac']:
-            # 16-bit/44.1kHz FLAC theoretical max is 1411 kbps; 24-bit starts at ~2116 kbps
-            # Real-world compressed: 16-bit = 800-1400 kbps, 24-bit = 1500+ kbps
-            DEPTH_THRESHOLD = 1450
-
-            if bit_depth_pref == '24':
-                hi_res = [c for c in quality_buckets['flac']
-                          if (self._calculate_effective_kbps(c.size, c.duration) or 0) > DEPTH_THRESHOLD]
-                if hi_res:
-                    logger.info(f"Quality Filter: Bit depth 24-bit preference — {len(hi_res)}/{len(quality_buckets['flac'])} FLAC candidates are hi-res")
-                    quality_buckets['flac'] = hi_res
-                elif not bit_depth_fallback:
-                    logger.info("Quality Filter: No 24-bit FLAC found and fallback disabled — rejecting all FLAC")
-                    quality_buckets['flac'] = []
-                else:
-                    logger.info("Quality Filter: No 24-bit FLAC found — falling back to 16-bit")
-
-            elif bit_depth_pref == '16':
-                lo_res = [c for c in quality_buckets['flac']
-                          if (self._calculate_effective_kbps(c.size, c.duration) or 0) <= DEPTH_THRESHOLD]
-                if lo_res:
-                    logger.info(f"Quality Filter: Bit depth 16-bit preference — {len(lo_res)}/{len(quality_buckets['flac'])} FLAC candidates are standard")
-                    quality_buckets['flac'] = lo_res
-                elif not bit_depth_fallback:
-                    logger.info("Quality Filter: No 16-bit FLAC found and fallback disabled — rejecting all FLAC")
-                    quality_buckets['flac'] = []
-                else:
-                    logger.info("Quality Filter: No 16-bit FLAC found — falling back to 24-bit")
-
-        # Debug logging
-        for quality, bucket in quality_buckets.items():
-            if bucket:
-                logger.debug(f"Quality Filter: Found {len(bucket)} '{quality}' candidates (after bitrate + bit depth filtering)")
-
-        # Waterfall priority logic: try qualities in priority order
-        # Build priority list from enabled qualities
-        quality_priorities = []
-        for quality_name, quality_config in profile['qualities'].items():
-            if quality_config.get('enabled', False):
-                priority = quality_config.get('priority', 999)
-                quality_priorities.append((priority, quality_name))
-
-        # Sort by priority (lower number = higher priority)
-        quality_priorities.sort()
-
-        # Try each quality in priority order
-        for priority, quality_name in quality_priorities:
-            candidates_for_quality = quality_buckets.get(quality_name, [])
-            if candidates_for_quality:
-                logger.info(f"Quality Filter: Returning {len(candidates_for_quality)} '{quality_name}' candidates (priority {priority})")
-                return candidates_for_quality
-
-        # If no enabled qualities matched, check if fallback is enabled
-        if profile.get('fallback_enabled', True):
-            logger.warning("Quality Filter: No enabled qualities matched, falling back to density-filtered candidates")
-            if density_filtered_all:
-                density_filtered_all.sort(key=lambda x: (x.quality_score, self._calculate_effective_kbps(x.size, x.duration) or 0), reverse=True)
-                logger.info(f"Quality Filter: Returning {len(density_filtered_all)} fallback candidates (bitrate-filtered, any quality)")
-                return density_filtered_all
-            else:
-                logger.warning("Quality Filter: All candidates failed bitrate checks, returning empty (respecting constraints)")
-                return []
+        if ranked:
+            best_label = ranked[0].audio_quality.label()
+            logger.info("Quality Filter: returning %d candidate(s), best=%s", len(ranked), best_label)
         else:
-            logger.warning("Quality Filter: No enabled qualities matched and fallback is disabled, returning empty")
-            return []
-    
+            logger.warning("Quality Filter: no candidates passed quality constraints")
+
+        return ranked
+
     async def get_session_info(self) -> Optional[Dict[str, Any]]:
         """Get slskd session information including version"""
         if not self.base_url:

@@ -13,10 +13,11 @@ import from a neutral package per Cin's contract-first standard.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from core.imports.filename import parse_filename_metadata
+from core.quality.model import AudioQuality
 
 
 @dataclass
@@ -32,6 +33,20 @@ class SearchResult:
     upload_speed: int
     queue_length: int
     result_type: str = "track"  # "track" or "album"
+    # Rich quality metadata — populated by sources that provide it.
+    # None means "unknown", not "absent".
+    sample_rate: Optional[int] = None  # Hz (e.g. 44100, 96000, 192000)
+    bit_depth: Optional[int] = None    # bits per sample (16, 24)
+
+    @property
+    def audio_quality(self) -> AudioQuality:
+        """Unified quality descriptor derived from this result's fields."""
+        return AudioQuality(
+            format=self.quality.lower() if self.quality else 'unknown',
+            bitrate=self.bitrate,
+            sample_rate=self.sample_rate,
+            bit_depth=self.bit_depth,
+        )
 
     @property
     def quality_score(self) -> float:
@@ -126,6 +141,19 @@ class AlbumResult:
     upload_speed: int = 0
     queue_length: int = 0
     result_type: str = "album"
+
+    @property
+    def audio_quality(self) -> AudioQuality:
+        """Unified quality descriptor derived from dominant track quality."""
+        sample_rates = [t.sample_rate for t in self.tracks if t.sample_rate]
+        bit_depths = [t.bit_depth for t in self.tracks if t.bit_depth]
+        bitrates = [t.bitrate for t in self.tracks if t.bitrate]
+        return AudioQuality(
+            format=self.dominant_quality.lower() if self.dominant_quality else 'unknown',
+            bitrate=max(bitrates) if bitrates else None,
+            sample_rate=max(sample_rates) if sample_rates else None,
+            bit_depth=max(bit_depths) if bit_depths else None,
+        )
 
     @property
     def quality_score(self) -> float:

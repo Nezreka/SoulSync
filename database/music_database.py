@@ -8580,7 +8580,7 @@ class MusicDatabase:
     # Quality profile management methods
 
     def get_quality_profile(self) -> dict:
-        """Get the quality profile configuration, returns default if not set"""
+        """Get the quality profile configuration, returns default if not set."""
         import json
 
         profile_json = self.get_preference('quality_profile')
@@ -8588,49 +8588,53 @@ class MusicDatabase:
         if profile_json:
             try:
                 profile = json.loads(profile_json)
-                # Migrate v1 profiles (min_mb/max_mb) to v2 (min_kbps/max_kbps)
-                if profile.get('version', 1) < 2:
-                    logger.info("Migrating quality profile from v1 (file size) to v2 (bitrate density)")
+                version = profile.get('version', 1)
+                if version < 2:
+                    logger.info("Migrating quality profile v1 → v3")
                     return self._get_default_quality_profile()
+                if version == 2:
+                    logger.info("Migrating quality profile v2 → v3 (adding ranked_targets)")
+                    return self._migrate_v2_to_v3(profile)
                 return profile
             except json.JSONDecodeError:
                 logger.error("Failed to parse quality profile JSON, returning default")
 
         return self._get_default_quality_profile()
 
+    def _migrate_v2_to_v3(self, profile: dict) -> dict:
+        """Add ranked_targets to a v2 profile without losing its qualities dict."""
+        from core.quality.model import v2_qualities_to_ranked_targets
+        profile = dict(profile)
+        profile['version'] = 3
+        if 'ranked_targets' not in profile:
+            profile['ranked_targets'] = v2_qualities_to_ranked_targets(
+                profile.get('qualities', {})
+            )
+        return profile
+
     def _get_default_quality_profile(self) -> dict:
-        """Return the default v2 quality profile (balanced preset)"""
+        """Return the default v3 quality profile (balanced preset)."""
         return {
-            "version": 2,
+            "version": 3,
             "preset": "balanced",
+            "fallback_enabled": True,
+            "ranked_targets": [
+                {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+                {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+                {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+                {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+                {"label": "FLAC 16-bit",        "format": "flac", "bit_depth": 16},
+                {"label": "MP3 320kbps",        "format": "mp3",  "min_bitrate": 320},
+                {"label": "MP3 256kbps",        "format": "mp3",  "min_bitrate": 256},
+                {"label": "MP3 192kbps",        "format": "mp3",  "min_bitrate": 192},
+            ],
+            # Keep qualities dict for backwards compat with any old code paths still reading it
             "qualities": {
-                "flac": {
-                    "enabled": True,
-                    "min_kbps": 500,
-                    "max_kbps": 10000,
-                    "priority": 1,
-                    "bit_depth": "any"
-                },
-                "mp3_320": {
-                    "enabled": True,
-                    "min_kbps": 280,
-                    "max_kbps": 500,
-                    "priority": 2
-                },
-                "mp3_256": {
-                    "enabled": True,
-                    "min_kbps": 200,
-                    "max_kbps": 400,
-                    "priority": 3
-                },
-                "mp3_192": {
-                    "enabled": False,
-                    "min_kbps": 150,
-                    "max_kbps": 300,
-                    "priority": 4
-                }
+                "flac":    {"enabled": True,  "min_kbps": 500,  "max_kbps": 10000, "priority": 1, "bit_depth": "any"},
+                "mp3_320": {"enabled": True,  "min_kbps": 280,  "max_kbps": 500,   "priority": 2},
+                "mp3_256": {"enabled": True,  "min_kbps": 200,  "max_kbps": 400,   "priority": 3},
+                "mp3_192": {"enabled": False, "min_kbps": 150,  "max_kbps": 300,   "priority": 4},
             },
-            "fallback_enabled": True
         }
 
     def set_quality_profile(self, profile: dict) -> bool:
@@ -8647,104 +8651,32 @@ class MusicDatabase:
             return False
 
     def get_quality_preset(self, preset_name: str) -> dict:
-        """Get a predefined quality preset"""
+        """Get a predefined quality preset (v3 format with ranked_targets)."""
+        _FLAC_HI_RES_TARGETS = [
+            {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+            {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+            {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+            {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+            {"label": "FLAC 16-bit",        "format": "flac", "bit_depth": 16},
+        ]
+        _MP3_TARGETS = [
+            {"label": "MP3 320kbps", "format": "mp3", "min_bitrate": 320},
+            {"label": "MP3 256kbps", "format": "mp3", "min_bitrate": 256},
+            {"label": "MP3 192kbps", "format": "mp3", "min_bitrate": 192},
+        ]
         presets = {
             "audiophile": {
-                "version": 2,
-                "preset": "audiophile",
-                "qualities": {
-                    "flac": {
-                        "enabled": True,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 1,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": False,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 2
-                    },
-                    "mp3_256": {
-                        "enabled": False,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 3
-                    },
-                    "mp3_192": {
-                        "enabled": False,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 4
-                    }
-                },
-                "fallback_enabled": False
+                "version": 3, "preset": "audiophile", "fallback_enabled": False,
+                "ranked_targets": _FLAC_HI_RES_TARGETS,
             },
             "balanced": {
-                "version": 2,
-                "preset": "balanced",
-                "qualities": {
-                    "flac": {
-                        "enabled": True,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 1,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": True,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 2
-                    },
-                    "mp3_256": {
-                        "enabled": True,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 3
-                    },
-                    "mp3_192": {
-                        "enabled": False,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 4
-                    }
-                },
-                "fallback_enabled": True
+                "version": 3, "preset": "balanced", "fallback_enabled": True,
+                "ranked_targets": _FLAC_HI_RES_TARGETS + _MP3_TARGETS,
             },
             "space_saver": {
-                "version": 2,
-                "preset": "space_saver",
-                "qualities": {
-                    "flac": {
-                        "enabled": False,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 4,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": True,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 1
-                    },
-                    "mp3_256": {
-                        "enabled": True,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 2
-                    },
-                    "mp3_192": {
-                        "enabled": True,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 3
-                    }
-                },
-                "fallback_enabled": True
-            }
+                "version": 3, "preset": "space_saver", "fallback_enabled": True,
+                "ranked_targets": _MP3_TARGETS,
+            },
         }
 
         return presets.get(preset_name, presets["balanced"])

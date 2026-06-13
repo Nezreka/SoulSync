@@ -34,7 +34,7 @@ from core.imports.context import (
 )
 from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
-from core.imports.guards import check_flac_bit_depth, move_to_quarantine
+from core.imports.guards import check_flac_bit_depth, check_quality_target, move_to_quarantine
 from core.imports.quarantine import (
     approve_quarantine_entry,
     entry_id_from_quarantined_filename,
@@ -160,7 +160,7 @@ def import_rejection_reason(context: dict) -> str | None:
             f"{context.get('_acoustid_failure_msg', 'fingerprint mismatch')}"
         )
     if context.get('_bitdepth_rejected'):
-        return "rejected by bit-depth filter"
+        return "rejected by quality filter"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
     return None
@@ -581,10 +581,11 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         if context['_audio_quality']:
             logger.info(f"Audio quality detected: {context['_audio_quality']}")
 
-            _skip_bit_depth = _should_skip_quarantine_check(context, 'bit_depth')
-            rejection_reason = None if _skip_bit_depth else check_flac_bit_depth(file_path, context)
-            if _skip_bit_depth:
-                logger.info(f"[BitDepth] Skipped (user approval) for {_basename}")
+            _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
+                            _should_skip_quarantine_check(context, 'quality')
+            rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
+            if _skip_quality:
+                logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
             if rejection_reason:
                 try:
                     quarantine_path = move_to_quarantine(
@@ -592,10 +593,10 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         context,
                         rejection_reason,
                         automation_engine,
-                        trigger='bit_depth',
+                        trigger='quality',
                     )
                     _mark_task_quarantined(context, quarantine_path)
-                    logger.info(f"File quarantined due to bit depth filter: {quarantine_path}")
+                    logger.info(f"File quarantined due to quality mismatch: {quarantine_path}")
                 except Exception as quarantine_error:
                     logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                     try:
@@ -604,17 +605,25 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                         logger.debug("delete quarantine fallback: %s", e)
 
                 context['_bitdepth_rejected'] = True
-                with matched_context_lock:
-                    if context_key in matched_downloads_context:
-                        del matched_downloads_context[context_key]
-
                 task_id = context.get('task_id')
                 batch_id = context.get('batch_id')
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+
+                # Try the next-best candidate before giving up — same pattern
+                # as AcoustID and integrity failures.
+                if _requeue_quarantined_task_for_retry(task_id, batch_id, 'quality'):
+                    logger.info(
+                        "Quality mismatch for task %s — retrying next-best candidate: %s",
+                        task_id, rejection_reason,
+                    )
+                    return
+
                 if task_id:
                     with tasks_lock:
                         if task_id in download_tasks:
                             download_tasks[task_id]['status'] = 'failed'
-                            download_tasks[task_id]['error_message'] = f"Bit depth filter: {rejection_reason}"
+                            download_tasks[task_id]['error_message'] = f"Quality filter: {rejection_reason}"
                 if task_id and batch_id:
                     _notify_download_completed(batch_id, task_id, success=False)
                 return
