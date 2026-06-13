@@ -547,6 +547,12 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         // ~10s. Now the modal shows immediately with a loading note and tracks
         // stream in once discovery starts. We return early so the shared open at
         // the bottom isn't reached for this path. (#867 UX)
+        //
+        // Open in the 'discovering' phase (not 'fresh') because discovery is
+        // auto-starting: that renders the non-interactive "Discovering matches…"
+        // footer instead of clickable Start Discovery / Wing It buttons, which
+        // must NOT be clickable while the table is still empty/loading. (#867 UX)
+        youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
         openYouTubeDiscoveryModal(fakeUrlHash);
         const _descEl = document.querySelector(`#youtube-discovery-modal-${fakeUrlHash} .modal-description`);
         if (_descEl) _descEl.textContent = 'Loading playlist from Tidal…';
