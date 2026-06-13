@@ -10048,7 +10048,14 @@ function generateTableRowsFromState(state, urlHash) {
         return discoveryResults.map((result, index) => {
             // Handle different field names based on platform
             const trackName = result.lb_track || result.yt_track || result.track_name || '-';
-            const artistName = result.lb_artist || result.yt_artist || result.artist_name || '-';
+            // YouTube flat extraction often can't give a per-track artist, so the
+            // source-side artist comes back "Unknown Artist" even when discovery
+            // matched the song. Fall back to the matched (Spotify/iTunes) artist so
+            // the column shows the real artist instead of "Unknown" (#863).
+            let artistName = result.lb_artist || result.yt_artist || result.artist_name || '';
+            if (!artistName || artistName === 'Unknown Artist') {
+                artistName = result.spotify_artist || artistName || '-';
+            }
 
             return `
             <tr id="discovery-row-${urlHash}-${result.index}">
@@ -10190,6 +10197,19 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
         statusCell.textContent = result.status;
         statusCell.className = `discovery-status ${result.status_class}`;
+
+        // Fill the source-side artist live too — YouTube flat extraction often
+        // leaves it "Unknown Artist", so fall back to the matched artist once
+        // discovery resolves the track (#863). Without this, the per-row poll
+        // updates only the Spotify cells and the left column stays "Unknown".
+        const ytArtistCell = row.querySelector('.yt-artist');
+        if (ytArtistCell) {
+            let ytArtist = result.yt_artist || result.artist_name || '';
+            if (!ytArtist || ytArtist === 'Unknown Artist') {
+                ytArtist = result.spotify_artist || ytArtist || '-';
+            }
+            ytArtistCell.textContent = ytArtist;
+        }
 
         spotifyTrackCell.textContent = result.spotify_track || '-';
         spotifyArtistCell.textContent = result.spotify_artist || '-';
