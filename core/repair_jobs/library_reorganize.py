@@ -161,6 +161,16 @@ class LibraryReorganizeJob(RepairJob):
             album_id = album_row['id']
             album_title = album_row['title'] or 'Unknown Album'
 
+            # Default to the API planner (authoritative metadata via source IDs).
+            # But media-server libraries usually have NO source IDs, so that path
+            # dead-ends at 'no_source_id' and the job only ever reports "needs
+            # enrichment" without moving anything (#862). Reorganizing to match
+            # the template only needs the metadata already on the files — so when
+            # the API planner can't resolve a source, fall back to TAG mode, which
+            # reads each file's embedded title/artist/album/year (the year is what
+            # the user's "($year) $album" template needs). Only genuinely tag-poor
+            # albums then fall through to a finding.
+            reorg_metadata_source = 'api'
             try:
                 preview = preview_album_reorganize(
                     album_id=str(album_id),
@@ -169,6 +179,18 @@ class LibraryReorganizeJob(RepairJob):
                     resolve_file_path_fn=_resolve,
                     build_final_path_fn=build_final_path_for_track,
                 )
+                if preview.get('status') == 'no_source_id':
+                    tags_preview = preview_album_reorganize(
+                        album_id=str(album_id),
+                        db=context.db,
+                        transfer_dir=transfer_dir,
+                        resolve_file_path_fn=_resolve,
+                        build_final_path_fn=build_final_path_for_track,
+                        metadata_source='tags',
+                    )
+                    if tags_preview.get('status') == 'planned':
+                        preview = tags_preview
+                        reorg_metadata_source = 'tags'
             except Exception as exc:
                 logger.warning(
                     "Reorganize preview failed for album %s ('%s'): %s",
@@ -189,9 +211,10 @@ class LibraryReorganizeJob(RepairJob):
                 continue
 
             if status == 'no_source_id':
-                # Can't compute destinations without a metadata source —
-                # skip cleanly with a single finding rather than 12 per-track
-                # "no source" findings that would clutter the UI.
+                # Reached only when BOTH the API planner (no source ID) AND the
+                # tag-mode fallback (files missing essential title/artist/album
+                # tags, or not on disk) failed — so no destination can be computed.
+                # One album-level finding rather than N per-track ones (UI clutter).
                 result.skipped += len(tracks) or 1
                 if dry_run and context.create_finding and tracks:
                     inserted = context.create_finding(
@@ -201,12 +224,13 @@ class LibraryReorganizeJob(RepairJob):
                         entity_type='album',
                         entity_id=str(album_id),
                         file_path=None,
-                        title=f'Needs enrichment: {album_title}',
+                        title=f'Cannot place: {album_title}',
                         description=(
                             f"Album '{album_title}' by {preview.get('artist', '?')} "
-                            "has no metadata source ID — run enrichment first to "
-                            "populate at least one of spotify_album_id / "
-                            "itunes_album_id / deezer_id / discogs_id / soul_id."
+                            "couldn't be reorganized: it has no metadata source ID "
+                            "AND its files are missing essential tags (title / artist "
+                            "/ album) or aren't on disk. Re-tag the files or run "
+                            "'Fix Unknown Artists', then run this job again."
                         ),
                         details={'album_id': str(album_id), 'reason': 'no_source_id'},
                     )
@@ -280,6 +304,10 @@ class LibraryReorganizeJob(RepairJob):
                     'artist_id': str(album_row.get('artist_id') or ''),
                     'artist_name': preview.get('artist') or album_row.get('artist_name') or 'Unknown Artist',
                     'source': preview.get('source'),
+                    # Carry the mode the preview actually used so the live move
+                    # matches it — otherwise the queue runner defaults to 'api'
+                    # and a tag-mode-only album would fail at apply time (#862).
+                    'metadata_source': reorg_metadata_source,
                 })
 
             if context.update_progress and (i + 1) % 25 == 0:

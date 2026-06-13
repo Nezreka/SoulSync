@@ -463,6 +463,77 @@ def test_scan_apply_mode_enqueues_albums_via_reorganize_queue(make_context, monk
     assert result.findings_created == 0
 
 
+def _stub_preview_by_mode(monkeypatch, api_resp, tags_resp):
+    """Patch preview to return different responses for api vs tag mode, so the
+    #862 api→tags fallback can be exercised."""
+    from core import library_reorganize as core_lr
+
+    def _fake_preview(*, album_id, metadata_source='api', **kwargs):
+        return tags_resp if metadata_source == 'tags' else api_resp
+    monkeypatch.setattr(core_lr, 'preview_album_reorganize', _fake_preview)
+
+
+def test_scan_falls_back_to_tag_mode_when_api_has_no_source_id(make_context, monkeypatch):
+    """#862: media-server albums have no source ID, so the API planner returns
+    no_source_id. The job must fall back to TAG mode and, when that plans, emit
+    real path_mismatch findings — NOT a dead-end 'needs enrichment' finding."""
+    db = _FakeDB([_make_album_row(id_='A1', title='Tagged Album')])
+    _stub_preview_by_mode(
+        monkeypatch,
+        api_resp={'success': False, 'status': 'no_source_id', 'source': None,
+                  'album': 'Tagged Album', 'artist': 'A',
+                  'tracks': [{'track_id': 't1', 'title': 'X', 'matched': False}]},
+        tags_resp={'success': True, 'status': 'planned', 'source': 'tags',
+                   'album': 'Tagged Album', 'artist': 'A',
+                   'tracks': [{'track_id': 't1', 'title': 'X',
+                               'current_path': 'old/X.flac', 'new_path': 'A/(2008) Tagged Album/01 - X.flac',
+                               'matched': True, 'unchanged': False, 'file_exists': True}]},
+    )
+    ctx = make_context(db=db, dry_run=True)
+    result = LibraryReorganizeJob().scan(ctx)
+
+    findings = ctx._captured_findings  # type: ignore[attr-defined]
+    assert result.findings_created == 1
+    assert findings[0]['finding_type'] == 'path_mismatch'
+    # Crucially NOT the enrichment dead-end the user reported.
+    assert all(f['finding_type'] != 'album_needs_enrichment' for f in findings)
+
+
+def test_apply_mode_enqueues_tag_metadata_source_on_fallback(make_context, monkeypatch):
+    """#862: when the album reorganizes via the tag-mode fallback, the enqueued
+    item must carry metadata_source='tags' so the live move uses tags too (the
+    queue runner otherwise defaults to 'api' and would fail again)."""
+    db = _FakeDB([_make_album_row(id_='A1', title='Tagged Album', artist_id=10, artist_name='A')])
+    _stub_preview_by_mode(
+        monkeypatch,
+        api_resp={'success': False, 'status': 'no_source_id', 'source': None,
+                  'album': 'Tagged Album', 'artist': 'A',
+                  'tracks': [{'track_id': 't1', 'title': 'X', 'matched': False}]},
+        tags_resp={'success': True, 'status': 'planned', 'source': 'tags',
+                   'album': 'Tagged Album', 'artist': 'A',
+                   'tracks': [{'track_id': 't1', 'title': 'X',
+                               'current_path': 'old/X.flac', 'new_path': 'A/(2008) Tagged Album/01 - X.flac',
+                               'matched': True, 'unchanged': False, 'file_exists': True}]},
+    )
+
+    enqueue_calls = []
+
+    class _StubQueue:
+        def enqueue_many(self, items):
+            enqueue_calls.append(items)
+            return {'enqueued': len(items), 'already_queued': 0, 'total': len(items)}
+
+    import core.reorganize_queue as queue_mod
+    monkeypatch.setattr(queue_mod, 'get_queue', lambda: _StubQueue())
+
+    ctx = make_context(db=db, dry_run=False)
+    LibraryReorganizeJob().scan(ctx)
+
+    assert len(enqueue_calls) == 1
+    assert enqueue_calls[0][0]['metadata_source'] == 'tags'
+    assert enqueue_calls[0][0]['source'] == 'tags'
+
+
 def test_scan_only_iterates_albums_for_active_server(make_context, monkeypatch):
     """Pin: multi-server users (Plex + Jellyfin etc) — the job only
     iterates albums on the ACTIVE server. Inactive server's rows are
