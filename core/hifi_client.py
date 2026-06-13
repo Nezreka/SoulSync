@@ -92,6 +92,7 @@ DEFAULT_INSTANCES = [
     'https://hund.qqdl.site',
     'https://katze.qqdl.site',
     'https://arran.monochrome.tf',
+    'https://us-west.monochrome.tf',  # community-confirmed working (Sokhi)
 ]
 
 
