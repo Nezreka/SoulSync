@@ -164,6 +164,21 @@ def test_reconcile_organize_batch_rebuilds_from_library(tmp_path: Path):
     assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
 
 
+def test_reconcile_batch_playlist_rebuilds_even_if_row_flag_off(tmp_path: Path):
+    """The batch's OWN playlist rebuilds because the per-download toggle (batch
+    playlist_folder_mode) is the intent — even when the saved organize_by_playlist
+    row flag is off (the common case: user flips the download-modal toggle, never
+    the saved preference). 'Off' (PL2) has organize_by_playlist=False on the row."""
+    b = _mk(tmp_path, "B.mp3")[0]                  # Off's membership = B
+    db = _RebuildDB({"B": b})
+    batch = {"playlist_folder_mode": True, "playlist_name": "Off",
+             "source_playlist_ref": "PL2", "batch_source": "spotify", "queue": []}
+    cfg = _Cfg(str(tmp_path / "Playlists"))
+    results = reconcile_batch_playlists(db, batch, {}, cfg)
+    assert len(results) == 1 and results[0][0] == "Off"
+    assert (tmp_path / "Playlists" / "Off" / "B.mp3").exists()
+
+
 def test_reconcile_wishlist_track_rebuilds_its_playlist(tmp_path: Path):
     """The wishlist gap: a wishlist batch (not organize) completes a track whose
     provenance points to an organize playlist → that playlist gets rebuilt from the
