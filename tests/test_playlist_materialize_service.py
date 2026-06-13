@@ -30,8 +30,8 @@ class _RebuildDB:
 
     def get_mirrored_playlists(self, profile_id=1):
         return [
-            {"id": 1, "name": "Mix", "organize_by_playlist": True},
-            {"id": 2, "name": "Off", "organize_by_playlist": False},
+            {"id": 1, "name": "Mix", "source_playlist_id": "PL1", "organize_by_playlist": True},
+            {"id": 2, "name": "Off", "source_playlist_id": "PL2", "organize_by_playlist": False},
         ]
 
     def get_mirrored_playlist_tracks(self, pid):
@@ -43,6 +43,12 @@ class _RebuildDB:
     def get_mirrored_playlist(self, playlist_id):
         for pl in self.get_mirrored_playlists():
             if pl["id"] == playlist_id:
+                return pl
+        return None
+
+    def resolve_mirrored_playlist(self, ref, profile_id=1, *, default_source="spotify"):
+        for pl in self.get_mirrored_playlists():
+            if str(ref) in (pl["source_playlist_id"], str(pl["id"]), pl["name"]):
                 return pl
         return None
 
@@ -142,59 +148,53 @@ def test_materialize_skipped_when_not_organize(tmp_path: Path):
     assert not (tmp_path / "Playlists").exists()
 
 
-def test_reconcile_organize_batch_full_rebuild(tmp_path: Path):
-    """An organize-by-playlist batch → its own folder is fully (re)built from the
-    batch payload."""
-    owned, fresh = _mk(tmp_path, "Owned.mp3"), _mk(tmp_path, "Fresh.mp3")
-    batch = {
-        "playlist_folder_mode": True,
-        "playlist_name": "Mix",
-        "analysis_results": [{"found": True, "matched_file_path": owned[0]}],
-        "queue": ["t1"],
-    }
-    tasks = {"t1": {"status": "completed", "final_file_path": fresh[0],
-                    "track_info": {"_playlist_name": "Mix"}}}   # same playlist as batch
+def test_reconcile_organize_batch_rebuilds_from_library(tmp_path: Path):
+    """An organize batch → its playlist is rebuilt from the LIBRARY (membership ×
+    check_track_exists), not from fragile per-task fields. Owned members link,
+    non-owned drop out."""
+    a = _mk(tmp_path, "A.mp3")[0]                 # Mix membership = A, Gone; only A owned
+    db = _RebuildDB({"A": a})
+    batch = {"playlist_folder_mode": True, "playlist_name": "Mix",
+             "source_playlist_ref": "PL1", "batch_source": "spotify", "queue": []}
     cfg = _Cfg(str(tmp_path / "Playlists"))
-    results = reconcile_batch_playlists(batch, tasks, cfg)
-    assert len(results) == 1                                     # only Mix (no double-add)
+    results = reconcile_batch_playlists(db, batch, {}, cfg)
+    assert len(results) == 1
     name, s = results[0]
-    assert name == "Mix" and s.linked == 2
-    pdir = Path(s.playlist_dir)
-    assert (pdir / "Owned.mp3").exists() and (pdir / "Fresh.mp3").exists()
+    assert name == "Mix" and s.linked == 1        # A owned; Gone not in library → skipped
+    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
 
 
-def test_reconcile_wishlist_adds_to_other_playlist_without_pruning(tmp_path: Path):
-    """The wishlist gap: a wishlist batch (not organize) downloads a track that
-    belongs to an organize playlist → it's ADDED to that playlist's folder, and
-    the folder's existing entries are NOT pruned."""
-    # Pre-seed Smack That with an existing symlink (a track from a prior batch).
-    existing = _mk(tmp_path, "Existing.mp3")[0]
-    from core.playlists.materialize import rebuild_playlist_folder
-    rebuild_playlist_folder(str(tmp_path / "Playlists"), "Smack That", [existing], "symlink")
-
-    # A WISHLIST batch (playlist_folder_mode False) completes a track tagged for
-    # the "Smack That" organize playlist.
-    late = _mk(tmp_path, "Late.mp3")[0]
-    batch = {"playlist_folder_mode": False, "playlist_name": "wishlist",
-             "analysis_results": [], "queue": ["w1"]}
-    tasks = {"w1": {"status": "completed", "final_file_path": late,
-                    "track_info": {"_playlist_name": "Smack That"}}}
+def test_reconcile_wishlist_track_rebuilds_its_playlist(tmp_path: Path):
+    """The wishlist gap: a wishlist batch (not organize) completes a track whose
+    provenance points to an organize playlist → that playlist gets rebuilt from the
+    library, regardless of which import path set which task field."""
+    a = _mk(tmp_path, "A.mp3")[0]
+    db = _RebuildDB({"A": a})
+    batch = {"playlist_folder_mode": False, "playlist_name": "wishlist", "queue": ["w1"]}
+    tasks = {"w1": {"status": "completed",
+                    "track_info": {"source_info": {"playlist_id": "PL1", "source": "spotify"}}}}
     cfg = _Cfg(str(tmp_path / "Playlists"))
+    results = reconcile_batch_playlists(db, batch, tasks, cfg)
+    assert len(results) == 1 and results[0][0] == "Mix"
+    assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()   # Mix rebuilt from the library
 
-    results = reconcile_batch_playlists(batch, tasks, cfg)
-    assert len(results) == 1 and results[0][0] == "Smack That"
-    pdir = tmp_path / "Playlists" / "Smack That"
-    assert (pdir / "Late.mp3").exists()        # the wishlist track was ADDED
-    assert (pdir / "Existing.mp3").exists()    # and the prior entry was NOT pruned
+
+def test_reconcile_skips_non_organized_provenance(tmp_path: Path):
+    """A completed track pointing to a NON-organize playlist (Off / PL2) is ignored."""
+    db = _RebuildDB({"B": _mk(tmp_path, "B.mp3")[0]})
+    batch = {"playlist_folder_mode": False, "playlist_name": "wishlist", "queue": ["w1"]}
+    tasks = {"w1": {"status": "completed",
+                    "track_info": {"source_info": {"playlist_id": "PL2", "source": "spotify"}}}}
+    assert reconcile_batch_playlists(db, batch, tasks, _Cfg(str(tmp_path / "Playlists"))) == []
+    assert not (tmp_path / "Playlists" / "Off").exists()
 
 
 def test_reconcile_noop_for_plain_batch(tmp_path: Path):
     """A normal (non-organize, no provenance) batch → nothing happens."""
-    f = _mk(tmp_path, "X.mp3")[0]
-    batch = {"playlist_folder_mode": False, "playlist_name": "album",
-             "analysis_results": [], "queue": ["a1"]}
-    tasks = {"a1": {"status": "completed", "final_file_path": f, "track_info": {}}}
-    assert reconcile_batch_playlists(batch, tasks, _Cfg(str(tmp_path / "Playlists"))) == []
+    db = _RebuildDB({})
+    batch = {"playlist_folder_mode": False, "playlist_name": "album", "queue": ["a1"]}
+    tasks = {"a1": {"status": "completed", "track_info": {}}}     # no source_info
+    assert reconcile_batch_playlists(db, batch, tasks, _Cfg(str(tmp_path / "Playlists"))) == []
     assert not (tmp_path / "Playlists").exists()
 
 

@@ -74,55 +74,63 @@ def materialize_playlist_from_batch(batch: dict, download_tasks: dict, config_ma
     return rebuild_playlist_folder(root, name, real_paths, mode)
 
 
-def reconcile_batch_playlists(batch: dict, download_tasks: dict, config_manager):
-    """One post-batch step: drop the batch's newly-resolved tracks into the right
-    ``Playlists/<name>/`` folders. Path-independent — covers an organize-by-playlist
-    download AND a late wishlist arrival — using the per-track playlist provenance
-    each download already carries, plus the file paths the batch already captured
-    (so it needs no DB re-match and no waiting on the server scan/sync).
+def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_manager, *, profile_id: int = 1):
+    """One post-batch step: rebuild every organize-by-playlist playlist this batch
+    TOUCHED, from CURRENT library ownership.
 
-      - The batch's OWN organize playlist is fully rebuilt from the batch payload
-        (owned + downloaded), pruning tracks no longer present.
-      - A track that completed for a DIFFERENT playlist (e.g. a wishlist
-        fulfillment) is ADDED to that playlist's folder — no prune, since this
-        batch isn't that playlist's full membership (removals are handled by a
-        full rebuild on the next sync / the manual button).
+    Touched playlists = the batch's own organize playlist + any playlist a completed
+    track belongs to (via the per-track ``source_info`` provenance — covers a
+    wishlist batch fulfilling a track that belongs to an organize playlist). Each is
+    rebuilt via ``_rebuild_one_from_db`` (``check_track_exists`` over its membership),
+    so it's robust to HOW a track imported — modal worker, slskd monitor, or the
+    verification worker, which don't all set the same task fields. It simply asks the
+    library what's owned, and prunes tracks that have left the playlist.
 
-    Returns a list of ``(playlist_name, RebuildSummary)``. Callers wrap non-fatally."""
-    from core.library.path_resolver import resolve_library_file_path
+    Returns ``[(playlist_name, RebuildSummary)]``. Callers wrap non-fatally."""
+    import json as _json
 
-    results = []
-    root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
-    mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
-    batch_name = batch.get("playlist_name") if batch.get("playlist_folder_mode") else None
+    # Collect the (ref, source) of every organize playlist this batch touched.
+    wanted, seen_ref = [], set()
 
-    # 1. The batch's own organize playlist → full materialize (prunes removed).
-    if batch_name:
-        summary = materialize_playlist_from_batch(batch, download_tasks, config_manager)
-        if summary:
-            results.append((batch_name, summary))
+    def _want(ref, source):
+        ref = str(ref or "").strip()
+        if not ref:
+            return
+        key = (ref, source or "spotify")
+        if key not in seen_ref:
+            seen_ref.add(key)
+            wanted.append(key)
 
-    # 2. Tracks that completed for OTHER playlists (e.g. wishlist fulfilling a
-    #    track that belongs to an organize playlist) → add-only into that folder.
-    extra: dict = {}
+    if batch.get("playlist_folder_mode"):
+        _want(batch.get("source_playlist_ref") or batch.get("playlist_id"),
+              batch.get("batch_source") or "spotify")
+
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
-        if task.get("status") != "completed" or not task.get("final_file_path"):
+        if task.get("status") != "completed":
             continue
-        pname = (task.get("track_info") or {}).get("_playlist_name")
-        if pname and pname != batch_name:
-            extra.setdefault(pname, []).append(task["final_file_path"])
+        si = (task.get("track_info") or {}).get("source_info") or {}
+        if isinstance(si, str):
+            try:
+                si = _json.loads(si)
+            except Exception:
+                si = {}
+        if isinstance(si, dict) and si.get("playlist_id"):
+            _want(si["playlist_id"], si.get("source") or "spotify")
 
-    for name, stored in extra.items():
-        real, seen = [], set()
-        for p in stored:
-            r = resolve_library_file_path(str(p), config_manager=config_manager)
-            if r and r not in seen:
-                seen.add(r)
-                real.append(r)
-        if real:
-            results.append((name, rebuild_playlist_folder(root, name, real, mode, prune_stale=False)))
-
+    results, seen_id = [], set()
+    for ref, source in wanted:
+        try:
+            pl = db.resolve_mirrored_playlist(ref, profile_id, default_source=source)
+        except Exception:
+            pl = None
+        if not pl or not pl.get("organize_by_playlist") or pl.get("id") in seen_id:
+            continue
+        seen_id.add(pl.get("id"))
+        try:
+            results.append(_rebuild_one_from_db(db, config_manager, pl))
+        except Exception:
+            continue
     return results
 
 

@@ -556,7 +556,8 @@ def on_download_completed(batch_id: str, task_id: str, success: bool, deps: Life
                 # from the batch's own captured paths — non-fatal, derived view.
                 try:
                     from core.playlists.materialize_service import reconcile_batch_playlists
-                    for _pl_name, _mat in reconcile_batch_playlists(batch, download_tasks, deps.config_manager):
+                    from database.music_database import MusicDatabase
+                    for _pl_name, _mat in reconcile_batch_playlists(MusicDatabase(), batch, download_tasks, deps.config_manager):
                         logger.info(
                             f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}': "
                             f"{_mat.linked} linked, {_mat.copied} copied, "
@@ -758,7 +759,8 @@ def check_batch_completion_v2(batch_id: str, deps: LifecycleDeps) -> Optional[bo
                 # get built for them. Path-independent, non-fatal, derived view.
                 try:
                     from core.playlists.materialize_service import reconcile_batch_playlists
-                    for _pl_name, _mat in reconcile_batch_playlists(batch, download_tasks, deps.config_manager):
+                    from database.music_database import MusicDatabase
+                    for _pl_name, _mat in reconcile_batch_playlists(MusicDatabase(), batch, download_tasks, deps.config_manager):
                         logger.info(
                             f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}': "
                             f"{_mat.linked} linked, {_mat.copied} copied, "
