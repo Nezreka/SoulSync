@@ -37,6 +37,8 @@ from core.discovery.quality_scanner import (
     _track_artist_names,
     _track_name,
 )
+from core.library.file_tags import read_embedded_tags
+from core.library.path_resolver import resolve_library_file_path
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
@@ -150,6 +152,69 @@ def _rank_label(rank: Optional[int]) -> str:
     }.get(rank, 'unknown')
 
 
+def _norm_isrc(value: Any) -> str:
+    """Canonicalize an ISRC for comparison: uppercase, strip dashes/spaces."""
+    if not value:
+        return ''
+    return str(value).upper().replace('-', '').replace(' ', '').strip()
+
+
+def _read_track_isrc(file_path: str) -> str:
+    """Read the ISRC the enrichment pipeline embedded in the file's tags.
+
+    Enrichment matches every track to the metadata sources and writes the IDs
+    (ISRC, per-source track IDs) into the file — so an already-enriched track
+    carries its exact identity. Returns '' when unreadable / not enriched."""
+    resolved = resolve_library_file_path(file_path) if file_path else None
+    if not resolved and file_path and os.path.isfile(file_path):
+        resolved = file_path
+    if not resolved:
+        return ''
+    try:
+        info = read_embedded_tags(resolved)
+    except Exception:
+        return ''
+    if not info or not info.get('available'):
+        return ''
+    return _norm_isrc((info.get('tags') or {}).get('isrc'))
+
+
+def _candidate_isrc(cand: Any) -> str:
+    """Pull an ISRC off a provider search result (Track / dict), checking the
+    common shapes: a flat ``isrc`` or a nested ``external_ids.isrc``."""
+    direct = _extract_lookup_value(cand, 'isrc')
+    if direct:
+        return _norm_isrc(direct)
+    ext = _extract_lookup_value(cand, 'external_ids')
+    if isinstance(ext, dict):
+        return _norm_isrc(ext.get('isrc'))
+    return ''
+
+
+def _match_via_isrc(isrc: str, source_priority: List[str]) -> Tuple[Optional[Any], Optional[str]]:
+    """Exact-match a track by its ISRC via each source's ``isrc:`` search.
+
+    ISRC is the universal cross-source recording key, so this resolves the EXACT
+    track (with its real album) instead of fuzzy-matching by name. Guarded: only
+    a candidate whose own ISRC equals ours is accepted, so a source that ignores
+    the ``isrc:`` syntax and returns unrelated hits can't produce a false match.
+    Returns (track, source) or (None, None)."""
+    if not isrc:
+        return None, None
+    for source in source_priority:
+        client = get_client_for_source(source)
+        if not client or not hasattr(client, 'search_tracks'):
+            continue
+        try:
+            results = _search_tracks_for_source(source, f'isrc:{isrc}', limit=5, client=client)
+        except Exception:
+            results = []
+        for cand in results or []:
+            if _candidate_isrc(cand) == isrc:
+                return cand, source
+    return None, None
+
+
 def _find_best_match(engine: Any, source_priority: List[str], title: str, artist: str,
                      album: str, min_confidence: float) -> Tuple[Optional[Any], float, Optional[str], bool]:
     """Search the configured metadata sources for the best replacement match.
@@ -201,11 +266,12 @@ class QualityUpgradeJob(RepairJob):
         "track against your Quality Profile using BOTH the file format and its "
         'bitrate — so a 128 kbps MP3 is no longer treated the same as a 320 kbps '
         'one, and enabling MP3-320/256 in your profile actually counts.\n\n'
-        'For every track below your preferred quality, it searches your configured '
-        'metadata source for a better version and creates a finding showing the '
-        'match and a confidence score. Nothing is queued automatically: applying a '
-        'finding adds that matched track — with its album context — to the wishlist, '
-        'the same as any other download.\n\n'
+        'For every track below your preferred quality, it finds a better version and '
+        'creates a finding. If the track was enriched, it uses the ISRC embedded in '
+        'the file to resolve the EXACT track (and its album) — no guessing; otherwise '
+        'it falls back to a name/artist search with a confidence score. Nothing is '
+        'queued automatically: applying a finding adds that matched track — with its '
+        'album context — to the wishlist, the same as any other download.\n\n'
         'Settings:\n'
         '- Scope: "watchlist" (watchlisted artists only) or "all" (whole library)\n'
         '- Min confidence: minimum match confidence (0-1) to surface a finding\n\n'
@@ -330,13 +396,24 @@ class QualityUpgradeJob(RepairJob):
                     log_line=f'Low quality ({current_label}): {artist_name} - {title}',
                     log_type='info')
 
-            try:
-                best, conf, source, attempted = _find_best_match(
-                    engine, source_priority, title, artist_name or '', album_title or '', min_conf)
-            except Exception as e:
-                logger.debug("[Quality Upgrade] Match error for %s - %s: %s", artist_name, title, e)
-                result.errors += 1
-                continue
+            # Fast path: enrichment embeds the ISRC (and per-source track IDs) in
+            # the file's tags, so an already-enriched track carries its exact
+            # identity. Resolve the EXACT track by ISRC — no fuzzy matching, and
+            # the real album comes with it. Only fall back to name/artist search
+            # for tracks that were never enriched / have no usable ISRC.
+            matched_via = 'isrc'
+            best, source = _match_via_isrc(_read_track_isrc(file_path), source_priority)
+            conf, attempted = (1.0, True) if best else (0.0, False)
+
+            if not best:
+                matched_via = 'search'
+                try:
+                    best, conf, source, attempted = _find_best_match(
+                        engine, source_priority, title, artist_name or '', album_title or '', min_conf)
+                except Exception as e:
+                    logger.debug("[Quality Upgrade] Match error for %s - %s: %s", artist_name, title, e)
+                    result.errors += 1
+                    continue
 
             if not attempted:
                 logger.warning("[Quality Upgrade] No metadata provider responded — stopping")
@@ -365,7 +442,8 @@ class QualityUpgradeJob(RepairJob):
                         description=(
                             f'"{title}" by {artist_name} is {current_label}, below your preferred '
                             f'quality. Best match: "{_track_name(best)}" via {source} '
-                            f'(confidence {conf:.0%}). Apply to add it to the wishlist.'),
+                            f'({"exact ISRC match" if matched_via == "isrc" else f"confidence {conf:.0%}"}). '
+                            'Apply to add it to the wishlist.'),
                         details={
                             'track_id': track_id,
                             'track_title': title,
@@ -375,6 +453,7 @@ class QualityUpgradeJob(RepairJob):
                             'current_format': current_label,
                             'current_bitrate': bitrate,
                             'match_confidence': conf,
+                            'matched_via': matched_via,
                             'provider': source,
                             'matched_track_data': matched,
                         })
