@@ -876,6 +876,20 @@ class ConfigManager:
         config[keys[-1]] = value
         self._save_config()
 
+    def resolve_secret(self, key: str, posted: Any) -> str:
+        """Resolve a secret value coming back from the settings UI.
+
+        The UI renders a saved-but-untouched secret as the REDACTED_SENTINEL (shown
+        masked); empty or that sentinel means "use the stored value", while a real
+        string is a genuine new secret. A connection-test endpoint should test the
+        EFFECTIVE secret, not the mask — otherwise testing a saved-but-untouched
+        token sends the sentinel and the source rejects it (#870)."""
+        if isinstance(posted, str):
+            posted = posted.strip()
+        if not posted or posted == self.REDACTED_SENTINEL:
+            return self.get(key, '') or ''
+        return posted
+
     def get_spotify_config(self) -> Dict[str, str]:
         return self.get('spotify', {})
 
