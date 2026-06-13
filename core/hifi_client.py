@@ -95,6 +95,54 @@ DEFAULT_INSTANCES = [
     'https://us-west.monochrome.tf',  # community-confirmed working (Sokhi)
 ]
 
+# The default instances as they shipped BEFORE the auto-push mechanism below.
+# Used as the one-time baseline for the "already offered" set so existing
+# installs don't get pre-existing defaults they'd deliberately removed
+# resurrected — only genuinely NEW defaults are pushed.
+LEGACY_DEFAULTS = [
+    'https://triton.squid.wtf',
+    'https://hifi-one.spotisaver.net',
+    'https://hifi-two.spotisaver.net',
+    'https://hund.qqdl.site',
+    'https://katze.qqdl.site',
+    'https://arran.monochrome.tf',
+]
+
+
+def compute_new_default_pushes(all_defaults, offered, legacy_baseline, existing):
+    """Decide which default instances to auto-add to an EXISTING install.
+
+    A new working instance added to ``DEFAULT_INSTANCES`` should reach everyone,
+    not just fresh installs / people who click "Restore Defaults" — but we must
+    NOT re-add defaults a user deliberately removed.
+
+    The ``offered`` set records every default ever presented to this install.
+    First run (``offered is None``) baselines to ``legacy_baseline`` (the defaults
+    that shipped before tracking), so those are treated as already-offered. Any
+    default NOT in the offered set is genuinely new → added once (unless already
+    present) and recorded.
+
+    Pure: returns ``(urls_to_add, new_offered_list)``. The caller does the I/O.
+    """
+    def _n(u):
+        return (u or '').rstrip('/')
+    base = list(legacy_baseline) if offered is None else list(offered)
+    offered_set = {_n(u) for u in base}
+    existing_set = {_n(u) for u in (existing or [])}
+    to_add, new_offered = [], list(base)
+    for u in all_defaults:
+        if _n(u) in offered_set:
+            continue
+        offered_set.add(_n(u))
+        new_offered.append(u)
+        if _n(u) not in existing_set:
+            to_add.append(u)
+    return to_add, new_offered
+
+
+# Run the new-default push at most once per process.
+_pushed_new_defaults = False
+
 
 from core.download_plugins.base import DownloadSourcePlugin
 
@@ -139,11 +187,41 @@ class HiFiClient(DownloadSourcePlugin):
     def set_engine(self, engine):
         self._engine = engine
 
+    def _push_new_default_instances(self, db):
+        """One-time-per-process: auto-add any genuinely-new default instances to an
+        existing config so a newly-added working instance reaches everyone, not
+        just fresh installs / Restore-Defaults clickers. Never resurrects defaults
+        a user removed (tracked via the persisted 'offered' set)."""
+        global _pushed_new_defaults
+        if _pushed_new_defaults:
+            return
+        try:
+            from config.settings import config_manager
+            offered = config_manager.get('hifi.offered_defaults', None)
+            existing = db.get_all_hifi_instances()
+            to_add, new_offered = compute_new_default_pushes(
+                DEFAULT_INSTANCES, offered, LEGACY_DEFAULTS,
+                [i.get('url') for i in existing],
+            )
+            if to_add:
+                priority = len(existing)
+                for url in to_add:
+                    if db.add_hifi_instance(url.rstrip('/'), priority):
+                        priority += 1
+                logger.info(f"[HiFi] Auto-added {len(to_add)} new default instance(s) "
+                            f"to existing config: {to_add}")
+            if offered is None or to_add:
+                config_manager.set('hifi.offered_defaults', new_offered)
+            _pushed_new_defaults = True
+        except Exception as e:
+            logger.warning(f"[HiFi] new-default auto-push skipped: {e}")
+
     def _load_instances_from_db(self):
         try:
             from database.music_database import get_database
             db = get_database()
             db.seed_hifi_instances(DEFAULT_INSTANCES)
+            self._push_new_default_instances(db)
             rows = db.get_hifi_instances()
             urls = [r['url'] for r in rows if r['enabled']]
             if urls:
