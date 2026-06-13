@@ -14776,6 +14776,16 @@ def _fetch_youtube_video_artist(video_id, cookie_opts):
     return (info.get('uploader') or info.get('channel') or '').strip()
 
 
+def _recover_youtube_artist_cleaned(video_id):
+    """Fetch + clean a YouTube track's artist from its video page (#863).
+    Used by the async discovery worker for tracks flat extraction left Unknown."""
+    raw = _fetch_youtube_video_artist(video_id, _youtube_cookie_opts())
+    if not raw:
+        return ''
+    cleaned = clean_youtube_artist(raw)
+    return cleaned if cleaned and cleaned != 'Unknown Artist' else ''
+
+
 def parse_youtube_playlist(url):
     """
     Parse a YouTube Music playlist URL and extract track information using yt-dlp
@@ -14848,55 +14858,13 @@ def parse_youtube_playlist(url):
                 
                 tracks.append(track_data)
 
-            # ARTIST RECOVERY (#863): current yt-dlp flat extraction returns ONLY
-            # the title per entry — no uploader/artist — so tracks whose title
-            # isn't "Artist - Title" came out "Unknown Artist" and discovery
-            # couldn't match them. Recover the artist from each unresolved track's
-            # OWN video page (uploader/channel). Bounded by a wall-clock budget so
-            # a large playlist can't exceed the 120s gunicorn worker timeout;
-            # whatever isn't reached stays for MusicBrainz/Spotify discovery.
-            unresolved = [t for t in tracks
-                          if t.get('id') and (not t['artists'] or t['artists'][0] == 'Unknown Artist')]
-            if unresolved:
-                cookie_opts = _youtube_cookie_opts()
-                deadline = time.time() + 75  # leave headroom under the 120s worker timeout
-                recovered = 0
-                # Per-video lookups are several seconds each, so doing them
-                # sequentially only covered ~a dozen tracks before the budget ran
-                # out (the back half of a playlist stayed "Unknown Artist"). Run a
-                # small pool concurrently to cover the whole playlist within the
-                # same wall-clock budget, without hammering YouTube.
-                from concurrent.futures import (ThreadPoolExecutor, as_completed,
-                                                TimeoutError as _FuturesTimeout)
-                ex = ThreadPoolExecutor(max_workers=5, thread_name_prefix="yt_artist")
-                fut_to_track = {ex.submit(_fetch_youtube_video_artist, t['id'], cookie_opts): t
-                                for t in unresolved}
-                try:
-                    for fut in as_completed(fut_to_track, timeout=max(1.0, deadline - time.time())):
-                        t = fut_to_track[fut]
-                        try:
-                            raw_artist = fut.result()
-                        except Exception:
-                            raw_artist = ''
-                        if raw_artist:
-                            ca = clean_youtube_artist(raw_artist)
-                            if ca and ca != 'Unknown Artist':
-                                t['artists'] = [ca]
-                                t['name'] = clean_youtube_track_title(t.get('name') or '', ca)
-                                t['raw_artist'] = raw_artist
-                                recovered += 1
-                except _FuturesTimeout:
-                    logger.warning(
-                        f"[YT Parse] Artist-recovery budget hit; recovered {recovered}/{len(unresolved)}, "
-                        "rest left for discovery to resolve"
-                    )
-                finally:
-                    # Don't block the response waiting on in-flight lookups past
-                    # the budget — cancel what hasn't started, let the rest finish
-                    # in the background.
-                    ex.shutdown(wait=False, cancel_futures=True)
-                if recovered:
-                    logger.info(f"[YT Parse] Recovered artist for {recovered}/{len(unresolved)} unresolved tracks")
+            # NOTE: current yt-dlp flat extraction returns ONLY the title per entry
+            # (no uploader/artist), so tracks whose title isn't "Artist - Title"
+            # land here as "Unknown Artist". The per-video artist recovery does NOT
+            # run here — it would block this request for minutes on a big playlist
+            # and risk the 120s worker timeout. It runs in the async discovery
+            # worker instead (which already iterates every track with a progress
+            # bar). See run_youtube_discovery_worker / recover_youtube_artist (#863).
 
             # Create playlist object matching GUI structure
             playlist_data = {
@@ -24748,6 +24716,7 @@ def _build_youtube_discovery_deps():
         build_discovery_wing_it_stub=_build_discovery_wing_it_stub,
         get_database=get_database,
         add_activity_item=add_activity_item,
+        recover_youtube_artist=_recover_youtube_artist_cleaned,
     )
 
 
