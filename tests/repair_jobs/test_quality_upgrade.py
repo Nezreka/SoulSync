@@ -96,13 +96,20 @@ def meets(path, bitrate, profile):
 # --- scan produces a finding (seam) ----------------------------------------
 
 class _FakeConn:
-    def __init__(self, rows):
+    def __init__(self, rows, finding_ids=()):
         self._rows = rows
+        self._finding_ids = list(finding_ids)
+        self._sql = ''
 
-    def execute(self, *a, **k):
+    def execute(self, sql='', *a, **k):
+        self._sql = sql or ''
         return self
 
     def fetchall(self):
+        # The existing-findings query reads repair_findings; everything else is the
+        # track load.
+        if 'repair_findings' in self._sql:
+            return [(fid,) for fid in self._finding_ids]
         return self._rows
 
     def close(self):
@@ -110,15 +117,16 @@ class _FakeConn:
 
 
 class _FakeDB:
-    def __init__(self, rows, profile):
+    def __init__(self, rows, profile, finding_ids=()):
         self._rows = rows
         self._profile = profile
+        self._finding_ids = finding_ids
 
     def get_quality_profile(self):
         return self._profile
 
     def _get_connection(self):
-        return _FakeConn(self._rows)
+        return _FakeConn(self._rows, self._finding_ids)
 
     def get_watchlist_artists(self, profile_id=1):
         return [types.SimpleNamespace(artist_name='Artist A')]
@@ -135,12 +143,13 @@ def _ctx(db, findings):
     )
 
 
-def test_scan_creates_finding_for_low_quality_track(monkeypatch):
-    # One 128 kbps MP3 (below the balanced floor) for Artist A.
-    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
-    db = _FakeDB(rows, BALANCED)
+def _row(track_id=1, title='Song One', path='/music/a.mp3', bitrate=128, duration=180000,
+         artist='Artist A', album='Album X', album_id=10, track_number=6):
+    """A track row in _TRACK_COLS order (album source-id columns default to None)."""
+    return (track_id, title, path, bitrate, duration, artist, album, album_id, track_number)
 
-    # Stub the metadata side so the test stays offline.
+
+def _stub_engine(monkeypatch):
     monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
     monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
     monkeypatch.setattr(
@@ -151,10 +160,16 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
             normalize_string=lambda s: s,
         ),
     )
+
+
+def test_scan_creates_finding_for_low_quality_track(monkeypatch):
+    db = _FakeDB([_row(bitrate=128)], BALANCED)
+    _stub_engine(monkeypatch)
     fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
                   'album': {'name': 'Album X', 'images': []}}
-    # No ISRC / album hit → exercise the search tier.
-    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')
+    # No track-id / ISRC / album hit → exercise the search tier.
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_find_best_match',
                         lambda *a, **k: (fake_match, 0.95, 'spotify', True))
@@ -162,9 +177,7 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
 
     findings = []
-    job = qu.QualityUpgradeJob()
-    # default scope 'watchlist'; config_manager None → defaults used
-    result = job.scan(_ctx(db, findings))
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
 
     assert result.findings_created == 1
     assert len(findings) == 1
@@ -175,6 +188,63 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     assert f['details']['matched_track_data']['id'] == 'sp1'
     assert f['details']['album_title'] == 'Album X'
     assert f['details']['provider'] == 'spotify'
+
+
+def test_match_via_track_id_fetches_exact_by_id(monkeypatch):
+    """Most-direct tier: a per-source track ID in the tags → get_track_details by ID."""
+    track = {'id': 'sp9', 'name': 'Song One', 'album': {'name': 'Album X'}}
+    client = types.SimpleNamespace(get_track_details=lambda tid: track if tid == 'sp9' else None)
+    monkeypatch.setattr(qu, 'get_client_for_source', lambda src: client)
+    best, source = qu._match_via_track_id({'spotify_track_id': 'sp9'}, ['spotify'])
+    assert best['id'] == 'sp9'
+    assert source == 'spotify'
+    assert qu._match_via_track_id({}, ['spotify']) == (None, None)  # no ID → nothing
+
+
+def test_duration_ok_guard():
+    assert qu._duration_ok(180000, 181000) is True      # within 5s
+    assert qu._duration_ok(180000, 200000) is False     # 20s off — wrong cut
+    assert qu._duration_ok(None, 200000) is True         # unknown → lenient
+    assert qu._duration_ok(180000, 0) is True            # unknown → lenient
+
+
+def test_scan_prefers_track_id_tier(monkeypatch):
+    """The source's own track ID (from file tags) wins over every other tier."""
+    db = _FakeDB([_row()], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'spotify_track_id': 'sp9', 'isrc': 'X'})
+    fake = {'id': 'sp9', 'name': 'Song One', 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda ids, sp: (fake, 'spotify'))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    def _boom(*a, **k):
+        raise AssertionError("no lower tier should run when the track-ID tier matches")
+    monkeypatch.setattr(qu, '_match_via_isrc', _boom)
+    monkeypatch.setattr(qu, '_match_via_album', _boom)
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_via'] == 'track_id'
+
+
+def test_scan_skips_already_proposed_tracks(monkeypatch):
+    """A re-run must not re-resolve a track that already has a finding."""
+    db = _FakeDB([_row(track_id=1)], BALANCED, finding_ids=['1'])
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+
+    def _boom(*a, **k):
+        raise AssertionError("no matching for an already-proposed track")
+    monkeypatch.setattr(qu, '_match_via_track_id', _boom)
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+    assert findings == []
+    assert result.findings_skipped_dedup == 1
 
 
 def test_match_via_isrc_accepts_exact_match(monkeypatch):
@@ -201,14 +271,12 @@ def test_match_via_isrc_rejects_all_mismatches(monkeypatch):
 
 
 def test_scan_prefers_isrc_exact_match_over_fuzzy(monkeypatch):
-    """When the file carries an ISRC and it resolves, use the exact match and do
-    NOT run the fuzzy search at all."""
-    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
-    db = _FakeDB(rows, BALANCED)
-    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
-    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
-    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: 'USRC17607839')
+    """No track-ID, but the file carries an ISRC that resolves → use the exact match
+    and do NOT run the album/search tiers."""
+    db = _FakeDB([_row()], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'isrc': 'USRC17607839'})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_isrc', lambda isrc, sp: (fake, 'spotify'))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -225,15 +293,13 @@ def test_scan_prefers_isrc_exact_match_over_fuzzy(monkeypatch):
     assert findings[0]['details']['match_confidence'] == 1.0
 
 
-def test_scan_falls_back_to_search_without_isrc(monkeypatch):
-    """No usable ISRC → fall back to fuzzy search."""
-    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
-    db = _FakeDB(rows, BALANCED)
-    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
-    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
-    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')  # un-enriched
-    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))  # no album hit
+def test_scan_falls_back_to_search_without_ids(monkeypatch):
+    """No track-ID / ISRC / album hit → fall back to fuzzy search."""
+    db = _FakeDB([_row()], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})  # un-enriched
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (fake, 0.88, 'spotify', True))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -245,15 +311,13 @@ def test_scan_falls_back_to_search_without_isrc(monkeypatch):
     assert findings[0]['details']['matched_via'] == 'search'
 
 
-def test_scan_uses_album_tier_when_no_isrc(monkeypatch):
-    """No ISRC, but the album→track lookup resolves it → matched_via 'album',
-    and the fuzzy search is never reached."""
-    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
-    db = _FakeDB(rows, BALANCED)
-    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
-    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
-    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
-    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')
+def test_scan_uses_album_tier_when_no_ids(monkeypatch):
+    """No track-ID / ISRC, but the album→track lookup resolves it → matched_via
+    'album', and the fuzzy search is never reached."""
+    db = _FakeDB([_row()], BALANCED)
+    _stub_engine(monkeypatch)
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (fake, 'spotify'))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -283,8 +347,7 @@ def test_find_track_in_album_exact_title_with_track_number(monkeypatch):
 
 def test_scan_skips_tracks_meeting_quality(monkeypatch):
     # A 320 kbps MP3 meets the balanced profile → no finding, no metadata calls.
-    rows = [(2, 'Good Song', '/music/b.mp3', 320, 'Artist A', 'Album Y', 11)]
-    db = _FakeDB(rows, BALANCED)
+    db = _FakeDB([_row(track_id=2, title='Good Song', bitrate=320)], BALANCED)
 
     def _boom(*a, **k):  # must never be called for an acceptable track
         raise AssertionError("matching should not run for an acceptable track")

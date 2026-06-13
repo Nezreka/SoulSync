@@ -64,6 +64,20 @@ _PROFILE_KEY_RANK = {
     'mp3_192': RANK_192,
 }
 
+# Per-source file-tag key holding that source's own track ID (written by enrichment).
+_SOURCE_TRACK_ID_TAG = {
+    'spotify': 'spotify_track_id',
+    'deezer': 'deezer_track_id',
+    'itunes': 'itunes_track_id',
+    'audiodb': 'audiodb_track_id',
+    'musicbrainz': 'musicbrainz_releasetrackid',
+    'tidal': 'tidal_track_id',
+}
+
+# Reject a fuzzy candidate whose length differs from ours by more than this (ms) —
+# catches wrong versions (live/edit/remix) that share a title. Exact tiers skip it.
+_DURATION_TOLERANCE_MS = 5000
+
 
 def _normalize_kbps(bitrate: Optional[int]) -> Optional[int]:
     """Library bitrate may be stored in bps (e.g. 320000) or kbps (320).
@@ -159,24 +173,68 @@ def _norm_isrc(value: Any) -> str:
     return str(value).upper().replace('-', '').replace(' ', '').strip()
 
 
-def _read_track_isrc(file_path: str) -> str:
-    """Read the ISRC the enrichment pipeline embedded in the file's tags.
+def _read_file_ids(file_path: str) -> Dict[str, str]:
+    """Read the identifiers enrichment embedded in the file's tags.
 
     Enrichment matches every track to the metadata sources and writes the IDs
-    (ISRC, per-source track IDs) into the file — so an already-enriched track
-    carries its exact identity. Returns '' when unreadable / not enriched."""
+    (ISRC + per-source track IDs) into the file — so an already-enriched track
+    carries its exact identity. Returns a dict with a normalized ``isrc`` plus any
+    ``<source>_track_id`` tags present; empty dict when unreadable / not enriched."""
     resolved = resolve_library_file_path(file_path) if file_path else None
     if not resolved and file_path and os.path.isfile(file_path):
         resolved = file_path
     if not resolved:
-        return ''
+        return {}
     try:
         info = read_embedded_tags(resolved)
     except Exception:
-        return ''
+        return {}
     if not info or not info.get('available'):
-        return ''
-    return _norm_isrc((info.get('tags') or {}).get('isrc'))
+        return {}
+    tags = info.get('tags') or {}
+    out: Dict[str, str] = {}
+    isrc = _norm_isrc(tags.get('isrc'))
+    if isrc:
+        out['isrc'] = isrc
+    for tag_key in set(_SOURCE_TRACK_ID_TAG.values()):
+        val = tags.get(tag_key)
+        if val:
+            out[tag_key] = str(val)
+    return out
+
+
+def _duration_ok(want_ms: Any, got_ms: Any, tolerance_ms: int = _DURATION_TOLERANCE_MS) -> bool:
+    """Wrong-version guard: True when the candidate's length is within tolerance of
+    ours — or when either length is unknown (never reject on missing data)."""
+    try:
+        w, g = int(want_ms or 0), int(got_ms or 0)
+    except (TypeError, ValueError):
+        return True
+    if w <= 0 or g <= 0:
+        return True
+    return abs(w - g) <= tolerance_ms
+
+
+def _match_via_track_id(file_ids: Dict[str, str],
+                        source_priority: List[str]) -> Tuple[Optional[Any], Optional[str]]:
+    """Most-direct path: enrichment already wrote this track's per-source IDs into
+    the file. If we have the active source's own track ID, fetch that exact track by
+    ID — no search at all. Returns (track, source) or (None, None)."""
+    for source in source_priority:
+        tag_key = _SOURCE_TRACK_ID_TAG.get(source)
+        track_id = file_ids.get(tag_key) if tag_key else None
+        if not track_id:
+            continue
+        client = get_client_for_source(source)
+        if not client or not hasattr(client, 'get_track_details'):
+            continue
+        try:
+            track = client.get_track_details(str(track_id))
+        except Exception:
+            track = None
+        if track:
+            return track, source
+    return None, None
 
 
 def _candidate_isrc(cand: Any) -> str:
@@ -217,13 +275,16 @@ def _match_via_isrc(isrc: str, source_priority: List[str]) -> Tuple[Optional[Any
 
 # Column order for the _load_tracks SELECT — rows come back as dicts keyed by these.
 _TRACK_COLS = (
-    'id', 'title', 'file_path', 'bitrate', 'artist_name', 'album_title', 'album_id',
-    'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
+    'id', 'title', 'file_path', 'bitrate', 'duration', 'artist_name', 'album_title',
+    'album_id', 'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
     'musicbrainz_release_id', 'audiodb_id',
 )
 
 # Human-readable note per match tier (search uses a confidence % instead).
-_MATCH_NOTE = {'isrc': 'exact ISRC match', 'album': 'matched within album'}
+_MATCH_NOTE = {
+    'track_id': 'exact track ID', 'isrc': 'exact ISRC match',
+    'album': 'matched within album',
+}
 
 # Per-source column holding that source's album ID on the albums table.
 _SOURCE_ALBUM_ID_COL = {
@@ -240,9 +301,11 @@ def _norm_title(value: Any) -> str:
     return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
 
 
-def _find_track_in_album(items: Any, title: str, track_number: Any, engine: Any) -> Optional[Any]:
+def _find_track_in_album(items: Any, title: str, track_number: Any, engine: Any,
+                         want_duration_ms: Any = None) -> Optional[Any]:
     """Pick the track in an album's tracklist that matches ours — exact normalized
-    title first (track_number breaks ties), then a high-similarity fuzzy fallback."""
+    title first (track_number then duration break ties), then a high-similarity
+    fuzzy fallback that respects the duration guard."""
     want = _norm_title(title)
     exact = []
     best, best_score = None, 0.0
@@ -252,6 +315,8 @@ def _find_track_in_album(items: Any, title: str, track_number: Any, engine: Any)
             exact.append(it)
             continue
         if engine and it_name:
+            if not _duration_ok(want_duration_ms, _extract_lookup_value(it, 'duration_ms', 'duration')):
+                continue
             score = engine.similarity_score(
                 engine.normalize_string(title), engine.normalize_string(it_name))
             if score > best_score and score >= 0.85:
@@ -261,13 +326,17 @@ def _find_track_in_album(items: Any, title: str, track_number: Any, engine: Any)
             for it in exact:
                 if _extract_lookup_value(it, 'track_number') == track_number:
                     return it
+        # Multiple same-title cuts (e.g. album + live): prefer the closest length.
+        if want_duration_ms and len(exact) > 1:
+            exact.sort(key=lambda it: abs(int(want_duration_ms) - int(
+                _extract_lookup_value(it, 'duration_ms', 'duration', default=0) or 0)))
         return exact[0]
     return best
 
 
 def _match_via_album(engine: Any, source_priority: List[str], artist: str, album_title: str,
-                     title: str, track_number: Any,
-                     stored_album_ids: Dict[str, str]) -> Tuple[Optional[Any], Optional[str]]:
+                     title: str, track_number: Any, stored_album_ids: Dict[str, str],
+                     want_duration_ms: Any = None) -> Tuple[Optional[Any], Optional[str]]:
     """Structured artist → album → track match. For each source: use the album's
     stored source ID if we already have it (enriched album), else find the album
     by searching ``artist album``; then pull that album's tracklist and locate our
@@ -305,7 +374,7 @@ def _match_via_album(engine: Any, source_priority: List[str], artist: str, album
         except Exception:
             resp = None
         items = resp.get('items') if isinstance(resp, dict) else None
-        match = _find_track_in_album(items, title, track_number, engine)
+        match = _find_track_in_album(items, title, track_number, engine, want_duration_ms)
         if match is None:
             continue
         # The album tracklist's tracks usually omit the album object — attach it so
@@ -319,7 +388,8 @@ def _match_via_album(engine: Any, source_priority: List[str], artist: str, album
 
 
 def _find_best_match(engine: Any, source_priority: List[str], title: str, artist: str,
-                     album: str, min_confidence: float) -> Tuple[Optional[Any], float, Optional[str], bool]:
+                     album: str, min_confidence: float,
+                     want_duration_ms: Any = None) -> Tuple[Optional[Any], float, Optional[str], bool]:
     """Search the configured metadata sources for the best replacement match.
     Returns (best_track, confidence, source, attempted_any_provider)."""
     temp_track = type('TempTrack', (), {'name': title, 'artists': [artist], 'album': album})()
@@ -336,6 +406,10 @@ def _find_best_match(engine: Any, source_priority: List[str], title: str, artist
             matches = _search_tracks_for_source(source, query, limit=5, client=client)
             time.sleep(0.5)  # be gentle on metadata APIs
             for cand in matches or []:
+                # Wrong-version guard: a candidate whose length is way off is a
+                # different cut (live/edit/remix) — reject before it can win.
+                if not _duration_ok(want_duration_ms, _extract_lookup_value(cand, 'duration_ms', 'duration')):
+                    continue
                 cand_artists = _track_artist_names(cand)
                 artist_conf = max(
                     (engine.similarity_score(engine.normalize_string(artist),
@@ -369,12 +443,14 @@ class QualityUpgradeJob(RepairJob):
         "track against your Quality Profile using BOTH the file format and its "
         'bitrate — so a 128 kbps MP3 is no longer treated the same as a 320 kbps '
         'one, and enabling MP3-320/256 in your profile actually counts.\n\n'
-        'For every track below your preferred quality, it finds a better version and '
-        'creates a finding. If the track was enriched, it uses the ISRC embedded in '
-        'the file to resolve the EXACT track (and its album) — no guessing; otherwise '
-        'it falls back to a name/artist search with a confidence score. Nothing is '
-        'queued automatically: applying a finding adds that matched track — with its '
-        'album context — to the wishlist, the same as any other download.\n\n'
+        'For every track below your preferred quality it resolves the exact better '
+        'version using the most precise identity available, in order: the source '
+        "track ID enrichment wrote into the file → the file's ISRC → the album's "
+        'tracklist (by stored album ID or album search) → a name/artist search. The '
+        'fuzzy steps also reject candidates whose length is off (wrong live/edit cut). '
+        'It skips tracks it already proposed, so re-runs are cheap. Nothing is queued '
+        'automatically: applying a finding adds that matched track — with its album '
+        'context — to the wishlist, the same as any other download.\n\n'
         'Settings:\n'
         '- Scope: "watchlist" (watchlisted artists only) or "all" (whole library)\n'
         '- Min confidence: minimum match confidence (0-1) to surface a finding\n\n'
@@ -404,8 +480,8 @@ class QualityUpgradeJob(RepairJob):
         conn = db._get_connection()
         try:
             base = (
-                "SELECT t.id, t.title, t.file_path, t.bitrate, a.name AS artist_name, "
-                "al.title AS album_title, t.album_id, t.track_number, "
+                "SELECT t.id, t.title, t.file_path, t.bitrate, t.duration, "
+                "a.name AS artist_name, al.title AS album_title, t.album_id, t.track_number, "
                 "al.spotify_album_id, al.itunes_album_id, al.deezer_id, "
                 "al.musicbrainz_release_id, al.audiodb_id "
                 "FROM tracks t "
@@ -425,6 +501,21 @@ class QualityUpgradeJob(RepairJob):
             else:
                 rows = conn.execute(base).fetchall()
             return [dict(zip(_TRACK_COLS, r, strict=False)) for r in rows]
+        finally:
+            conn.close()
+
+    def _load_existing_finding_ids(self, db: Any) -> set:
+        """Track IDs that already have a finding for this job (any status). Lets a
+        re-run skip tracks we've already proposed/dismissed without re-hitting the
+        metadata API — pending stays deduped, and a dismissed track stays dismissed."""
+        conn = db._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT entity_id FROM repair_findings WHERE job_id = ? AND entity_type = 'track'",
+                (self.job_id,)).fetchall()
+            return {str(r[0]) for r in rows if r and r[0] is not None}
+        except Exception:
+            return set()
         finally:
             conn.close()
 
@@ -459,6 +550,10 @@ class QualityUpgradeJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Checking quality on {total} tracks...', total=total)
 
+        # Tracks we've already proposed/dismissed — skip them so a re-run doesn't
+        # re-resolve the same tracks against the metadata API.
+        already_found = self._load_existing_finding_ids(db)
+
         # Metadata source for matching — resolved lazily so we only fail if we
         # actually find a low-quality track that needs a match.
         engine = None
@@ -474,6 +569,7 @@ class QualityUpgradeJob(RepairJob):
             title = row['title']
             file_path = row['file_path']
             bitrate = row['bitrate']
+            duration_ms = row.get('duration')
             artist_name = row['artist_name']
             album_title = row['album_title']
             album_id = row['album_id']
@@ -482,6 +578,10 @@ class QualityUpgradeJob(RepairJob):
                 src: row[col] for src, col in _SOURCE_ALBUM_ID_COL.items() if row.get(col)
             }
             result.scanned += 1
+
+            if str(track_id) in already_found:
+                result.findings_skipped_dedup += 1
+                continue
 
             if meets_preferred_quality(file_path, bitrate, quality_profile):
                 result.skipped += 1
@@ -510,26 +610,39 @@ class QualityUpgradeJob(RepairJob):
                     log_line=f'Low quality ({current_label}): {artist_name} - {title}',
                     log_type='info')
 
+            # Read the identifiers enrichment embedded in the file once (ISRC +
+            # per-source track IDs), used by the two most-exact tiers below.
+            file_ids = _read_file_ids(file_path)
+
             # Tiered match, best identity first, loosest last:
-            #   1. ISRC embedded in the file tags (enriched track) → EXACT track.
-            #   2. Album → track: use the album's stored source ID if we have it
-            #      (enriched album), else find the album by search, then locate our
-            #      track in its tracklist. Pins the right album even when the track
-            #      itself isn't enriched. (artist → album → track)
+            #   0. The active source's OWN track ID, embedded in the file by
+            #      enrichment → fetch that exact track by ID. No search at all.
+            #   1. ISRC (also in the tags) → exact track on any source.
+            #   2. Album → track: stored album source ID if we have it (enriched
+            #      album), else find the album by search, then locate our track in
+            #      its tracklist. Pins the right album even when the track itself
+            #      isn't enriched. (artist → album → track)
             #   3. Plain artist+title search with similarity scoring. (artist → track)
+            # The fuzzy tiers (2-3) also apply a duration guard to reject wrong cuts.
             best, source, conf, attempted = None, None, 0.0, False
 
-            matched_via = 'isrc'
-            best, source = _match_via_isrc(_read_track_isrc(file_path), source_priority)
+            matched_via = 'track_id'
+            best, source = _match_via_track_id(file_ids, source_priority)
             if best:
                 conf, attempted = 1.0, True
+
+            if not best:
+                matched_via = 'isrc'
+                best, source = _match_via_isrc(file_ids.get('isrc', ''), source_priority)
+                if best:
+                    conf, attempted = 1.0, True
 
             if not best:
                 matched_via = 'album'
                 try:
                     best, source = _match_via_album(
                         engine, source_priority, artist_name or '', album_title or '',
-                        title, track_number, stored_album_ids)
+                        title, track_number, stored_album_ids, duration_ms)
                 except Exception as e:
                     logger.debug("[Quality Upgrade] Album match error for %s - %s: %s", artist_name, title, e)
                     best = None
@@ -540,7 +653,8 @@ class QualityUpgradeJob(RepairJob):
                 matched_via = 'search'
                 try:
                     best, conf, source, attempted = _find_best_match(
-                        engine, source_priority, title, artist_name or '', album_title or '', min_conf)
+                        engine, source_priority, title, artist_name or '', album_title or '',
+                        min_conf, duration_ms)
                 except Exception as e:
                     logger.debug("[Quality Upgrade] Match error for %s - %s: %s", artist_name, title, e)
                     result.errors += 1
