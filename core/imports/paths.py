@@ -438,7 +438,6 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
     original_search = get_import_original_search(context)
     album_context = get_import_context_album(context)
     source = get_import_source(context)
-    playlist_folder_mode = track_info.get("_playlist_folder_mode", False)
     artist_name = extract_artist_name(artist_context)
 
     source_info = track_info.get("source_info") or {}
@@ -465,40 +464,6 @@ def build_final_path_for_track(context, artist_context, album_info, file_ext, cr
         raw_album_type = album_context.get("album_type", "") or ""
     total_tracks = (album_context.get("total_tracks", 0) or 0) if album_context else 0
     album_type_display = get_album_type_display(raw_album_type, total_tracks)
-
-    if playlist_folder_mode:
-        playlist_name = track_info.get("_playlist_name", "Unknown Playlist")
-        track_name = get_import_clean_title(context, default=original_search.get("title", "Unknown Track"))
-        _artists = original_search.get("artists") or track_info.get("artists") or []
-
-        template_context = {
-            "artist": artist_name,
-            "albumartist": artist_name,
-            "album": track_name,
-            "title": track_name,
-            "playlist_name": playlist_name,
-            "track_number": 1,
-            "disc_number": 1,
-            "year": year,
-            "quality": context.get("_audio_quality", ""),
-            "albumtype": album_type_display,
-            "_artists_list": _artists,
-            "_itunes_artist_id": str(artist_context.get("id", "")) if isinstance(artist_context, dict) and str(artist_context.get("id", "")).isdigit() and source == "itunes" else None,
-        }
-
-        folder_path, filename_base = get_file_path_from_template(template_context, "playlist_path")
-        if folder_path and filename_base:
-            final_path = os.path.join(transfer_dir, folder_path, filename_base + file_ext)
-            _ensure_dir(os.path.join(transfer_dir, folder_path), exist_ok=True)
-            return final_path, True
-
-        playlist_name_sanitized = sanitize_filename(playlist_name)
-        playlist_dir = os.path.join(transfer_dir, playlist_name_sanitized)
-        _ensure_dir(playlist_dir, exist_ok=True)
-        artist_name_sanitized = sanitize_filename(template_context["artist"])
-        track_name_sanitized = sanitize_filename(track_name)
-        new_filename = f"{artist_name_sanitized} - {track_name_sanitized}{file_ext}"
-        return os.path.join(playlist_dir, new_filename), True
 
     if album_info and album_info.get("is_album"):
         clean_track_name = get_import_clean_title(context, album_info=album_info, default=original_search.get("title", "Unknown Track"))
