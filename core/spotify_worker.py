@@ -12,6 +12,9 @@ from core.spotify_client import SpotifyClient, SpotifyRateLimitError
 from core.worker_utils import (
     ARTIST_NAME_MATCH_THRESHOLD,
     interruptible_sleep,
+    owned_album_titles,
+    pick_artist_by_catalog,
+    release_titles,
     set_album_api_track_count,
     source_id_conflict,
 )
@@ -563,16 +566,23 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for artist '{artist_name}'")
             return
 
-        # Find best fuzzy match — score all candidates, pick highest above the
-        # (stricter, artist-specific) threshold so short-name false positives
-        # like "ODESZA"/"odessa" don't slip through.
-        best_obj = None
-        best_score = 0
-        for artist_obj in results:
-            score = self._name_similarity(artist_name, artist_obj.name)
-            if score >= ARTIST_NAME_MATCH_THRESHOLD and score > best_score:
-                best_obj = artist_obj
-                best_score = score
+        # Candidates clearing the (stricter, artist-specific) name gate, best
+        # name-score first so [0] is the legacy "first/highest" pick.
+        scored = [
+            (self._name_similarity(artist_name, a.name), a)
+            for a in results
+        ]
+        gated = [a for score, a in sorted(scored, key=lambda s: s[0], reverse=True)
+                 if score >= ARTIST_NAME_MATCH_THRESHOLD]
+
+        # Same-name disambiguation: when more than one "Rone" clears the gate,
+        # pick the one whose catalog overlaps the albums this library owns.
+        best_obj, _overlap = pick_artist_by_catalog(
+            gated,
+            owned_album_titles(self.db, artist_id),
+            lambda a: release_titles(self.client.get_artist_albums(a.id)),
+        )
+        best_score = self._name_similarity(artist_name, best_obj.name) if best_obj else 0
 
         if best_obj:
             if not self._is_spotify_id(best_obj.id):
