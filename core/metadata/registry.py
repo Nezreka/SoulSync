@@ -442,10 +442,18 @@ def get_primary_source_status(
             connected = bool(client and client.is_spotify_authenticated())
             # No-auth composite (fallback_source='spotify' + metadata.spotify_free):
             # works without authentication, so treat the free path's availability
-            # as "connected" too.
+            # as "connected" too. get_client_for_source() returns None when not
+            # officially authed, so fetch the client directly to probe the free
+            # path — otherwise this check can never fire for a no-auth user.
             if not connected and _get_config_value("metadata.spotify_free", False):
+                free_client = client
+                if free_client is None:
+                    try:
+                        free_client = get_spotify_client(client_factory=spotify_client_factory)
+                    except Exception:
+                        free_client = None
                 try:
-                    connected = bool(client and client.is_spotify_metadata_available())
+                    connected = bool(free_client and free_client.is_spotify_metadata_available())
                 except Exception:
                     connected = False
         elif source == "hydrabase":
