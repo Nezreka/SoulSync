@@ -5432,6 +5432,13 @@
                                             </div>
                                         </div>
                                         <div class="form-group">
+                                            <label>Completed Downloads Path — in SoulSync (optional):</label>
+                                            <input type="text" id="torrent-download-path" placeholder="leave blank for the shared-volume default">
+                                            <div class="setting-help-text">
+                                                Where <strong>SoulSync</strong> can read finished torrents — its own in-container path. Set this when your client saves to a category folder (e.g. a "Music" category at <code>/data/downloads/music</code>) that's mounted here at a different path. SoulSync finds the release by name under this folder. Blank = use the Soulseek download/transfer folders.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
                                             <label>Stalled torrent timeout (minutes):</label>
                                             <input type="number" id="torrent-stall-timeout" min="0" step="1" placeholder="10">
                                             <div class="setting-help-text">
@@ -5509,6 +5516,13 @@
                                             <input type="text" id="usenet-client-category" placeholder="soulsync" value="soulsync">
                                             <div class="setting-help-text">
                                                 SoulSync tags every NZB with this category so it ends up in a predictable post-processing folder.
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Completed Downloads Path — in SoulSync (optional):</label>
+                                            <input type="text" id="usenet-download-path" placeholder="leave blank for the shared-volume default">
+                                            <div class="setting-help-text">
+                                                Where <strong>SoulSync</strong> can read finished NZB downloads — its own in-container path. Set this when SABnzbd/NZBGet writes that category to a folder (e.g. <code>/data/downloads/music</code>) mounted here at a different path. SoulSync finds the release by name under this folder. Blank = use the Soulseek download/transfer folders.
                                             </div>
                                         </div>
                                         <div class="form-group">

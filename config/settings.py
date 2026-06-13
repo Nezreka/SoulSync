@@ -508,6 +508,22 @@ class ConfigManager:
                 # its partial data, fail the download so the next source can
                 # try) or "pause" (pause in the client, leave for the user).
                 "torrent_stall_action": "abandon",
+                # Where THIS container can read completed torrent/usenet
+                # downloads (#857). The downloader (qBit/SAB) reports a save
+                # path from inside ITS OWN container — often a category folder
+                # like /data/downloads/music — which may be mounted at a
+                # different point here. Set these to the in-container path(s)
+                # where SoulSync sees those finished downloads; the resolver
+                # then finds the release by name under them. Empty = fall back
+                # to the soulseek download/transfer dirs (the shared-volume
+                # default). See core.download_plugins.album_bundle.resolve_reported_save_path.
+                "torrent_download_path": "",
+                "usenet_download_path": "",
+                # Explicit remote→local prefix mappings for non-shared / oddly
+                # mounted layouts (Sonarr/Radarr "Remote Path Mapping" style):
+                # a list of {"from": "<client path>", "to": "<soulsync path>"}.
+                # Tried before the basename fallback above.
+                "usenet_path_mappings": [],
             },
             "post_processing": {
                 # When a download is quarantined (AcoustID mismatch, integrity /
