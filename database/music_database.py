@@ -13704,8 +13704,12 @@ class MusicDatabase:
             row = self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
             if row:
                 return row
-        if ref.isdigit():
-            return self.get_mirrored_playlist(int(ref))
+        # Fallback: bare numeric ref or a synthetic batch id (auto_mirror_<pk>,
+        # youtube_mirrored_<pk>, mirrored_<pk>) whose trailing digits are the PK.
+        from core.playlists.source_refs import extract_mirrored_pk
+        pk = extract_mirrored_pk(ref)
+        if pk is not None:
+            return self.get_mirrored_playlist(pk)
         return None
 
     def set_mirrored_playlist_organize_by_playlist(

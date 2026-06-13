@@ -19,6 +19,31 @@ from urllib.parse import parse_qs, urlparse
 
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{16,32}$")
 
+# Synthetic batch playlist_id prefixes that wrap a mirrored_playlists PK.
+# Download/discovery flows build a batch playlist_id as f"{prefix}{pk}" — e.g.
+# auto_mirror_<pk> (core/automation/handlers/sync_playlist.py), youtube_mirrored_<pk>
+# (YouTube discovery), and mirrored_<pk> (web_server url hashes). The trailing
+# digits are the mirrored_playlists primary key, NOT an upstream source id, so a
+# (source, source_playlist_id) lookup will never match them.
+_MIRRORED_PK_PREFIXES = ("youtube_mirrored_", "auto_mirror_", "mirrored_")
+
+
+def extract_mirrored_pk(playlist_ref: object) -> Optional[int]:
+    """Return the mirrored_playlists PK from a synthetic batch ref, else None.
+
+    Handles the synthetic forms above plus a bare numeric ref. Anything else
+    (a real upstream source id) returns None so the caller falls back to a
+    (source, source_playlist_id) lookup.
+    """
+    ref = str(playlist_ref or "").strip()
+    if not ref:
+        return None
+    for prefix in _MIRRORED_PK_PREFIXES:
+        if ref.startswith(prefix):
+            tail = ref[len(prefix):]
+            return int(tail) if tail.isdigit() else None
+    return int(ref) if ref.isdigit() else None
+
 
 @dataclass(frozen=True)
 class MirroredSourceRef:
