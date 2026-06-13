@@ -14736,6 +14736,46 @@ def clean_youtube_artist(artist_string):
     
     return artist_string
 
+def _youtube_cookie_opts():
+    """yt-dlp cookie options matching the rest of the app (Settings → YouTube).
+    Per-video extraction needs these to get past YouTube's bot checks."""
+    opts = {}
+    try:
+        cb = config_manager.get('youtube.cookies_browser', '')
+        if cb:
+            opts['cookiesfrombrowser'] = (cb,)
+    except Exception:
+        pass
+    return opts
+
+
+def _fetch_youtube_video_artist(video_id, cookie_opts):
+    """Recover a track's artist from its OWN video page (uploader/channel), which
+    flat playlist extraction no longer returns on current yt-dlp (#863).
+
+    Returns a raw artist string or ''. Per-VIDEO uploader/channel is the track's
+    channel (the artist / "<Artist> - Topic"), NOT the playlist owner — so unlike
+    a flat playlist entry it's safe to trust here. ``ignoreerrors`` keeps an
+    age-gated / unavailable video from raising."""
+    from core.youtube_track_meta import derive_artist_and_title
+    opts = {'quiet': True, 'no_warnings': True, 'skip_download': True, 'ignoreerrors': True}
+    opts.update(cookie_opts or {})
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    except Exception as e:
+        logger.debug(f"[YT Parse] per-video meta fetch failed for {video_id}: {e}")
+        return ''
+    if not info:
+        return ''
+    # Reuse the precedence (music fields / Topic / title split); then fall back to
+    # the per-video uploader/channel, which here IS the artist.
+    artist, _title = derive_artist_and_title(info)
+    if artist:
+        return artist
+    return (info.get('uploader') or info.get('channel') or '').strip()
+
+
 def parse_youtube_playlist(url):
     """
     Parse a YouTube Music playlist URL and extract track information using yt-dlp
@@ -14752,6 +14792,7 @@ def parse_youtube_playlist(url):
             'skip_download': True,  # Don't download, just extract IDs and basic info
             'lazy_playlist': False,  # Force full playlist resolution (prevents ~100 entry cap)
         }
+        ydl_opts.update(_youtube_cookie_opts())
         
         tracks = []
         
@@ -14806,7 +14847,38 @@ def parse_youtube_playlist(url):
                 }
                 
                 tracks.append(track_data)
-            
+
+            # ARTIST RECOVERY (#863): current yt-dlp flat extraction returns ONLY
+            # the title per entry — no uploader/artist — so tracks whose title
+            # isn't "Artist - Title" came out "Unknown Artist" and discovery
+            # couldn't match them. Recover the artist from each unresolved track's
+            # OWN video page (uploader/channel). Bounded by a wall-clock budget so
+            # a large playlist can't exceed the 120s gunicorn worker timeout;
+            # whatever isn't reached stays for MusicBrainz/Spotify discovery.
+            unresolved = [t for t in tracks
+                          if t.get('id') and (not t['artists'] or t['artists'][0] == 'Unknown Artist')]
+            if unresolved:
+                cookie_opts = _youtube_cookie_opts()
+                deadline = time.time() + 75  # leave headroom under the 120s worker timeout
+                recovered = 0
+                for t in unresolved:
+                    if time.time() >= deadline:
+                        logger.warning(
+                            f"[YT Parse] Artist-recovery budget hit after {recovered} tracks; "
+                            f"{len(unresolved) - recovered} left as Unknown for discovery to resolve"
+                        )
+                        break
+                    raw_artist = _fetch_youtube_video_artist(t['id'], cookie_opts)
+                    if raw_artist:
+                        ca = clean_youtube_artist(raw_artist)
+                        if ca and ca != 'Unknown Artist':
+                            t['artists'] = [ca]
+                            t['name'] = clean_youtube_track_title(t.get('name') or '', ca)
+                            t['raw_artist'] = raw_artist
+                            recovered += 1
+                if recovered:
+                    logger.info(f"[YT Parse] Recovered artist for {recovered}/{len(unresolved)} unresolved tracks")
+
             # Create playlist object matching GUI structure
             playlist_data = {
                 'id': playlist_id,
@@ -14817,7 +14889,7 @@ def parse_youtube_playlist(url):
                 'source': 'youtube',
                 'image_url': playlist_info.get('thumbnail', '') or '',
             }
-            
+
             logger.info(f"Successfully parsed YouTube playlist: {len(tracks)} tracks extracted")
             return playlist_data
             
