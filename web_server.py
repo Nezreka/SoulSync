@@ -21611,6 +21611,35 @@ def hifi_reorder_instances():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@app.route('/api/hifi/instances/reset', methods=['POST'])
+@admin_only
+def hifi_reset_instances():
+    """Restore any built-in default HiFi instances that were removed.
+
+    Non-destructive (#Sokhi): keeps user-added instances and the existing
+    order/enabled state, and only re-adds the provided defaults that are
+    currently missing — so you can recover ones you removed by accident without
+    wiping the working instance you just found."""
+    try:
+        from database.music_database import get_database
+        from core.hifi_client import DEFAULT_INSTANCES
+        db = get_database()
+        existing = {(i.get('url') or '').rstrip('/') for i in db.get_all_hifi_instances()}
+        priority = len(existing)
+        restored = []
+        for url in DEFAULT_INSTANCES:
+            u = url.rstrip('/')
+            if u not in existing and db.add_hifi_instance(u, priority):
+                restored.append(u)
+                priority += 1
+        if download_orchestrator:
+            download_orchestrator.reload_instances('hifi')
+        return jsonify({'success': True, 'restored': len(restored), 'urls': restored})
+    except Exception as e:
+        logger.error(f"Error resetting HiFi instances: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/hifi/instances/list', methods=['GET'])
 @admin_only
 def hifi_list_instances():

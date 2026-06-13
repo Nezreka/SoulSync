@@ -62637,8 +62637,19 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 .hifi-instance-toggle {
     flex-shrink: 0;
     cursor: pointer;
-    font-size: 0.9em;
-    transition: color 0.15s;
+    font-size: 0.95em;
+    transition: color 0.15s, background 0.15s;
+    /* Bigger tap target — the bare glyph was hard to hit/register (#Sokhi). */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    user-select: none;
+}
+.hifi-instance-toggle:hover {
+    background: rgba(255, 255, 255, 0.07);
 }
 .hifi-instance-toggle.on {
     color: #4caf50;
@@ -62656,11 +62667,20 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     flex-shrink: 0;
     color: #f44336;
     cursor: pointer;
-    font-size: 0.9em;
-    transition: color 0.15s;
+    font-size: 0.95em;
+    transition: color 0.15s, background 0.15s;
+    /* Bigger tap target — the bare ✖ was hard to hit/register (#Sokhi). */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    user-select: none;
 }
 .hifi-instance-remove:hover {
     color: #ef5350;
+    background: rgba(244, 67, 54, 0.15);
 }
 
 /* ==========================================================================
