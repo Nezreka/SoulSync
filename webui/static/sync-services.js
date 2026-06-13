@@ -150,42 +150,19 @@ async function handleTidalCardClick(playlistId) {
     console.log(`🎵 [Card Click] Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
 
     if (state.phase === 'fresh') {
-        // Fetch tracks if not yet loaded (metadata-only listing doesn't include them)
-        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
-            console.log(`🎵 Fetching tracks for Tidal playlist: ${state.playlist.name}`);
-            showLoadingOverlay(`Loading ${state.playlist.name}...`);
-            try {
-                const resp = await fetch(`/api/tidal/playlist/${playlistId}`);
-                if (resp.ok) {
-                    const fullData = await resp.json();
-                    if (fullData.tracks && fullData.tracks.length > 0) {
-                        // Convert to Track-like objects for the discovery modal
-                        state.playlist.tracks = fullData.tracks.map(t => ({
-                            id: t.id, name: t.name, artists: t.artists || [],
-                            album: t.album || '', duration_ms: t.duration_ms || 0,
-                            track_number: t.track_number || 0
-                        }));
-                        // Update card count
-                        const countEl = document.querySelector(`#tidal-card-${playlistId} .playlist-card-track-count`);
-                        if (countEl) countEl.textContent = `${state.playlist.tracks.length} tracks`;
-                    }
-                }
-            } catch (e) {
-                console.error(`Failed to fetch Tidal playlist tracks: ${e}`);
-                hideLoadingOverlay();
-            }
+        // Open the modal IMMEDIATELY — don't block on a slow Tidal track fetch.
+        // The old flow awaited /api/tidal/playlist/<id> (which paginates with a
+        // 1s sleep per page + rate-limit throttle, ~10s for a big playlist)
+        // before the modal appeared, then the backend re-fetched the same
+        // playlist when discovery started. Now the backend discovery fetch is
+        // the single source of truth and the modal builds its rows from those
+        // results as they stream in (#867), so we open right away. If the
+        // background loader already cached the track list, the rows seed
+        // instantly; otherwise the discovery poll fills them in. (#867 UX)
+        if (!Array.isArray(state.playlist.tracks)) {
+            state.playlist.tracks = [];
         }
 
-        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
-            hideLoadingOverlay();
-            showToast('Could not load tracks for this playlist', 'error');
-            return;
-        }
-
-        hideLoadingOverlay();
-        console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
-
-        // Open discovery modal - phase will be updated when discovery actually starts
         openTidalDiscoveryModal(playlistId, state.playlist);
 
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
