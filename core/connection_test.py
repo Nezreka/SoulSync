@@ -82,7 +82,16 @@ def run_service_test(service, test_config):
                  if temp_client.is_spotify_authenticated():
                      return True, "Spotify connection successful!"
                  else:
-                     # Using fallback metadata source
+                     # Spotify-Free (no-auth) metadata path: officially unauthenticated,
+                     # but the no-creds source is selected and available. Report it as the
+                     # working source rather than the generic Deezer/Discogs/iTunes fallback.
+                     try:
+                         spotify_free_available = temp_client.is_spotify_metadata_available()
+                     except Exception:
+                         spotify_free_available = False
+                     if spotify_free_available:
+                         return True, "Spotify (no-auth) connection successful!"
+                     # Using a different fallback metadata source
                      fb_src = _get_metadata_fallback_source()
                      fallback_name = 'Deezer' if fb_src == 'deezer' else 'Discogs' if fb_src == 'discogs' else 'iTunes'
                      if spotify_configured:
