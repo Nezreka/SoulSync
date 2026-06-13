@@ -14742,6 +14742,7 @@ def parse_youtube_playlist(url):
     Uses flat playlist extraction to avoid rate limits and get all tracks
     Returns a list of track dictionaries compatible with our Track structure
     """
+    from core.youtube_track_meta import derive_artist_and_title
     try:
         # Configure yt-dlp options for flat playlist extraction (avoids rate limits)
         ydl_opts = {
@@ -14774,14 +14775,25 @@ def parse_youtube_playlist(url):
                 
                 # Extract basic information from flat extraction
                 raw_title = entry.get('title', 'Unknown Track')
-                raw_uploader = entry.get('uploader', 'Unknown Artist')
+                raw_uploader = entry.get('uploader') or entry.get('channel') or ''
                 duration = entry.get('duration', 0)
                 video_id = entry.get('id', '')
-                
-                # Clean the track title and artist using our cleaning functions
-                cleaned_artist = clean_youtube_artist(raw_uploader)
-                cleaned_title = clean_youtube_track_title(raw_title, cleaned_artist)
-                
+
+                # Derive the artist from the best available signal — music
+                # fields, a "- Topic" channel, or an "Artist - Title" split —
+                # instead of blindly using `uploader`, which on a playlist is the
+                # OWNER, not the track artist (#863: every track became "Wing It"
+                # / "Unknown Artist"). Returns ('' , title) when nothing reliable.
+                derived_artist, derived_title = derive_artist_and_title(entry)
+
+                # Clean the track title and artist using our cleaning functions.
+                if derived_artist:
+                    cleaned_artist = clean_youtube_artist(derived_artist)
+                    cleaned_title = clean_youtube_track_title(derived_title, cleaned_artist)
+                else:
+                    cleaned_artist = 'Unknown Artist'
+                    cleaned_title = clean_youtube_track_title(derived_title, None)
+
                 # Create track object matching GUI structure
                 track_data = {
                     'id': video_id,
@@ -14789,7 +14801,7 @@ def parse_youtube_playlist(url):
                     'artists': [cleaned_artist],
                     'duration_ms': duration * 1000 if duration else 0,
                     'raw_title': raw_title,  # Keep original for reference
-                    'raw_artist': raw_uploader,  # Keep original for reference
+                    'raw_artist': derived_artist or raw_uploader,  # Keep original for reference
                     'url': f"https://www.youtube.com/watch?v={video_id}"
                 }
                 
