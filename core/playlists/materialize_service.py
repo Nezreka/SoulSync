@@ -28,6 +28,9 @@ from core.playlists.materialize import (
     normalize_mode,
     rebuild_playlist_folder,
 )
+from utils.logging_config import get_logger
+
+logger = get_logger("playlists.materialize")
 
 
 def collect_batch_real_paths(batch: dict, download_tasks: dict, *, config_manager) -> List[str]:
@@ -90,20 +93,24 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
     import json as _json
 
     # Collect the (ref, source) of every organize playlist this batch touched.
+    # (ref, source, force). force=True for the batch's OWN playlist: the per-download
+    # "organize by playlist" toggle (batch playlist_folder_mode) is the user's
+    # intent, so it rebuilds regardless of the saved row preference. Provenance
+    # playlists (force=False) require the saved organize_by_playlist flag.
     wanted, seen_ref = [], set()
 
-    def _want(ref, source):
+    def _want(ref, source, force):
         ref = str(ref or "").strip()
         if not ref:
             return
         key = (ref, source or "spotify")
         if key not in seen_ref:
             seen_ref.add(key)
-            wanted.append(key)
+            wanted.append((ref, source or "spotify", force))
 
     if batch.get("playlist_folder_mode"):
         _want(batch.get("source_playlist_ref") or batch.get("playlist_id"),
-              batch.get("batch_source") or "spotify")
+              batch.get("batch_source") or "spotify", True)
 
     for tid in (batch.get("queue") or []):
         task = (download_tasks or {}).get(tid) or {}
@@ -116,20 +123,28 @@ def reconcile_batch_playlists(db, batch: dict, download_tasks: dict, config_mana
             except Exception:
                 si = {}
         if isinstance(si, dict) and si.get("playlist_id"):
-            _want(si["playlist_id"], si.get("source") or "spotify")
+            _want(si["playlist_id"], si.get("source") or "spotify", False)
 
     results, seen_id = [], set()
-    for ref, source in wanted:
+    for ref, source, force in wanted:
         try:
             pl = db.resolve_mirrored_playlist(ref, profile_id, default_source=source)
-        except Exception:
+        except Exception as e:
+            logger.debug("[Playlist Folder] resolve failed for ref=%s source=%s: %s", ref, source, e)
             pl = None
-        if not pl or not pl.get("organize_by_playlist") or pl.get("id") in seen_id:
+        if not pl:
+            logger.info("[Playlist Folder] no mirrored playlist resolved for ref=%s source=%s "
+                        "(force=%s) — folder not built", ref, source, force)
+            continue
+        if pl.get("id") in seen_id:
+            continue
+        if not force and not pl.get("organize_by_playlist"):
             continue
         seen_id.add(pl.get("id"))
         try:
             results.append(_rebuild_one_from_db(db, config_manager, pl))
-        except Exception:
+        except Exception as e:
+            logger.error("[Playlist Folder] rebuild failed for '%s': %s", pl.get("name"), e)
             continue
     return results
 
