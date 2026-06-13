@@ -4063,7 +4063,11 @@ async function handleDbUpdateButtonClick() {
         }
 
         try {
-            button.disabled = true;
+            // Leave the button ENABLED while "Starting..." so it doubles as a
+            // cancel affordance — a wedged start (#859) must stay clickable. A
+            // second click reads "Starting..." and falls through to the stop
+            // branch below, so there's no double-start risk.
+            button.disabled = false;
             button.textContent = 'Starting...';
             const response = await fetch('/api/database/update', {
                 method: 'POST',
@@ -4072,14 +4076,19 @@ async function handleDbUpdateButtonClick() {
                 // scan takes precedence server-side, so send only its flag.
                 body: JSON.stringify(isDeepScan ? { deep_scan: true } : { full_refresh: isFullRefresh })
             });
+            const data = await response.json().catch(() => ({}));
 
-            if (response.ok) {
+            // Check BOTH the HTTP status and the body's success flag — a 200 with
+            // success:false must not be mistaken for a started job (#859).
+            if (response.ok && data.success !== false) {
                 showToast('Database update started!', 'success');
                 // Start polling immediately to get live status
                 checkAndUpdateDbProgress();
+                // Socket-independent safety net: recovers the card from
+                // "Starting..." even if the WebSocket goes quiet/half-open (#859).
+                armDbUpdateSafetyPoll();
             } else {
-                const errorData = await response.json();
-                showToast(`Error: ${errorData.error}`, 'error');
+                showToast(`Error: ${data.error || 'Failed to start update.'}`, 'error');
                 button.disabled = false;
                 button.textContent = 'Update Database';
             }

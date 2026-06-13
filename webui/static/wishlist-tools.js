@@ -8280,6 +8280,30 @@ function updateDbProgressFromData(data) {
     updateDbProgressUI(data);
 }
 
+// Socket-independent safety net for the DB-updater card. The 1s WebSocket
+// broadcast normally drives the card, but if the socket goes quiet/half-open the
+// card can wedge on "Starting..." with a frozen bar and no recovery (#859). This
+// polls /status directly, applies the same idempotent UI update, and stops itself
+// once the job is no longer running.
+let _dbUpdateSafetyPoll = null;
+function armDbUpdateSafetyPoll() {
+    if (_dbUpdateSafetyPoll) { clearInterval(_dbUpdateSafetyPoll); _dbUpdateSafetyPoll = null; }
+    const tick = async () => {
+        try {
+            const r = await fetch('/api/database/update/status');
+            if (!r.ok) return;
+            const state = await r.json();
+            updateDbProgressUI(state);
+            if (state.status !== 'running') {
+                clearInterval(_dbUpdateSafetyPoll);
+                _dbUpdateSafetyPoll = null;
+            }
+        } catch (e) { /* transient — keep the safety net armed */ }
+    };
+    tick();  // immediate: flip off "Starting..." as soon as the server confirms state
+    _dbUpdateSafetyPoll = setInterval(tick, 5000);
+}
+
 function updateDbProgressUI(state) {
     const button = document.getElementById('db-update-button');
     const phaseLabel = document.getElementById('db-phase-label');
@@ -8310,6 +8334,17 @@ function updateDbProgressUI(state) {
             phaseLabel.textContent = state.phase || 'Idle';
             progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
         }
+
+        // Reset the bar/label so a finished/idle/error card doesn't keep showing a
+        // frozen partial bar from the previous run (e.g. "2/3 artists 66.7%" left
+        // over after completion) — the #859 confusion. Finished → full bar; any
+        // other terminal state → cleared bar. The phase label carries the summary.
+        if (state.status === 'finished') {
+            progressBar.style.width = '100%';
+        } else {
+            progressBar.style.width = '0%';
+        }
+        progressLabel.textContent = '';
 
         if (state.status === 'finished' || state.status === 'error') {
             // Final stats refresh after completion/error

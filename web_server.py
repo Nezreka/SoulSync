@@ -973,6 +973,10 @@ db_update_state = {
     "removed_artists": 0,
     "removed_albums": 0,
     "removed_tracks": 0,
+    # Heartbeat epoch (seconds): bumped at start and on every progress/phase
+    # callback. The stall watchdog (core.database_update_health) flips a job to
+    # 'error' when this goes stale while status is still 'running' (#859).
+    "last_progress_at": 0,
 }
 _db_update_automation_id = None  # Set when automation triggers DB update, used by callbacks
 db_update_lock = threading.Lock()
@@ -8099,7 +8103,8 @@ def request_incremental_database_update():
         with db_update_lock:
             db_update_state.update({
                 "status": "running", "phase": "Initializing...",
-                "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+                "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+                "last_progress_at": time.time(),  # seed heartbeat for the stall watchdog
             })
         db_update_executor.submit(_run_db_update_task, False, active_server)
 
@@ -15723,7 +15728,8 @@ def _db_update_progress_callback(current_item, processed, total, percentage):
             "current_item": current_item,
             "processed": processed,
             "total": total,
-            "progress": percentage
+            "progress": percentage,
+            "last_progress_at": time.time(),  # heartbeat for the stall watchdog
         })
     _update_automation_progress(_db_update_automation_id,
                                 progress=percentage, processed=processed, total=total,
@@ -15733,6 +15739,7 @@ def _db_update_phase_callback(phase):
     logger.info(f"[DB Phase] {phase}")
     with db_update_lock:
         db_update_state["phase"] = phase
+        db_update_state["last_progress_at"] = time.time()  # heartbeat for the stall watchdog
     _update_automation_progress(_db_update_automation_id, phase=phase)
 
 def _db_update_artist_callback(artist_name, success, details, album_count, track_count):
@@ -15852,6 +15859,44 @@ def _db_update_error_callback(error_message):
 
     # Add activity for database update error
     add_activity_item("", "Database Update Failed", error_message, "Now")
+
+
+def _check_db_update_stall():
+    """Watchdog: flip a hung 'running' DB-update job to 'error' so the UI can
+    recover (#859). A worker that blocks indefinitely (media-server call with no
+    timeout, DB lock) never fires its finished/error callback, so the job would
+    otherwise sit at 'running' forever with a frozen progress bar.
+
+    Idempotent — only acts on the running→stalled transition (after the flip,
+    status != 'running' so the pure check returns False and we don't re-fire).
+    Safe to call from the status endpoint and the 1s broadcast loop. Returns True
+    only on the transition."""
+    from core.database_update_health import (
+        DEFAULT_STALL_TIMEOUT_SECONDS,
+        is_db_update_stalled,
+        stalled_error_message,
+    )
+    try:
+        timeout = config_manager.get('database.update_stall_timeout_seconds',
+                                     DEFAULT_STALL_TIMEOUT_SECONDS)
+    except Exception:
+        timeout = DEFAULT_STALL_TIMEOUT_SECONDS
+    now = time.time()
+    with db_update_lock:
+        if not is_db_update_stalled(db_update_state, now, timeout):
+            return False
+        msg = stalled_error_message(db_update_state, now)
+        db_update_state["status"] = "error"
+        db_update_state["error_message"] = msg
+        db_update_state["phase"] = "Stalled"
+    logger.error(f"[DB Update Watchdog] {msg}")
+    # The hung worker paused enrichment/maintenance workers and won't resume them
+    # itself — resume here so a stall doesn't leave them parked indefinitely.
+    try:
+        _resume_workers_after_scan()
+    except Exception as e:
+        logger.debug(f"[DB Update Watchdog] resume workers failed: {e}")
+    return True
 
 _workers_paused_by_scan = set()  # Track which workers WE paused (don't resume manually-paused ones)
 
@@ -16719,7 +16764,10 @@ def start_database_update():
         db_update_state.update({
             "status": "running",
             "phase": f"{scan_type}: Initializing...",
-            "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": ""
+            "progress": 0, "current_item": "", "processed": 0, "total": 0, "error_message": "",
+            # Seed the heartbeat now so a worker that hangs during init (before the
+            # first progress/phase callback) is still caught by the stall watchdog.
+            "last_progress_at": time.time(),
         })
 
         # Add activity for database update start
@@ -16737,6 +16785,7 @@ def start_database_update():
 @app.route('/api/database/update/status', methods=['GET'])
 def get_database_update_status():
     """Endpoint to poll for the current update status."""
+    _check_db_update_stall()  # self-heal a hung job before reporting (#859)
     with db_update_lock:
         # Debug: Log current state occasionally
         if db_update_state["status"] == "running":
@@ -37158,6 +37207,7 @@ def _emit_tool_progress_loop():
             logger.debug(f"Error emitting duplicate cleaner status: {e}")
         # DB Update
         try:
+            _check_db_update_stall()  # self-heal a hung job, then broadcast (#859)
             with db_update_lock:
                 socketio.emit('tool:db-update', dict(db_update_state))
         except Exception as e:
