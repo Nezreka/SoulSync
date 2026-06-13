@@ -34,6 +34,8 @@ _JOB_MODULES = [
     'core.repair_jobs.acoustid_scanner',
     'core.repair_jobs.missing_cover_art',
     'core.repair_jobs.missing_lyrics',
+    'core.repair_jobs.replaygain_filler',
+    'core.repair_jobs.empty_folder_cleaner',
     'core.repair_jobs.expired_download_cleaner',
     'core.repair_jobs.metadata_gap_filler',
     'core.repair_jobs.album_completeness',
@@ -48,6 +50,7 @@ _JOB_MODULES = [
     'core.repair_jobs.discography_backfill',
     'core.repair_jobs.canonical_version_resolve',
     'core.repair_jobs.library_retag',
+    'core.repair_jobs.quality_upgrade',
 ]
 
 

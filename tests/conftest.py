@@ -113,12 +113,6 @@ _DEFAULT_STREAM_STATE = {
     "error_message": None,
 }
 
-_DEFAULT_QUALITY_SCANNER_STATE = {
-    "status": "running", "phase": "Scanning...", "progress": 35,
-    "processed": 35, "total": 100, "quality_met": 30,
-    "low_quality": 5, "matched": 2, "error_message": "", "results": [],
-}
-
 _DEFAULT_DUPLICATE_CLEANER_STATE = {
     "status": "running", "phase": "Scanning...", "progress": 50,
     "files_scanned": 500, "total_files": 1000, "duplicates_found": 10,
@@ -257,7 +251,6 @@ enrichment_status = copy.deepcopy(_DEFAULT_ENRICHMENT_STATUS)
 
 # Phase 4: Tool progress state
 stream_state = copy.deepcopy(_DEFAULT_STREAM_STATE)
-quality_scanner_state = copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE)
 duplicate_cleaner_state = copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE)
 retag_state = copy.deepcopy(_DEFAULT_RETAG_STATE)
 db_update_state = copy.deepcopy(_DEFAULT_DB_UPDATE_STATE)
@@ -350,13 +343,12 @@ ENRICHMENT_ENDPOINTS = {
 # Phase 4 helpers
 
 TOOL_NAMES = [
-    'stream', 'quality-scanner', 'duplicate-cleaner',
+    'stream', 'duplicate-cleaner',
     'retag', 'db-update', 'metadata', 'logs',
 ]
 
 TOOL_ENDPOINTS = {
     'stream': '/api/stream/status',
-    'quality-scanner': '/api/quality-scanner/status',
     'duplicate-cleaner': '/api/duplicate-cleaner/status',
     'retag': '/api/retag/status',
     'db-update': '/api/database/update/status',
@@ -372,10 +364,6 @@ def _build_stream_status():
         "track_info": stream_state["track_info"],
         "error_message": stream_state["error_message"],
     }
-
-
-def _build_quality_scanner_status():
-    return dict(quality_scanner_state)
 
 
 def _build_duplicate_cleaner_status():
@@ -419,7 +407,6 @@ def _build_tool_status(tool_name):
     """Dispatcher that returns the correct status payload for any tool."""
     builders = {
         'stream': _build_stream_status,
-        'quality-scanner': _build_quality_scanner_status,
         'duplicate-cleaner': _build_duplicate_cleaner_status,
         'retag': _build_retag_status,
         'db-update': _build_db_update_status,
@@ -634,10 +621,6 @@ def test_app():
     @app.route('/api/stream/status')
     def stream_status_endpoint():
         return jsonify(_build_stream_status())
-
-    @app.route('/api/quality-scanner/status')
-    def quality_scanner_status_endpoint():
-        return jsonify(_build_quality_scanner_status())
 
     @app.route('/api/duplicate-cleaner/status')
     def duplicate_cleaner_status_endpoint():
@@ -961,7 +944,6 @@ def shared_state():
         'enrichment_endpoints': ENRICHMENT_ENDPOINTS,
         # Phase 4 state
         'stream_state': stream_state,
-        'quality_scanner_state': quality_scanner_state,
         'duplicate_cleaner_state': duplicate_cleaner_state,
         'retag_state': retag_state,
         'db_update_state': db_update_state,
@@ -969,7 +951,6 @@ def shared_state():
         'logs_activities': logs_activities,
         'build_tool_status': _build_tool_status,
         'build_stream_status': _build_stream_status,
-        'build_quality_scanner_status': _build_quality_scanner_status,
         'build_duplicate_cleaner_status': _build_duplicate_cleaner_status,
         'build_retag_status': _build_retag_status,
         'build_db_update_status': _build_db_update_status,
@@ -1019,8 +1000,6 @@ def reset_state():
     # Phase 4 resets
     stream_state.clear()
     stream_state.update(copy.deepcopy(_DEFAULT_STREAM_STATE))
-    quality_scanner_state.clear()
-    quality_scanner_state.update(copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE))
     duplicate_cleaner_state.clear()
     duplicate_cleaner_state.update(copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE))
     retag_state.clear()
@@ -1061,8 +1040,6 @@ def reset_state():
     enrichment_status.update(copy.deepcopy(_DEFAULT_ENRICHMENT_STATUS))
     stream_state.clear()
     stream_state.update(copy.deepcopy(_DEFAULT_STREAM_STATE))
-    quality_scanner_state.clear()
-    quality_scanner_state.update(copy.deepcopy(_DEFAULT_QUALITY_SCANNER_STATE))
     duplicate_cleaner_state.clear()
     duplicate_cleaner_state.update(copy.deepcopy(_DEFAULT_DUPLICATE_CLEANER_STATE))
     retag_state.clear()

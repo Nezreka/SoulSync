@@ -1648,6 +1648,70 @@ function _serverEditorRefresh() {
     _openServerCompareView(_serverEditorState.playlistId, _serverEditorState.playlistName, _serverEditorState.mirroredPlaylist);
 }
 
+/**
+ * Export the currently-open server playlist as an M3U file. Takes the tracks
+ * physically present ON the server (matched + extra) and reuses the shared M3U
+ * writer, which resolves each to its real library file path (+ the configured
+ * entry_base_path prefix) so media servers like Music Assistant can read it.
+ * force:true bypasses the auto-save "m3u_export.enabled" gate — this is a manual
+ * on-demand export.
+ */
+async function exportServerPlaylistM3U() {
+    const st = _serverEditorState;
+    const btn = document.getElementById('server-editor-export-btn');
+    const tracks = (st && Array.isArray(st.tracks) ? st.tracks : [])
+        .filter(t => t.server_track)
+        .map(t => ({
+            name: t.server_track.title,
+            artist: t.server_track.artist || '',
+            duration_ms: t.server_track.duration || 0,
+        }));
+    if (!tracks.length) {
+        showToast('No server tracks to export', 'warning');
+        return;
+    }
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Exporting…'; }
+    try {
+        const res = await fetch('/api/generate-playlist-m3u', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: st.playlistName || 'Playlist',
+                tracks,
+                context_type: 'playlist',
+                save_to_disk: true,
+                force: true,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.success === false) {
+            throw new Error(data.error || 'Export failed');
+        }
+        // Download the .m3u to the browser (same as the other Export-as-M3U
+        // buttons) — force=true also saved it server-side for media servers.
+        const name = (st.playlistName || 'Playlist').replace(/[/\\?%*:|"<>]/g, '-');
+        const blob = new Blob([data.m3u_content || ''], { type: 'audio/x-mpegurl;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${name}.m3u`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        // `found` = server tracks resolved to a real library file path; any not in
+        // SoulSync's library are skipped (can't write a path for them).
+        const found = data.stats && data.stats.found != null ? data.stats.found : tracks.length;
+        const note = found < tracks.length ? ` (${found}/${tracks.length} in library)` : ` (${found} tracks)`;
+        showToast(`Exported M3U: ${st.playlistName}${note}`, 'success');
+    } catch (e) {
+        showToast(`M3U export failed: ${e.message}`, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig || '📋 Export M3U'; }
+    }
+}
+
 function serverEditorBack() {
     const container = document.getElementById('server-playlist-container');
     const editor = document.getElementById('server-editor');
@@ -1916,11 +1980,28 @@ setInterval(() => {
 }, 30000);
 
 async function loadDashboardSyncHistory() {
+    // Don't poll the auth-gated sync-history endpoint while the app is locked —
+    // it would 401 every 30s cycle (the result is discarded anyway). Resumes
+    // automatically on unlock (init.js removes 'app-locked').
+    if (document.body.classList.contains('app-locked')) return;
     const container = document.getElementById('sync-history-cards');
     if (!container) return;
 
     try {
         const response = await fetch('/api/sync/history?limit=10');
+        if (response.status === 401) {
+            // Session lapsed (e.g. the server restarted) while this tab still
+            // believed it was unlocked, so the guard above couldn't fire. Surface
+            // the correct unlock screen — both add 'app-locked', which stops the
+            // poll until the user re-authenticates (same as a fresh page load).
+            const info = await response.json().catch(() => ({}));
+            if (info.login_required && typeof showLoginScreen === 'function') {
+                showLoginScreen();
+            } else if (typeof showLaunchPinScreen === 'function') {
+                showLaunchPinScreen();
+            }
+            return;
+        }
         if (!response.ok) return;
 
         const data = await response.json();

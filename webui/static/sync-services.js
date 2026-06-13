@@ -150,42 +150,19 @@ async function handleTidalCardClick(playlistId) {
     console.log(`🎵 [Card Click] Tidal card clicked: ${playlistId}, Phase: ${state.phase}`);
 
     if (state.phase === 'fresh') {
-        // Fetch tracks if not yet loaded (metadata-only listing doesn't include them)
-        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
-            console.log(`🎵 Fetching tracks for Tidal playlist: ${state.playlist.name}`);
-            showLoadingOverlay(`Loading ${state.playlist.name}...`);
-            try {
-                const resp = await fetch(`/api/tidal/playlist/${playlistId}`);
-                if (resp.ok) {
-                    const fullData = await resp.json();
-                    if (fullData.tracks && fullData.tracks.length > 0) {
-                        // Convert to Track-like objects for the discovery modal
-                        state.playlist.tracks = fullData.tracks.map(t => ({
-                            id: t.id, name: t.name, artists: t.artists || [],
-                            album: t.album || '', duration_ms: t.duration_ms || 0,
-                            track_number: t.track_number || 0
-                        }));
-                        // Update card count
-                        const countEl = document.querySelector(`#tidal-card-${playlistId} .playlist-card-track-count`);
-                        if (countEl) countEl.textContent = `${state.playlist.tracks.length} tracks`;
-                    }
-                }
-            } catch (e) {
-                console.error(`Failed to fetch Tidal playlist tracks: ${e}`);
-                hideLoadingOverlay();
-            }
+        // Open the modal IMMEDIATELY — don't block on a slow Tidal track fetch.
+        // The old flow awaited /api/tidal/playlist/<id> (which paginates with a
+        // 1s sleep per page + rate-limit throttle, ~10s for a big playlist)
+        // before the modal appeared, then the backend re-fetched the same
+        // playlist when discovery started. Now the backend discovery fetch is
+        // the single source of truth and the modal builds its rows from those
+        // results as they stream in (#867), so we open right away. If the
+        // background loader already cached the track list, the rows seed
+        // instantly; otherwise the discovery poll fills them in. (#867 UX)
+        if (!Array.isArray(state.playlist.tracks)) {
+            state.playlist.tracks = [];
         }
 
-        if (!state.playlist.tracks || state.playlist.tracks.length === 0) {
-            hideLoadingOverlay();
-            showToast('Could not load tracks for this playlist', 'error');
-            return;
-        }
-
-        hideLoadingOverlay();
-        console.log(`🎵 Ready with ${state.playlist.tracks.length} Tidal tracks for discovery`);
-
-        // Open discovery modal - phase will be updated when discovery actually starts
         openTidalDiscoveryModal(playlistId, state.playlist);
 
     } else if (state.phase === 'discovering' || state.phase === 'discovered' || state.phase === 'syncing' || state.phase === 'sync_complete') {
@@ -563,6 +540,23 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
 
     // Only start discovery if not already discovered AND not currently discovering
     if (!isAlreadyDiscovered && !isCurrentlyDiscovering) {
+        // Open the modal FIRST so it appears instantly. The discovery-start POST
+        // below fetches the ENTIRE playlist server-side before it responds (Tidal
+        // sleeps 1s per page → ~10s for a large playlist). Previously the modal
+        // was only opened AFTER this await, so the user stared at nothing for those
+        // ~10s. Now the modal shows immediately with a loading note and tracks
+        // stream in once discovery starts. We return early so the shared open at
+        // the bottom isn't reached for this path. (#867 UX)
+        //
+        // Open in the 'discovering' phase (not 'fresh') because discovery is
+        // auto-starting: that renders the non-interactive "Discovering matches…"
+        // footer instead of clickable Start Discovery / Wing It buttons, which
+        // must NOT be clickable while the table is still empty/loading. (#867 UX)
+        youtubePlaylistStates[fakeUrlHash].phase = 'discovering';
+        openYouTubeDiscoveryModal(fakeUrlHash);
+        const _descEl = document.querySelector(`#youtube-discovery-modal-${fakeUrlHash} .modal-description`);
+        if (_descEl) _descEl.textContent = 'Loading playlist from Tidal…';
+
         // Start Tidal discovery process automatically (like sync.py)
         try {
             console.log(`🔍 Starting Tidal discovery for: ${playlistData.name}`);
@@ -576,10 +570,12 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
             if (result.error) {
                 console.error('❌ Error starting Tidal discovery:', result.error);
                 showToast(`Error starting discovery: ${result.error}`, 'error');
+                if (_descEl) _descEl.textContent = 'Could not start discovery.';
                 return;
             }
 
             console.log('✅ Tidal discovery started, beginning polling...');
+            if (_descEl) _descEl.textContent = 'Discovering tracks…';
 
             // Update phase to discovering now that backend discovery is actually started
             tidalPlaylistStates[playlistId].phase = 'discovering';
@@ -594,7 +590,9 @@ async function openTidalDiscoveryModal(playlistId, playlistData) {
         } catch (error) {
             console.error('❌ Error starting Tidal discovery:', error);
             showToast(`Error starting discovery: ${error.message}`, 'error');
+            if (_descEl) _descEl.textContent = 'Could not start discovery.';
         }
+        return;
     } else if (isCurrentlyDiscovering) {
         // Resume polling if discovery is already in progress (like YouTube)
         console.log(`🔄 Resuming Tidal discovery polling for: ${playlistData.name}`);
@@ -4063,7 +4061,11 @@ async function handleDbUpdateButtonClick() {
         }
 
         try {
-            button.disabled = true;
+            // Leave the button ENABLED while "Starting..." so it doubles as a
+            // cancel affordance — a wedged start (#859) must stay clickable. A
+            // second click reads "Starting..." and falls through to the stop
+            // branch below, so there's no double-start risk.
+            button.disabled = false;
             button.textContent = 'Starting...';
             const response = await fetch('/api/database/update', {
                 method: 'POST',
@@ -4072,14 +4074,19 @@ async function handleDbUpdateButtonClick() {
                 // scan takes precedence server-side, so send only its flag.
                 body: JSON.stringify(isDeepScan ? { deep_scan: true } : { full_refresh: isFullRefresh })
             });
+            const data = await response.json().catch(() => ({}));
 
-            if (response.ok) {
+            // Check BOTH the HTTP status and the body's success flag — a 200 with
+            // success:false must not be mistaken for a started job (#859).
+            if (response.ok && data.success !== false) {
                 showToast('Database update started!', 'success');
                 // Start polling immediately to get live status
                 checkAndUpdateDbProgress();
+                // Socket-independent safety net: recovers the card from
+                // "Starting..." even if the WebSocket goes quiet/half-open (#859).
+                armDbUpdateSafetyPoll();
             } else {
-                const errorData = await response.json();
-                showToast(`Error: ${errorData.error}`, 'error');
+                showToast(`Error: ${data.error || 'Failed to start update.'}`, 'error');
                 button.disabled = false;
                 button.textContent = 'Update Database';
             }
@@ -10039,7 +10046,14 @@ function generateTableRowsFromState(state, urlHash) {
         return discoveryResults.map((result, index) => {
             // Handle different field names based on platform
             const trackName = result.lb_track || result.yt_track || result.track_name || '-';
-            const artistName = result.lb_artist || result.yt_artist || result.artist_name || '-';
+            // YouTube flat extraction often can't give a per-track artist, so the
+            // source-side artist comes back "Unknown Artist" even when discovery
+            // matched the song. Fall back to the matched (Spotify/iTunes) artist so
+            // the column shows the real artist instead of "Unknown" (#863).
+            let artistName = result.lb_artist || result.yt_artist || result.artist_name || '';
+            if (!artistName || artistName === 'Unknown Artist') {
+                artistName = result.spotify_artist || artistName || '-';
+            }
 
             return `
             <tr id="discovery-row-${urlHash}-${result.index}">
@@ -10170,8 +10184,30 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
     // Update table rows
     status.results.forEach(result => {
-        const row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
-        if (!row) return;
+        let row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
+        if (!row) {
+            // #867: the initial rows are pre-rendered from a separately-fetched
+            // track list (state.playlist.tracks) that can be SHORTER than the
+            // backend's authoritative discovery results — e.g. a Tidal playlist
+            // whose discovery fetched 59 tracks while the modal's own track fetch
+            // returned a rate-limited partial (~21). The old `if (!row) return`
+            // silently dropped every result past the pre-rendered rows. Create
+            // the missing row instead so the authoritative results drive the
+            // list and no discovered track disappears. The existing cell-fill
+            // logic below then populates it like any other row.
+            const trackName = result.yt_track || result.lb_track || result.track_name || '-';
+            row = document.createElement('tr');
+            row.id = `discovery-row-${urlHash}-${result.index}`;
+            row.innerHTML =
+                `<td class="yt-track">${trackName}</td>` +
+                '<td class="yt-artist"></td>' +
+                '<td class="discovery-status"></td>' +
+                '<td class="spotify-track">-</td>' +
+                '<td class="spotify-artist">-</td>' +
+                '<td class="spotify-album">-</td>' +
+                '<td class="discovery-actions">-</td>';
+            tableBody.appendChild(row);
+        }
 
         const statusCell = row.querySelector('.discovery-status');
         const spotifyTrackCell = row.querySelector('.spotify-track');
@@ -10181,6 +10217,19 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
         statusCell.textContent = result.status;
         statusCell.className = `discovery-status ${result.status_class}`;
+
+        // Fill the source-side artist live too — YouTube flat extraction often
+        // leaves it "Unknown Artist", so fall back to the matched artist once
+        // discovery resolves the track (#863). Without this, the per-row poll
+        // updates only the Spotify cells and the left column stays "Unknown".
+        const ytArtistCell = row.querySelector('.yt-artist');
+        if (ytArtistCell) {
+            let ytArtist = result.yt_artist || result.artist_name || '';
+            if (!ytArtist || ytArtist === 'Unknown Artist') {
+                ytArtist = result.spotify_artist || ytArtist || '-';
+            }
+            ytArtistCell.textContent = ytArtist;
+        }
 
         spotifyTrackCell.textContent = result.spotify_track || '-';
         spotifyArtistCell.textContent = result.spotify_artist || '-';

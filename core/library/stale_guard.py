@@ -42,4 +42,43 @@ def is_implausible_stale_removal(
     return missing_count > total_count * max_fraction
 
 
-__all__ = ["is_implausible_stale_removal", "DEFAULT_MIN_TOTAL", "DEFAULT_MAX_MISSING_FRACTION"]
+# The orphan detector walks the transfer folder and flags any audio file whose
+# path/title doesn't resolve to a DB track. If the DB's stored paths share a base
+# prefix the local filesystem no longer has (remount, Docker volume change, WSL
+# hiccup), EVERY file misses and the whole library looks "orphaned" — and a user
+# batch-applying "move to staging" on those findings would relocate their entire
+# library. Same failure mode as stale-removal, so we skip the whole result when
+# the orphan share is implausibly large. Needs an absolute floor too: 3/4 orphans
+# in a tiny folder is normal, 4000/5000 is a path mismatch.
+DEFAULT_MIN_ORPHANS = 20
+DEFAULT_MAX_ORPHAN_FRACTION = 0.5
+
+
+def is_implausible_orphan_flood(
+    orphan_count: int,
+    total_count: int,
+    *,
+    min_orphans: int = DEFAULT_MIN_ORPHANS,
+    max_fraction: float = DEFAULT_MAX_ORPHAN_FRACTION,
+) -> bool:
+    """True when so many files look orphaned that the DB↔filesystem path mapping is
+    almost certainly broken (not real orphans) and the scan should create NO
+    findings — otherwise a batch "move to staging" / "delete" could wipe the
+    library. Below ``min_orphans`` (absolute) it always returns False so small,
+    genuine orphan sets still surface.
+    """
+    if total_count <= 0 or orphan_count <= 0:
+        return False
+    if orphan_count <= min_orphans:
+        return False
+    return orphan_count > total_count * max_fraction
+
+
+__all__ = [
+    "is_implausible_stale_removal",
+    "is_implausible_orphan_flood",
+    "DEFAULT_MIN_TOTAL",
+    "DEFAULT_MAX_MISSING_FRACTION",
+    "DEFAULT_MIN_ORPHANS",
+    "DEFAULT_MAX_ORPHAN_FRACTION",
+]

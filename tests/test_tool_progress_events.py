@@ -13,16 +13,15 @@ conftest is a different module instance. Use the ``shared_state`` fixture instea
 import pytest
 
 
-# All 7 tool progress pollers
+# Tool progress pollers
 TOOLS = [
-    'stream', 'quality-scanner', 'duplicate-cleaner',
+    'stream', 'duplicate-cleaner',
     'retag', 'db-update', 'metadata', 'logs',
 ]
 
 # Endpoint URLs keyed by tool name
 ENDPOINTS = {
     'stream': '/api/stream/status',
-    'quality-scanner': '/api/quality-scanner/status',
     'duplicate-cleaner': '/api/duplicate-cleaner/status',
     'retag': '/api/retag/status',
     'db-update': '/api/database/update/status',
@@ -62,27 +61,6 @@ class TestToolDataShape:
         assert 'track_info' in data
         assert 'error_message' in data
         assert isinstance(data['progress'], (int, float))
-
-    def test_quality_scanner_shape(self, test_app, shared_state):
-        """Quality scanner has status, phase, progress, processed, total, quality_met."""
-        app, socketio = test_app
-        client = socketio.test_client(app)
-        build = shared_state['build_quality_scanner_status']
-
-        socketio.emit('tool:quality-scanner', build())
-        received = client.get_received()
-        events = [e for e in received if e['name'] == 'tool:quality-scanner']
-        assert len(events) >= 1
-        data = events[0]['args'][0]
-
-        assert 'status' in data
-        assert 'phase' in data
-        assert 'progress' in data
-        assert 'processed' in data
-        assert 'total' in data
-        assert 'quality_met' in data
-        assert 'low_quality' in data
-        assert 'matched' in data
 
     def test_duplicate_cleaner_shape(self, test_app, shared_state):
         """Duplicate cleaner has status, phase, progress, space_freed_mb."""
@@ -255,11 +233,11 @@ class TestToolBackwardCompat:
         client2 = socketio.test_client(app)
         build = shared_state['build_tool_status']
 
-        socketio.emit('tool:quality-scanner', build('quality-scanner'))
+        socketio.emit('tool:duplicate-cleaner', build('duplicate-cleaner'))
 
         for client in [client1, client2]:
             received = client.get_received()
-            events = [e for e in received if e['name'] == 'tool:quality-scanner']
+            events = [e for e in received if e['name'] == 'tool:duplicate-cleaner']
             assert len(events) >= 1
 
         client1.disconnect()
@@ -270,17 +248,15 @@ class TestToolBackwardCompat:
         app, socketio = test_app
         client = socketio.test_client(app)
         build = shared_state['build_tool_status']
-        qs = shared_state['quality_scanner_state']
+        dc = shared_state['duplicate_cleaner_state']
 
         # Mutate state
-        qs['status'] = 'finished'
-        qs['progress'] = 100
-        qs['processed'] = 100
+        dc['status'] = 'finished'
+        dc['progress'] = 100
 
-        socketio.emit('tool:quality-scanner', build('quality-scanner'))
+        socketio.emit('tool:duplicate-cleaner', build('duplicate-cleaner'))
         received = client.get_received()
-        events = [e for e in received if e['name'] == 'tool:quality-scanner']
+        events = [e for e in received if e['name'] == 'tool:duplicate-cleaner']
         data = events[-1]['args'][0]
         assert data['status'] == 'finished'
         assert data['progress'] == 100
-        assert data['processed'] == 100

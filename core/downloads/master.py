@@ -505,13 +505,19 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             track_name = track_data.get('name', '')
             artists = track_data.get('artists', [])
             found, confidence = False, 0.0
+            # Additive payload: the owned library track (DatabaseTrack) when this
+            # item is found in the library, so downstream (playlist materialization)
+            # knows WHERE the real file is without re-matching. None when not owned.
+            matched_track = None
 
             # Manual library matches are authoritative unless the user explicitly
             # requested a force re-download from the normal download modal.
             _stid = track_data.get('spotify_track_id') or track_data.get('source_track_id') or track_data.get('id', '')
-            if not ignore_manual_matches and _stid and _mlm.get_match_for_track(
-                db, batch_profile_id, track_data, default_source=batch_source
-            ):
+            _manual_match = (
+                _mlm.get_match_for_track(db, batch_profile_id, track_data, default_source=batch_source)
+                if (not ignore_manual_matches and _stid) else None
+            )
+            if _manual_match:
                 logger.info(f"[Manual Match] '{track_name}' already matched in library — skipping download")
                 try:
                     deps.check_and_remove_track_from_wishlist_by_metadata(track_data)
@@ -523,6 +529,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     'found': True,
                     'confidence': 1.0,
                     'match_reason': 'manual_library_match',
+                    'matched_file_path': _manual_match.get('library_file_path'),
+                    'matched_track_id': _manual_match.get('library_track_id'),
                 })
                 continue
 
@@ -568,8 +576,10 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                 # Direct title match (try both raw and normalized)
                 if track_name_lower in album_tracks_map:
                     found, confidence = True, 1.0
+                    matched_track = album_tracks_map[track_name_lower]
                 elif _normalized_source_title and _normalized_source_title in album_tracks_map:
                     found, confidence = True, 1.0
+                    matched_track = album_tracks_map[_normalized_source_title]
                 else:
                     # Fuzzy match against album tracks using string similarity.
                     # Compare BOTH the raw and normalized source titles —
@@ -577,14 +587,17 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     # matching when the album doesn't imply version
                     # context (helper returns the input unchanged).
                     best_sim = 0.0
+                    best_track = None
                     for db_title_lower, _db_track in album_tracks_map.items():
                         sim_raw = db._string_similarity(track_name_lower, db_title_lower)
                         sim_norm = db._string_similarity(_normalized_source_title, db_title_lower) if _normalized_source_title else 0.0
                         sim = max(sim_raw, sim_norm)
                         if sim > best_sim:
                             best_sim = sim
+                            best_track = _db_track
                     if best_sim >= 0.7:
                         found, confidence = True, best_sim
+                        matched_track = best_track
                     else:
                         # Fall back to global per-track search for this track
                         # When allow_duplicates is on for album downloads, skip global
@@ -605,6 +618,7 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                                 )
                                 if db_track and track_confidence >= 0.7:
                                     found, confidence = True, track_confidence
+                                    matched_track = db_track
                                     break
             elif allow_duplicates and batch_is_album:
                 # Allow duplicates + album download + album not in DB yet → treat all as missing
@@ -624,10 +638,15 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                     )
                     if db_track and track_confidence >= 0.7:
                         found, confidence = True, track_confidence
+                        matched_track = db_track
                         break
 
             analysis_results.append({
-                'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence
+                'track_index': track_index, 'track': track_data, 'found': found, 'confidence': confidence,
+                # Additive: real on-disk location of the owned track (None when not
+                # owned), so playlist materialization links the right file.
+                'matched_file_path': getattr(matched_track, 'file_path', None),
+                'matched_track_id': getattr(matched_track, 'id', None),
             })
             
             # WISHLIST REMOVAL: If track is found in database, check if it should be removed from wishlist
@@ -765,6 +784,41 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
             if is_auto_batch and playlist_id == 'wishlist':
                 logger.warning("[Auto-Wishlist] No missing tracks found - calling auto-completion handler to toggle cycle and reschedule")
                 deps.missing_download_executor.submit(deps.process_failed_tracks_to_wishlist_exact_with_auto_completion, batch_id)
+
+            # Organize-by-playlist with NOTHING to download (every track already
+            # owned): the batch never enters the download/lifecycle path, so build
+            # the playlist folder here from the owned files the analysis matched.
+            # Gated + non-fatal; runs once after analysis, not in the per-track loop.
+            if effective_playlist_folder_mode:
+                try:
+                    from core.playlists.materialize_service import reconcile_batch_playlists
+                    from database.music_database import MusicDatabase as _MDB
+                    _batch = download_batches.get(batch_id)
+                    if _batch is not None:
+                        # We KNOW the intent is organize-by-playlist here (the gate
+                        # above). The line-431 sync only writes the dict field when
+                        # effective and NOT batch_playlist_folder_mode, so when the
+                        # toggle itself drove it the dict field can still be falsy —
+                        # which makes reconcile build no batch ref. Make the dict
+                        # authoritative so reconcile sees the batch's own playlist.
+                        _batch['playlist_folder_mode'] = True
+                        if effective_playlist_name:
+                            _batch['playlist_name'] = effective_playlist_name
+                        _results = reconcile_batch_playlists(_MDB(), _batch, download_tasks, deps.config_manager)
+                        if not _results:
+                            logger.info(
+                                f"[Playlist Folder] All-owned: nothing rebuilt for "
+                                f"ref={_batch.get('source_playlist_ref') or _batch.get('playlist_id')} "
+                                f"source={_batch.get('batch_source')}"
+                            )
+                        for _pl_name, _mat in _results:
+                            logger.info(
+                                f"[Playlist Folder] Rebuilt '{_mat.playlist_dir}' (all owned): "
+                                f"{_mat.linked} linked, {_mat.copied} copied, {_mat.removed_stale} stale removed"
+                                + (" (symlinks unsupported here → copied)" if _mat.fellback else "")
+                            )
+                except Exception as _mat_err:
+                    logger.error(f"[Playlist Folder] All-owned materialize failed (non-fatal): {_mat_err}")
 
             return
 
@@ -1144,7 +1198,13 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             task_pl_folder_mode = True
                             task_pl_name = wl_pl_name or wl_mirrored.get('name') or batch_playlist_name
                 if task_pl_folder_mode:
-                    track_info['_playlist_folder_mode'] = True
+                    # Organize-by-playlist now imports each track NORMALLY into the
+                    # Artist/Album library (i.e. exactly what a normal download does)
+                    # — the playlist folder is built as links/copies AFTER the batch
+                    # from the real library files. So we deliberately DON'T set
+                    # `_playlist_folder_mode` (which routed the real file into a flat
+                    # Music/<playlist>/ dump). We keep `_playlist_name` + source_info
+                    # — they're download provenance (core/downloads/origin.py).
                     track_info['_playlist_name'] = task_pl_name
                     if batch_source_playlist_ref:
                         track_info['source_info'] = {
@@ -1153,8 +1213,8 @@ def run_full_missing_tracks_process(batch_id, playlist_id, tracks_json, deps: Ma
                             'source': batch_source,
                         }
                     logger.info(
-                        f"[Task Creation] Added playlist folder mode for: "
-                        f"{track_info.get('name')} → {task_pl_name}"
+                        f"[Task Creation] Organize-by-playlist (normal import + "
+                        f"materialize after batch): {track_info.get('name')} → {task_pl_name}"
                     )
                 else:
                     logger.debug(

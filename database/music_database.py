@@ -102,6 +102,10 @@ class WatchlistArtist:
     include_instrumentals: bool = False
     lookback_days: Optional[int] = None  # Per-artist override; None = use global setting
     preferred_metadata_source: Optional[str] = None  # Per-artist override; None = use global setting
+    # When False ("follow only"), the watchlist scan still discovers + surfaces new
+    # releases for this artist but does NOT auto-add them to the wishlist (so they
+    # don't auto-download). Default True = current behaviour.
+    auto_download: bool = True
     profile_id: int = 1
 
 @dataclass
@@ -467,6 +471,12 @@ class MusicDatabase:
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
 
+            # Per-artist auto_download ("follow only") column. MUST run after the
+            # profile-support migrations above — those recreate watchlist_artists
+            # from an explicit column list, so any column added before them gets
+            # dropped. Adding it here (after the last recreate) makes it stick.
+            self._add_watchlist_auto_download_column(cursor)
+
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
 
@@ -579,6 +589,7 @@ class MusicDatabase:
             # Add explored_at to mirrored_playlists (migration)
             self._add_mirrored_playlist_explored_column(cursor)
             self._add_mirrored_playlist_organize_column(cursor)
+            self._add_mirrored_playlist_custom_name_column(cursor)
 
             # Add notification columns to automations (migration)
             self._add_automation_notify_columns(cursor)
@@ -1250,6 +1261,23 @@ class MusicDatabase:
                 logger.info("Added organize_by_playlist column to mirrored_playlists table")
         except Exception as e:
             logger.error(f"Error adding organize_by_playlist column to mirrored_playlists: {e}")
+
+    def _add_mirrored_playlist_custom_name_column(self, cursor):
+        """Add custom_name (a user alias) for a mirrored playlist.
+
+        Overrides the upstream ``name`` for both UI display and sync-to-server,
+        while staying tied to the original — the upstream ``name`` keeps tracking
+        on refresh, ``custom_name`` just overrides what's shown/synced. Stored in
+        its OWN column (not ``name``) precisely so ``mirror_playlist`` — which
+        rewrites ``name`` from upstream on every refresh — never clobbers it."""
+        try:
+            cursor.execute("PRAGMA table_info(mirrored_playlists)")
+            cols = [c[1] for c in cursor.fetchall()]
+            if 'custom_name' not in cols:
+                cursor.execute("ALTER TABLE mirrored_playlists ADD COLUMN custom_name TEXT DEFAULT NULL")
+                logger.info("Added custom_name column to mirrored_playlists table")
+        except Exception as e:
+            logger.error(f"Error adding custom_name column to mirrored_playlists: {e}")
 
     def _add_automation_notify_columns(self, cursor):
         """Add notification and result columns to automations table."""
@@ -2139,6 +2167,21 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding content type filter columns to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_auto_download_column(self, cursor):
+        """Add per-artist auto_download column ("follow only" toggle).
+
+        Default 1 (auto-download) = existing behaviour. When 0, the watchlist scan
+        still finds + surfaces new releases for the artist but skips adding them to
+        the wishlist."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'auto_download' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN auto_download INTEGER NOT NULL DEFAULT 1")
+                logger.info("Added auto_download column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -6883,6 +6926,31 @@ class MusicDatabase:
             logger.error(f"API: Error searching tracks with title='{title}', artist='{artist}': {e}")
             return []
     
+    def get_tracks_for_m3u_resolution(self, server_source: Optional[str] = None) -> List[Dict[str, str]]:
+        """Bulk-load (artist, title, file_path) for in-memory M3U path resolution.
+
+        ONE indexed read instead of a per-artist search loop. SQLite WAL allows it
+        to run concurrently with the enrichment/scan writers, so M3U export no
+        longer blocks behind them (the 'Export M3U hangs forever' report). Only
+        rows that actually have a file_path are returned (the rest can't go in an
+        M3U anyway)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            sql = ("SELECT tracks.title AS title, artists.name AS artist_name, tracks.file_path AS file_path "
+                   "FROM tracks JOIN artists ON tracks.artist_id = artists.id "
+                   "WHERE tracks.file_path IS NOT NULL AND tracks.file_path != ''")
+            params: list = []
+            if server_source:
+                sql += " AND tracks.server_source = ?"
+                params.append(server_source)
+            cursor.execute(sql, params)
+            return [{'title': r['title'] or '', 'artist': r['artist_name'] or '', 'file_path': r['file_path']}
+                    for r in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error bulk-loading tracks for M3U resolution: {e}")
+            return []
+
     def _search_tracks_basic(self, cursor, title: str, artist: str, limit: int, server_source: str = None,
                              rank_artist: str = None) -> List[DatabaseTrack]:
         """Basic SQL LIKE search - fastest method"""
@@ -9275,7 +9343,8 @@ class MusicDatabase:
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
-                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source']
+                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
+                                   'auto_download']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -9313,6 +9382,7 @@ class MusicDatabase:
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
+                    auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -9337,6 +9407,7 @@ class MusicDatabase:
                         include_instrumentals=include_instrumentals,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
+                        auto_download=auto_download,
                         profile_id=profile_id
                     ))
 
@@ -13704,8 +13775,12 @@ class MusicDatabase:
             row = self.get_mirrored_playlist_by_source(default_source, ref, profile_id)
             if row:
                 return row
-        if ref.isdigit():
-            return self.get_mirrored_playlist(int(ref))
+        # Fallback: bare numeric ref or a synthetic batch id (auto_mirror_<pk>,
+        # youtube_mirrored_<pk>, mirrored_<pk>) whose trailing digits are the PK.
+        from core.playlists.source_refs import extract_mirrored_pk
+        pk = extract_mirrored_pk(ref)
+        if pk is not None:
+            return self.get_mirrored_playlist(pk)
         return None
 
     def set_mirrored_playlist_organize_by_playlist(
@@ -13729,6 +13804,32 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating organize_by_playlist for playlist {playlist_id}: {e}")
+            return False
+
+    def set_mirrored_playlist_custom_name(self, playlist_id: int, custom_name) -> bool:
+        """Set or clear a user alias for a mirrored playlist.
+
+        A blank/None value CLEARS the alias (display + sync fall back to the
+        upstream name). Touches only ``custom_name`` + ``updated_at``, leaving the
+        upstream ``name`` and the tracks untouched — so the alias survives upstream
+        refresh and never disturbs anything else (mirrors the source-ref/organize
+        update pattern)."""
+        value = (str(custom_name).strip() or None) if custom_name is not None else None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE mirrored_playlists
+                    SET custom_name = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                    """,
+                    (value, playlist_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating custom_name for playlist {playlist_id}: {e}")
             return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:

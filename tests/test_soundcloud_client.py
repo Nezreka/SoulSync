@@ -248,6 +248,99 @@ def test_search_handles_empty_entries(tmp_dl: Path) -> None:
     assert tracks == []
 
 
+# ---------------------------------------------------------------------------
+# URL resolution (#865): paste a SoundCloud link, incl. unlisted/private
+# ---------------------------------------------------------------------------
+
+
+def test_is_soundcloud_url_accepts_real_links() -> None:
+    ok = [
+        'https://soundcloud.com/artist/track-name',
+        'http://soundcloud.com/artist/sets/my-set',
+        'https://soundcloud.com/artist/track/s-AbC123',          # private share token
+        'soundcloud.com/artist/track-name',                       # scheme-less
+        'https://m.soundcloud.com/artist/track',
+        'https://on.soundcloud.com/aBcDe',                        # short link
+    ]
+    for u in ok:
+        assert soundcloud_client.is_soundcloud_url(u) is True, u
+
+
+def test_is_soundcloud_url_rejects_non_links() -> None:
+    no = [
+        'daft punk around the world',
+        'best soundcloud tracks 2024',          # mentions soundcloud, not a URL
+        'https://youtube.com/watch?v=abc',
+        'https://open.spotify.com/track/xyz',
+        '', None, 42,
+    ]
+    for u in no:
+        assert soundcloud_client.is_soundcloud_url(u) is False, repr(u)
+
+
+def test_search_routes_a_url_to_resolve(tmp_dl: Path) -> None:
+    """A pasted SoundCloud URL must go through resolve_url, NOT scsearch."""
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    sentinel = ([TrackResult(username='soundcloud', filename='1||u||n', size=0,
+                             bitrate=128, duration=None, quality='mp3',
+                             free_upload_slots=999, upload_speed=1, queue_length=0)], [])
+    # resolve_url is async → patch.object gives an AsyncMock, so return_value is
+    # what `await` yields.
+    with patch.object(client, 'resolve_url', return_value=sentinel) as rv, \
+         patch.object(client, '_extract_search_entries') as scsearch:
+        tracks, albums = _run(client.search('https://soundcloud.com/x/private/s-tok'))
+    rv.assert_called_once()
+    scsearch.assert_not_called()
+    assert len(tracks) == 1
+
+
+def test_resolve_url_single_track_uses_permalink(tmp_dl: Path) -> None:
+    """Full extraction puts a transient stream URL in `url`; the stable permalink
+    is `webpage_url`. The filename must encode the permalink."""
+    info = {
+        'id': '999',
+        'title': 'Artist Name - Secret Song',
+        'uploader': 'artistname',
+        'url': 'https://cf-media.sndcdn.com/transient-stream.mp3',   # expires
+        'webpage_url': 'https://soundcloud.com/artistname/secret-song/s-Tok3n',
+        'duration': 200.0,
+    }
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with patch.object(client, '_extract_url_info', return_value=info):
+        tracks, albums = _run(client.resolve_url('https://soundcloud.com/artistname/secret-song/s-Tok3n'))
+    assert albums == []
+    assert len(tracks) == 1
+    parts = tracks[0].filename.split('||')
+    assert parts[0] == '999'
+    assert parts[1] == 'https://soundcloud.com/artistname/secret-song/s-Tok3n'  # permalink, not stream
+    assert tracks[0]._source_metadata['permalink_url'] == 'https://soundcloud.com/artistname/secret-song/s-Tok3n'
+    assert tracks[0].artist == 'Artist Name'
+    assert tracks[0].duration == 200000
+
+
+def test_resolve_url_set_yields_all_tracks(tmp_dl: Path) -> None:
+    info = {
+        'entries': [
+            {'id': '1', 'title': 'A - One', 'webpage_url': 'https://soundcloud.com/a/one', 'duration': 100},
+            {'id': '2', 'title': 'A - Two', 'webpage_url': 'https://soundcloud.com/a/two', 'duration': 120},
+        ],
+    }
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with patch.object(client, '_extract_url_info', return_value=info):
+        tracks, _ = _run(client.resolve_url('https://soundcloud.com/a/sets/my-set'))
+    assert {t._source_metadata['track_id'] for t in tracks} == {'1', '2'}
+    assert all('soundcloud.com' in t.filename.split('||')[1] for t in tracks)
+
+
+def test_resolve_url_empty_on_failure(tmp_dl: Path) -> None:
+    client = SoundcloudClient(download_path=str(tmp_dl))
+    with patch.object(client, '_extract_url_info', side_effect=RuntimeError('blocked')):
+        assert _run(client.resolve_url('https://soundcloud.com/x/y')) == ([], [])
+    with patch.object(client, '_extract_url_info', return_value=None):
+        assert _run(client.resolve_url('https://soundcloud.com/x/y')) == ([], [])
+    assert _run(client.resolve_url('')) == ([], [])
+
+
 def test_search_handles_malformed_entries_individually(tmp_dl: Path) -> None:
     """One bad entry shouldn't poison the entire result set."""
     fake_entries = [

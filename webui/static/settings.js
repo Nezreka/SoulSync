@@ -1129,6 +1129,8 @@ async function loadSettingsData() {
         document.getElementById('transfer-path').value = settings.soulseek?.transfer_path || './Transfer';
         document.getElementById('staging-path').value = settings.import?.staging_path || './Staging';
         document.getElementById('music-videos-path').value = settings.library?.music_videos_path || './MusicVideos';
+        document.getElementById('playlists-materialize-path').value = settings.playlists?.materialize_path || './Playlists';
+        document.getElementById('playlists-materialize-mode').value = settings.playlists?.materialize_mode || 'symlink';
 
         // Populate Download Source settings
         document.getElementById('download-source-mode').value = settings.download_source?.mode || 'soulseek';
@@ -1177,6 +1179,8 @@ async function loadSettingsData() {
             _tcStall.value = (secs === undefined || secs === null) ? 10 : Math.round(Number(secs) / 60);
         }
         if (_tcStallAct) _tcStallAct.value = settings.download_source?.torrent_stall_action || 'abandon';
+        const _tcDlPath = document.getElementById('torrent-download-path');
+        if (_tcDlPath) _tcDlPath.value = settings.download_source?.torrent_download_path || '';
         const _ucType = document.getElementById('usenet-client-type');
         const _ucUrl = document.getElementById('usenet-client-url');
         const _ucKey = document.getElementById('usenet-client-api-key');
@@ -1189,6 +1193,8 @@ async function loadSettingsData() {
         if (_ucUser) _ucUser.value = settings.usenet_client?.username || '';
         if (_ucPass) _ucPass.value = settings.usenet_client?.password || '';
         if (_ucCat) _ucCat.value = settings.usenet_client?.category || 'soulsync';
+        const _ucDlPath = document.getElementById('usenet-download-path');
+        if (_ucDlPath) _ucDlPath.value = settings.download_source?.usenet_download_path || '';
         if (typeof updateUsenetClientUI === 'function') updateUsenetClientUI();
         // Sync ARL to connections tab field + bidirectional listeners
         const _connArl = document.getElementById('deezer-connection-arl');
@@ -2999,6 +3005,10 @@ async function saveSettings(quiet = false) {
                 return (Number.isFinite(m) && m >= 0 ? m : 10) * 60;
             })(),
             torrent_stall_action: document.getElementById('torrent-stall-action')?.value || 'abandon',
+            // In-container path(s) where SoulSync reads finished torrent/usenet
+            // downloads (#857). Rendered in the torrent/usenet client sections.
+            torrent_download_path: document.getElementById('torrent-download-path')?.value || '',
+            usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
         },
         tidal_download: {
             quality: document.getElementById('tidal-download-quality').value || 'lossless',
@@ -3132,6 +3142,10 @@ async function saveSettings(quiet = false) {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
+        },
+        playlists: {
+            materialize_path: document.getElementById('playlists-materialize-path').value || './Playlists',
+            materialize_mode: document.getElementById('playlists-materialize-mode').value || 'symlink'
         },
         lossy_copy: {
             enabled: document.getElementById('lossy-copy-enabled').checked,
@@ -4206,6 +4220,30 @@ async function addHiFiInstance() {
     }
 }
 
+async function restoreDefaultHiFiInstances() {
+    const btn = document.getElementById('hifi-instances-restore-btn');
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Restoring…'; }
+    try {
+        const resp = await fetch('/api/hifi/instances/reset', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+            const n = data.restored || 0;
+            if (typeof showToast === 'function') {
+                showToast(n ? `Restored ${n} default instance${n === 1 ? '' : 's'}`
+                            : 'All default instances are already present', 'success');
+            }
+        } else {
+            alert(data.error || 'Failed to restore defaults');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig || 'Restore Defaults'; }
+    }
+}
+
 async function removeHiFiInstance(url) {
     try {
         const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
@@ -4628,6 +4666,7 @@ const PATH_INPUT_IDS = {
     transfer: 'transfer-path',
     staging: 'staging-path',
     'music-videos': 'music-videos-path',
+    'playlists-materialize': 'playlists-materialize-path',
     'm3u-entry-base': 'm3u-entry-base-path'
 };
 
@@ -4644,6 +4683,45 @@ function togglePathLock(pathType, btn) {
         input.setAttribute('readonly', '');
         btn.textContent = 'Unlock';
         btn.classList.add('locked');
+    }
+}
+
+// Manually (re)build every "organize by playlist" folder from current library
+// ownership — mirrors the automatic rebuild that runs after a playlist download.
+async function rebuildPlaylistFolders() {
+    const btn = document.getElementById('playlists-rebuild-btn');
+    const status = document.getElementById('playlists-rebuild-status');
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Rebuilding…';
+    if (status) { status.style.color = ''; status.textContent = 'Rebuilding playlist folders…'; }
+    try {
+        const res = await fetch('/api/playlists/materialize/rebuild', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || 'Rebuild failed');
+        const n = data.count || 0;
+        let linked = 0, copied = 0, removed = 0;
+        (data.results || []).forEach(r => {
+            linked += r.linked || 0; copied += r.copied || 0; removed += r.removed_stale || 0;
+        });
+        if (status) {
+            status.style.color = '#4caf50';
+            status.textContent = (n === 0)
+                ? 'No "organize by playlist" playlists to rebuild yet.'
+                : `Rebuilt ${n} playlist folder${n === 1 ? '' : 's'} — ${linked} linked, ${copied} copied, ${removed} stale removed.`;
+        }
+        if (typeof showToast === 'function') showToast('Playlist folders rebuilt', 'success');
+    } catch (e) {
+        if (status) { status.style.color = '#f44336'; status.textContent = 'Rebuild failed: ' + (e.message || e); }
+        if (typeof showToast === 'function') showToast('Playlist rebuild failed', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
     }
 }
 

@@ -2735,6 +2735,7 @@ async function loadRepairFindings() {
             path_mismatch: 'Path Mismatch', metadata_gap: 'Missing Metadata',
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
+            missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
         };
 
@@ -2745,6 +2746,8 @@ async function loadRepairFindings() {
             track_number_mismatch: 'Fix',
             missing_cover_art: 'Apply Art',
             missing_lyrics: 'Apply Lyrics',
+            missing_replaygain: 'Apply RG',
+            empty_folder: 'Delete Folder',
             expired_download: 'Delete',
             metadata_gap: 'Apply',
             duplicate_tracks: 'Keep Best',
@@ -3136,6 +3139,16 @@ function _renderFindingDetail(f) {
             if (d.track_title) rows.push(['Track', d.track_title]);
             if (d.artist) rows.push(['Artist', d.artist]);
             if (d.album_title) rows.push(['Album', d.album_title]);
+            return _gridRows(rows);
+
+        case 'missing_replaygain':
+            if (d.track_title) rows.push(['Track', d.track_title]);
+            if (d.artist) rows.push(['Artist', d.artist]);
+            return _gridRows(rows);
+
+        case 'empty_folder':
+            if (d.folder_path) rows.push(['Folder', d.folder_path, 'path']);
+            if (d.junk_files && d.junk_files.length) rows.push(['Junk files', d.junk_files.join(', ')]);
             return _gridRows(rows);
 
         case 'expired_download':

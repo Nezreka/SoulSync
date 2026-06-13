@@ -29,6 +29,7 @@ import uuid
 import time
 from typing import List, Optional, Dict, Any, Tuple, Callable
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     import yt_dlp
@@ -43,6 +44,33 @@ from config.settings import config_manager
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
 
 logger = get_logger("soundcloud_client")
+
+
+def is_soundcloud_url(value: Any) -> bool:
+    """True when ``value`` is a SoundCloud URL (track, set/playlist, or a
+    public-but-unlisted ``/s-<token>`` share link), incl. ``on.soundcloud.com``
+    short links and scheme-less ``soundcloud.com/...`` forms.
+
+    Pure + network-free. Used so a pasted SoundCloud link is RESOLVED directly
+    (it carries its own access token) instead of being run through scsearch,
+    which can't find unlisted/private tracks (#865). A normal text query — even
+    one mentioning "soundcloud" — is not a URL and returns False."""
+    if not value or not isinstance(value, str):
+        return False
+    raw = value.strip()
+    if not raw:
+        return False
+    candidate = raw if '://' in raw else f'https://{raw}'
+    try:
+        host = (urlparse(candidate).netloc or '').lower()
+    except Exception:
+        return False
+    host = host.split('@')[-1].split(':')[0]  # strip any userinfo / port
+    return (
+        host == 'soundcloud.com'
+        or host.endswith('.soundcloud.com')
+        or host.endswith('soundcloud.app.goo.gl')
+    )
 
 
 # Quality tiers — SoundCloud anonymous access only really delivers one
@@ -173,6 +201,12 @@ class SoundcloudClient(DownloadSourcePlugin):
             logger.warning(f"Invalid SoundCloud search query: {query!r}")
             return ([], [])
 
+        # A pasted SoundCloud link resolves directly — scsearch can't find an
+        # unlisted/private track, but its share URL carries an access token that
+        # yt-dlp can resolve (#865).
+        if is_soundcloud_url(query):
+            return await self.resolve_url(query, timeout=timeout, progress_callback=progress_callback)
+
         # SoundCloud or a transient yt-dlp parse can fail; the caller still
         # gets an empty list, never a raised exception.
         limit = min(MAX_SEARCH_LIMIT, max(1, DEFAULT_SEARCH_LIMIT))
@@ -224,6 +258,70 @@ class SoundcloudClient(DownloadSourcePlugin):
                 return []
             entries = info.get('entries') or []
             return [e for e in entries if isinstance(e, dict)]
+
+    async def resolve_url(
+        self,
+        url: str,
+        timeout: Optional[int] = None,
+        progress_callback: Optional[Callable] = None,
+    ) -> Tuple[List[TrackResult], List[AlbumResult]]:
+        """Resolve a direct SoundCloud track/set URL into downloadable
+        TrackResult(s) — including public-but-unlisted/private share links that
+        scsearch can't find, because the URL itself carries the access token
+        (#865). A set/playlist link resolves to all its tracks. Returns
+        ``(tracks, [])`` and never raises (empty on any failure)."""
+        if not self.is_available():
+            logger.warning("SoundCloud not available for URL resolve (yt-dlp missing)")
+            return ([], [])
+        url = (url or '').strip()
+        if not url:
+            return ([], [])
+
+        logger.info(f"Resolving SoundCloud URL: {url}")
+        loop = asyncio.get_event_loop()
+        try:
+            info = await loop.run_in_executor(None, self._extract_url_info, url)
+        except Exception as exc:
+            logger.error(f"SoundCloud URL resolve failed: {exc}")
+            return ([], [])
+        if not isinstance(info, dict):
+            return ([], [])
+
+        # A set/playlist link yields `entries`; a single track is the dict itself.
+        entries = info.get('entries')
+        raw_entries = [e for e in entries if isinstance(e, dict)] if entries else [info]
+
+        track_results: List[TrackResult] = []
+        for entry in raw_entries:
+            # Full (non-flat) extraction puts a transient media-stream URL in
+            # `url`; the stable permalink lives in `webpage_url`. Pin `url` to the
+            # permalink so the download encoding matches what search() produces
+            # (the worker re-resolves the permalink at download time).
+            permalink = entry.get('webpage_url') or entry.get('url')
+            if permalink:
+                entry = {**entry, 'url': permalink}
+            try:
+                converted = self._sc_to_track_result(entry)
+                if converted is not None:
+                    track_results.append(converted)
+            except Exception as exc:
+                logger.debug(f"Skipping SoundCloud URL entry conversion error: {exc}")
+
+        logger.info(f"Resolved {len(track_results)} SoundCloud track(s) from URL")
+        return (track_results, [])
+
+    def _extract_url_info(self, url: str) -> Optional[Dict[str, Any]]:
+        """Full (non-flat) yt-dlp extraction of a direct SoundCloud URL — needed
+        to get the real id/permalink/title for a single track or set. Anonymous;
+        the share token (if any) is already in the URL. Injectable for tests."""
+        opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+            'noplaylist': False,
+        }
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            return ydl.extract_info(url, download=False)
 
     def _sc_to_track_result(self, entry: Dict[str, Any]) -> Optional[TrackResult]:
         """Convert a yt-dlp SoundCloud entry into the standard TrackResult.

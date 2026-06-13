@@ -14460,7 +14460,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .mirrored-card-delete,
 .mirrored-card-clear,
-.mirrored-card-link {
+.mirrored-card-link,
+.mirrored-card-rename {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: #555;
@@ -14481,6 +14482,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
 .mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-rename,
 .mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
 }
@@ -14503,6 +14505,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #64b5f6;
     background: rgba(100, 181, 246, 0.15);
     border-color: rgba(100, 181, 246, 0.3);
+    transform: scale(1.1);
+}
+
+.mirrored-card-rename:hover {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.15);
+    border-color: rgba(74, 222, 128, 0.3);
     transform: scale(1.1);
 }
 
@@ -62628,8 +62637,19 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 .hifi-instance-toggle {
     flex-shrink: 0;
     cursor: pointer;
-    font-size: 0.9em;
-    transition: color 0.15s;
+    font-size: 0.95em;
+    transition: color 0.15s, background 0.15s;
+    /* Bigger tap target — the bare glyph was hard to hit/register (#Sokhi). */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    user-select: none;
+}
+.hifi-instance-toggle:hover {
+    background: rgba(255, 255, 255, 0.07);
 }
 .hifi-instance-toggle.on {
     color: #4caf50;
@@ -62647,11 +62667,20 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     flex-shrink: 0;
     color: #f44336;
     cursor: pointer;
-    font-size: 0.9em;
-    transition: color 0.15s;
+    font-size: 0.95em;
+    transition: color 0.15s, background 0.15s;
+    /* Bigger tap target — the bare ✖ was hard to hit/register (#Sokhi). */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    user-select: none;
 }
 .hifi-instance-remove:hover {
     color: #ef5350;
+    background: rgba(244, 67, 54, 0.15);
 }
 
 /* ==========================================================================
@@ -67977,3 +68006,279 @@ body.em-scroll-lock { overflow: hidden; }
     font-weight: 500;
     margin-bottom: 6px;
 }
+
+
+/* ════════════════════════════════════════════════════════════════════════
+   Artist "DB Record" inspector — button + programmer-style modal
+   ════════════════════════════════════════════════════════════════════════ */
+#artist-hero-section { position: relative; }
+
+.artist-db-record-btn {
+    position: absolute;
+    bottom: 14px;
+    right: 16px;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 13px;
+    font: 600 11.5px/1 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    letter-spacing: 0.04em;
+    color: #cdd6f4;
+    background: linear-gradient(135deg, rgba(20,24,34,0.72), rgba(14,17,23,0.82));
+    border: 1px solid rgba(122,162,247,0.35);
+    border-radius: 999px;
+    cursor: pointer;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.03),
+                0 0 0 0 rgba(122,162,247,0.0);
+    opacity: 0.82;
+    transition: transform .2s cubic-bezier(.4,0,.2,1), box-shadow .25s ease,
+                opacity .2s ease, border-color .25s ease, color .2s ease;
+}
+.artist-db-record-btn svg { color: #7aa2f7; transition: color .2s ease, transform .3s ease; }
+.artist-db-record-btn:hover {
+    opacity: 1;
+    transform: translateY(-2px);
+    color: #fff;
+    border-color: rgba(122,162,247,0.7);
+    box-shadow: 0 8px 26px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.05),
+                0 0 18px rgba(122,162,247,0.35);
+}
+.artist-db-record-btn:hover svg { color: #9ece6a; transform: rotate(-6deg) scale(1.08); }
+.artist-db-record-btn:active { transform: translateY(0); }
+
+/* ── Overlay + card ── */
+.arec-overlay {
+    position: fixed; inset: 0; z-index: 10050;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+    background: rgba(8,10,14,0.7);
+    backdrop-filter: blur(10px);
+    opacity: 0; transition: opacity .22s ease;
+}
+.arec-overlay.visible { opacity: 1; }
+
+.arec-card {
+    width: min(760px, 96vw);
+    max-height: min(82vh, 820px);
+    display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #11151c, #0d1017);
+    border: 1px solid rgba(122,162,247,0.22);
+    border-radius: 16px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.02),
+                0 0 60px rgba(122,162,247,0.08);
+    overflow: hidden;
+    transform: translateY(10px) scale(0.985);
+    transition: transform .26s cubic-bezier(.34,1.3,.5,1);
+    font-family: ui-sans-serif, system-ui, sans-serif;
+}
+.arec-overlay.visible .arec-card { transform: translateY(0) scale(1); }
+
+.arec-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: linear-gradient(180deg, rgba(122,162,247,0.06), transparent);
+}
+.arec-title {
+    display: flex; align-items: center; gap: 8px;
+    font: 700 14px/1 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    color: #e6ebff; letter-spacing: 0.02em;
+}
+.arec-dot {
+    width: 9px; height: 9px; border-radius: 50%;
+    background: #9ece6a; box-shadow: 0 0 10px #9ece6a;
+    animation: arecPulse 2.4s ease-in-out infinite;
+}
+@keyframes arecPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.arec-sub {
+    margin-top: 4px; font-size: 12px; color: #8b93b0;
+    font-family: ui-monospace, Menlo, monospace;
+}
+.arec-close {
+    background: none; border: none; color: #8b93b0; font-size: 24px;
+    line-height: 1; cursor: pointer; padding: 0 4px; transition: color .15s ease, transform .15s ease;
+}
+.arec-close:hover { color: #ff6b6b; transform: scale(1.12); }
+
+/* ── Toolbar ── */
+.arec-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-wrap: wrap;
+}
+.arec-tabs { display: inline-flex; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 2px; }
+.arec-tab {
+    border: none; background: none; cursor: pointer;
+    padding: 5px 12px; border-radius: 6px;
+    font: 600 11.5px/1 'JetBrains Mono', ui-monospace, monospace;
+    color: #8b93b0; transition: all .15s ease;
+}
+.arec-tab.active { background: rgba(122,162,247,0.22); color: #cdd6f4; }
+.arec-tab:not(.active):hover { color: #cdd6f4; }
+.arec-filter {
+    flex: 1; min-width: 120px;
+    padding: 7px 11px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    color: #cdd6f4;
+    font: 12px/1 ui-monospace, Menlo, monospace;
+    outline: none; transition: border-color .15s ease, box-shadow .15s ease;
+}
+.arec-filter:focus { border-color: rgba(122,162,247,0.5); box-shadow: 0 0 0 3px rgba(122,162,247,0.12); }
+.arec-actions { display: inline-flex; gap: 8px; }
+.arec-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 12px;
+    background: rgba(122,162,247,0.1);
+    border: 1px solid rgba(122,162,247,0.25);
+    border-radius: 8px;
+    color: #c0caf5; cursor: pointer;
+    font: 600 11.5px/1 'JetBrains Mono', ui-monospace, monospace;
+    transition: all .15s ease;
+}
+.arec-btn:hover { background: rgba(122,162,247,0.2); border-color: rgba(122,162,247,0.55); color: #fff; }
+.arec-btn svg { opacity: 0.85; }
+
+/* ── Body ── */
+.arec-body {
+    flex: 1; overflow: auto; padding: 8px 6px 8px 14px;
+    font-family: ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+.arec-loading, .arec-error { padding: 28px; text-align: center; color: #8b93b0; font-size: 13px; }
+.arec-error { color: #ff8585; }
+
+.arec-fields { display: flex; flex-direction: column; }
+.arec-row {
+    display: grid; grid-template-columns: minmax(140px, 210px) 1fr auto;
+    gap: 10px; align-items: start;
+    padding: 6px 8px; border-radius: 7px;
+    border-bottom: 1px solid rgba(255,255,255,0.035);
+    transition: background .12s ease;
+}
+.arec-row:hover { background: rgba(122,162,247,0.07); }
+.arec-row.is-empty { opacity: 0.5; }
+.arec-key { color: #7aa2f7; font-size: 12px; font-weight: 600; word-break: break-all; }
+.arec-val { color: #c8d0e8; font-size: 12px; word-break: break-word; white-space: pre-wrap; }
+.arec-val .arec-json { color: #9ece6a; }
+.arec-val .arec-null, .arec-null { color: #565f89; font-style: italic; }
+.arec-rowcopy {
+    background: none; border: none; cursor: pointer;
+    color: #565f89; font-size: 13px; padding: 1px 5px; border-radius: 5px;
+    opacity: 0; transition: opacity .12s ease, color .12s ease, background .12s ease;
+}
+.arec-row:hover .arec-rowcopy { opacity: 1; }
+.arec-rowcopy:hover { color: #9ece6a; background: rgba(255,255,255,0.06); }
+
+.arec-code {
+    margin: 0; padding: 6px 8px; font-size: 12px; line-height: 1.55;
+    color: #c0caf5; white-space: pre; tab-size: 2;
+}
+.arec-code .tok-key  { color: #7aa2f7; }
+.arec-code .tok-str  { color: #9ece6a; }
+.arec-code .tok-num  { color: #ff9e64; }
+.arec-code .tok-bool { color: #bb9af7; }
+.arec-code .tok-null { color: #565f89; font-style: italic; }
+
+/* ── Footer ── */
+.arec-footer {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 16px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    background: rgba(0,0,0,0.25);
+    font: 11px/1 'JetBrains Mono', ui-monospace, monospace;
+    color: #8b93b0;
+}
+.arec-footer b { color: #cdd6f4; }
+.arec-footer .arec-id { margin-left: auto; color: #565f89; }
+
+/* scrollbar */
+.arec-body::-webkit-scrollbar { width: 10px; }
+.arec-body::-webkit-scrollbar-thumb { background: rgba(122,162,247,0.25); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.arec-body::-webkit-scrollbar-thumb:hover { background: rgba(122,162,247,0.45); background-clip: padding-box; }
+
+@media (max-width: 640px) {
+    .artist-db-record-btn span { display: none; }
+    .artist-db-record-btn { padding: 8px; }
+    .arec-row { grid-template-columns: 1fr; gap: 2px; }
+    .arec-rowcopy { opacity: 1; justify-self: end; margin-top: -22px; }
+}
+
+
+/* #852: while the launch-PIN / login lock screen is up, hide EVERYTHING in the
+   body except the lock overlays themselves — so removing the overlay (Safari
+   "Hide Distracting Items", devtools) reveals a blank page, not the empty chrome
+   or any of the on-demand modals/sidebars. The hide-element trick can only ADD
+   hiding, never undo this rule. initApp() drops body.app-locked once authenticated. */
+body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not(style):not(noscript) {
+    display: none !important;
+}
+
+
+/* Login-password clarity in Manage Profiles (#login-mode) */
+.profile-manage-login-banner {
+    margin: 0 0 12px;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #fcd9a8;
+    background: rgba(245, 158, 11, 0.10);
+    border: 1px solid rgba(245, 158, 11, 0.30);
+}
+.profile-role-pill--warn {
+    background: rgba(239, 68, 68, 0.16);
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.40);
+    text-transform: none;
+}
+.profile-role-pill--ok {
+    background: rgba(16, 185, 129, 0.14);
+    color: #6ee7b7;
+    border-color: rgba(16, 185, 129, 0.30);
+    text-transform: none;
+}
+/* The set-login-password button (lock icon) + an attention pulse when a member
+   can't sign in yet (login on, no password). */
+.profile-manage-item .profile-password-btn {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    color: #9ca3af;
+    border-radius: 8px;
+    padding: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .15s ease;
+}
+.profile-manage-item .profile-password-btn svg { width: 15px; height: 15px; }
+.profile-manage-item .profile-password-btn:hover {
+    background: rgba(99, 102, 241, 0.18);
+    border-color: rgba(99, 102, 241, 0.4);
+    color: #c7d2fe;
+}
+.profile-manage-item .profile-password-btn.has-password { color: #6ee7b7; }
+.profile-manage-item .profile-password-btn.needs-password {
+    color: #fca5a5;
+    border-color: rgba(239, 68, 68, 0.45);
+    background: rgba(239, 68, 68, 0.12);
+    animation: arecPwPulse 1.8s ease-in-out infinite;
+}
+@keyframes arecPwPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.0); }
+    50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18); }
+}
+
+
+/* Watchlist export modal — reuses the .arec-* card; just the option label + button */
+.wlx-opt {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 12px/1 'JetBrains Mono', ui-monospace, monospace;
+    color: #8b93b0; cursor: pointer; user-select: none;
+}
+.wlx-opt input { accent-color: #7aa2f7; }
+.watchlist-export-btn .watchlist-all-icon { font-weight: 700; }

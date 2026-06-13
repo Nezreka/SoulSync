@@ -216,7 +216,22 @@ def build_reset_query(
     table = meta['table']
     ms = match_status_column(service)
     la = last_attempted_column(service)
-    set_clause = f"SET {ms} = NULL, {la} = NULL"
+    set_parts = [f"{ms} = NULL", f"{la} = NULL"]
+
+    # Also forget the stored source ID so re-matching actually RE-RESOLVES the
+    # entity. Without this, the worker hits its existing-id short-circuit, sees
+    # the old (possibly WRONG) id and just re-confirms it — which is why "click
+    # to rematch" never fixed a mis-matched same-name artist (#868). Tracks keep
+    # their ids in file tags rather than a column, so only artist/album clear one.
+    if entity_type in ('artist', 'album'):
+        try:
+            from core.source_ids import id_column
+            id_col = id_column(service, entity_type)
+        except Exception:
+            id_col = None
+        if id_col:
+            set_parts.append(f"{id_col} = NULL")
+    set_clause = "SET " + ", ".join(set_parts)
 
     if scope == 'item':
         if not entity_id:
