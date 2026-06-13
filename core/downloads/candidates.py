@@ -339,7 +339,6 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                         )
 
                     logger.info(f"[Context] Set is_album_download: {is_album_context} (has clean data: {has_clean_spotify_data})")
-                    logger.debug(f"[Debug] Context creation - track_info: {track_info is not None}, playlist_folder_mode: {track_info.get('_playlist_folder_mode', False) if track_info else False}")
                 
                 # Update task with successful download info
                 with tasks_lock:
