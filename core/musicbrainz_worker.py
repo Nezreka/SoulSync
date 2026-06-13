@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.musicbrainz_service import MusicBrainzService
-from core.worker_utils import interruptible_sleep, source_id_conflict
+from core.worker_utils import interruptible_sleep, owned_album_titles, source_id_conflict
 
 logger = get_logger("musicbrainz_worker")
 
@@ -366,7 +366,8 @@ class MusicBrainzWorker:
                 return
 
             if item_type == 'artist':
-                result = self.mb_service.match_artist(item_name)
+                result = self.mb_service.match_artist(
+                    item_name, owned_titles=owned_album_titles(self.db, item_id))
                 mbid = result.get('mbid') if result else None
                 # MB's combined score can match a weak name ("Grant" -> "Amy
                 # Grant") when its own relevance rank is high. Guard against

@@ -8,7 +8,15 @@ from datetime import datetime, timedelta
 from utils.logging_config import get_logger
 from database.music_database import MusicDatabase
 from core.deezer_client import DeezerClient
-from core.worker_utils import accept_artist_match, interruptible_sleep, set_album_api_track_count
+from core.worker_utils import (
+    accept_artist_match,
+    artist_name_matches,
+    interruptible_sleep,
+    owned_album_titles,
+    pick_artist_by_catalog,
+    release_titles,
+    set_album_api_track_count,
+)
 from core.enrichment.manual_match_honoring import honor_stored_match
 
 logger = get_logger("deezer_worker")
@@ -401,7 +409,20 @@ class DeezerWorker:
             logger.debug(f"Preserving existing Deezer ID for artist '{artist_name}': {existing_id}")
             return
 
-        result = self.client.search_artist(artist_name)
+        # Multi-candidate search (was single search_artist) so same-name artists
+        # can be disambiguated: gate by name, then pick the one whose catalog
+        # overlaps the albums this library owns.
+        results = self.client.search_artists(artist_name, limit=5)
+        gated = [a for a in (results or []) if artist_name_matches(artist_name, getattr(a, 'name', ''))]
+        chosen, _overlap = pick_artist_by_catalog(
+            gated,
+            owned_album_titles(self.db, artist_id),
+            lambda a: release_titles(self.client.get_artist_albums_list(a.id)),
+        )
+
+        # search_artists returns lean Artist objects; fetch the full dict (same
+        # shape the old search_artist returned) for storage.
+        result = self.client.get_artist_info(chosen.id) if chosen else None
         if result:
             result_name = result.get('name', '')
             ok, reason = accept_artist_match(
