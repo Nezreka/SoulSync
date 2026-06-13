@@ -964,6 +964,8 @@ class RepairWorker:
             'track_number_mismatch': self._fix_track_number,
             'missing_cover_art': self._fix_missing_cover_art,
             'missing_lyrics': self._fix_missing_lyrics,
+            'missing_replaygain': self._fix_missing_replaygain,
+            'empty_folder': self._fix_empty_folder,
             'expired_download': self._fix_expired_download,
             'metadata_gap': self._fix_metadata_gap,
             'duplicate_tracks': self._fix_duplicates,
@@ -979,6 +981,7 @@ class RepairWorker:
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
+            'quality_upgrade': self._fix_quality_upgrade,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1002,6 +1005,36 @@ class RepairWorker:
                 return {'success': True, 'action': 'added_to_wishlist',
                         'message': f"Added '{track_name}' to wishlist"}
             return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
+        """Add the matched higher-quality version to the wishlist (with album
+        context). Applying a Quality Upgrade finding is the user-approved step
+        that the old auto-acting Quality Scanner did without review."""
+        track_data = details.get('matched_track_data')
+        if not track_data:
+            return {'success': False, 'error': 'No matched track in finding'}
+        try:
+            success = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason=f"Quality upgrade — current file is {details.get('current_format', 'low quality')}",
+                source_type='repair',
+                source_info={
+                    'job': 'quality_upgrade',
+                    'original_file_path': file_path,
+                    'original_format': details.get('current_format'),
+                    'original_bitrate': details.get('current_bitrate'),
+                    'album_title': details.get('album_title'),
+                    'match_confidence': details.get('match_confidence'),
+                    'provider': details.get('provider'),
+                },
+            )
+            track_name = track_data.get('name', '?')
+            if success:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f"Added '{track_name}' to wishlist for re-download"}
+            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist or be blocklisted)"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -1478,6 +1511,56 @@ class RepairWorker:
             # Lyrics vanished between scan and apply (rare) — report, don't crash.
             return {'success': False, 'error': 'Could not fetch lyrics (no longer available?)'}
         return {'success': True, 'action': 'applied_lyrics', 'message': 'Wrote lyrics (.lrc) + embedded'}
+
+    def _fix_missing_replaygain(self, entity_type, entity_id, file_path, details):
+        """Apply a missing-ReplayGain finding: run the same ffmpeg ebur128 loudness
+        analysis the import pipeline uses and write the RG tags in place (#437)."""
+        raw_path = details.get('file_path') or file_path
+        if not raw_path:
+            return {'success': False, 'error': 'No file path in finding'}
+        download_folder = self._config_manager.get('soulseek.download_path', '') if self._config_manager else None
+        resolved = _resolve_file_path(raw_path, self.transfer_folder, download_folder,
+                                      config_manager=self._config_manager) or raw_path
+        if not os.path.isfile(resolved):
+            return {'success': False, 'error': f'File not found on disk: {os.path.basename(raw_path)}'}
+        try:
+            from core.replaygain import (analyze_track, write_replaygain_tags,
+                                         is_ffmpeg_available, RG_REFERENCE_LUFS)
+            if not is_ffmpeg_available():
+                return {'success': False, 'error': 'ffmpeg not available — cannot analyze ReplayGain'}
+            lufs, peak_dbfs = analyze_track(resolved)
+            gain_db = RG_REFERENCE_LUFS - lufs   # same formula as the import pipeline
+            ok = write_replaygain_tags(resolved, gain_db, peak_dbfs)
+        except Exception as e:
+            logger.error("ReplayGain fix failed for %s: %s", os.path.basename(raw_path), e)
+            return {'success': False, 'error': str(e)}
+        if not ok:
+            return {'success': False, 'error': 'Could not write ReplayGain tags'}
+        return {'success': True, 'action': 'applied_replaygain',
+                'message': f'Wrote ReplayGain ({gain_db:+.2f} dB)'}
+
+    def _fix_empty_folder(self, entity_type, entity_id, file_path, details):
+        """Apply an empty-folder finding: re-check the folder is still empty/junk-
+        only (anything that gained a real file since the scan is left alone), then
+        remove it. The library root + symlinked dirs are refused."""
+        from core.repair_jobs.empty_folder_cleaner import remove_empty_folder
+        raw = details.get('folder_path') or file_path
+        if not raw:
+            return {'success': False, 'error': 'No folder path in finding'}
+        resolved = self._resolve_path(raw) if hasattr(self, '_resolve_path') else raw
+        res = remove_empty_folder(
+            resolved,
+            junk_files=details.get('junk_files') or [],
+            remove_junk=bool(details.get('remove_junk', True)),
+            root=self.transfer_folder,
+            listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
+            remove_file=os.remove, rmdir=os.rmdir,
+        )
+        if not res.get('removed'):
+            return {'success': False, 'error': res.get('error') or 'Could not remove folder'}
+        _name = os.path.basename(resolved.rstrip('/\\')) or resolved
+        return {'success': True, 'action': 'removed_empty_folder',
+                'message': f'Removed empty folder: {_name}'}
 
     def _fix_expired_download(self, entity_type, entity_id, file_path, details):
         """Apply an expired-download finding: delete the file + library row +
@@ -3284,7 +3367,7 @@ class RepairWorker:
                              'album_mbid_mismatch',
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
-                             'missing_lossy_copy',
+                             'missing_lossy_copy', 'missing_replaygain', 'empty_folder',
                              'missing_discography_track', 'acoustid_mismatch')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]

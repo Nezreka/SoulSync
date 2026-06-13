@@ -2014,6 +2014,39 @@ async function parseMirroredPipelineResponse(res, fallbackMessage) {
     return data;
 }
 
+async function editMirroredCustomName(playlistId, originalName, currentCustom) {
+    // Custom alias: changes the name shown in SoulSync AND used when syncing to
+    // the media server, while staying tied to the original upstream playlist.
+    // Blank clears the alias (falls back to the original name).
+    const nextName = window.prompt(
+        `Rename "${originalName}"\n\nThis name is shown here and used when syncing. ` +
+        `Leave blank to use the original name.`,
+        currentCustom || ''
+    );
+    if (nextName === null) return;  // cancelled
+    const trimmed = nextName.trim();
+    try {
+        const res = await fetch(`/api/mirrored-playlists/${playlistId}/custom-name`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ custom_name: trimmed })
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'Failed to update name');
+        }
+        showToast(trimmed ? `Renamed to "${trimmed}"` : `Reverted to "${originalName}"`, 'success');
+        loadMirroredPlaylists();
+        const openModal = document.getElementById('mirrored-track-modal');
+        if (openModal) {
+            closeMirroredModal();
+            openMirroredPlaylistModal(playlistId);
+        }
+    } catch (err) {
+        showToast(`Error: ${err.message}`, 'error');
+    }
+}
+
 async function editMirroredSourceRef(playlistId, name, source, currentRef) {
     const label = (source === 'spotify_public' || source === 'youtube')
         ? 'original playlist URL'

@@ -123,10 +123,10 @@ class AutomationDeps:
     duplicate_cleaner_lock: Any
     duplicate_cleaner_executor: Any
     run_duplicate_cleaner: Callable[..., Any]
-    get_quality_scanner_state: Callable[[], dict]
-    quality_scanner_lock: Any
-    quality_scanner_executor: Any
-    run_quality_scanner: Callable[..., Any]
+    # Triggers a "Run Now" of a library-maintenance repair job by id (e.g.
+    # 'quality_upgrade'). Returns truthy if the job was queued. Replaces the old
+    # standalone quality-scanner executor/state (the scanner is now a repair job).
+    run_repair_job_now: Callable[[str], Any]
 
     # --- Download orchestrator + queue accessors ---
     download_orchestrator: Any

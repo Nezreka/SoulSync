@@ -509,7 +509,8 @@ function renderMirroredCard(p, container) {
     card.innerHTML = `
         <div class="source-icon ${_escAttr(p.source)}">${srcIcon}</div>
         <div class="mirrored-card-info">
-            <div class="card-name">${_esc(p.name)}</div>
+            <div class="card-name">${_esc(p.display_name || p.name)}</div>
+            ${p.custom_name ? `<div class="card-original-name" title="Original (upstream) playlist name — still tracked">↳ ${_esc(p.name)}</div>` : ''}
             <div class="card-meta">
                 <span class="source-badge ${_escAttr(p.source)}">${_esc(p.source)}</span>
                 <span>${p.track_count} tracks</span>
@@ -520,6 +521,7 @@ function renderMirroredCard(p, container) {
         </div>
         ${disc > 0 ? `<button class="mirrored-card-clear" onclick="event.stopPropagation(); clearMirroredDiscovery(${p.id}, '${_escJs(p.name)}')" title="Clear discovery data">↺</button>` : ''}
         <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
+        <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
     `;

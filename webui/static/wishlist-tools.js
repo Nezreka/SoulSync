@@ -2811,145 +2811,8 @@ function stopDbUpdatePolling() {
     }
 }
 
-// ===================================================================
-// QUALITY SCANNER TOOL
-// ===================================================================
-
-async function handleQualityScanButtonClick() {
-    const button = document.getElementById('quality-scan-button');
-    const currentAction = button.textContent;
-
-    if (currentAction === 'Scan Library') {
-        const scopeSelect = document.getElementById('quality-scan-scope');
-        const scope = scopeSelect.value;
-
-        try {
-            button.disabled = true;
-            button.textContent = 'Starting...';
-            const response = await fetch('/api/quality-scanner/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scope: scope })
-            });
-
-            if (response.ok) {
-                showToast('Quality scan started!', 'success');
-                // Start polling immediately to get live status
-                checkAndUpdateQualityScanProgress();
-            } else {
-                const errorData = await response.json();
-                showToast(`Error: ${errorData.error}`, 'error');
-                button.disabled = false;
-                button.textContent = 'Scan Library';
-            }
-        } catch (error) {
-            showToast('Failed to start quality scan.', 'error');
-            button.disabled = false;
-            button.textContent = 'Scan Library';
-        }
-
-    } else { // "Stop Scan"
-        try {
-            const response = await fetch('/api/quality-scanner/stop', { method: 'POST' });
-            if (response.ok) {
-                showToast('Stop request sent.', 'info');
-            } else {
-                showToast('Failed to send stop request.', 'error');
-            }
-        } catch (error) {
-            showToast('Error sending stop request.', 'error');
-        }
-    }
-}
-
-async function checkAndUpdateQualityScanProgress() {
-    if (socketConnected) return; // WebSocket handles this
-    try {
-        const response = await fetch('/api/quality-scanner/status', {
-            signal: AbortSignal.timeout(10000) // 10 second timeout
-        });
-        if (!response.ok) return;
-
-        const state = await response.json();
-        console.debug('🔍 Quality Scanner Status:', state.status, `${state.processed}/${state.total}`, `${state.progress.toFixed(1)}%`);
-        updateQualityScanProgressUI(state);
-
-        // Start polling only if not already polling and status is running
-        if (state.status === 'running' && !qualityScannerStatusInterval) {
-            console.log('🔄 Starting quality scanner polling (1 second interval)');
-            qualityScannerStatusInterval = setInterval(checkAndUpdateQualityScanProgress, 1000);
-        }
-
-    } catch (error) {
-        console.warn('Could not fetch quality scanner status:', error);
-        // Don't stop polling on network errors - keep trying
-    }
-}
-
-function updateQualityScanProgressFromData(data) {
-    const prev = _lastToolStatus['quality-scanner'];
-    _lastToolStatus['quality-scanner'] = data.status;
-    if (prev !== undefined && data.status === prev && data.status !== 'running') return;
-    updateQualityScanProgressUI(data);
-}
-
-function updateQualityScanProgressUI(state) {
-    const button = document.getElementById('quality-scan-button');
-    const phaseLabel = document.getElementById('quality-phase-label');
-    const progressLabel = document.getElementById('quality-progress-label');
-    const progressBar = document.getElementById('quality-progress-bar');
-    const scopeSelect = document.getElementById('quality-scan-scope');
-
-    // Stats
-    const processedStat = document.getElementById('quality-stat-processed');
-    const metStat = document.getElementById('quality-stat-met');
-    const lowStat = document.getElementById('quality-stat-low');
-    const matchedStat = document.getElementById('quality-stat-matched');
-
-    if (!button || !phaseLabel || !progressLabel || !progressBar || !scopeSelect) return;
-
-    // Update stats
-    if (processedStat) processedStat.textContent = state.processed || 0;
-    if (metStat) metStat.textContent = state.quality_met || 0;
-    if (lowStat) lowStat.textContent = state.low_quality || 0;
-    if (matchedStat) matchedStat.textContent = state.matched || 0;
-
-    if (state.status === 'running') {
-        button.textContent = 'Stop Scan';
-        button.disabled = false;
-        scopeSelect.disabled = true;
-
-        phaseLabel.textContent = state.phase || 'Scanning...';
-        progressLabel.textContent = `${state.processed} / ${state.total} tracks scanned (${state.progress.toFixed(1)}%)`;
-        progressBar.style.width = `${state.progress}%`;
-    } else { // idle, finished, or error
-        stopQualityScannerPolling();
-        button.textContent = 'Scan Library';
-        button.disabled = false;
-        scopeSelect.disabled = false;
-
-        if (state.status === 'error') {
-            phaseLabel.textContent = `Error: ${state.error_message}`;
-            progressBar.style.backgroundColor = '#ff4444'; // Red for error
-        } else {
-            phaseLabel.textContent = state.phase || 'Ready to scan';
-            progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
-        }
-
-        if (state.status === 'finished') {
-            // Show completion toast with results
-            showToast(`Scan complete! ${state.matched} tracks added to wishlist`, 'success');
-        }
-    }
-}
-
-function stopQualityScannerPolling() {
-    if (qualityScannerStatusInterval) {
-        console.log('⏹️ Stopping quality scanner polling');
-        clearInterval(qualityScannerStatusInterval);
-        qualityScannerStatusInterval = null;
-    }
-}
+// (Quality Scanner tool removed — quality scanning is now the 'Quality Upgrade
+// Finder' job in Library Maintenance / Tools → repair jobs.)
 
 // ===================================================================
 // IMPORT IDS FROM FILE TAGS (reconcile embedded provider IDs)
@@ -5630,43 +5493,6 @@ const TOOL_HELP_CONTENT = {
             <p>Available for <strong>Plex</strong> and <strong>Jellyfin</strong> media servers. Each enrichment worker only runs if its service is authenticated.</p>
         `
     },
-    'quality-scanner': {
-        title: 'Quality Scanner',
-        content: `
-            <h4>What does this tool do?</h4>
-            <p>The Quality Scanner identifies tracks in your library that don't meet your preferred quality settings and automatically matches them to Spotify to add to your wishlist for re-downloading.</p>
-
-            <h4>Scan Scope</h4>
-            <ul>
-                <li><strong>Watchlist Artists Only:</strong> Only scans tracks from artists you're watching. Faster and more focused.</li>
-                <li><strong>All Library Tracks:</strong> Scans your entire music library. Comprehensive but takes longer.</li>
-            </ul>
-
-            <h4>How it works</h4>
-            <ol>
-                <li>Scans tracks and checks file format against your quality preferences</li>
-                <li>Identifies tracks below your quality threshold (e.g., MP3 when you prefer FLAC)</li>
-                <li>Uses fuzzy matching to find the track on Spotify (70% confidence minimum)</li>
-                <li>Automatically adds matched tracks to your wishlist for re-download</li>
-            </ol>
-
-            <h4>Quality Tiers</h4>
-            <ul>
-                <li><strong>Tier 1 (Best):</strong> FLAC, WAV, ALAC, AIFF - Lossless formats</li>
-                <li><strong>Tier 2:</strong> OPUS, OGG - High quality lossy</li>
-                <li><strong>Tier 3:</strong> M4A, AAC - Standard lossy</li>
-                <li><strong>Tier 4:</strong> MP3, WMA - Lower quality lossy</li>
-            </ul>
-
-            <h4>Stats Explained</h4>
-            <ul>
-                <li><strong>Processed:</strong> Total tracks scanned so far</li>
-                <li><strong>Quality Met:</strong> Tracks that meet your quality standards</li>
-                <li><strong>Low Quality:</strong> Tracks below your quality threshold</li>
-                <li><strong>Matched:</strong> Low quality tracks successfully matched to Spotify and added to wishlist</li>
-            </ul>
-        `
-    },
     'duplicate-cleaner': {
         title: 'Duplicate Cleaner',
         content: `
@@ -7566,11 +7392,6 @@ async function initializeToolsPage() {
         metadataButton._toolsWired = true;
     }
 
-    const qualityScanButton = document.getElementById('quality-scan-button');
-    if (qualityScanButton && !qualityScanButton._toolsWired) {
-        qualityScanButton.addEventListener('click', handleQualityScanButtonClick);
-        qualityScanButton._toolsWired = true;
-    }
 
     const duplicateCleanButton = document.getElementById('duplicate-clean-button');
     if (duplicateCleanButton && !duplicateCleanButton._toolsWired) {
@@ -7615,7 +7436,6 @@ async function initializeToolsPage() {
 
     // Check for ongoing operations
     await checkAndUpdateDbProgress();
-    await checkAndUpdateQualityScanProgress();
     await checkAndUpdateDuplicateCleanProgress();
 
     // Initialize library maintenance section
@@ -8280,6 +8100,30 @@ function updateDbProgressFromData(data) {
     updateDbProgressUI(data);
 }
 
+// Socket-independent safety net for the DB-updater card. The 1s WebSocket
+// broadcast normally drives the card, but if the socket goes quiet/half-open the
+// card can wedge on "Starting..." with a frozen bar and no recovery (#859). This
+// polls /status directly, applies the same idempotent UI update, and stops itself
+// once the job is no longer running.
+let _dbUpdateSafetyPoll = null;
+function armDbUpdateSafetyPoll() {
+    if (_dbUpdateSafetyPoll) { clearInterval(_dbUpdateSafetyPoll); _dbUpdateSafetyPoll = null; }
+    const tick = async () => {
+        try {
+            const r = await fetch('/api/database/update/status');
+            if (!r.ok) return;
+            const state = await r.json();
+            updateDbProgressUI(state);
+            if (state.status !== 'running') {
+                clearInterval(_dbUpdateSafetyPoll);
+                _dbUpdateSafetyPoll = null;
+            }
+        } catch (e) { /* transient — keep the safety net armed */ }
+    };
+    tick();  // immediate: flip off "Starting..." as soon as the server confirms state
+    _dbUpdateSafetyPoll = setInterval(tick, 5000);
+}
+
 function updateDbProgressUI(state) {
     const button = document.getElementById('db-update-button');
     const phaseLabel = document.getElementById('db-phase-label');
@@ -8310,6 +8154,17 @@ function updateDbProgressUI(state) {
             phaseLabel.textContent = state.phase || 'Idle';
             progressBar.style.backgroundColor = 'rgb(var(--accent-rgb))'; // Green for normal
         }
+
+        // Reset the bar/label so a finished/idle/error card doesn't keep showing a
+        // frozen partial bar from the previous run (e.g. "2/3 artists 66.7%" left
+        // over after completion) — the #859 confusion. Finished → full bar; any
+        // other terminal state → cleared bar. The phase label carries the summary.
+        if (state.status === 'finished') {
+            progressBar.style.width = '100%';
+        } else {
+            progressBar.style.width = '0%';
+        }
+        progressLabel.textContent = '';
 
         if (state.status === 'finished' || state.status === 'error') {
             // Final stats refresh after completion/error

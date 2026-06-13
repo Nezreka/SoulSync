@@ -52,6 +52,10 @@ class YoutubeDiscoveryDeps:
     build_discovery_wing_it_stub: Callable
     get_database: Callable[[], Any]
     add_activity_item: Callable
+    # Recover a YouTube track's artist from its own video page when flat playlist
+    # extraction left it "Unknown Artist" (#863). Takes a video id, returns a raw
+    # artist string or ''. Optional — discovery still works without it.
+    recover_youtube_artist: Callable[[str], str] = None
 
 
 def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
@@ -93,6 +97,30 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                 # Search for track using active provider
                 cleaned_title = track['name']
                 cleaned_artist = track['artists'][0] if track['artists'] else 'Unknown Artist'
+
+                # Recover the artist from the track's own video page if flat
+                # playlist extraction left it Unknown (#863). Done here, in the
+                # background worker, rather than in the parse request (which would
+                # block for minutes on a big playlist). Per-track cost is hidden
+                # behind the discovery progress bar; the recovered artist makes the
+                # match below actually find the song.
+                if cleaned_artist == 'Unknown Artist' and track.get('id'):
+                    if not deps.recover_youtube_artist:
+                        logger.warning("[YT Discovery] artist recovery unavailable (dep not wired) "
+                                       "— '%s' stays Unknown", cleaned_title)
+                    else:
+                        try:
+                            _rec = deps.recover_youtube_artist(track['id'])
+                        except Exception as _rec_err:
+                            logger.warning(f"[YT Discovery] artist recovery raised for {track.get('id')}: {_rec_err}")
+                            _rec = ''
+                        if _rec and _rec != 'Unknown Artist':
+                            logger.info(f"[YT Discovery] recovered artist '{_rec}' for '{cleaned_title}' ({track['id']})")
+                            cleaned_artist = _rec
+                            track['artists'] = [_rec]  # persist so retries/UI see it
+                        else:
+                            logger.info(f"[YT Discovery] artist recovery returned nothing for "
+                                        f"'{cleaned_title}' ({track['id']}) — leaving Unknown")
 
                 logger.info(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
 

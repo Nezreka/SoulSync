@@ -1324,13 +1324,20 @@ class TidalClient:
                         track_ids.append(item.get("id"))
 
                 if track_ids:
-                    # Batch fetch full track details with artists and albums
-                    try:
-                        batch_tracks = self._get_tracks_batch(track_ids)
-                    except Exception as e:
-                        logger.error(f"Error fetching track details for page {page_num}: {e}")
-                        # Continue pagination — we lose this batch but can still get remaining
-                        batch_tracks = []
+                    # Batch fetch full track details with artists and albums.
+                    # Chunk to the filter[id] page cap — Tidal returns at most
+                    # _COLLECTION_BATCH_SIZE tracks per request, so a relationships
+                    # page larger than the cap would be silently truncated if sent
+                    # in one shot. Mirrors get_album_tracks. (#867)
+                    batch_tracks = []
+                    for j in range(0, len(track_ids), self._COLLECTION_BATCH_SIZE):
+                        chunk_ids = track_ids[j:j + self._COLLECTION_BATCH_SIZE]
+                        try:
+                            batch_tracks.extend(self._get_tracks_batch(chunk_ids))
+                        except Exception as e:
+                            logger.error(f"Error fetching track details for page {page_num}: {e}")
+                            # Lose this chunk but keep going — remaining chunks/pages can still load
+                            continue
 
                     if len(batch_tracks) < len(track_ids):
                         logger.warning(f"Page {page_num}: requested {len(track_ids)} tracks but only {len(batch_tracks)} returned (some may be unavailable in your region)")

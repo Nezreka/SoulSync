@@ -1048,8 +1048,12 @@ def test_wishlist_album_grouping_uses_shared_rich_album_context(monkeypatch):
     assert images == {'http://img'}
 
 
-def test_playlist_folder_mode_propagates(monkeypatch):
-    """Playlist folder mode flag carried through to track_info."""
+def test_organize_by_playlist_keeps_provenance_not_routing(monkeypatch):
+    """Organize-by-playlist no longer routes the file per-track. Each track imports
+    NORMALLY into Artist/Album (what a normal download does); the playlist folder
+    is built as links AFTER the batch. So the old routing flag
+    `_playlist_folder_mode` is NOT set, but `_playlist_name` provenance IS kept
+    (core/downloads/origin.py)."""
     db = _FakeDB()
     monkeypatch.setattr('database.music_database.MusicDatabase', lambda: db)
 
@@ -1062,8 +1066,8 @@ def test_playlist_folder_mode_propagates(monkeypatch):
 
     task_id = download_batches['B15']['queue'][0]
     info = download_tasks[task_id]['track_info']
-    assert info['_playlist_folder_mode'] is True
-    assert info['_playlist_name'] == 'My Mix'
+    assert '_playlist_folder_mode' not in info        # routing retired → normal import
+    assert info['_playlist_name'] == 'My Mix'          # provenance preserved
 
 
 # ---------------------------------------------------------------------------

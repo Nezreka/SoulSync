@@ -171,12 +171,7 @@ ACTIONS: list[dict] = [
     {"type": "update_discovery_pool", "label": "Update Discovery", "icon": "compass",
      "description": "Refresh discovery pool with new tracks", "available": True},
     {"type": "start_quality_scan", "label": "Run Quality Scan", "icon": "bar-chart",
-     "description": "Scan for low-quality audio files", "available": True,
-     "config_fields": [
-         {"key": "scope", "type": "select", "label": "Scope",
-          "options": [{"value": "watchlist", "label": "Watchlist Artists"}, {"value": "library", "label": "Full Library"}],
-          "default": "watchlist"}
-     ]},
+     "description": "Run the Quality Upgrade Finder (scope is set in Library Maintenance)", "available": True},
     {"type": "backup_database", "label": "Backup Database", "icon": "save",
      "description": "Create timestamped database backup", "available": True},
     {"type": "refresh_beatport_cache", "label": "Refresh Beatport Cache", "icon": "music",

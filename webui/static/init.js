@@ -404,6 +404,10 @@ async function initProfileSystem() {
 function showLoginScreen() {
     const overlay = document.getElementById('login-overlay');
     if (!overlay) return;
+    // Hide the entire app while locked, so removing the overlay (Safari "Hide
+    // Distracting Items", devtools) reveals nothing — not even the empty chrome.
+    // initApp() reveals it again on a successful sign-in (#852).
+    document.body.classList.add('app-locked');
     overlay.style.display = 'flex';
     const u = document.getElementById('login-username');
     if (u) setTimeout(() => u.focus(), 50);
@@ -507,6 +511,8 @@ async function submitRecoveryReset() {
 function showLaunchPinScreen() {
     const overlay = document.getElementById('launch-pin-overlay');
     if (!overlay) return;
+    // Hide the whole app while locked — bypassing the overlay reveals nothing (#852).
+    document.body.classList.add('app-locked');
     overlay.style.display = 'flex';
 
     const input = document.getElementById('launch-pin-input');
@@ -1788,6 +1794,7 @@ function initProfileManagement() {
             const name = document.getElementById('new-profile-name').value.trim();
             const avatarUrl = document.getElementById('new-profile-avatar-url').value.trim();
             const pin = document.getElementById('new-profile-pin').value;
+            const loginPassword = (document.getElementById('new-profile-password') || {}).value || '';
             if (!name) return;
 
             // Collect profile settings
@@ -1804,6 +1811,7 @@ function initProfileManagement() {
                     name, avatar_color: selectedColor,
                     avatar_url: avatarUrl || undefined,
                     pin: pin || undefined,
+                    password: loginPassword || undefined,
                     home_page: homePage,
                     allowed_pages: allowedPages,
                     can_download: canDl
@@ -1814,6 +1822,7 @@ function initProfileManagement() {
                 document.getElementById('new-profile-name').value = '';
                 document.getElementById('new-profile-avatar-url').value = '';
                 document.getElementById('new-profile-pin').value = '';
+                if (document.getElementById('new-profile-password')) document.getElementById('new-profile-password').value = '';
                 document.getElementById('new-profile-home-page').value = '';
                 pageCheckboxes.forEach(cb => cb.checked = true);
                 document.getElementById('new-profile-can-download').checked = true;
@@ -1864,6 +1873,22 @@ async function loadProfileManageList() {
     const data = await res.json();
     const profiles = data.profiles || [];
 
+    // Login-mode aware: when it's on, surface which members can't sign in yet
+    // (no login password) so the lock button's purpose is obvious.
+    let loginMode = false;
+    try { loginMode = !!(await (await fetch('/api/profiles/current')).json()).login_mode; } catch (e) { /* ignore */ }
+
+    // Banner when login mode is on (explains the password requirement up front).
+    const banner = document.getElementById('profile-manage-login-banner');
+    if (banner) banner.remove();
+    if (loginMode) {
+        const b = document.createElement('div');
+        b.id = 'profile-manage-login-banner';
+        b.className = 'profile-manage-login-banner';
+        b.textContent = '🔐 Login mode is on — every member needs a login password to sign in. Use the lock button to set one.';
+        list.parentNode.insertBefore(b, list);
+    }
+
     list.innerHTML = '';
     profiles.forEach(p => {
         const item = document.createElement('div');
@@ -1887,6 +1912,12 @@ async function loadProfileManageList() {
         if (p.is_admin) pills.push({ text: 'Admin', cls: 'profile-role-pill--admin' });
         if (p.can_download === false) pills.push({ text: 'No Downloads', cls: '' });
         if (p.allowed_pages) pills.push({ text: `${p.allowed_pages.length} pages`, cls: '' });
+        // Login-password status (only meaningful while login mode is on).
+        if (loginMode && !p.is_admin) {
+            pills.push(p.has_password
+                ? { text: '🔒 Login ready', cls: 'profile-role-pill--ok' }
+                : { text: '⚠ No login password', cls: 'profile-role-pill--warn' });
+        }
         if (pills.length) {
             const roleDiv = document.createElement('div');
             roleDiv.className = 'role';
@@ -1918,6 +1949,20 @@ async function loadProfileManageList() {
         actions.appendChild(editBtn);
 
         if (!p.is_admin) {
+            // Set/change the LOGIN password (separate from the quick-switch PIN;
+            // used when "Require login" is on). A member with no password can't
+            // sign in and can't self-bootstrap one, so the admin sets it here.
+            const pwBtn = document.createElement('button');
+            // Pulse the button when login's on and this member can't sign in yet.
+            const needsPw = loginMode && !p.has_password;
+            pwBtn.className = 'profile-password-btn' + (p.has_password ? ' has-password' : '') + (needsPw ? ' needs-password' : '');
+            pwBtn.dataset.id = p.id;
+            pwBtn.dataset.name = p.name;
+            pwBtn.dataset.hasPassword = p.has_password ? '1' : '0';
+            pwBtn.title = p.has_password ? 'Change login password' : 'Set login password (for Require Login mode)';
+            pwBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="16" r="1"/><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+            actions.appendChild(pwBtn);
+
             const delBtn = document.createElement('button');
             delBtn.className = 'profile-delete-btn';
             delBtn.dataset.id = p.id;
@@ -1942,6 +1987,11 @@ async function loadProfileManageList() {
         };
     });
 
+    // Bind set-login-password buttons
+    list.querySelectorAll('.profile-password-btn').forEach(btn => {
+        btn.onclick = () => showProfilePasswordForm(btn.dataset.id, btn.dataset.name, btn.dataset.hasPassword === '1');
+    });
+
     // Bind delete buttons
     list.querySelectorAll('.profile-delete-btn').forEach(btn => {
         btn.onclick = async () => {
@@ -1960,6 +2010,100 @@ async function loadProfileManageList() {
     });
 
     checkAdminPinRequired();
+}
+
+function showProfilePasswordForm(profileId, name, hasPassword) {
+    const list = document.getElementById('profile-manage-list');
+    // One inline form at a time — drop any edit/password form already open.
+    ['profile-password-form', 'profile-edit-form'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.remove();
+    });
+
+    const form = document.createElement('div');
+    form.id = 'profile-password-form';
+    form.className = 'profile-edit-form';
+
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;margin-bottom:4px;';
+    title.textContent = 'Login password — ' + name;     // textContent = XSS-safe
+    form.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:0.8em;color:rgba(255,255,255,0.5);margin-bottom:8px;line-height:1.4;';
+    hint.textContent = 'Used when "Require login" is on (separate from the quick-switch PIN). ' +
+        (hasPassword ? 'This profile has a password set.'
+                     : "This profile has no password yet — it can't sign in until you set one.");
+    form.appendChild(hint);
+
+    const pw = document.createElement('input');
+    pw.type = 'password'; pw.className = 'profile-input';
+    pw.placeholder = 'New password'; pw.autocomplete = 'new-password';
+    const confirm = document.createElement('input');
+    confirm.type = 'password'; confirm.className = 'profile-input';
+    confirm.placeholder = 'Confirm password'; confirm.autocomplete = 'new-password';
+    form.appendChild(pw); form.appendChild(confirm);
+
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:0.8em;margin:6px 0;display:none;';
+    form.appendChild(msg);
+    const showMsg = (t, ok) => {
+        msg.textContent = t; msg.style.color = ok ? '#10b981' : '#ef4444'; msg.style.display = 'block';
+    };
+
+    const post = async (password, okMsg, okType) => {
+        const res = await fetch('/api/profiles/' + encodeURIComponent(profileId) + '/set-password', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password }),
+        });
+        const data = await res.json();
+        if (data.success) {
+            form.remove();
+            loadProfileManageList();
+            if (typeof showToast === 'function') showToast(okMsg, okType);
+            return true;
+        }
+        showMsg(data.error || 'Failed to update password', false);
+        return false;
+    };
+
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn--primary';
+    saveBtn.textContent = 'Save password';
+    saveBtn.onclick = async () => {
+        const p1 = pw.value, p2 = confirm.value;
+        if (!p1 || !p1.trim()) { showMsg('Enter a password', false); return; }
+        if (p1.length < 4) { showMsg('Use at least 4 characters', false); return; }
+        if (p1 !== p2) { showMsg("Passwords don't match", false); return; }
+        saveBtn.disabled = true;
+        try { if (!await post(p1, 'Login password set for ' + name, 'success')) saveBtn.disabled = false; }
+        catch (e) { showMsg('Connection error', false); saveBtn.disabled = false; }
+    };
+    btnRow.appendChild(saveBtn);
+
+    if (hasPassword) {
+        const clearBtn = document.createElement('button');
+        clearBtn.className = 'btn';
+        clearBtn.textContent = 'Remove password';
+        clearBtn.onclick = async () => {
+            clearBtn.disabled = true;
+            try { if (!await post('', 'Login password removed', 'info')) clearBtn.disabled = false; }
+            catch (e) { showMsg('Connection error', false); clearBtn.disabled = false; }
+        };
+        btnRow.appendChild(clearBtn);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = () => form.remove();
+    btnRow.appendChild(cancelBtn);
+
+    form.appendChild(btnRow);
+    list.appendChild(form);
+    pw.focus();
 }
 
 function showProfileEditForm(profileId, currentName, currentColor, currentAvatarUrl, profileSettings = {}) {
@@ -2322,6 +2466,10 @@ async function _continueAppInit() {
 }
 
 function initApp() {
+    // Unlocked / authenticated — reveal the app (the lock screens hide it via
+    // body.app-locked so a bypassed overlay shows nothing). Do this FIRST so
+    // component init below measures real layout, not a display:none container.
+    document.body.classList.remove('app-locked');
     // Initialize components
     initializeNavigation();
     initializeMobileNavigation();

@@ -130,6 +130,10 @@ def manual_search_client(monkeypatch):
                     'qobuz':    _make_plugin(),
                     'hifi':     _make_plugin(),
                     'deezer':   _make_plugin(),
+                    # Present in the registry but deliberately NOT in the default
+                    # hybrid_order, so the #865 SoundCloud-link test can select it
+                    # without changing the 'all' fan-out tests.
+                    'soundcloud': _make_plugin(),
                 }
 
                 class _FakeSpec:
@@ -215,6 +219,46 @@ def manual_search_client(monkeypatch):
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
+
+def test_manual_search_soundcloud_link_forces_soundcloud_source(manual_search_client):
+    """#865: pasting a SoundCloud URL forces the SoundCloud source and passes the
+    URL straight through (so its search resolves the link, incl. unlisted/private)
+    — it must NOT be turned into a text query or fan out to other sources."""
+    client, ctx = manual_search_client
+    # Hybrid order = soundcloud only, so SoundCloud is the lone available source.
+    from config.settings import config_manager
+    original = config_manager.get
+
+    def _cfg(key, default=None):
+        if key == 'download_source.mode':
+            return 'hybrid'
+        if key == 'download_source.hybrid_order':
+            return ['soundcloud']
+        return original(key, default)
+    ctx['config_get_setter'](_cfg)
+
+    url = 'https://soundcloud.com/artist/secret-track/s-AbC123'
+    resp = client.post('/api/downloads/task/task-abc/manual-search',
+                       json={'query': url, 'source': 'all'})
+    assert resp.status_code == 200
+    msgs = _consume_ndjson(resp)
+    header = next(m for m in msgs if m.get('type') == 'header')
+    # The link forced the SoundCloud source, with the raw URL kept as the query.
+    assert header['sources_queried'] == ['soundcloud']
+    assert header['query'] == url
+
+
+def test_manual_search_soundcloud_link_errors_when_not_connected(manual_search_client):
+    """A SoundCloud link with SoundCloud not configured → clear 400, not a
+    useless text search of the raw URL."""
+    client, ctx = manual_search_client
+    # Default hybrid_order has no soundcloud → it's not an available source.
+    resp = client.post('/api/downloads/task/task-abc/manual-search',
+                       json={'query': 'https://soundcloud.com/artist/track', 'source': 'all'})
+    assert resp.status_code == 400
+    assert 'soundcloud' in resp.get_data(as_text=True).lower()
+    ctx['plugins']['soundcloud'].search.assert_not_called()
 
 
 def test_manual_search_validates_query_length(manual_search_client):

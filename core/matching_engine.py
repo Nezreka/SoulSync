@@ -115,7 +115,8 @@ class MusicMatchingEngine:
         # Replace common separators with spaces to preserve word boundaries.
         # Include hyphen in separator replacement for artist names like "AC/DC" vs "AC-DC"
         # Include '&' so "Pig&Dan" becomes "Pig Dan" (matches "Pig & Dan" on Soulseek)
-        text = re.sub(r'[._/&-]', ' ', text)
+        # Include ':' so "T:T" becomes "T T" (matches "T_T" stored with underscores on Soulseek)
+        text = re.sub(r'[._/&:\-]', ' ', text)
 
         # Keep alphanumeric characters, spaces, AND the '$' sign.
         # When CJK was detected upstream, also preserve CJK Unified
