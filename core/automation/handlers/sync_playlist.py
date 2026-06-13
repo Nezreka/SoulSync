@@ -203,10 +203,15 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     except Exception as e:
         deps.logger.debug("mirror sync last-status read: %s", e)
 
+    # Sync under the user's custom alias when set, else the upstream name (#865
+    # follow-up). The server-side playlist is named with this.
+    from core.playlists.naming import effective_mirrored_name
+    sync_name = effective_mirrored_name(pl) or pl.get('name') or 'Playlist'
+
     deps.update_progress(
         auto_id,
         progress=50,
-        phase=f'Syncing "{pl["name"]}"',
+        phase=f'Syncing "{sync_name}"',
         log_line=f'{len(tracks_json)} discovered, {skipped_count} skipped',
         log_type='info',
     )
@@ -221,14 +226,14 @@ def auto_sync_playlist(config: Dict[str, Any], deps: AutomationDeps) -> Dict[str
     skip_wishlist_add = bool(pl.get('organize_by_playlist'))
     threading.Thread(
         target=deps.run_sync_task,
-        args=(sync_id, pl['name'], tracks_json, auto_id, 1, pl.get('image_url', '')),
+        args=(sync_id, sync_name, tracks_json, auto_id, 1, pl.get('image_url', '')),
         kwargs={'skip_wishlist_add': skip_wishlist_add},
         daemon=True,
         name=f'auto-sync-{playlist_id}',
     ).start()
     return {
         'status': 'started',
-        'playlist_name': pl['name'],
+        'playlist_name': sync_name,
         'discovered_tracks': str(len(tracks_json)),
         'skipped_tracks': str(skipped_count),
         '_manages_own_progress': True,
