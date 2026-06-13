@@ -27829,7 +27829,7 @@ def watchlist_artist_config(artist_id):
                        artist_name, image_url, spotify_artist_id, itunes_artist_id,
                        last_scan_timestamp, date_added, include_instrumentals, deezer_artist_id,
                        lookback_days, discogs_artist_id, preferred_metadata_source,
-                       amazon_artist_id, musicbrainz_artist_id
+                       amazon_artist_id, musicbrainz_artist_id, auto_download
                 FROM watchlist_artists
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                       OR discogs_artist_id = ? OR amazon_artist_id = ? OR musicbrainz_artist_id = ?
@@ -27958,6 +27958,8 @@ def watchlist_artist_config(artist_id):
                 'date_added': result[12],
                 'lookback_days': result[15] if len(result) > 15 else None,
                 'preferred_metadata_source': result[17] if len(result) > 17 else None,
+                # follow-only toggle (default True/auto-download when column absent)
+                'auto_download': bool(result[20]) if len(result) > 20 and result[20] is not None else True,
             }
 
             from core.metadata.registry import get_primary_source
@@ -27997,6 +27999,9 @@ def watchlist_artist_config(artist_id):
             # Validate — only accept known sources, empty string means clear override
             if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
                 preferred_metadata_source = None
+            # Follow-only toggle: default True so an older client that omits the
+            # field keeps auto-downloading.
+            auto_download = bool(data.get('auto_download', True))
 
             # Validate at least one release type is selected
             if not (include_albums or include_eps or include_singles):
@@ -28021,13 +28026,14 @@ def watchlist_artist_config(artist_id):
                 SET include_albums = ?, include_eps = ?, include_singles = ?,
                     include_live = ?, include_remixes = ?, include_acoustic = ?, include_compilations = ?,
                     include_instrumentals = ?, lookback_days = ?, preferred_metadata_source = ?,
+                    auto_download = ?,
                     last_scan_timestamp = CASE WHEN ? THEN NULL ELSE last_scan_timestamp END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE spotify_artist_id = ? OR itunes_artist_id = ? OR deezer_artist_id = ?
                       OR discogs_artist_id = ? OR musicbrainz_artist_id = ?
             """, (int(include_albums), int(include_eps), int(include_singles),
                   int(include_live), int(include_remixes), int(include_acoustic), int(include_compilations),
-                  int(include_instrumentals), lookback_days, preferred_metadata_source, lookback_changed,
+                  int(include_instrumentals), lookback_days, preferred_metadata_source, int(auto_download), lookback_changed,
                   artist_id, artist_id, artist_id, artist_id, artist_id))
             conn.commit()
 
@@ -28051,6 +28057,7 @@ def watchlist_artist_config(artist_id):
                     'include_acoustic': include_acoustic,
                     'include_compilations': include_compilations,
                     'include_instrumentals': include_instrumentals,
+                    'auto_download': auto_download,
                 }
             })
 
