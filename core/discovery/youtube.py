@@ -104,16 +104,23 @@ def run_youtube_discovery_worker(url_hash, deps: YoutubeDiscoveryDeps):
                 # block for minutes on a big playlist). Per-track cost is hidden
                 # behind the discovery progress bar; the recovered artist makes the
                 # match below actually find the song.
-                if (cleaned_artist == 'Unknown Artist' and deps.recover_youtube_artist
-                        and track.get('id')):
-                    try:
-                        _rec = deps.recover_youtube_artist(track['id'])
-                    except Exception as _rec_err:
-                        logger.debug(f"Artist recovery failed for {track.get('id')}: {_rec_err}")
-                        _rec = ''
-                    if _rec and _rec != 'Unknown Artist':
-                        cleaned_artist = _rec
-                        track['artists'] = [_rec]  # persist so retries/UI see it
+                if cleaned_artist == 'Unknown Artist' and track.get('id'):
+                    if not deps.recover_youtube_artist:
+                        logger.warning("[YT Discovery] artist recovery unavailable (dep not wired) "
+                                       "— '%s' stays Unknown", cleaned_title)
+                    else:
+                        try:
+                            _rec = deps.recover_youtube_artist(track['id'])
+                        except Exception as _rec_err:
+                            logger.warning(f"[YT Discovery] artist recovery raised for {track.get('id')}: {_rec_err}")
+                            _rec = ''
+                        if _rec and _rec != 'Unknown Artist':
+                            logger.info(f"[YT Discovery] recovered artist '{_rec}' for '{cleaned_title}' ({track['id']})")
+                            cleaned_artist = _rec
+                            track['artists'] = [_rec]  # persist so retries/UI see it
+                        else:
+                            logger.info(f"[YT Discovery] artist recovery returned nothing for "
+                                        f"'{cleaned_title}' ({track['id']}) — leaving Unknown")
 
                 logger.info(f"Searching {discovery_source} for: '{cleaned_artist}' - '{cleaned_title}'")
 
