@@ -174,6 +174,73 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     assert f['details']['provider'] == 'spotify'
 
 
+def test_match_via_isrc_accepts_exact_match(monkeypatch):
+    """The guard accepts only a candidate whose own ISRC equals ours (dash/case
+    insensitive), so it survives a source returning unrelated hits first."""
+    monkeypatch.setattr(qu, 'get_client_for_source',
+                        lambda src: types.SimpleNamespace(search_tracks=lambda *a, **k: []))
+    monkeypatch.setattr(qu, '_search_tracks_for_source', lambda *a, **k: [
+        {'id': 'x', 'name': 'Wrong', 'isrc': 'ZZISRC000000'},
+        {'id': 'sp1', 'name': 'Right', 'isrc': 'US-RC1-76-07839'},  # dashed form
+    ])
+    best, source = qu._match_via_isrc('USRC17607839', ['spotify'])
+    assert best['id'] == 'sp1'
+    assert source == 'spotify'
+
+
+def test_match_via_isrc_rejects_all_mismatches(monkeypatch):
+    monkeypatch.setattr(qu, 'get_client_for_source',
+                        lambda src: types.SimpleNamespace(search_tracks=lambda *a, **k: []))
+    monkeypatch.setattr(qu, '_search_tracks_for_source', lambda *a, **k: [
+        {'id': 'x', 'name': 'Wrong', 'external_ids': {'isrc': 'ZZISRC000000'}},
+    ])
+    assert qu._match_via_isrc('USRC17607839', ['spotify']) == (None, None)
+
+
+def test_scan_prefers_isrc_exact_match_over_fuzzy(monkeypatch):
+    """When the file carries an ISRC and it resolves, use the exact match and do
+    NOT run the fuzzy search at all."""
+    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
+    db = _FakeDB(rows, BALANCED)
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
+    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: 'USRC17607839')
+    fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_match_via_isrc', lambda isrc, sp: (fake, 'spotify'))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    def _boom(*a, **k):
+        raise AssertionError("fuzzy search must not run when an ISRC match exists")
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_via'] == 'isrc'
+    assert findings[0]['details']['match_confidence'] == 1.0
+
+
+def test_scan_falls_back_to_search_without_isrc(monkeypatch):
+    """No usable ISRC → fall back to fuzzy search."""
+    rows = [(1, 'Song One', '/music/a.mp3', 128, 'Artist A', 'Album X', 10)]
+    db = _FakeDB(rows, BALANCED)
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+    monkeypatch.setattr('core.matching_engine.MusicMatchingEngine', lambda: types.SimpleNamespace())
+    monkeypatch.setattr(qu, '_read_track_isrc', lambda fp: '')  # un-enriched
+    fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (fake, 0.88, 'spotify', True))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_via'] == 'search'
+
+
 def test_scan_skips_tracks_meeting_quality(monkeypatch):
     # A 320 kbps MP3 meets the balanced profile → no finding, no metadata calls.
     rows = [(2, 'Good Song', '/music/b.mp3', 320, 'Artist A', 'Album Y', 11)]
