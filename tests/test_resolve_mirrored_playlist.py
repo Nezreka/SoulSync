@@ -55,3 +55,30 @@ def test_empty_refs_return_none(tmp_path):
     assert db.resolve_mirrored_playlist(None) is None
     assert db.resolve_mirrored_playlist('') is None
     assert db.resolve_mirrored_playlist('   ') is None
+
+
+def test_synthetic_mirrored_batch_ref_resolves_by_pk(tmp_path):
+    """A discovery/mirror batch carries a synthetic playlist_id like
+    youtube_mirrored_<pk> with batch source 'mirrored'. (source, source_playlist_id)
+    can't match it — it must resolve via the embedded PK. Regression for the
+    organize-by-playlist 'all found but no folder built' report."""
+    db = MusicDatabase(str(tmp_path / "m.db"))
+    pk = db.mirror_playlist(source='youtube', source_playlist_id='abc123XYZ',
+                            name='My Mirror', tracks=[], profile_id=1)
+    assert pk
+    for ref in (f'youtube_mirrored_{pk}', f'auto_mirror_{pk}', f'mirrored_{pk}'):
+        row = db.resolve_mirrored_playlist(ref, profile_id=1, default_source='mirrored')
+        assert row is not None and row['id'] == pk, ref
+
+
+def test_extract_mirrored_pk_pure():
+    from core.playlists.source_refs import extract_mirrored_pk
+    assert extract_mirrored_pk('youtube_mirrored_63') == 63
+    assert extract_mirrored_pk('auto_mirror_7') == 7
+    assert extract_mirrored_pk('mirrored_12') == 12
+    assert extract_mirrored_pk('42') == 42          # bare PK
+    assert extract_mirrored_pk('908622995') == 908622995  # numeric upstream id (PK fallback only)
+    assert extract_mirrored_pk('37i9dQZF1DXcBWIGoYBM5M') is None  # real spotify id
+    assert extract_mirrored_pk('youtube_mirrored_') is None       # no digits
+    assert extract_mirrored_pk('') is None
+    assert extract_mirrored_pk(None) is None
