@@ -29,7 +29,6 @@ let isSortReversed = false;
 let searchAbortController = null;
 let dbStatsInterval = null;
 let dbUpdateStatusInterval = null;
-let qualityScannerStatusInterval = null;
 let duplicateCleanerStatusInterval = null;
 let wishlistCountInterval = null;
 let wishlistCountdownInterval = null;  // Countdown timer for wishlist overview modal
@@ -487,7 +486,6 @@ function initializeWebSocket() {
     // 'tool:stream' is intentionally NOT wired: stream state is per-listener
     // (session cookie), so the global broadcast could only carry the DEFAULT
     // session's eternal "stopped" — the player polls /api/stream/status instead.
-    socket.on('tool:quality-scanner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateQualityScanProgressFromData(data); });
     socket.on('tool:duplicate-cleaner', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDuplicateCleanProgressFromData(data); });
     socket.on('tool:db-update', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateDbProgressFromData(data); });
     socket.on('tool:metadata', (data) => { if (_qaToolBusy(data)) qaSignal('tools'); updateMetadataStatusFromData(data); });

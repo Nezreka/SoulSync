@@ -136,7 +136,7 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'start_quality_scan',
         lambda config: auto_start_quality_scan(config, deps),
-        lambda: deps.get_quality_scanner_state().get('status') == 'running',
+        lambda: False,  # repair worker dedupes Run-Now requests itself
     )
     engine.register_action_handler(
         'backup_database',
