@@ -4876,7 +4876,10 @@
                                             <input type="url" id="hifi-new-instance" class="form-input" placeholder="https://example.com" style="flex:1;">
                                             <button class="test-button" onclick="addHiFiInstance()">Add</button>
                                         </div>
-                                        <button class="test-button" onclick="checkHiFiInstances()" id="hifi-instances-check-btn" style="margin-bottom: 8px;">Check All Instances</button>
+                                        <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+                                            <button class="test-button" onclick="checkHiFiInstances()" id="hifi-instances-check-btn">Check All Instances</button>
+                                            <button class="test-button" onclick="restoreDefaultHiFiInstances()" id="hifi-instances-restore-btn" title="Re-add any of the built-in default instances you've removed (keeps the ones you added)">Restore Defaults</button>
+                                        </div>
                                         <div id="hifi-instances-status-panel" style="display: none;"></div>
                                     </div>
                                 </div>

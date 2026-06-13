@@ -4220,6 +4220,30 @@ async function addHiFiInstance() {
     }
 }
 
+async function restoreDefaultHiFiInstances() {
+    const btn = document.getElementById('hifi-instances-restore-btn');
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Restoring…'; }
+    try {
+        const resp = await fetch('/api/hifi/instances/reset', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            loadHiFiInstances();
+            const n = data.restored || 0;
+            if (typeof showToast === 'function') {
+                showToast(n ? `Restored ${n} default instance${n === 1 ? '' : 's'}`
+                            : 'All default instances are already present', 'success');
+            }
+        } else {
+            alert(data.error || 'Failed to restore defaults');
+        }
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig || 'Restore Defaults'; }
+    }
+}
+
 async function removeHiFiInstance(url) {
     try {
         const resp = await fetch(`/api/hifi/instances?url=${encodeURIComponent(url)}`, {
