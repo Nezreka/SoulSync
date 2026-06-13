@@ -14460,7 +14460,8 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .mirrored-card-delete,
 .mirrored-card-clear,
-.mirrored-card-link {
+.mirrored-card-link,
+.mirrored-card-rename {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
     color: #555;
@@ -14481,6 +14482,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
 .mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-rename,
 .mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
 }
@@ -14503,6 +14505,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #64b5f6;
     background: rgba(100, 181, 246, 0.15);
     border-color: rgba(100, 181, 246, 0.3);
+    transform: scale(1.1);
+}
+
+.mirrored-card-rename:hover {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.15);
+    border-color: rgba(74, 222, 128, 0.3);
     transform: scale(1.1);
 }
 
