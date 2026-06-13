@@ -215,6 +215,109 @@ def _match_via_isrc(isrc: str, source_priority: List[str]) -> Tuple[Optional[Any
     return None, None
 
 
+# Column order for the _load_tracks SELECT — rows come back as dicts keyed by these.
+_TRACK_COLS = (
+    'id', 'title', 'file_path', 'bitrate', 'artist_name', 'album_title', 'album_id',
+    'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
+    'musicbrainz_release_id', 'audiodb_id',
+)
+
+# Human-readable note per match tier (search uses a confidence % instead).
+_MATCH_NOTE = {'isrc': 'exact ISRC match', 'album': 'matched within album'}
+
+# Per-source column holding that source's album ID on the albums table.
+_SOURCE_ALBUM_ID_COL = {
+    'spotify': 'spotify_album_id',
+    'itunes': 'itunes_album_id',
+    'deezer': 'deezer_id',
+    'musicbrainz': 'musicbrainz_release_id',
+    'audiodb': 'audiodb_id',
+}
+
+
+def _norm_title(value: Any) -> str:
+    """Collapse a title to alphanumerics for tolerant comparison."""
+    return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+
+def _find_track_in_album(items: Any, title: str, track_number: Any, engine: Any) -> Optional[Any]:
+    """Pick the track in an album's tracklist that matches ours — exact normalized
+    title first (track_number breaks ties), then a high-similarity fuzzy fallback."""
+    want = _norm_title(title)
+    exact = []
+    best, best_score = None, 0.0
+    for it in items or []:
+        it_name = _extract_lookup_value(it, 'name', 'title', default='')
+        if want and _norm_title(it_name) == want:
+            exact.append(it)
+            continue
+        if engine and it_name:
+            score = engine.similarity_score(
+                engine.normalize_string(title), engine.normalize_string(it_name))
+            if score > best_score and score >= 0.85:
+                best, best_score = it, score
+    if exact:
+        if track_number:
+            for it in exact:
+                if _extract_lookup_value(it, 'track_number') == track_number:
+                    return it
+        return exact[0]
+    return best
+
+
+def _match_via_album(engine: Any, source_priority: List[str], artist: str, album_title: str,
+                     title: str, track_number: Any,
+                     stored_album_ids: Dict[str, str]) -> Tuple[Optional[Any], Optional[str]]:
+    """Structured artist → album → track match. For each source: use the album's
+    stored source ID if we already have it (enriched album), else find the album
+    by searching ``artist album``; then pull that album's tracklist and locate our
+    track in it. This pins the right album (exact context) without needing the
+    track itself to be enriched. Returns (track, source) or (None, None)."""
+    if not album_title:
+        return None, None
+    for source in source_priority:
+        client = get_client_for_source(source)
+        if not client or not hasattr(client, 'get_album_tracks'):
+            continue
+
+        album_id = stored_album_ids.get(source)
+        album_name = album_title
+        if not album_id and hasattr(client, 'search_albums'):
+            try:
+                albums = client.search_albums(f'{artist} {album_title}'.strip(), limit=5)
+            except Exception:
+                albums = []
+            best_alb, best_s = None, 0.0
+            for alb in albums or []:
+                aname = _extract_lookup_value(alb, 'name', 'title', default='')
+                s = engine.similarity_score(
+                    engine.normalize_string(album_title), engine.normalize_string(aname))
+                if s > best_s and s >= 0.80:
+                    best_alb, best_s = alb, s
+            if best_alb is not None:
+                album_id = _extract_lookup_value(best_alb, 'id')
+                album_name = _extract_lookup_value(best_alb, 'name', 'title', default=album_title)
+        if not album_id:
+            continue
+
+        try:
+            resp = client.get_album_tracks(str(album_id))
+        except Exception:
+            resp = None
+        items = resp.get('items') if isinstance(resp, dict) else None
+        match = _find_track_in_album(items, title, track_number, engine)
+        if match is None:
+            continue
+        # The album tracklist's tracks usually omit the album object — attach it so
+        # the wishlist add carries the correct album context.
+        if isinstance(match, dict):
+            alb = match.get('album')
+            if not isinstance(alb, dict) or not alb.get('name'):
+                match['album'] = {'name': album_name, 'images': []}
+        return match, source
+    return None, None
+
+
 def _find_best_match(engine: Any, source_priority: List[str], title: str, artist: str,
                      album: str, min_confidence: float) -> Tuple[Optional[Any], float, Optional[str], bool]:
     """Search the configured metadata sources for the best replacement match.
@@ -297,12 +400,14 @@ class QualityUpgradeJob(RepairJob):
                 min_conf = 0.7
         return {'scope': scope, 'min_confidence': min_conf}
 
-    def _load_tracks(self, db: Any, scope: str) -> List[tuple]:
+    def _load_tracks(self, db: Any, scope: str) -> List[dict]:
         conn = db._get_connection()
         try:
             base = (
                 "SELECT t.id, t.title, t.file_path, t.bitrate, a.name AS artist_name, "
-                "al.title AS album_title, t.album_id "
+                "al.title AS album_title, t.album_id, t.track_number, "
+                "al.spotify_album_id, al.itunes_album_id, al.deezer_id, "
+                "al.musicbrainz_release_id, al.audiodb_id "
                 "FROM tracks t "
                 "JOIN artists a ON t.artist_id = a.id "
                 "JOIN albums al ON t.album_id = al.id "
@@ -319,7 +424,7 @@ class QualityUpgradeJob(RepairJob):
                     base + f" AND a.name IN ({placeholders})", names).fetchall()
             else:
                 rows = conn.execute(base).fetchall()
-            return rows
+            return [dict(zip(_TRACK_COLS, r, strict=False)) for r in rows]
         finally:
             conn.close()
 
@@ -365,8 +470,17 @@ class QualityUpgradeJob(RepairJob):
             if i % 10 == 0 and context.wait_if_paused():
                 return result
 
-            track_id, title, file_path, bitrate, artist_name, album_title, album_id = (
-                row[0], row[1], row[2], row[3], row[4], row[5], row[6])
+            track_id = row['id']
+            title = row['title']
+            file_path = row['file_path']
+            bitrate = row['bitrate']
+            artist_name = row['artist_name']
+            album_title = row['album_title']
+            album_id = row['album_id']
+            track_number = row.get('track_number')
+            stored_album_ids = {
+                src: row[col] for src, col in _SOURCE_ALBUM_ID_COL.items() if row.get(col)
+            }
             result.scanned += 1
 
             if meets_preferred_quality(file_path, bitrate, quality_profile):
@@ -396,14 +510,31 @@ class QualityUpgradeJob(RepairJob):
                     log_line=f'Low quality ({current_label}): {artist_name} - {title}',
                     log_type='info')
 
-            # Fast path: enrichment embeds the ISRC (and per-source track IDs) in
-            # the file's tags, so an already-enriched track carries its exact
-            # identity. Resolve the EXACT track by ISRC — no fuzzy matching, and
-            # the real album comes with it. Only fall back to name/artist search
-            # for tracks that were never enriched / have no usable ISRC.
+            # Tiered match, best identity first, loosest last:
+            #   1. ISRC embedded in the file tags (enriched track) → EXACT track.
+            #   2. Album → track: use the album's stored source ID if we have it
+            #      (enriched album), else find the album by search, then locate our
+            #      track in its tracklist. Pins the right album even when the track
+            #      itself isn't enriched. (artist → album → track)
+            #   3. Plain artist+title search with similarity scoring. (artist → track)
+            best, source, conf, attempted = None, None, 0.0, False
+
             matched_via = 'isrc'
             best, source = _match_via_isrc(_read_track_isrc(file_path), source_priority)
-            conf, attempted = (1.0, True) if best else (0.0, False)
+            if best:
+                conf, attempted = 1.0, True
+
+            if not best:
+                matched_via = 'album'
+                try:
+                    best, source = _match_via_album(
+                        engine, source_priority, artist_name or '', album_title or '',
+                        title, track_number, stored_album_ids)
+                except Exception as e:
+                    logger.debug("[Quality Upgrade] Album match error for %s - %s: %s", artist_name, title, e)
+                    best = None
+                if best:
+                    conf, attempted = 1.0, True
 
             if not best:
                 matched_via = 'search'
@@ -415,10 +546,10 @@ class QualityUpgradeJob(RepairJob):
                     result.errors += 1
                     continue
 
-            if not attempted:
-                logger.warning("[Quality Upgrade] No metadata provider responded — stopping")
-                return result
             if not best:
+                if matched_via == 'search' and not attempted:
+                    logger.warning("[Quality Upgrade] No metadata provider responded — stopping")
+                    return result
                 result.skipped += 1
                 continue
 
@@ -442,7 +573,7 @@ class QualityUpgradeJob(RepairJob):
                         description=(
                             f'"{title}" by {artist_name} is {current_label}, below your preferred '
                             f'quality. Best match: "{_track_name(best)}" via {source} '
-                            f'({"exact ISRC match" if matched_via == "isrc" else f"confidence {conf:.0%}"}). '
+                            f'({_MATCH_NOTE.get(matched_via, "matched") if matched_via != "search" else f"confidence {conf:.0%}"}). '
                             'Apply to add it to the wishlist.'),
                         details={
                             'track_id': track_id,
