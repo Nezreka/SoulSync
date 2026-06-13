@@ -4305,13 +4305,11 @@ async function testDeezerDownloadConnection() {
     statusEl.textContent = 'Checking...';
     statusEl.style.color = '#aaa';
     try {
-        // Save the ARL first so the backend can use it
-        const arl = document.getElementById('deezer-download-arl')?.value || '';
-        if (!arl) {
-            statusEl.textContent = 'No ARL token provided';
-            statusEl.style.color = '#ff9800';
-            return;
-        }
+        let arl = document.getElementById('deezer-download-arl')?.value || '';
+        // An untouched field holds the redaction sentinel (a token IS saved) —
+        // send empty so the backend tests the SAVED token instead of the mask,
+        // which the source would reject (#870).
+        if (arl === REDACTED_SECRET_SENTINEL) arl = '';
         const resp = await fetch('/api/deezer-download/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
