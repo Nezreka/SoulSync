@@ -446,6 +446,52 @@ def test_scan_watchlist_artists_scans_tracks_and_updates_state(monkeypatch):
     assert scan_state["recent_wishlist_additions"][0]["track_name"] == "Track One"
 
 
+def test_follow_only_artist_discovers_but_skips_wishlist_add(monkeypatch):
+    """auto_download=False ("follow only"): the scan still finds the new track
+    (counts toward new_tracks_found + the scan summary) but must NOT call
+    add_track_to_wishlist — so nothing auto-downloads (corruption's request)."""
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
+    monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ALBUMS", 0)
+
+    artist = _build_artist()
+    artist.auto_download = False  # follow only
+    album = types.SimpleNamespace(id="album-1", name="Album One")
+    album_data = {
+        "name": "Album One",
+        "images": [{"url": "https://example.com/album.jpg"}],
+        "tracks": {"items": [{
+            "id": "track-1", "name": "Track One", "track_number": 1,
+            "disc_number": 1, "artists": [{"name": "Artist One"}],
+        }]},
+    }
+    scanner = _build_scanner(album_data, [artist])
+    scanner._database.has_fresh_similar_artists = lambda *a, **k: False
+
+    add_calls = []
+    monkeypatch.setattr(scanner, "_backfill_missing_ids", lambda *a, **k: None)
+    monkeypatch.setattr(scanner, "get_artist_image_url", lambda *a, **k: "https://example.com/artist.jpg")
+    monkeypatch.setattr(scanner, "get_artist_discography_for_watchlist", lambda *a, **k: [album])
+    monkeypatch.setattr(scanner, "_get_lookback_period_setting", lambda: "30")
+    monkeypatch.setattr(scanner, "_get_rescan_cutoff", lambda: None)
+    monkeypatch.setattr(scanner, "_should_include_release", lambda *a, **k: True)
+    monkeypatch.setattr(scanner, "_should_include_track", lambda *a, **k: True)
+    monkeypatch.setattr(scanner, "is_track_missing_from_library", lambda *a, **k: True)
+    monkeypatch.setattr(scanner, "add_track_to_wishlist", lambda *a, **k: add_calls.append(a) or True)
+    monkeypatch.setattr(scanner, "update_artist_scan_timestamp", lambda *a, **k: True)
+    monkeypatch.setattr(scanner, "update_similar_artists", lambda *a, **k: True)
+    monkeypatch.setattr(scanner, "_backfill_similar_artists_fallback_ids", lambda *a, **k: 0)
+
+    scan_state = {}
+    results = scanner.scan_watchlist_artists([artist], scan_state=scan_state)
+
+    assert results[0].success is True
+    assert results[0].new_tracks_found == 1          # still discovered/surfaced
+    assert results[0].tracks_added_to_wishlist == 0  # but not auto-added
+    assert add_calls == []                           # the one gated call never fired
+    assert scan_state["summary"]["new_tracks_found"] == 1
+    assert scan_state["summary"]["tracks_added_to_wishlist"] == 0
+
+
 def test_scan_watchlist_artists_skips_placeholder_tracklists(monkeypatch):
     monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ARTISTS", 0)
     monkeypatch.setattr(watchlist_scanner_module, "DELAY_BETWEEN_ALBUMS", 0)

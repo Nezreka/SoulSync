@@ -1376,10 +1376,17 @@ class WatchlistScanner:
                                 if scan_state is not None:
                                     scan_state['tracks_found_this_scan'] += 1
 
-                                added = self.add_track_to_wishlist(
-                                    track, album_data, artist,
-                                    scan_run_id=(scan_state or {}).get('scan_run_id', ''),
-                                )
+                                # "Follow only" artists (auto_download off): discover and
+                                # surface the release exactly like normal, but skip the one
+                                # call that adds it to the wishlist — so nothing auto-downloads
+                                # and the user can pick what to grab (corruption's request).
+                                if getattr(artist, 'auto_download', True):
+                                    added = self.add_track_to_wishlist(
+                                        track, album_data, artist,
+                                        scan_run_id=(scan_state or {}).get('scan_run_id', ''),
+                                    )
+                                else:
+                                    added = False
 
                                 track_artists = track.get('artists', [])
                                 track_artist_name = track_artists[0].get('name', 'Unknown Artist') if track_artists else 'Unknown Artist'

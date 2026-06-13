@@ -102,6 +102,10 @@ class WatchlistArtist:
     include_instrumentals: bool = False
     lookback_days: Optional[int] = None  # Per-artist override; None = use global setting
     preferred_metadata_source: Optional[str] = None  # Per-artist override; None = use global setting
+    # When False ("follow only"), the watchlist scan still discovers + surfaces new
+    # releases for this artist but does NOT auto-add them to the wishlist (so they
+    # don't auto-download). Default True = current behaviour.
+    auto_download: bool = True
     profile_id: int = 1
 
 @dataclass
@@ -466,6 +470,12 @@ class MusicDatabase:
             self._add_service_credential_sets(cursor)
             self._add_soul_id_columns(cursor)
             self._add_listening_history_table(cursor)
+
+            # Per-artist auto_download ("follow only") column. MUST run after the
+            # profile-support migrations above — those recreate watchlist_artists
+            # from an explicit column list, so any column added before them gets
+            # dropped. Adding it here (after the last recreate) makes it stick.
+            self._add_watchlist_auto_download_column(cursor)
 
             # Spotify library cache
             self._add_spotify_library_cache_table(cursor)
@@ -2157,6 +2167,21 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding content type filter columns to watchlist_artists: {e}")
             # Don't raise - this is a migration, database can still function
+
+    def _add_watchlist_auto_download_column(self, cursor):
+        """Add per-artist auto_download column ("follow only" toggle).
+
+        Default 1 (auto-download) = existing behaviour. When 0, the watchlist scan
+        still finds + surfaces new releases for the artist but skips adding them to
+        the wishlist."""
+        try:
+            cursor.execute("PRAGMA table_info(watchlist_artists)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'auto_download' not in columns:
+                cursor.execute("ALTER TABLE watchlist_artists ADD COLUMN auto_download INTEGER NOT NULL DEFAULT 1")
+                logger.info("Added auto_download column to watchlist_artists table")
+        except Exception as e:
+            logger.error(f"Error adding auto_download column to watchlist_artists: {e}")
 
     def _add_watchlist_lookback_days_column(self, cursor):
         """Add per-artist lookback_days column to watchlist_artists table"""
@@ -9293,7 +9318,8 @@ class MusicDatabase:
                                'last_scan_timestamp', 'created_at', 'updated_at']
                 optional_columns = ['image_url', 'itunes_artist_id', 'deezer_artist_id', 'discogs_artist_id', 'musicbrainz_artist_id', 'include_albums', 'include_eps', 'include_singles',
                                    'include_live', 'include_remixes', 'include_acoustic', 'include_compilations',
-                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source']
+                                   'include_instrumentals', 'lookback_days', 'preferred_metadata_source',
+                                   'auto_download']
 
                 columns_to_select = base_columns + [col for col in optional_columns if col in existing_columns]
 
@@ -9331,6 +9357,7 @@ class MusicDatabase:
                     include_instrumentals = bool(row['include_instrumentals']) if 'include_instrumentals' in existing_columns else False
                     lookback_days = row['lookback_days'] if 'lookback_days' in existing_columns else None
                     preferred_metadata_source = row['preferred_metadata_source'] if 'preferred_metadata_source' in existing_columns else None
+                    auto_download = bool(row['auto_download']) if 'auto_download' in existing_columns else True
 
                     watchlist_artists.append(WatchlistArtist(
                         id=row['id'],
@@ -9355,6 +9382,7 @@ class MusicDatabase:
                         include_instrumentals=include_instrumentals,
                         lookback_days=lookback_days,
                         preferred_metadata_source=preferred_metadata_source,
+                        auto_download=auto_download,
                         profile_id=profile_id
                     ))
 

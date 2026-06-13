@@ -2498,6 +2498,9 @@ async function openWatchlistArtistConfigModal(artistId, artistName) {
         }
 
         // Set checkbox states
+        // Default to true (auto-download) when absent (older configs).
+        const _autoDlToggle = document.getElementById('config-auto-download');
+        if (_autoDlToggle) _autoDlToggle.checked = config.auto_download !== false;
         document.getElementById('config-include-albums').checked = config.include_albums;
         document.getElementById('config-include-eps').checked = config.include_eps;
         document.getElementById('config-include-singles').checked = config.include_singles;
@@ -2985,6 +2988,8 @@ async function saveWatchlistArtistConfig(artistId) {
         const includeAcoustic = document.getElementById('config-include-acoustic').checked;
         const includeCompilations = document.getElementById('config-include-compilations').checked;
         const includeInstrumentals = document.getElementById('config-include-instrumentals').checked;
+        const autoDownloadEl = document.getElementById('config-auto-download');
+        const autoDownload = autoDownloadEl ? autoDownloadEl.checked : true;
         const lookbackDaysVal = document.getElementById('config-lookback-days').value;
         const lookbackDays = lookbackDaysVal !== '' ? parseInt(lookbackDaysVal) : null;
         const activeSourceBtn = document.querySelector('#config-metadata-source-selector .config-msrc-btn.active');
@@ -3016,6 +3021,7 @@ async function saveWatchlistArtistConfig(artistId) {
                 include_acoustic: includeAcoustic,
                 include_compilations: includeCompilations,
                 include_instrumentals: includeInstrumentals,
+                auto_download: autoDownload,
                 lookback_days: lookbackDays,
                 preferred_metadata_source: preferredMetadataSource,
             })
