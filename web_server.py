@@ -14861,21 +14861,40 @@ def parse_youtube_playlist(url):
                 cookie_opts = _youtube_cookie_opts()
                 deadline = time.time() + 75  # leave headroom under the 120s worker timeout
                 recovered = 0
-                for t in unresolved:
-                    if time.time() >= deadline:
-                        logger.warning(
-                            f"[YT Parse] Artist-recovery budget hit after {recovered} tracks; "
-                            f"{len(unresolved) - recovered} left as Unknown for discovery to resolve"
-                        )
-                        break
-                    raw_artist = _fetch_youtube_video_artist(t['id'], cookie_opts)
-                    if raw_artist:
-                        ca = clean_youtube_artist(raw_artist)
-                        if ca and ca != 'Unknown Artist':
-                            t['artists'] = [ca]
-                            t['name'] = clean_youtube_track_title(t.get('name') or '', ca)
-                            t['raw_artist'] = raw_artist
-                            recovered += 1
+                # Per-video lookups are several seconds each, so doing them
+                # sequentially only covered ~a dozen tracks before the budget ran
+                # out (the back half of a playlist stayed "Unknown Artist"). Run a
+                # small pool concurrently to cover the whole playlist within the
+                # same wall-clock budget, without hammering YouTube.
+                from concurrent.futures import (ThreadPoolExecutor, as_completed,
+                                                TimeoutError as _FuturesTimeout)
+                ex = ThreadPoolExecutor(max_workers=5, thread_name_prefix="yt_artist")
+                fut_to_track = {ex.submit(_fetch_youtube_video_artist, t['id'], cookie_opts): t
+                                for t in unresolved}
+                try:
+                    for fut in as_completed(fut_to_track, timeout=max(1.0, deadline - time.time())):
+                        t = fut_to_track[fut]
+                        try:
+                            raw_artist = fut.result()
+                        except Exception:
+                            raw_artist = ''
+                        if raw_artist:
+                            ca = clean_youtube_artist(raw_artist)
+                            if ca and ca != 'Unknown Artist':
+                                t['artists'] = [ca]
+                                t['name'] = clean_youtube_track_title(t.get('name') or '', ca)
+                                t['raw_artist'] = raw_artist
+                                recovered += 1
+                except _FuturesTimeout:
+                    logger.warning(
+                        f"[YT Parse] Artist-recovery budget hit; recovered {recovered}/{len(unresolved)}, "
+                        "rest left for discovery to resolve"
+                    )
+                finally:
+                    # Don't block the response waiting on in-flight lookups past
+                    # the budget — cancel what hasn't started, let the rest finish
+                    # in the background.
+                    ex.shutdown(wait=False, cancel_futures=True)
                 if recovered:
                     logger.info(f"[YT Parse] Recovered artist for {recovered}/{len(unresolved)} unresolved tracks")
 
