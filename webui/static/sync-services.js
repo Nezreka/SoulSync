@@ -10186,8 +10186,30 @@ function updateYouTubeDiscoveryModal(urlHash, status) {
 
     // Update table rows
     status.results.forEach(result => {
-        const row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
-        if (!row) return;
+        let row = document.getElementById(`discovery-row-${urlHash}-${result.index}`);
+        if (!row) {
+            // #867: the initial rows are pre-rendered from a separately-fetched
+            // track list (state.playlist.tracks) that can be SHORTER than the
+            // backend's authoritative discovery results — e.g. a Tidal playlist
+            // whose discovery fetched 59 tracks while the modal's own track fetch
+            // returned a rate-limited partial (~21). The old `if (!row) return`
+            // silently dropped every result past the pre-rendered rows. Create
+            // the missing row instead so the authoritative results drive the
+            // list and no discovered track disappears. The existing cell-fill
+            // logic below then populates it like any other row.
+            const trackName = result.yt_track || result.lb_track || result.track_name || '-';
+            row = document.createElement('tr');
+            row.id = `discovery-row-${urlHash}-${result.index}`;
+            row.innerHTML =
+                `<td class="yt-track">${trackName}</td>` +
+                '<td class="yt-artist"></td>' +
+                '<td class="discovery-status"></td>' +
+                '<td class="spotify-track">-</td>' +
+                '<td class="spotify-artist">-</td>' +
+                '<td class="spotify-album">-</td>' +
+                '<td class="discovery-actions">-</td>';
+            tableBody.appendChild(row);
+        }
 
         const statusCell = row.querySelector('.discovery-status');
         const spotifyTrackCell = row.querySelector('.spotify-track');
