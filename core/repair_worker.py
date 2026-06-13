@@ -981,6 +981,7 @@ class RepairWorker:
             'acoustid_mismatch': self._fix_acoustid_mismatch,
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
+            'quality_upgrade': self._fix_quality_upgrade,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1004,6 +1005,36 @@ class RepairWorker:
                 return {'success': True, 'action': 'added_to_wishlist',
                         'message': f"Added '{track_name}' to wishlist"}
             return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
+        """Add the matched higher-quality version to the wishlist (with album
+        context). Applying a Quality Upgrade finding is the user-approved step
+        that the old auto-acting Quality Scanner did without review."""
+        track_data = details.get('matched_track_data')
+        if not track_data:
+            return {'success': False, 'error': 'No matched track in finding'}
+        try:
+            success = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason=f"Quality upgrade — current file is {details.get('current_format', 'low quality')}",
+                source_type='repair',
+                source_info={
+                    'job': 'quality_upgrade',
+                    'original_file_path': file_path,
+                    'original_format': details.get('current_format'),
+                    'original_bitrate': details.get('current_bitrate'),
+                    'album_title': details.get('album_title'),
+                    'match_confidence': details.get('match_confidence'),
+                    'provider': details.get('provider'),
+                },
+            )
+            track_name = track_data.get('name', '?')
+            if success:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f"Added '{track_name}' to wishlist for re-download"}
+            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist or be blocklisted)"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 

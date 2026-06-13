@@ -50,6 +50,7 @@ _JOB_MODULES = [
     'core.repair_jobs.discography_backfill',
     'core.repair_jobs.canonical_version_resolve',
     'core.repair_jobs.library_retag',
+    'core.repair_jobs.quality_upgrade',
 ]
 
 
