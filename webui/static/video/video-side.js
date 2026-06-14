@@ -33,6 +33,7 @@
         { id: 'video-wishlist', label: 'Wishlist' },
         { id: 'video-downloads', label: 'Downloads' },
         { id: 'video-calendar', label: 'Calendar' },
+        { id: 'video-tools', label: 'Tools' },
         { id: 'video-import', label: 'Import', shared: true },
         { id: 'video-settings', label: 'Settings' },
         { id: 'video-issues', label: 'Issues', shared: true },

@@ -357,6 +357,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
                     <span class="nav-text">Calendar</span>
                 </a>
+                <a class="nav-button" data-video-page="video-tools" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1 2.7-2.4z"/></svg></span>
+                    <span class="nav-text">Tools</span>
+                </a>
                 <a class="nav-button" data-video-page="video-import" href="#">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
                     <span class="nav-text">Import</span>
@@ -552,6 +556,14 @@
                                                 <h4 class="library-status-title">Video Library</h4>
                                                 <p class="library-status-subtitle">Not scanned yet</p>
                                             </div>
+                                            <div class="library-status-actions">
+                                                <button class="library-status-btn" type="button" data-video-scan-mode="full">
+                                                    <span>Refresh</span>
+                                                </button>
+                                                <button class="library-status-btn library-status-btn-secondary" type="button" data-video-scan-mode="deep">
+                                                    <span>Deep Scan</span>
+                                                </button>
+                                            </div>
                                         </div>
                                         <div class="library-status-stats">
                                             <div class="library-status-stat">
@@ -692,6 +704,35 @@
                         </div>
                         <div class="video-library-grid" data-video-lib-grid></div>
                         <p class="video-empty-note" data-video-lib-empty hidden>Nothing here yet — run a scan to pull your library from the media server.</p>
+                    </div>
+                </section>
+                <section class="video-subpage" data-video-subpage="video-tools" hidden>
+                    <div class="page-shell tools-page-container">
+                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
+                            <div class="header-text">
+                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Tools</span></h2>
+                                <p class="header-subtitle">Maintenance jobs and library tools</p>
+                            </div>
+                        </div>
+                        <div class="tools-section">
+                            <h3 class="tools-section-title">Database &amp; Scanning</h3>
+                            <div class="tools-grid">
+                                <div class="tool-card">
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title">Library Scan</h4>
+                                    </div>
+                                    <p class="tool-card-info">Pull movies &amp; shows from your media server into the video library. <strong>Incremental</strong>: recently-added only (fast). <strong>Full Refresh</strong>: re-read everything. <strong>Deep Scan</strong>: full re-read and remove items no longer on the server.</p>
+                                    <div class="tool-card-controls video-scan-controls">
+                                        <button class="video-tool-btn" type="button" data-video-scan-mode="incremental">Incremental</button>
+                                        <button class="video-tool-btn" type="button" data-video-scan-mode="full">Full Refresh</button>
+                                        <button class="video-tool-btn video-tool-btn--warn" type="button" data-video-scan-mode="deep">Deep Scan</button>
+                                    </div>
+                                    <div class="tool-card-progress-section">
+                                        <p class="progress-phase-label" data-video-tools-scan-status>Idle</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </section>
                 <div class="video-placeholder-slot" id="video-placeholder-slot" hidden></div>
@@ -8822,6 +8863,10 @@
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
     <!-- Video side shell controller (isolated; music never references it) -->
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
+    <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
+    <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
+    <!-- Video tools page (isolated; reflects scan progress) -->
+    <script src="{{ url_for('static', filename='video/video-tools.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
