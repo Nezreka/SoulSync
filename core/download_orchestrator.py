@@ -412,9 +412,17 @@ class DownloadOrchestrator:
 
             if scored:
                 scored.sort(key=lambda x: x._match_confidence, reverse=True)
-                filtered_results = scored
+                # Match filter done (right track); now prefer the best quality
+                # among the confidence-passing survivors so streaming isn't
+                # quality-blind like Soulseek already isn't. Stable ranking
+                # keeps confidence order within an equal quality tier; the
+                # `or scored` fail-safe never leaves us with nothing to try.
+                from core.quality.selection import rank_for_profile
+                ranked, _ = rank_for_profile(scored)
+                filtered_results = ranked or scored
                 logger.info(f"Streaming validation: {len(scored)}/{len(tracks)} passed "
-                            f"(best: {scored[0]._match_confidence:.2f})")
+                            f"(best: {scored[0]._match_confidence:.2f}, "
+                            f"quality pick: {filtered_results[0].audio_quality.label()})")
             else:
                 logger.warning(f"No streaming results passed validation for: {query}")
                 return None
