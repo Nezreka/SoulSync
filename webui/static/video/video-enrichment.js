@@ -52,7 +52,7 @@
                 total += prog[k].total || 0;
             }
         }
-        setText(tip, '[data-video-enrich-progress]', matched + ' / ' + total);
+        setText(tip, '[data-video-enrich-progress]', 'Progress: ' + matched + ' / ' + total);
     }
 
     function pollOne(svc) {
