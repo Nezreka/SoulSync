@@ -266,6 +266,45 @@ def test_list_movies_and_shows(db):
     assert (shows[0]["episode_count"], shows[0]["owned_count"]) == (2, 1)
 
 
+def test_query_library_search_letter_sort_status_pagination(db):
+    db.upsert_movie("plex", {"server_id": "1", "title": "The Matrix", "year": 1999,
+                             "file": {"relative_path": "x.mkv", "resolution": "1080p"}})
+    db.upsert_movie("plex", {"server_id": "2", "title": "Akira", "year": 1988})           # wanted
+    db.upsert_movie("plex", {"server_id": "3", "title": "Avatar", "year": 2009,
+                             "file": {"relative_path": "y.mkv"}})
+
+    # Article-aware sort: "The Matrix" files under M.
+    res = db.query_library("movies")
+    assert [i["title"] for i in res["items"]] == ["Akira", "Avatar", "The Matrix"]
+    assert res["pagination"]["total_count"] == 3
+
+    assert [i["title"] for i in db.query_library("movies", letter="m")["items"]] == ["The Matrix"]
+    assert [i["title"] for i in db.query_library("movies", search="aki")["items"]] == ["Akira"]
+    assert {i["title"] for i in db.query_library("movies", status="owned")["items"]} == {"The Matrix", "Avatar"}
+    assert [i["title"] for i in db.query_library("movies", status="wanted")["items"]] == ["Akira"]
+    assert [i["title"] for i in db.query_library("movies", sort="year")["items"]] == ["Avatar", "The Matrix", "Akira"]
+
+    # Resolution badge field comes through.
+    assert db.query_library("movies", search="matrix")["items"][0]["resolution"] == "1080p"
+
+    # Pagination.
+    p1 = db.query_library("movies", limit=2, page=1)
+    assert len(p1["items"]) == 2 and p1["pagination"]["total_pages"] == 2 and p1["pagination"]["has_next"]
+    p2 = db.query_library("movies", limit=2, page=2)
+    assert len(p2["items"]) == 1 and p2["pagination"]["has_prev"]
+
+
+def test_query_library_shows_status_and_counts(db):
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Owned Show", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e.mkv"}}]}]})
+    db.upsert_show_tree("plex", {"server_id": "s2", "title": "Wanted Show", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1}]}]})
+    assert [i["title"] for i in db.query_library("shows", status="owned")["items"]] == ["Owned Show"]
+    assert [i["title"] for i in db.query_library("shows", status="wanted")["items"]] == ["Wanted Show"]
+    owned = db.query_library("shows", search="Owned")["items"][0]
+    assert (owned["episode_count"], owned["owned_count"]) == (1, 1)
+
+
 # ── isolation: the video DB imports nothing from music ───────────────────────
 
 def test_video_db_module_imports_nothing_from_music():

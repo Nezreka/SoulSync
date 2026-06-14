@@ -17,6 +17,7 @@ verbatim on first init.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -35,6 +36,14 @@ _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
 # Init runs once per database path per process (same guard style as music).
 _init_lock = threading.Lock()
 _initialized_paths: set[str] = set()
+
+# Sort/letter key: title without a leading article, lowercased (so "The Matrix"
+# files under M, like music's library).
+_ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
+
+
+def _sort_title(title) -> str:
+    return _ARTICLE_RE.sub("", (title or "").strip()).lower()
 
 
 class VideoDatabase:
@@ -198,17 +207,18 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             conn.execute(
-                "INSERT INTO movies (server_source, server_id, title, year, overview, "
+                "INSERT INTO movies (server_source, server_id, title, sort_title, year, overview, "
                 "runtime_minutes, content_rating, studio, poster_url, has_file, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
-                "title=excluded.title, year=excluded.year, overview=excluded.overview, "
-                "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
-                "studio=excluded.studio, poster_url=excluded.poster_url, "
-                "has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
-                (server_source, item["server_id"], item.get("title"), item.get("year"),
-                 item.get("overview"), item.get("runtime_minutes"), item.get("content_rating"),
-                 item.get("studio"), item.get("poster_url"), 1 if item.get("file") else 0),
+                "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
+                "overview=excluded.overview, runtime_minutes=excluded.runtime_minutes, "
+                "content_rating=excluded.content_rating, studio=excluded.studio, "
+                "poster_url=excluded.poster_url, has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
+                (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
+                 item.get("year"), item.get("overview"), item.get("runtime_minutes"),
+                 item.get("content_rating"), item.get("studio"), item.get("poster_url"),
+                 1 if item.get("file") else 0),
             )
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
@@ -227,16 +237,16 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             conn.execute(
-                "INSERT INTO shows (server_source, server_id, title, year, overview, status, "
+                "INSERT INTO shows (server_source, server_id, title, sort_title, year, overview, status, "
                 "network, runtime_minutes, content_rating, poster_url, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
-                "title=excluded.title, year=excluded.year, overview=excluded.overview, "
-                "status=excluded.status, network=excluded.network, "
+                "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
+                "overview=excluded.overview, status=excluded.status, network=excluded.network, "
                 "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
                 "poster_url=excluded.poster_url, updated_at=CURRENT_TIMESTAMP",
-                (server_source, item["server_id"], item.get("title"), item.get("year"),
-                 item.get("overview"), item.get("status"), item.get("network"),
+                (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
+                 item.get("year"), item.get("overview"), item.get("status"), item.get("network"),
                  item.get("runtime_minutes"), item.get("content_rating"), item.get("poster_url")),
             )
             show_id = conn.execute(
@@ -399,6 +409,83 @@ class VideoDatabase:
                 f"SELECT server_source, server_id, poster_url FROM {table} WHERE id=?",
                 (item_id,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    # ── paged/filtered/sorted library query (server-side, like music) ─────────
+    def query_library(self, kind: str, *, search=None, letter=None, sort="title",
+                      status="all", page=1, limit=75) -> dict:
+        """One page of movies/shows with search + A–Z + sort + owned/wanted
+        filtering done in SQL. Returns {items, pagination:{...}} mirroring the
+        music library's contract."""
+        try:
+            page = max(1, int(page or 1))
+            limit = max(1, min(500, int(limit or 75)))
+        except (TypeError, ValueError):
+            page, limit = 1, 75
+        is_shows = kind == "shows"
+        alias = "s" if is_shows else "m"
+        tbl = "shows" if is_shows else "movies"
+
+        where, params = [], []
+        if search:
+            where.append(f"{alias}.title LIKE ? COLLATE NOCASE")
+            params.append("%" + search + "%")
+        if letter and letter != "all":
+            col = f"COALESCE({alias}.sort_title, {alias}.title)"
+            if letter == "#":
+                where.append(f"substr(UPPER({col}), 1, 1) NOT BETWEEN 'A' AND 'Z'")
+            else:
+                where.append(f"{col} LIKE ? COLLATE NOCASE")
+                params.append(letter + "%")
+        if not is_shows:
+            if status == "owned":
+                where.append("m.has_file = 1")
+            elif status == "wanted":
+                where.append("m.has_file = 0")
+        else:
+            if status == "owned":
+                where.append("EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
+            elif status == "wanted":
+                where.append("NOT EXISTS (SELECT 1 FROM episodes e WHERE e.show_id=s.id AND e.has_file=1)")
+        where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+        title_key = f"COALESCE({alias}.sort_title, {alias}.title) COLLATE NOCASE ASC"
+        order_sql = {
+            "title": title_key,
+            "year": f"{alias}.year DESC, " + title_key,
+            "added": f"{alias}.added_at DESC",
+        }.get(sort, title_key)
+
+        if is_shows:
+            select = ("SELECT s.id, s.title, s.year, "
+                      "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
+                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
+                      "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "
+                      "FROM shows s")
+        else:
+            select = ("SELECT m.id, m.title, m.year, m.has_file, "
+                      "(m.poster_url IS NOT NULL AND m.poster_url <> '') AS has_poster, "
+                      "(SELECT mf.resolution FROM media_files mf WHERE mf.movie_id=m.id LIMIT 1) AS resolution "
+                      "FROM movies m")
+
+        conn = self._get_connection()
+        try:
+            total = conn.execute(f"SELECT COUNT(*) FROM {tbl} {alias}{where_sql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"{select}{where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?",
+                params + [limit, (page - 1) * limit]).fetchall()
+            items = []
+            for r in rows:
+                d = dict(r)
+                d["has_poster"] = bool(d.get("has_poster"))
+                if not is_shows:
+                    d["has_file"] = bool(d.get("has_file"))
+                items.append(d)
+            total_pages = max(1, (total + limit - 1) // limit)
+            return {"items": items, "pagination": {
+                "page": page, "total_pages": total_pages, "total_count": total,
+                "has_prev": page > 1, "has_next": page < total_pages}}
         finally:
             conn.close()
 

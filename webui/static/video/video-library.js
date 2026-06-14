@@ -1,11 +1,10 @@
 /*
  * SoulSync — Video Library page (isolated).
  *
- * Reuses the music library's exact look (.library-artist-card grid,
- * .alphabet-selector, .library-search-input) — only the data is new
- * (/api/video/library) and posters come from the video poster proxy. Movies/
- * Shows tabs, a search box, and an A–Z selector filter client-side. Cards are
- * NOT clickable yet (divs, not links). Self-contained IIFE, no globals.
+ * Reuses the music library's look + paging model: server-side search / A–Z /
+ * sort / owned-wanted filter / pagination (75 per page) via /api/video/library,
+ * rendering one page of music-style .library-artist-card cards (with a poster
+ * proxy + resolution badge). Cards are NOT clickable yet. IIFE, no globals.
  */
 (function () {
     'use strict';
@@ -14,7 +13,9 @@
     var LIBRARY_URL = '/api/video/library';
     var LETTERS = 'abcdefghijklmnopqrstuvwxyz'.split('');
 
-    var state = { tab: 'movies', data: null, loading: false, search: '', letter: 'all' };
+    var state = { tab: 'movies', search: '', letter: 'all', sort: 'title',
+                  status: 'all', page: 1, limit: 75, loaded: false };
+    var searchTimer = null;
 
     function $(sel) { return document.querySelector(sel); }
 
@@ -24,11 +25,14 @@
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    // First letter for the A–Z buckets, ignoring a leading article.
-    function letterOf(title) {
-        var t = String(title || '').toLowerCase().replace(/^(the|a|an)\s+/, '').trim();
-        var c = t.charAt(0);
-        return /[a-z]/.test(c) ? c : '#';
+    function resLabel(res) {
+        if (!res) return '';
+        res = String(res).toLowerCase();
+        if (res.indexOf('2160') > -1 || res === '4k') return '4K';
+        if (res.indexOf('1080') > -1) return '1080p';
+        if (res.indexOf('720') > -1) return '720p';
+        if (res.indexOf('480') > -1 || res.indexOf('576') > -1) return 'SD';
+        return res.toUpperCase();
     }
 
     function buildAlphabet() {
@@ -46,87 +50,91 @@
                     state.letter = letter;
                     var all = host.querySelectorAll('.alphabet-btn');
                     for (var j = 0; j < all.length; j++) all[j].classList.toggle('active', all[j] === btn);
-                    render();
+                    reload();
                 });
             })(defs[i][0], b);
             host.appendChild(b);
         }
     }
 
-    function items() {
-        return (state.data && state.data[state.tab]) || [];
-    }
-
-    function filtered() {
-        var search = state.search.toLowerCase();
-        return items().filter(function (it) {
-            if (search && String(it.title || '').toLowerCase().indexOf(search) === -1) return false;
-            if (state.letter !== 'all' && letterOf(it.title) !== state.letter) return false;
-            return true;
-        });
-    }
-
     function cardHTML(it, kind) {
-        var fallbackEmoji = kind === 'movie' ? '🎬' : '📺';
+        var fallback = kind === 'movie' ? '🎬' : '📺';
         var img = it.has_poster
             ? '<div class="library-artist-image"><img src="/api/video/poster/' + kind + '/' + it.id +
               '" alt="" loading="lazy" onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' +
-              fallbackEmoji + '</div>\'"></div>'
-            : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallbackEmoji + '</div></div>';
+              fallback + '</div>\'"></div>'
+            : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
+
+        var badge = '';
+        if (kind === 'movie') {
+            var rl = resLabel(it.resolution);
+            if (rl) badge = '<div class="video-card-badge">' + rl + '</div>';
+        }
 
         var meta = [];
         if (it.year) meta.push(String(it.year));
         if (kind === 'movie') meta.push(it.has_file ? 'Owned' : 'Wanted');
         else meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
 
-        return '<div class="library-artist-card">' + img +
+        return '<div class="library-artist-card">' + img + badge +
             '<div class="library-artist-info">' +
             '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
             '<div class="library-artist-stats"><span class="library-artist-stat">' +
             esc(meta.join(' · ')) + '</span></div></div></div>';
     }
 
-    function render() {
+    function showLoading(on) {
+        var l = $('[data-video-lib-loading]');
+        if (l) l.classList.toggle('hidden', !on);
+    }
+
+    function renderItems(items, kind) {
         var grid = $('[data-video-lib-grid]');
         var empty = $('[data-video-lib-empty]');
-        var loading = $('[data-video-lib-loading]');
-        var count = $('[data-video-lib-count]');
-        var countLabel = $('[data-video-lib-count-label]');
-        var search = $('[data-video-lib-search]');
-        if (!grid) return;
-
-        if (loading) loading.classList.toggle('hidden', !state.loading);
-        if (search) search.placeholder = 'Search ' + (state.tab === 'movies' ? 'movies' : 'shows') + '...';
-        if (countLabel) countLabel.textContent = state.tab === 'movies' ? 'Movies' : 'Shows';
-        if (count) count.textContent = items().length;
-
-        if (state.loading) { grid.innerHTML = ''; if (empty) empty.classList.add('hidden'); return; }
-
-        var kind = state.tab === 'movies' ? 'movie' : 'show';
-        var list = filtered();
-        grid.innerHTML = list.map(function (it) { return cardHTML(it, kind); }).join('');
-
-        if (empty) {
-            empty.classList.toggle('hidden', list.length > 0);
-            var t = $('[data-video-lib-empty-title]');
-            if (t) t.textContent = items().length === 0 ? 'Nothing here yet'
-                : 'No ' + (state.tab === 'movies' ? 'movies' : 'shows') + ' match';
-        }
+        if (grid) grid.innerHTML = items.map(function (it) { return cardHTML(it, kind); }).join('');
+        if (empty) empty.classList.toggle('hidden', items.length > 0);
     }
 
-    function load(force) {
-        if (state.data && !force) { render(); return; }
-        state.loading = true;
-        render();
-        fetch(LIBRARY_URL, { headers: { 'Accept': 'application/json' } })
+    function updatePagination(p) {
+        var box = $('[data-video-lib-pagination]');
+        var prev = $('[data-video-lib-prev]');
+        var next = $('[data-video-lib-next]');
+        var info = $('[data-video-lib-pageinfo]');
+        if (!box) return;
+        if (!p) { box.classList.add('hidden'); return; }
+        if (prev) prev.disabled = !p.has_prev;
+        if (next) next.disabled = !p.has_next;
+        if (info) info.textContent = 'Page ' + p.page + ' of ' + p.total_pages;
+        box.classList.toggle('hidden', p.total_pages <= 1);
+    }
+
+    function setCount(n) {
+        var c = $('[data-video-lib-count]');
+        var lbl = $('[data-video-lib-count-label]');
+        if (c) c.textContent = n;
+        if (lbl) lbl.textContent = state.tab === 'movies' ? 'Movies' : 'Shows';
+    }
+
+    function load() {
+        state.loaded = true;
+        showLoading(true);
+        var kind = state.tab === 'movies' ? 'movies' : 'shows';
+        var params = new URLSearchParams({
+            kind: kind, search: state.search, letter: state.letter, sort: state.sort,
+            status: state.status, page: state.page, limit: state.limit });
+        fetch(LIBRARY_URL + '?' + params.toString(), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                state.loading = false;
-                state.data = (d && !d.error) ? d : { movies: [], shows: [] };
-                render();
+                showLoading(false);
+                if (!d || d.error) { renderItems([], kind); updatePagination(null); setCount(0); return; }
+                renderItems(d.items || [], kind);
+                updatePagination(d.pagination);
+                setCount(d.pagination ? d.pagination.total_count : 0);
             })
-            .catch(function () { state.loading = false; state.data = { movies: [], shows: [] }; render(); });
+            .catch(function () { showLoading(false); renderItems([], kind); updatePagination(null); setCount(0); });
     }
+
+    function reload() { state.page = 1; load(); }
 
     function wire() {
         var tabs = document.querySelectorAll('[data-video-lib-tab]');
@@ -136,39 +144,43 @@
                     state.tab = tab.getAttribute('data-video-lib-tab');
                     var all = document.querySelectorAll('[data-video-lib-tab]');
                     for (var j = 0; j < all.length; j++) all[j].classList.toggle('active', all[j] === tab);
-                    render();
+                    var s = $('[data-video-lib-search]');
+                    if (s) s.placeholder = 'Search ' + (state.tab === 'movies' ? 'movies' : 'shows') + '...';
+                    reload();
                 });
             })(tabs[i]);
         }
         var search = $('[data-video-lib-search]');
         if (search) {
-            search.addEventListener('input', function () { state.search = search.value || ''; render(); });
+            search.addEventListener('input', function () {
+                state.search = search.value || '';
+                if (searchTimer) clearTimeout(searchTimer);
+                searchTimer = setTimeout(reload, 300);
+            });
         }
+        var sort = $('[data-video-lib-sort]');
+        if (sort) sort.addEventListener('change', function () { state.sort = sort.value; reload(); });
+        var status = $('[data-video-lib-status]');
+        if (status) status.addEventListener('change', function () { state.status = status.value; reload(); });
+        var prev = $('[data-video-lib-prev]');
+        if (prev) prev.addEventListener('click', function () {
+            if (state.page > 1) { state.page--; load(); }
+        });
+        var next = $('[data-video-lib-next]');
+        if (next) next.addEventListener('click', function () { state.page++; load(); });
     }
 
-    function onScanProgress(e) {
-        var s = e.detail || {};
-        if (s.state !== 'scanning') return;
-        var label = $('[data-video-scan-label]');
-        if (label) label.textContent = 'Scanning…';
-    }
-
-    function onScanDone() {
-        var label = $('[data-video-scan-label]');
-        if (label) label.textContent = 'Scan';
-        load(true);
-    }
+    function onScanDone() { if (state.loaded) load(); }
 
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
-        load(false);
+        if (!state.loaded) load();
     }
 
     function init() {
         buildAlphabet();
         wire();
         document.addEventListener('soulsync:video-page-shown', onPageShown);
-        document.addEventListener('soulsync:video-scan-progress', onScanProgress);
         document.addEventListener('soulsync:video-scan-done', onScanDone);
     }
 
