@@ -699,28 +699,53 @@
                     </div>
                 </section>
                 <section class="video-subpage" data-video-subpage="video-library" hidden>
-                    <div class="page-shell">
-                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Library</span></h2>
-                                <p class="header-subtitle">Movies and shows from your media server</p>
-                            </div>
-                            <div class="header-quick-nav">
-                                <button class="header-button watchlist-button" type="button" data-video-scan>
-                                    <span class="hero-btn-icon">&#128260;</span>
-                                    <span class="hero-btn-label" data-video-scan-label>Scan Library</span>
+                    <!-- Reuses the music library's exact classes (.library-container,
+                         .library-artist-card, .alphabet-selector, .library-search-input)
+                         so it looks identical — just fed from /api/video/library. -->
+                    <div class="library-page-embed" id="video-library-page">
+                        <div class="library-container">
+                            <div class="library-header">
+                                <div class="library-header-content">
+                                    <h2 class="library-title"><img src="/static/library.png" class="page-header-icon" alt=""><span>Library</span></h2>
+                                    <p class="library-subtitle">Movies and shows from your media server</p>
+                                </div>
+                                <div class="library-stats">
+                                    <span class="library-stat">
+                                        <span class="stat-number" data-video-lib-count>0</span>
+                                        <span class="stat-label" data-video-lib-count-label>Movies</span>
+                                    </span>
+                                </div>
+                                <button class="library-watchlist-all-btn library-export-btn" type="button" data-video-scan-mode="full" title="Scan the media server">
+                                    <span class="watchlist-all-icon" data-video-scan-icon>&#128260;</span>
+                                    <span class="watchlist-all-text" data-video-scan-label>Scan</span>
                                 </button>
                             </div>
-                        </div>
-                        <div class="video-library-toolbar">
-                            <div class="video-library-tabs">
-                                <button class="video-lib-tab active" type="button" data-video-lib-tab="movies">Movies</button>
-                                <button class="video-lib-tab" type="button" data-video-lib-tab="shows">Shows</button>
+                            <div class="library-controls">
+                                <div class="video-library-tabs">
+                                    <button class="video-lib-tab active" type="button" data-video-lib-tab="movies">Movies</button>
+                                    <button class="video-lib-tab" type="button" data-video-lib-tab="shows">Shows</button>
+                                </div>
+                                <div class="library-search-container">
+                                    <input type="text" class="library-search-input" data-video-lib-search placeholder="Search movies...">
+                                    <div class="library-search-icon">&#128269;</div>
+                                </div>
+                                <div class="alphabet-selector">
+                                    <div class="alphabet-selector-inner" data-video-lib-alphabet></div>
+                                </div>
                             </div>
-                            <span class="video-library-count" data-video-lib-count></span>
+                            <div class="library-content">
+                                <div class="library-loading hidden" data-video-lib-loading>
+                                    <div class="loading-spinner"></div>
+                                    <div class="loading-text">Loading library...</div>
+                                </div>
+                                <div class="library-artists-grid" data-video-lib-grid></div>
+                                <div class="library-empty hidden" data-video-lib-empty>
+                                    <div class="empty-icon">&#127916;</div>
+                                    <div class="empty-title" data-video-lib-empty-title>Nothing here yet</div>
+                                    <div class="empty-subtitle">Run a scan to pull your library from the media server.</div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="video-library-grid" data-video-lib-grid></div>
-                        <p class="video-empty-note" data-video-lib-empty hidden>Nothing here yet — run a scan to pull your library from the media server.</p>
                     </div>
                 </section>
                 <section class="video-subpage" data-video-subpage="video-tools" hidden>
