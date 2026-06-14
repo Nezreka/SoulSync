@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS movies (
     id                   INTEGER PRIMARY KEY,
     server_source        TEXT,            -- 'plex' | 'jellyfin' (NULL = not on a server yet, e.g. wishlist)
     server_id            TEXT,            -- media server native id (Plex ratingKey / Jellyfin Item Id)
-    tmdb_id              INTEGER UNIQUE,
+    tmdb_id              INTEGER,         -- not unique: same film can sit in >1 library
     imdb_id              TEXT,
     title                TEXT NOT NULL,
     sort_title           TEXT,
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS shows (
     id                 INTEGER PRIMARY KEY,
     server_source      TEXT,             -- 'plex' | 'jellyfin' (NULL = not on a server yet)
     server_id          TEXT,             -- media server native id
-    tvdb_id            INTEGER UNIQUE,
+    tvdb_id            INTEGER,          -- not unique (same series can sit in >1 library)
     tmdb_id            INTEGER,
     imdb_id            TEXT,
     title              TEXT NOT NULL,

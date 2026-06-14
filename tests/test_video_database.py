@@ -224,6 +224,23 @@ def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
     assert eps == [1]
 
 
+def test_upsert_stores_provider_ids(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Inception",
+                                   "tmdb_id": 27205, "imdb_id": "tt1375666"})
+    with db.connect() as c:
+        row = c.execute("SELECT tmdb_id, imdb_id FROM movies WHERE id=?", (mid,)).fetchone()
+    assert (row["tmdb_id"], row["imdb_id"]) == (27205, "tt1375666")
+
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tvdb_id": 121361,
+                                       "tmdb_id": 1396, "imdb_id": "tt0903747", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "tvdb_id": 349232}]}]})
+    with db.connect() as c:
+        srow = c.execute("SELECT tvdb_id, tmdb_id, imdb_id FROM shows WHERE id=?", (sid,)).fetchone()
+        erow = c.execute("SELECT tvdb_id FROM episodes WHERE show_id=?", (sid,)).fetchone()
+    assert (srow["tvdb_id"], srow["tmdb_id"], srow["imdb_id"]) == (121361, 1396, "tt0903747")
+    assert erow["tvdb_id"] == 349232
+
+
 def test_prune_missing_skips_when_over_half_would_be_removed(db):
     # >100 movies; a scan that "sees" only a couple must NOT wipe the rest
     # (mirrors music's deep-scan 50% safety against partial server failures).

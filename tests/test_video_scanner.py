@@ -167,6 +167,27 @@ def test_incremental_falls_back_to_full_on_small_library(db):
     assert st["movies"] == 3
 
 
+def test_parse_plex_guids():
+    from core.video.sources import _parse_plex_guids
+
+    class _G:
+        def __init__(self, gid): self.id = gid
+
+    class _Obj:
+        def __init__(self, guids): self.guids = guids
+
+    got = _parse_plex_guids(_Obj([_G("imdb://tt1375666"), _G("tmdb://27205"), _G("tvdb://121361")]))
+    assert got == {"tmdb_id": 27205, "imdb_id": "tt1375666", "tvdb_id": 121361}
+    assert _parse_plex_guids(_Obj([])) == {"tmdb_id": None, "imdb_id": None, "tvdb_id": None}
+
+
+def test_parse_jellyfin_providers():
+    from core.video.sources import _parse_jf_providers
+    got = _parse_jf_providers({"ProviderIds": {"Imdb": "tt123", "Tmdb": "27205", "Tvdb": "121361"}})
+    assert got == {"imdb_id": "tt123", "tmdb_id": 27205, "tvdb_id": 121361}
+    assert _parse_jf_providers({}) == {"imdb_id": None, "tmdb_id": None, "tvdb_id": None}
+
+
 def test_core_video_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "core" / "video"
     for py in base.glob("*.py"):

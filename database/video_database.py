@@ -208,17 +208,18 @@ class VideoDatabase:
         try:
             conn.execute(
                 "INSERT INTO movies (server_source, server_id, title, sort_title, year, overview, "
-                "runtime_minutes, content_rating, studio, poster_url, has_file, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "runtime_minutes, content_rating, studio, poster_url, tmdb_id, imdb_id, has_file, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
                 "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
                 "overview=excluded.overview, runtime_minutes=excluded.runtime_minutes, "
                 "content_rating=excluded.content_rating, studio=excluded.studio, "
-                "poster_url=excluded.poster_url, has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
+                "poster_url=excluded.poster_url, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, "
+                "has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
                 (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
                  item.get("year"), item.get("overview"), item.get("runtime_minutes"),
                  item.get("content_rating"), item.get("studio"), item.get("poster_url"),
-                 1 if item.get("file") else 0),
+                 item.get("tmdb_id"), item.get("imdb_id"), 1 if item.get("file") else 0),
             )
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
@@ -238,16 +239,18 @@ class VideoDatabase:
         try:
             conn.execute(
                 "INSERT INTO shows (server_source, server_id, title, sort_title, year, overview, status, "
-                "network, runtime_minutes, content_rating, poster_url, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "network, runtime_minutes, content_rating, poster_url, tvdb_id, tmdb_id, imdb_id, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
                 "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
                 "overview=excluded.overview, status=excluded.status, network=excluded.network, "
                 "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
-                "poster_url=excluded.poster_url, updated_at=CURRENT_TIMESTAMP",
+                "poster_url=excluded.poster_url, tvdb_id=excluded.tvdb_id, tmdb_id=excluded.tmdb_id, "
+                "imdb_id=excluded.imdb_id, updated_at=CURRENT_TIMESTAMP",
                 (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
                  item.get("year"), item.get("overview"), item.get("status"), item.get("network"),
-                 item.get("runtime_minutes"), item.get("content_rating"), item.get("poster_url")),
+                 item.get("runtime_minutes"), item.get("content_rating"), item.get("poster_url"),
+                 item.get("tvdb_id"), item.get("tmdb_id"), item.get("imdb_id")),
             )
             show_id = conn.execute(
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
@@ -280,16 +283,17 @@ class VideoDatabase:
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
-                        "runtime_minutes, has_file) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "runtime_minutes, tvdb_id, has_file) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
                         "overview=excluded.overview, air_date=excluded.air_date, "
-                        "runtime_minutes=excluded.runtime_minutes, has_file=excluded.has_file",
+                        "runtime_minutes=excluded.runtime_minutes, tvdb_id=excluded.tvdb_id, "
+                        "has_file=excluded.has_file",
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
-                         ep.get("runtime_minutes"), 1 if ep.get("file") else 0),
+                         ep.get("runtime_minutes"), ep.get("tvdb_id"), 1 if ep.get("file") else 0),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",

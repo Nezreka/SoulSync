@@ -150,7 +150,11 @@ class VideoLibraryScanner:
                         break
                     continue
                 consec = 0
-                self.db.upsert_movie(server, item)
+                try:
+                    self.db.upsert_movie(server, item)
+                except Exception:
+                    logger.exception("video scan: skipping movie %s", sid)
+                    continue
                 seen_movies.add(sid)
                 movies += 1
                 processed += 1
@@ -178,7 +182,11 @@ class VideoLibraryScanner:
                         break
                     continue
                 consec = 0
-                self.db.upsert_show_tree(server, show)
+                try:
+                    self.db.upsert_show_tree(server, show)
+                except Exception:
+                    logger.exception("video scan: skipping show %s", sid)
+                    continue
                 seen_shows.add(sid)
                 shows += 1
                 episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))

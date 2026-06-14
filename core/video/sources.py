@@ -13,6 +13,8 @@ these adapters.
 
 from __future__ import annotations
 
+import re
+
 from utils.logging_config import get_logger
 
 logger = get_logger("video_sources")
@@ -20,6 +22,45 @@ logger = get_logger("video_sources")
 # Library scans are bulk operations — a far longer per-request timeout than the
 # shared client's interactive one, so big libraries don't read-timeout mid-scan.
 PLEX_SCAN_TIMEOUT = 120
+
+
+def _to_int(val):
+    if val is None:
+        return None
+    m = re.match(r"\d+", str(val))
+    return int(m.group()) if m else None
+
+
+def _parse_plex_guids(obj) -> dict:
+    """tmdb/imdb/tvdb ids from a Plex item's guids — Plex already matched them."""
+    out = {"tmdb_id": None, "imdb_id": None, "tvdb_id": None}
+    try:
+        for g in (getattr(obj, "guids", None) or []):
+            gid = getattr(g, "id", "") or ""
+            if "://" not in gid:
+                continue
+            scheme, value = gid.split("://", 1)
+            scheme = scheme.lower()
+            if scheme == "imdb":
+                out["imdb_id"] = (value.split("?")[0] or None)
+            elif scheme == "tmdb":
+                out["tmdb_id"] = _to_int(value)
+            elif scheme == "tvdb":
+                out["tvdb_id"] = _to_int(value)
+    except Exception:
+        pass
+    return out
+
+
+def _parse_jf_providers(item) -> dict:
+    """tmdb/imdb/tvdb ids from a Jellyfin item's ProviderIds."""
+    providers = item.get("ProviderIds") or {}
+    low = {(k or "").lower(): v for k, v in providers.items()}
+    return {
+        "imdb_id": low.get("imdb") or None,
+        "tmdb_id": _to_int(low.get("tmdb")),
+        "tvdb_id": _to_int(low.get("tvdb")),
+    }
 
 
 def _build_source(movies_lib=None, tv_lib=None):
@@ -156,7 +197,7 @@ class PlexVideoSource:
 
     def _movie(self, m) -> dict:
         dur = getattr(m, "duration", None)
-        return {
+        d = {
             "server_id": str(m.ratingKey),
             "title": m.title,
             "year": getattr(m, "year", None),
@@ -167,6 +208,8 @@ class PlexVideoSource:
             "runtime_minutes": int(dur / 60000) if dur else None,
             "file": self._part_file(m),
         }
+        d.update(_parse_plex_guids(m))
+        return d
 
     def _episode(self, ep, snum, enum) -> dict:
         dur = getattr(ep, "duration", None)
@@ -179,6 +222,7 @@ class PlexVideoSource:
             "overview": getattr(ep, "summary", None),
             "air_date": aired.date().isoformat() if aired else None,
             "runtime_minutes": int(dur / 60000) if dur else None,
+            "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
             "file": self._part_file(ep),
         }
 
@@ -199,7 +243,7 @@ class PlexVideoSource:
         seasons = [{"server_id": None, "season_number": n, "title": None,
                     "overview": None, "poster_url": None, "episodes": eps}
                    for n, eps in sorted(seasons_map.items())]
-        return {
+        d = {
             "server_id": str(sh.ratingKey),
             "title": sh.title,
             "year": getattr(sh, "year", None),
@@ -210,11 +254,13 @@ class PlexVideoSource:
             "content_rating": getattr(sh, "contentRating", None),
             "seasons": seasons,
         }
+        d.update(_parse_plex_guids(sh))
+        return d
 
 
 # ── Jellyfin ────────────────────────────────────────────────────────────────
-_JF_MOVIE_FIELDS = "Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios"
-_JF_EP_FIELDS = "Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber"
+_JF_MOVIE_FIELDS = "Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,ProviderIds"
+_JF_EP_FIELDS = "Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,ProviderIds"
 
 
 class JellyfinVideoSource:
@@ -312,7 +358,7 @@ class JellyfinVideoSource:
     def _movie(self, it) -> dict:
         studios = it.get("Studios") or []
         ticks = it.get("RunTimeTicks")
-        return {
+        d = {
             "server_id": str(it["Id"]),
             "title": it.get("Name"),
             "year": it.get("ProductionYear"),
@@ -323,12 +369,14 @@ class JellyfinVideoSource:
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "file": self._file(it),
         }
+        d.update(_parse_jf_providers(it))
+        return d
 
     def iter_shows(self, incremental=False):
         path = f"/Users/{self.uid}/Items"
         for view in self._views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
-                      "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating"}
+                      "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating,ProviderIds"}
             if incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "50"})
                 items = (self._req(path, params) or {}).get("Items", [])
@@ -362,6 +410,7 @@ class JellyfinVideoSource:
                     "overview": ep.get("Overview"),
                     "air_date": aired[:10] if aired else None,
                     "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
+                    "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
                     "file": self._file(ep),
                 })
             for snum, eps in sorted(by_season.items()):
@@ -370,7 +419,7 @@ class JellyfinVideoSource:
                                 "poster_url": None, "episodes": eps})
         except Exception:
             logger.exception("Jellyfin: failed reading episodes for %s", it.get("Name", "?"))
-        return {
+        d = {
             "server_id": series_id,
             "title": it.get("Name"),
             "year": it.get("ProductionYear"),
@@ -381,3 +430,5 @@ class JellyfinVideoSource:
             "content_rating": it.get("OfficialRating"),
             "seasons": seasons,
         }
+        d.update(_parse_jf_providers(it))
+        return d
