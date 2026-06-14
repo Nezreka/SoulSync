@@ -17,35 +17,50 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_sources")
 
+# Library scans are bulk operations — a far longer per-request timeout than the
+# shared client's interactive one, so big libraries don't read-timeout mid-scan.
+PLEX_SCAN_TIMEOUT = 120
+
 
 def get_active_video_source():
     """Return a media source for the active server, or None when the active
-    server has no video support (Navidrome/standalone) or isn't connected."""
+    server has no video support (Navidrome/standalone) or isn't configured.
+
+    Reuses the SHARED connection config (config_manager) — we don't reinvent
+    auth — but Plex gets a dedicated, long-timeout connection for the bulk scan
+    so it never inherits the shared client's short interactive timeout."""
     try:
         from config.settings import config_manager
-        from core.media_server.engine import get_media_server_engine
     except Exception:
-        logger.exception("video sources: shared infra unavailable")
+        logger.exception("video sources: config unavailable")
         return None
 
     server = config_manager.get_active_media_server()
-    engine = get_media_server_engine()
-    if not engine:
-        return None
-    client = engine.client(server) if server in ("plex", "jellyfin") else None
-    if not client:
-        return None
-    try:
-        if not client.ensure_connection():
+
+    if server == "plex":
+        cfg = config_manager.get_plex_config() or {}
+        base_url, token = cfg.get("base_url"), cfg.get("token")
+        if not base_url or not token:
             return None
-    except Exception:
-        logger.exception("video sources: %s ensure_connection failed", server)
+        try:
+            from plexapi.server import PlexServer
+            srv = PlexServer(base_url, token, timeout=PLEX_SCAN_TIMEOUT)
+            return PlexVideoSource(srv)
+        except Exception:
+            logger.exception("video sources: Plex connect failed")
+            return None
+
+    if server == "jellyfin":
+        try:
+            from core.media_server.engine import get_media_server_engine
+            engine = get_media_server_engine()
+            client = engine.client("jellyfin") if engine else None
+            if client and client.ensure_connection() and getattr(client, "user_id", None):
+                return JellyfinVideoSource(client)
+        except Exception:
+            logger.exception("video sources: Jellyfin connect failed")
         return None
 
-    if server == "plex" and getattr(client, "server", None) is not None:
-        return PlexVideoSource(client)
-    if server == "jellyfin" and getattr(client, "user_id", None):
-        return JellyfinVideoSource(client)
     return None
 
 
@@ -53,8 +68,8 @@ def get_active_video_source():
 class PlexVideoSource:
     server_name = "plex"
 
-    def __init__(self, client):
-        self._server = client.server
+    def __init__(self, server):
+        self._server = server
 
     def _sections(self, kind: str):
         return [s for s in self._server.library.sections() if s.type == kind]
@@ -63,13 +78,19 @@ class PlexVideoSource:
         for section in self._sections("movie"):
             items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
             for m in items:
-                yield self._movie(m)
+                try:
+                    yield self._movie(m)
+                except Exception:
+                    logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
     def iter_shows(self, incremental=False):
         for section in self._sections("show"):
             items = section.search(sort="addedAt:desc", maxresults=50) if incremental else section.all()
             for sh in items:
-                yield self._show(sh)
+                try:
+                    yield self._show(sh)
+                except Exception:
+                    logger.exception("Plex: skipping show %s", getattr(sh, "title", "?"))
 
     @staticmethod
     def _part_file(obj):
@@ -101,36 +122,33 @@ class PlexVideoSource:
             "file": self._part_file(m),
         }
 
+    def _episode(self, ep, snum) -> dict:
+        dur = getattr(ep, "duration", None)
+        aired = getattr(ep, "originallyAvailableAt", None)
+        return {
+            "server_id": str(ep.ratingKey),
+            "season_number": snum,
+            "episode_number": getattr(ep, "index", 0),
+            "title": ep.title,
+            "overview": getattr(ep, "summary", None),
+            "air_date": aired.date().isoformat() if aired else None,
+            "runtime_minutes": int(dur / 60000) if dur else None,
+            "file": self._part_file(ep),
+        }
+
     def _show(self, sh) -> dict:
-        seasons = []
+        # One episodes() call for the whole show (grouped by season) instead of a
+        # request per season — far fewer round-trips, much less timeout-prone.
+        seasons_map = {}
         try:
-            for se in sh.seasons():
-                episodes = []
-                for ep in se.episodes():
-                    dur = getattr(ep, "duration", None)
-                    aired = getattr(ep, "originallyAvailableAt", None)
-                    episodes.append({
-                        "server_id": str(ep.ratingKey),
-                        "season_number": ep.parentIndex if getattr(ep, "parentIndex", None) is not None
-                        else getattr(se, "seasonNumber", 0),
-                        "episode_number": getattr(ep, "index", 0),
-                        "title": ep.title,
-                        "overview": getattr(ep, "summary", None),
-                        "air_date": aired.date().isoformat() if aired else None,
-                        "runtime_minutes": int(dur / 60000) if dur else None,
-                        "file": self._part_file(ep),
-                    })
-                seasons.append({
-                    "server_id": str(se.ratingKey),
-                    "season_number": getattr(se, "seasonNumber", 0),
-                    "title": se.title,
-                    "overview": getattr(se, "summary", None),
-                    "poster_url": getattr(se, "thumb", None),
-                    "episodes": episodes,
-                })
+            for ep in sh.episodes():
+                snum = ep.parentIndex if getattr(ep, "parentIndex", None) is not None else 0
+                seasons_map.setdefault(snum, []).append(self._episode(ep, snum))
         except Exception:
-            logger.exception("Plex: failed reading seasons/episodes for %s",
-                             getattr(sh, "title", "?"))
+            logger.exception("Plex: failed reading episodes for %s", getattr(sh, "title", "?"))
+        seasons = [{"server_id": None, "season_number": n, "title": None,
+                    "overview": None, "poster_url": None, "episodes": eps}
+                   for n, eps in sorted(seasons_map.items())]
         return {
             "server_id": str(sh.ratingKey),
             "title": sh.title,
