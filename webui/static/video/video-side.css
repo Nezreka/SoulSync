@@ -226,27 +226,3 @@ body[data-side="video"] .dashboard-header-sweep {
     font-size: 12px;
     color: var(--text-secondary, #9aa0aa);
 }
-
-/* ── Tools page: scan buttons ──────────────────────────────────────────── */
-.video-scan-controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-}
-.video-tool-btn {
-    padding: 9px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    color: #fff;
-    background: rgb(var(--accent-rgb, 88 101 242));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 9px;
-    cursor: pointer;
-    transition: filter 0.15s ease, opacity 0.15s ease;
-}
-.video-tool-btn:hover { filter: brightness(1.1); }
-.video-tool-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.video-tool-btn--warn {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-primary, #e8e8ea);
-}

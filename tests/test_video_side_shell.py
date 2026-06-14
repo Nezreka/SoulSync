@@ -19,7 +19,6 @@ _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encodin
 _DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
 _LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
-_TOOLS_JS = (_ROOT / "webui" / "static" / "video" / "video-tools.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
@@ -157,9 +156,12 @@ def test_video_library_module_referenced_and_isolated():
 def test_video_tools_page_has_three_scan_modes():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-tools"', "</section>")
+    # Mode dropdown + single Scan button, same shape as the music tool card.
     for mode in ("incremental", "full", "deep"):
-        assert f'data-video-scan-mode="{mode}"' in block, f"tools page missing scan mode {mode}"
-    assert "data-video-tools-scan-status" in block
+        assert f'value="{mode}"' in block, f"tools page missing scan mode {mode}"
+    assert "data-video-scan-run" in block and "data-video-scan-select" in block
+    assert "data-video-scan-phase" in block          # reuses music progress markup
+    assert "tool-card" in block and "tool-card-controls" in block  # reuses music classes
     assert "onclick" not in block
 
 
@@ -171,15 +173,13 @@ def test_dashboard_library_card_has_refresh_and_deep_buttons():
     assert "library-status-actions" in block
 
 
-def test_scan_and_tools_modules_referenced_and_isolated():
-    assert "video/video-scan.js" in _INDEX and "video/video-tools.js" in _INDEX
-    for js in (_SCAN_JS, _TOOLS_JS):
-        stripped = js.strip()
-        assert stripped.startswith("/*") or stripped.startswith("(function")
-        assert "(function" in js and "})();" in js
-        assert "window." not in js
-        assert "addEventListener" in js
-    # The shared controller drives scans via the documented events.
+def test_scan_module_referenced_and_isolated():
+    assert "video/video-scan.js" in _INDEX
+    stripped = _SCAN_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _SCAN_JS and "})();" in _SCAN_JS
+    assert "window." not in _SCAN_JS
+    assert "addEventListener" in _SCAN_JS
     assert "soulsync:video-scan-done" in _SCAN_JS
     assert "/api/video/scan/request" in _SCAN_JS
 
