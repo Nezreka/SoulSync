@@ -39,6 +39,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/enrichment/<service>/status" in rules
     assert "/api/video/enrichment/<service>/unmatched" in rules
     assert "/api/video/enrichment/config" in rules
+    assert "/api/video/enrichment/<service>/test" in rules
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -100,6 +101,7 @@ def test_enrichment_endpoints(tmp_path):
     class FakeClient:
         enabled = True
         def match(self, *a): return None
+        def test(self): return (True, "ok")
 
     db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
     videoapi._video_db = db
@@ -125,6 +127,8 @@ def test_enrichment_endpoints(tmp_path):
         assert client.post("/api/video/enrichment/tmdb/resume").get_json()["status"] == "running"
         assert client.post("/api/video/enrichment/tmdb/retry",
                            json={"kind": "movie", "scope": "failed"}).get_json()["reset"] == 1
+        assert client.post("/api/video/enrichment/tmdb/test").get_json()["success"] is True
+        assert client.post("/api/video/enrichment/nope/test").status_code == 404
         assert client.get("/api/video/enrichment/nope/status").status_code == 404
     finally:
         videoapi._video_db = None

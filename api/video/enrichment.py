@@ -86,6 +86,18 @@ def register_routes(bp):
         w.resume()
         return jsonify({"status": "running"})
 
+    @bp.route("/enrichment/<service>/test", methods=["POST"])
+    def video_enrichment_test(service):
+        w = engine().worker(service)
+        if not w:
+            return jsonify({"success": False, "error": "unknown service"}), 404
+        try:
+            ok, msg = w.client.test()
+            return jsonify({"success": bool(ok), "message": msg, "error": None if ok else msg})
+        except Exception:
+            logger.exception("video enrichment test failed for %s", service)
+            return jsonify({"success": False, "error": "Test failed"})
+
     @bp.route("/enrichment/<service>/breakdown", methods=["GET"])
     def video_enrichment_breakdown(service):
         from . import get_video_db

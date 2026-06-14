@@ -31,6 +31,21 @@ class TMDBClient:
     def enabled(self):
         return bool(self.api_key)
 
+    def test(self):
+        if not self.api_key:
+            return False, "No TMDB API key set"
+        import requests
+        try:
+            r = requests.get(self.BASE + "/configuration", params={"api_key": self.api_key}, timeout=12)
+            if r.status_code == 200:
+                return True, "TMDB connection OK"
+            if r.status_code == 401:
+                return False, "Invalid TMDB API key"
+            return False, "TMDB returned HTTP " + str(r.status_code)
+        except Exception:
+            logger.exception("TMDB test failed")
+            return False, "Could not reach TMDB"
+
     def match(self, kind, title, year):
         if not self.api_key or not title:
             return None
@@ -76,6 +91,18 @@ class TVDBClient:
     @property
     def enabled(self):
         return bool(self.api_key)
+
+    def test(self):
+        if not self.api_key:
+            return False, "No TVDB API key set"
+        try:
+            token = self._auth()
+            if token:
+                return True, "TVDB connection OK"
+            return False, "TVDB login failed — check the key"
+        except Exception:
+            logger.exception("TVDB test failed")
+            return False, "Could not reach TVDB"
 
     def _auth(self):
         if self._token:
