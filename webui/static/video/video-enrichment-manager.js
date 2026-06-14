@@ -15,6 +15,10 @@
         { id: 'tmdb', name: 'TMDB' },
         { id: 'tvdb', name: 'TVDB' },
     ];
+    var LOGOS = {
+        tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
+        tvdb: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg',
+    };
     var GLYPH = { movie: '🎬', show: '📺' };
     var KIND_LABEL = { movie: 'Movies', show: 'Shows' };
 
@@ -94,7 +98,7 @@
             var cov = pct == null ? '' :
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
             return '<button class="em-worker-row" data-em-select="' + w.id + '">' +
-                '<span class="em-worker-icon vem-icon">' + esc(w.name) + '</span>' +
+                '<span class="em-worker-icon"><img class="vem-logo" src="' + LOGOS[w.id] + '" alt=""></span>' +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
                 '<span class="em-worker-sub">' + esc(railSub(s)) + '</span>' + cov + '</span>' +
                 '<span class="em-dot em-dot--' + info.cls + '" title="' + info.label + '"></span></button>';

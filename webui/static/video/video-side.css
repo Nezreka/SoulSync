@@ -169,7 +169,7 @@ body[data-side="video"] .dashboard-header-sweep {
     transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
 .video-enrich-button:hover { transform: translateY(-1px); border-color: rgb(var(--ve-accent, 88 101 242)); }
-.video-enrich-label { position: relative; z-index: 1; }
+.video-enrich-logo { width: 26px; height: 26px; object-fit: contain; position: relative; z-index: 1; }
 .video-enrich-spinner {
     position: absolute;
     inset: -2px;
@@ -186,29 +186,24 @@ body[data-side="video"] .dashboard-header-sweep {
 .video-enrich-button.disabled { opacity: 0.4; cursor: default; }
 @keyframes video-enrich-spin { to { transform: rotate(360deg); } }
 
+/* Positioning wrapper only — the content reuses music's shared .tooltip-content
+   / .tooltip-header / .tooltip-body styling, so it looks identical to the music
+   enrichment tooltips. */
 .video-enrich-tooltip {
     position: absolute;
-    top: 54px;
     left: 50%;
-    transform: translateX(-50%);
-    min-width: 190px;
-    padding: 10px 12px;
-    background: rgba(12, 12, 16, 0.97);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    top: calc(100% + 12px);
+    transform: translateX(-50%) translateY(-5px);
+    z-index: 5000;
     opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: none;
-    transition: opacity 0.15s ease;
-    z-index: 60;
-    font-size: 12px;
-    text-align: left;
 }
-.video-enrich-container:hover .video-enrich-tooltip { opacity: 1; }
-.video-enrich-tt-title { font-weight: 700; margin-bottom: 4px; color: var(--text-primary, #e8e8ea); }
-.video-enrich-tt-status, .video-enrich-tt-current, .video-enrich-tt-progress {
-    color: var(--text-secondary, #9aa0aa);
-    line-height: 1.5;
+.video-enrich-container:hover .video-enrich-tooltip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
 }
 
 .video-manage-workers-btn {
@@ -228,9 +223,12 @@ body[data-side="video"] .dashboard-header-sweep {
 }
 .video-manage-workers-btn:hover { transform: translateY(-1px); border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); }
 .video-manage-workers-icon img { width: 22px; height: 22px; display: block; }
+/* Service logo in the settings API-config frame headers (TMDB/TVDB). */
+.video-svc-logo { width: 18px; height: 18px; object-fit: contain; margin-right: 2px; }
 
 /* ── Video Manage-Workers modal: only the bits not covered by music's global
    .em-* classes, ALL scoped to #vem-overlay so music is never affected. ───── */
+#vem-overlay .vem-logo { width: 22px; height: 22px; object-fit: contain; }
 #vem-overlay .vem-icon {
     width: 34px;
     height: 34px;
