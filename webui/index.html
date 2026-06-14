@@ -4795,6 +4795,25 @@
                                                 Select which music library to use (doesn't affect config file)
                                             </small>
                                         </div>
+                                        <!-- Video side: which libraries are Movies / TV (shown only on the
+                                             video side; populated + saved by video/video-settings.js). -->
+                                        <div class="form-group video-library-selectors" data-video-only>
+                                            <label>Movies Library:</label>
+                                            <select data-video-lib-select="movies">
+                                                <option value="">Loading...</option>
+                                            </select>
+                                            <label style="margin-top: 12px;">TV Shows Library:</label>
+                                            <select data-video-lib-select="tv">
+                                                <option value="">Loading...</option>
+                                            </select>
+                                            <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                                Which server libraries the video side scans (doesn't affect config file)
+                                            </small>
+                                            <div style="margin-top: 8px;">
+                                                <button type="button" class="detect-button" data-video-lib-save>Save Libraries</button>
+                                                <span data-video-lib-status style="margin-left: 10px; font-size: 0.9em; color: #999;"></span>
+                                            </div>
+                                        </div>
                                         <div class="form-actions">
                                             <button id="plex-config-action-button" class="detect-button" onclick="clearPlexConfiguration()">Clear Configuration</button>
                                         </div>
@@ -8889,6 +8908,8 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
     <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
+    <!-- Video settings additions (isolated; library mapping on the settings page) -->
+    <script src="{{ url_for('static', filename='video/video-settings.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
