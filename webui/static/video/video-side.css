@@ -7,36 +7,73 @@
  * body flips to data-side="video".
  */
 
-/* ── The Music ↔ Video header toggle ───────────────────────────────────── */
+/* ── The Music ↔ Video header toggle (animated sliding pill) ────────────── */
 .side-toggle {
+    position: relative;
     display: flex;
-    gap: 3px;
     margin-top: 12px;
-    padding: 3px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 9px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 11px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.35);
+    isolation: isolate;
 }
+
+/* The thumb that slides under the active side. Positioned over the left half by
+   default; slides to the right half when body[data-side="video"]. */
+.side-toggle-thumb {
+    position: absolute;
+    z-index: 0;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    border-radius: 8px;
+    background: linear-gradient(135deg,
+        rgb(var(--accent-rgb, 88 101 242)),
+        rgba(var(--accent-rgb, 88 101 242), 0.82));
+    box-shadow: 0 3px 10px rgba(var(--accent-rgb, 88 101 242), 0.35);
+    transition: transform 0.28s cubic-bezier(0.34, 1.3, 0.5, 1);
+}
+body[data-side="video"] .side-toggle-thumb {
+    transform: translateX(100%);
+}
+
 .side-toggle-btn {
+    position: relative;
+    z-index: 1;
     flex: 1;
-    padding: 6px 8px;
-    font-size: 11px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 7px 6px;
+    font-size: 11.5px;
     font-weight: 600;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.02em;
     color: var(--text-secondary, #9aa0aa);
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: background 0.15s ease, color 0.15s ease;
+    transition: color 0.2s ease;
 }
-.side-toggle-btn:hover {
+.side-toggle-btn .side-toggle-icon {
+    width: 14px;
+    height: 14px;
+    flex: none;
+    opacity: 0.85;
+    transition: opacity 0.2s ease;
+}
+.side-toggle-btn:not(.active):hover {
     color: var(--text-primary, #e8e8ea);
-    background: rgba(255, 255, 255, 0.04);
 }
 .side-toggle-btn.active {
-    background: rgb(var(--accent-rgb, 88 101 242));
     color: #fff;
+}
+.side-toggle-btn.active .side-toggle-icon {
+    opacity: 1;
 }
 
 /* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
