@@ -151,40 +151,72 @@ body[data-side="video"] .dashboard-header-sweep {
 
 /* ── Dashboard enrichment-worker buttons (isolated; music untouched) ────── */
 .video-enrich-container { position: relative; }
+/* Mirrors music's .musicbrainz-button accent treatment, driven by --ve-accent. */
 .video-enrich-button {
     position: relative;
     width: 46px;
     height: 46px;
     border-radius: 50%;
-    border: 2px solid rgba(var(--ve-accent, 88 101 242), 0.5);
+    border: 1.5px solid rgba(var(--ve-accent, 88 101 242), 0.25);
     background: rgba(18, 18, 22, 0.85);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.02em;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(var(--ve-accent, 88 101 242), 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
-.video-enrich-button:hover { transform: translateY(-1px); border-color: rgb(var(--ve-accent, 88 101 242)); }
-.video-enrich-logo { width: 26px; height: 26px; object-fit: contain; position: relative; z-index: 1; }
-.video-enrich-spinner {
-    position: absolute;
-    inset: -2px;
-    border-radius: 50%;
-    border: 2px solid transparent;
-    border-top-color: rgb(var(--ve-accent, 88 101 242));
-    opacity: 0;
+.video-enrich-button:hover {
+    transform: scale(1.05);
+    border-color: rgba(var(--ve-accent, 88 101 242), 0.4);
+    box-shadow: 0 6px 20px rgba(var(--ve-accent, 88 101 242), 0.3),
+        0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.video-enrich-button.active,
+.video-enrich-button.complete {
+    border-color: rgba(var(--ve-accent, 88 101 242), 0.5);
+    box-shadow: 0 6px 24px rgba(var(--ve-accent, 88 101 242), 0.4),
+        0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+.video-enrich-button.paused { opacity: 0.6; }
+.video-enrich-button.disabled { opacity: 0.4; cursor: default; }
+.video-enrich-logo {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
+    opacity: 0.85;
+    position: relative;
+    z-index: 1;
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
     transition: opacity 0.3s ease;
 }
-.video-enrich-button.active { box-shadow: 0 0 14px rgba(var(--ve-accent, 88 101 242), 0.45); }
-.video-enrich-button.active .video-enrich-spinner { opacity: 1; animation: video-enrich-spin 1.1s linear infinite; }
-.video-enrich-button.paused { opacity: 0.6; }
-.video-enrich-button.complete { border-color: rgb(var(--ve-accent, 88 101 242)); }
-.video-enrich-button.disabled { opacity: 0.4; cursor: default; }
+.video-enrich-button:hover .video-enrich-logo { opacity: 1; }
+.video-enrich-spinner {
+    position: absolute;
+    width: 46px;
+    height: 46px;
+    border: 3px solid transparent;
+    border-top-color: rgba(var(--ve-accent, 88 101 242), 0.8);
+    border-right-color: rgba(var(--ve-accent, 88 101 242), 0.5);
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    pointer-events: none;
+}
+.video-enrich-button.active .video-enrich-spinner { opacity: 1; animation: video-enrich-spin 1.2s linear infinite; }
 @keyframes video-enrich-spin { to { transform: rotate(360deg); } }
+
+/* Tint the reused .tooltip-content with the service accent (music's default is
+   MusicBrainz purple; each service overrides — so we do the same per video svc). */
+.video-enrich-tooltip .tooltip-content {
+    border-color: rgba(var(--ve-accent, 88 101 242), 0.3);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
+        0 6px 20px rgba(var(--ve-accent, 88 101 242), 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+.video-enrich-tooltip .tooltip-header { color: rgba(var(--ve-accent, 88 101 242), 0.95); }
+.video-enrich-tooltip .tooltip-content::before { border-bottom-color: rgba(var(--ve-accent, 88 101 242), 0.3); }
+.video-enrich-tooltip [data-video-enrich-status] { color: rgb(var(--ve-accent, 88 101 242)); font-weight: 600; }
 
 /* Positioning wrapper only — the content reuses music's shared .tooltip-content
    / .tooltip-header / .tooltip-body styling, so it looks identical to the music
