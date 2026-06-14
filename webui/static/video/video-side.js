@@ -18,7 +18,7 @@
 
     var SIDE_KEY = 'soulsync_side';
     var MUSIC_SUBTITLE = 'Music Sync & Manager';
-    var VIDEO_SUBTITLE = 'Video Manager';
+    var VIDEO_SUBTITLE = 'Movies, TV & YouTube';
     var DEFAULT_VIDEO_PAGE = 'video-dashboard';
 
     // The video sidebar pages. Pages flagged shared: true are "same as music"
