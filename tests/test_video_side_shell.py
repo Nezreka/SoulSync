@@ -18,12 +18,14 @@ _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="re
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
 _DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
 _LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
+_SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
+_TOOLS_JS = (_ROOT / "webui" / "static" / "video" / "video-tools.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
     "video-dashboard", "video-search", "video-discover", "video-library",
     "video-watchlist", "video-wishlist", "video-downloads", "video-calendar",
-    "video-import", "video-settings", "video-issues", "video-help",
+    "video-tools", "video-import", "video-settings", "video-issues", "video-help",
 }
 
 
@@ -150,6 +152,36 @@ def test_video_library_module_referenced_and_isolated():
     assert "soulsync:video-page-shown" in _LIB_JS  # decoupled via the event
     assert "addEventListener" in _LIB_JS
     assert "window." not in _LIB_JS
+
+
+def test_video_tools_page_has_three_scan_modes():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-tools"', "</section>")
+    for mode in ("incremental", "full", "deep"):
+        assert f'data-video-scan-mode="{mode}"' in block, f"tools page missing scan mode {mode}"
+    assert "data-video-tools-scan-status" in block
+    assert "onclick" not in block
+
+
+def test_dashboard_library_card_has_refresh_and_deep_buttons():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    assert 'data-video-scan-mode="full"' in block   # Refresh
+    assert 'data-video-scan-mode="deep"' in block    # Deep Scan
+    assert "library-status-actions" in block
+
+
+def test_scan_and_tools_modules_referenced_and_isolated():
+    assert "video/video-scan.js" in _INDEX and "video/video-tools.js" in _INDEX
+    for js in (_SCAN_JS, _TOOLS_JS):
+        stripped = js.strip()
+        assert stripped.startswith("/*") or stripped.startswith("(function")
+        assert "(function" in js and "})();" in js
+        assert "window." not in js
+        assert "addEventListener" in js
+    # The shared controller drives scans via the documented events.
+    assert "soulsync:video-scan-done" in _SCAN_JS
+    assert "/api/video/scan/request" in _SCAN_JS
 
 
 def test_controller_is_isolated_iife_with_no_globals():

@@ -118,4 +118,7 @@
     }
 
     document.addEventListener('soulsync:video-page-shown', onPageShown);
+    // Dashboard scan buttons (data-video-scan-mode) are wired by video-scan.js;
+    // refresh the live counts whenever any scan finishes.
+    document.addEventListener('soulsync:video-scan-done', function () { loadStats(); });
 })();

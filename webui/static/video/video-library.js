@@ -13,8 +13,6 @@
 
     var PAGE_ID = 'video-library';
     var LIBRARY_URL = '/api/video/library';
-    var SCAN_REQUEST_URL = '/api/video/scan/request';
-    var SCAN_STATUS_URL = '/api/video/scan/status';
 
     var state = { tab: 'movies', data: null, loading: false, scanning: false };
 
@@ -103,43 +101,21 @@
         if (label) label.textContent = text;
     }
 
-    function pollScan() {
-        fetch(SCAN_STATUS_URL, { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.json(); })
-            .then(function (s) {
-                if (s && s.state === 'scanning') {
-                    setScanLabel((s.phase || 'Scanning') + '… '
-                        + (s.movies || 0) + 'm ' + (s.shows || 0) + 's');
-                    setTimeout(pollScan, 1500);
-                } else {
-                    state.scanning = false;
-                    var btn = $('[data-video-scan]');
-                    if (btn) btn.disabled = false;
-                    setScanLabel('Scan Library');
-                    loadLibrary(true);
-                }
-            })
-            .catch(function () {
-                state.scanning = false;
-                var btn = $('[data-video-scan]');
-                if (btn) btn.disabled = false;
-                setScanLabel('Scan Library');
-            });
-    }
-
-    function startScan() {
-        if (state.scanning) return;
-        state.scanning = true;
+    // Scan is triggered by the shared controller (video-scan.js wires the
+    // [data-video-scan] button); we just reflect its progress + reload on done.
+    function onScanProgress(e) {
+        var s = e.detail || {};
+        if (s.state !== 'scanning') return;
         var btn = $('[data-video-scan]');
         if (btn) btn.disabled = true;
-        setScanLabel('Starting…');
-        fetch(SCAN_REQUEST_URL, { method: 'POST', headers: { 'Accept': 'application/json' } })
-            .then(function () { setTimeout(pollScan, 600); })
-            .catch(function () {
-                state.scanning = false;
-                if (btn) btn.disabled = false;
-                setScanLabel('Scan Library');
-            });
+        setScanLabel((s.phase || 'Scanning') + '… ' + (s.movies || 0) + 'm ' + (s.shows || 0) + 's');
+    }
+
+    function onScanDone() {
+        var btn = $('[data-video-scan]');
+        if (btn) btn.disabled = false;
+        setScanLabel('Scan Library');
+        loadLibrary(true);
     }
 
     function wire() {
@@ -156,8 +132,6 @@
                 });
             })(tabs[i]);
         }
-        var scan = document.querySelector('[data-video-scan]');
-        if (scan) scan.addEventListener('click', startScan);
     }
 
     function onPageShown(e) {
@@ -168,6 +142,8 @@
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onPageShown);
+        document.addEventListener('soulsync:video-scan-progress', onScanProgress);
+        document.addEventListener('soulsync:video-scan-done', onScanDone);
     }
 
     if (document.readyState === 'loading') {
