@@ -248,6 +248,11 @@ def test_dashboard_enrichment_buttons_present():
     assert "data-video-manage-workers" in block
     assert "video-enrich-spinner" in block          # spins while running
     assert "onclick" not in block
+    # The Manage Workers button reuses music's classes verbatim so it's identical
+    # (icon circle + logo), but stays wired by data-attr — never an inline onclick.
+    mbtn = _block(block, r'<button class="em-manage-btn"', "</button>")
+    assert "data-video-manage-workers" in mbtn and "onclick" not in mbtn
+    assert "em-manage-btn-icon" in mbtn and "em-manage-btn-logo" in mbtn and "em-manage-btn-label" in mbtn
 
 
 def test_video_enrichment_module_referenced_and_isolated():
