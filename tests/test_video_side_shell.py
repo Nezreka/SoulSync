@@ -20,7 +20,8 @@ _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
     "video-dashboard", "video-search", "video-discover", "video-library",
-    "video-calendar", "video-import", "video-settings", "video-issues", "video-help",
+    "video-watchlist", "video-downloads", "video-calendar", "video-import",
+    "video-settings", "video-issues", "video-help",
 }
 
 

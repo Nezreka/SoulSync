@@ -29,6 +29,8 @@
         { id: 'video-search', label: 'Search' },
         { id: 'video-discover', label: 'Discover' },
         { id: 'video-library', label: 'Library' },
+        { id: 'video-watchlist', label: 'Watchlist' },
+        { id: 'video-downloads', label: 'Downloads' },
         { id: 'video-calendar', label: 'Calendar' },
         { id: 'video-import', label: 'Import', shared: true },
         { id: 'video-settings', label: 'Settings' },
