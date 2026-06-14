@@ -146,6 +146,7 @@ def _build_deps(
     primary_source='spotify',
     quality_tier_result=('lossless', 1),
     automation=None,
+    probe_fn=None,
 ):
     globals()['_TEST_PRIMARY_SOURCE'] = primary_source
     _TEST_SOURCE_CLIENTS.clear()
@@ -153,6 +154,17 @@ def _build_deps(
         _TEST_SOURCE_CLIENTS.update(source_clients)
     elif primary_source:
         _TEST_SOURCE_CLIENTS[primary_source] = _FakeMetadataClient(results=[])
+
+    # Quality is now decided by probing the real file against the v3 targets.
+    # Derive a stand-in AudioQuality from the legacy tier param so existing
+    # tests keep their intent: 'lossless' → a FLAC that meets the default
+    # flac-enabled profile; anything else → an MP3 that doesn't.
+    from core.quality.model import AudioQuality
+
+    def _default_probe(_fp):
+        if quality_tier_result[0] == 'lossless':
+            return AudioQuality('flac', bit_depth=16, sample_rate=44100)
+        return AudioQuality('mp3', bitrate=128)
 
     deps = qs.QualityScannerDeps(
         quality_scanner_state=state if state is not None else {},
@@ -162,6 +174,7 @@ def _build_deps(
         automation_engine=automation or _FakeAutomationEngine(),
         get_quality_tier_from_extension=lambda fp: quality_tier_result,
         add_activity_item=lambda *a, **kw: None,
+        probe_audio_quality=probe_fn or _default_probe,
     )
     return deps
 
@@ -423,20 +436,21 @@ def test_stop_request_halts_loop(mock_db_and_wishlist):
     db._watchlist_artists = [_WatchlistArtist('A')]
     db._tracks = [_track_row(track_id=1), _track_row(track_id=2)]
     state = {}
-    deps = _build_deps(state=state, quality_tier_result=('lossless', 1))
+    from core.quality.model import AudioQuality
 
-    # Override get_quality_tier_from_extension to set stop after first track
+    # Probe is called once per track; use it to stop after the first.
     call_count = [0]
 
     def stop_after_first(fp):
         call_count[0] += 1
         if call_count[0] == 1:
             # Set status to non-running BEFORE second track iter checks
-            with deps.quality_scanner_lock:
+            with state_lock:
                 state['status'] = 'stopping'
-        return ('lossless', 1)
+        return AudioQuality('flac', bit_depth=16, sample_rate=44100)  # meets profile
 
-    deps.get_quality_tier_from_extension = stop_after_first
+    state_lock = threading.Lock()
+    deps = _build_deps(state=state, quality_tier_result=('lossless', 1), probe_fn=stop_after_first)
 
     qs.run_quality_scanner('watchlist', 1, deps)
 
