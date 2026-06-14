@@ -241,6 +241,61 @@ def test_upsert_stores_provider_ids(db):
     assert erow["tvdb_id"] == 349232
 
 
+def test_show_detail_builds_season_episode_tree_with_rollups(db):
+    sid = db.upsert_show_tree("plex", {
+        "server_id": "s1", "title": "Show", "year": 2019, "overview": "A show",
+        "network": "HBO", "content_rating": "TV-MA", "status": "ended",
+        "poster_url": "/p.jpg", "seasons": [
+            {"season_number": 0, "episodes": [{"episode_number": 1, "title": "Special"}]},
+            {"season_number": 1, "title": "Season One", "episodes": [
+                {"episode_number": 1, "title": "Pilot", "air_date": "2019-01-01",
+                 "file": {"relative_path": "e1.mkv", "size_bytes": 5}},
+                {"episode_number": 2, "title": "Two", "air_date": "2019-01-08"}]}]})
+    # backdrop_url is filled by TMDB enrichment, not the scan — simulate that.
+    with db.connect() as c:
+        c.execute("UPDATE shows SET backdrop_url='/b.jpg' WHERE id=?", (sid,))
+        c.commit()
+    d = db.show_detail(sid)
+    assert d["title"] == "Show" and d["network"] == "HBO" and d["status"] == "ended"
+    assert d["has_poster"] and d["has_backdrop"]
+    assert (d["episode_total"], d["episode_owned"], d["season_count"]) == (3, 1, 2)
+    # Season 0 renders as "Specials"; season 1 keeps its title; ordered by number.
+    assert [s["season_number"] for s in d["seasons"]] == [0, 1]
+    assert d["seasons"][0]["title"] == "Specials"
+    s1 = d["seasons"][1]
+    assert s1["title"] == "Season One"
+    assert (s1["episode_total"], s1["episode_owned"]) == (2, 1)
+    assert s1["episodes"][0]["owned"] is True and s1["episodes"][1]["owned"] is False
+
+
+def test_show_detail_returns_none_for_missing(db):
+    assert db.show_detail(999999) is None
+
+
+def test_movie_detail_includes_owned_and_file(db):
+    mid = db.upsert_movie("plex", {
+        "server_id": "m1", "title": "Dune", "year": 2021, "overview": "Sand",
+        "tmdb_id": 438631, "poster_url": "/p.jpg",
+        "file": {"relative_path": "dune.mkv", "size_bytes": 99, "resolution": "2160p"}})
+    d = db.movie_detail(mid)
+    assert d["title"] == "Dune" and d["owned"] is True and d["tmdb_id"] == 438631
+    assert d["file"] and d["file"]["resolution"] == "2160p"
+    # A wishlist movie with no file reports owned False, file None.
+    mid2 = db.upsert_movie("plex", {"server_id": "m2", "title": "Wanted"})
+    d2 = db.movie_detail(mid2)
+    assert d2["owned"] is False and d2["file"] is None
+
+
+def test_get_art_ref_poster_vs_backdrop(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "poster_url": "/p.jpg"})
+    with db.connect() as c:           # backdrop is enrichment-filled, not scanned
+        c.execute("UPDATE shows SET backdrop_url='/b.jpg' WHERE id=?", (sid,))
+        c.commit()
+    assert db.get_art_ref("show", sid, "poster")["poster_url"] == "/p.jpg"
+    assert db.get_art_ref("show", sid, "backdrop")["poster_url"] == "/b.jpg"
+    assert db.get_art_ref("show", sid, "bogus") is None
+
+
 def test_prune_missing_skips_when_over_half_would_be_removed(db):
     # >100 movies; a scan that "sees" only a couple must NOT wipe the rest
     # (mirrors music's deep-scan 50% safety against partial server failures).

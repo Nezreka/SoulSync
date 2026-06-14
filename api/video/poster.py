@@ -15,10 +15,9 @@ logger = get_logger("video_api.poster")
 
 
 def register_routes(bp):
-    @bp.route("/poster/<kind>/<int:item_id>", methods=["GET"])
-    def video_poster(kind, item_id):
+    def _stream_art(kind, item_id, art):
         from . import get_video_db
-        ref = get_video_db().get_poster_ref(kind, item_id)
+        ref = get_video_db().get_art_ref(kind, item_id, art)
         if not ref or not ref.get("poster_url"):
             abort(404)
         try:
@@ -37,7 +36,8 @@ def register_routes(bp):
                 base, key = cfg.get("base_url"), cfg.get("api_key")
                 if not base:
                     abort(404)
-                url = base.rstrip("/") + f"/Items/{ref['server_id']}/Images/Primary"
+                image = "Backdrop" if art == "backdrop" else "Primary"
+                url = base.rstrip("/") + f"/Items/{ref['server_id']}/Images/{image}"
                 params = {"api_key": key} if key else {}
             else:
                 abort(404)
@@ -50,5 +50,13 @@ def register_routes(bp):
             resp.headers["Cache-Control"] = "public, max-age=86400"
             return resp
         except Exception:
-            logger.exception("video poster proxy failed for %s/%s", kind, item_id)
+            logger.exception("video %s proxy failed for %s/%s", art, kind, item_id)
             abort(404)
+
+    @bp.route("/poster/<kind>/<int:item_id>", methods=["GET"])
+    def video_poster(kind, item_id):
+        return _stream_art(kind, item_id, "poster")
+
+    @bp.route("/backdrop/<kind>/<int:item_id>", methods=["GET"])
+    def video_backdrop(kind, item_id):
+        return _stream_art(kind, item_id, "backdrop")

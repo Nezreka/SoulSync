@@ -600,17 +600,114 @@ class VideoDatabase:
 
     def get_poster_ref(self, kind: str, item_id: int) -> dict | None:
         """Server source/id/poster path for one movie or show, for the poster proxy."""
+        return self.get_art_ref(kind, item_id, "poster")
+
+    def get_art_ref(self, kind: str, item_id: int, art: str = "poster") -> dict | None:
+        """Server source/id + artwork path for one movie/show, for the image proxy.
+        ``art`` is 'poster' or 'backdrop'. Returns the path under 'poster_url' so
+        the proxy is artwork-agnostic."""
         table = {"movie": "movies", "show": "shows"}.get(kind)
-        if not table:
+        col = {"poster": "poster_url", "backdrop": "backdrop_url"}.get(art)
+        if not table or not col:
             return None
         conn = self._get_connection()
         try:
             row = conn.execute(
-                f"SELECT server_source, server_id, poster_url FROM {table} WHERE id=?",
+                f"SELECT server_source, server_id, {col} AS poster_url FROM {table} WHERE id=?",
                 (item_id,)).fetchone()
             return dict(row) if row else None
         finally:
             conn.close()
+
+    # ── detail payloads (drill-in pages) ──────────────────────────────────────
+    def show_detail(self, show_id: int) -> dict | None:
+        """Full TV-show detail: the show + its seasons → episodes tree, with
+        owned/total roll-ups. Drives the (isolated) video show-detail page."""
+        conn = self._get_connection()
+        try:
+            show = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
+            if not show:
+                return None
+            seasons = conn.execute(
+                "SELECT id, season_number, title, overview, "
+                "(poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
+                "FROM seasons WHERE show_id=? ORDER BY season_number", (show_id,)).fetchall()
+            eps = conn.execute(
+                "SELECT id, season_number, episode_number, title, overview, air_date, "
+                "runtime_minutes, monitored, has_file FROM episodes WHERE show_id=? "
+                "ORDER BY season_number, episode_number", (show_id,)).fetchall()
+        finally:
+            conn.close()
+
+        by_season: dict = {}
+        for e in eps:
+            by_season.setdefault(e["season_number"], []).append({
+                "id": e["id"], "episode_number": e["episode_number"],
+                "title": e["title"], "overview": e["overview"], "air_date": e["air_date"],
+                "runtime_minutes": e["runtime_minutes"],
+                "monitored": bool(e["monitored"]), "owned": bool(e["has_file"]),
+            })
+
+        # Seasons declared in the seasons table, plus any season numbers that only
+        # exist via episodes (defensive — a show with episodes but no season row).
+        season_nums = [s["season_number"] for s in seasons]
+        season_meta = {s["season_number"]: s for s in seasons}
+        for num in by_season:
+            if num not in season_meta:
+                season_nums.append(num)
+        out_seasons = []
+        for num in sorted(set(season_nums)):
+            ep_list = by_season.get(num, [])
+            owned = sum(1 for e in ep_list if e["owned"])
+            meta = season_meta.get(num)
+            out_seasons.append({
+                "season_number": num,
+                "title": (meta["title"] if meta else None) or (
+                    "Specials" if num == 0 else "Season %d" % num),
+                "overview": meta["overview"] if meta else None,
+                "has_poster": bool(meta["has_poster"]) if meta else False,
+                "episode_total": len(ep_list),
+                "episode_owned": owned,
+                "episodes": ep_list,
+            })
+
+        total = len(eps)
+        owned_total = sum(1 for e in eps if e["has_file"])
+        return {
+            "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
+            "overview": show["overview"], "status": show["status"], "network": show["network"],
+            "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
+            "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
+            "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
+            "season_count": len(out_seasons),
+            "episode_total": total, "episode_owned": owned_total,
+            "seasons": out_seasons,
+        }
+
+    def movie_detail(self, movie_id: int) -> dict | None:
+        """Full movie detail: the movie + owned/file info. Drives the (isolated)
+        video movie-detail page."""
+        conn = self._get_connection()
+        try:
+            m = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
+            if not m:
+                return None
+            f = conn.execute(
+                "SELECT resolution, quality, video_codec, audio_codec, size_bytes "
+                "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC LIMIT 1",
+                (movie_id,)).fetchone()
+        finally:
+            conn.close()
+        return {
+            "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
+            "overview": m["overview"], "status": m["status"], "studio": m["studio"],
+            "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
+            "content_rating": m["content_rating"],
+            "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
+            "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
+            "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),
+            "file": (dict(f) if f else None),
+        }
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",

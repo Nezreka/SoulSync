@@ -40,6 +40,39 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/enrichment/<service>/unmatched" in rules
     assert "/api/video/enrichment/config" in rules
     assert "/api/video/enrichment/<service>/test" in rules
+    assert "/api/video/detail/show/<int:show_id>" in rules
+    assert "/api/video/detail/movie/<int:movie_id>" in rules
+    assert any(r.startswith("/api/video/backdrop/") for r in rules)
+
+
+def test_show_detail_endpoint(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        sid = videoapi._video_db.upsert_show_tree("plex", {
+            "server_id": "s1", "title": "Show", "seasons": [
+                {"season_number": 1, "episodes": [
+                    {"episode_number": 1, "title": "Pilot",
+                     "file": {"relative_path": "e1.mkv", "size_bytes": 5}}]}]})
+        resp = client.get("/api/video/detail/show/%d" % sid)
+        assert resp.status_code == 200
+        d = resp.get_json()
+        assert d["kind"] == "show" and d["episode_total"] == 1 and d["episode_owned"] == 1
+        assert d["seasons"][0]["episodes"][0]["title"] == "Pilot"
+        assert client.get("/api/video/detail/show/999999").status_code == 404
+    finally:
+        videoapi._video_db = None
+
+
+def test_movie_detail_endpoint(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        mid = videoapi._video_db.upsert_movie("plex", {"server_id": "m1", "title": "Dune"})
+        resp = client.get("/api/video/detail/movie/%d" % mid)
+        assert resp.status_code == 200
+        assert resp.get_json()["title"] == "Dune"
+        assert client.get("/api/video/detail/movie/999999").status_code == 404
+    finally:
+        videoapi._video_db = None
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
