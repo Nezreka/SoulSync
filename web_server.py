@@ -11796,9 +11796,19 @@ def _resolve_library_file_path(file_path):
     # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
     # matches always win, so paths that already resolved are unaffected.
     from core.library.path_resolve import find_on_disk
-    for base_dir in [transfer_dir, download_dir] + list(library_dirs):
-        if not base_dir or not os.path.isdir(base_dir):
+    # Config often stores RELATIVE paths ("./Transfer") that don't match the
+    # actual absolute Docker mount ("/Transfer"). Also search the CWD-absolute
+    # and root-absolute forms so a relative config still resolves.
+    base_dirs = [transfer_dir, download_dir] + list(library_dirs)
+    for b in [transfer_dir, download_dir]:
+        if b and not os.path.isabs(b):
+            base_dirs.append(os.path.abspath(b))
+            base_dirs.append('/' + b.replace('./', '', 1).lstrip('/'))
+    seen_bases = set()
+    for base_dir in base_dirs:
+        if not base_dir or base_dir in seen_bases or not os.path.isdir(base_dir):
             continue
+        seen_bases.add(base_dir)
         # Start at index 0 so a clean relative path ("Artist/Album/Track.flac")
         # is tried in FULL first — the library scanner stores exactly that, and
         # skipping index 0 dropped the artist folder so it never matched. A
@@ -11816,9 +11826,10 @@ def _resolve_library_file_path(file_path):
     if not _resolve_library_diag_logged:
         _resolve_library_diag_logged = True
         logger.warning(
-            "[PathResolve] Could not resolve %r under any base dir — searched transfer=%r "
-            "download=%r library=%r. If files live elsewhere, add it under Settings > Library music paths.",
-            file_path, transfer_dir, download_dir, sorted(library_dirs),
+            "[PathResolve] Could not resolve %r under any base dir — searched %r (cwd=%r). "
+            "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
+            "the dir under Settings > Library music paths.",
+            file_path, [b for b in base_dirs if b and os.path.isdir(b)], os.getcwd(),
         )
     return None
 
