@@ -65,6 +65,12 @@
                 set('shows', lib.shows || 0);
                 set('episodes', lib.episodes || 0);
                 set('size', formatSize(lib.size_bytes));
+                // Server-prefixed title, like music ("Plex Database Updater").
+                var titleEl = document.querySelector('[data-video-scan-title]');
+                if (titleEl && d.server) {
+                    titleEl.textContent =
+                        d.server.charAt(0).toUpperCase() + d.server.slice(1) + ' Library Scan';
+                }
             })
             .catch(function () { /* leave defaults */ });
     }

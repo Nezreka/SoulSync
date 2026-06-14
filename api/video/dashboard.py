@@ -18,7 +18,13 @@ def register_routes(bp):
     def video_dashboard():
         from . import get_video_db
         try:
-            return jsonify(get_video_db().dashboard_stats())
+            stats = get_video_db().dashboard_stats()
+            try:
+                from config.settings import config_manager
+                stats["server"] = config_manager.get_active_media_server()
+            except Exception:
+                stats["server"] = None
+            return jsonify(stats)
         except Exception:
             logger.exception("Failed to build video dashboard stats")
             return jsonify({"error": "Failed to load video dashboard stats"}), 500
