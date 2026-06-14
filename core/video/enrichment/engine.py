@@ -58,3 +58,17 @@ def get_video_enrichment_engine():
                 eng.start_all()
                 _engine = eng
     return _engine
+
+
+def rebuild_video_enrichment_engine():
+    """Rebuild the engine so workers pick up changed API keys (stops the old
+    workers first so threads don't leak)."""
+    global _engine
+    with _lock:
+        if _engine is not None:
+            try:
+                _engine.stop_all()
+            except Exception:
+                logger.exception("video enrichment: stopping old engine failed")
+            _engine = None
+    return get_video_enrichment_engine()

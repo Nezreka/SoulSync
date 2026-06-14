@@ -12,6 +12,7 @@
 
     var PAGE_ID = 'video-settings';
     var URL = '/api/video/libraries';
+    var CONFIG_URL = '/api/video/enrichment/config';
 
     function status(text) {
         var n = document.querySelector('[data-video-lib-status]');
@@ -62,8 +63,34 @@
             .catch(function () { status('Save failed'); });
     }
 
+    // ── Enrichment API keys (TMDB / TVDB) ───────────────────────────────────
+    function loadKeys() {
+        fetch(CONFIG_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var t = document.getElementById('tmdb-api-key');
+                var v = document.getElementById('tvdb-api-key');
+                if (t && d.tmdb_api_key != null) t.value = d.tmdb_api_key;
+                if (v && d.tvdb_api_key != null) v.value = d.tvdb_api_key;
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function saveKeys() {
+        var t = document.getElementById('tmdb-api-key');
+        var v = document.getElementById('tvdb-api-key');
+        fetch(CONFIG_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '' })
+        }).catch(function () { /* ignore */ });
+    }
+
     function onPageShown(e) {
-        if (e && e.detail === PAGE_ID) load();
+        if (e && e.detail !== PAGE_ID) return;
+        load();
+        loadKeys();
     }
 
     function init() {
@@ -73,6 +100,11 @@
         for (var i = 0; i < selects.length; i++) {
             selects[i].addEventListener('change', save);
         }
+        // Enrichment keys save on blur/change (turns the workers on).
+        ['tmdb-api-key', 'tvdb-api-key'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('change', saveKeys);
+        });
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
