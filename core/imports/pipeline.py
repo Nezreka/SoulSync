@@ -1028,6 +1028,22 @@ def post_process_matched_download_with_verification(context_key, context, file_p
         if original_batch_id:
             context['batch_id'] = original_batch_id
 
+        # Quality / audio-guard quarantine. Unlike acoustid/integrity (whose
+        # retry+fail is driven by THIS wrapper below), the inner pipeline fully
+        # owns the quality and audio-guard outcome: it quarantines the file and
+        # then either re-queues the next-best candidate or marks the task failed
+        # and notifies. The wrapper must NOT continue to the "assume success"
+        # fall-through — that marked the quarantined file Completed, so the same
+        # track showed in BOTH Completed and Quarantine (e.g. an MP3-VBR rejected
+        # by a FLAC-only profile). It must also NOT mark it failed here, which
+        # would clobber a successful next-candidate retry. Just return.
+        if context.get('_bitdepth_rejected') or context.get('_silence_rejected'):
+            logger.info(
+                f"Task {task_id} quarantined by the quality/audio guard — inner "
+                f"pipeline already handled retry/fail; wrapper not marking completed"
+            )
+            return
+
         if context.get('_race_guard_failed'):
             logger.info(f"Race guard: source file gone for task {task_id} — marking as failed")
             with tasks_lock:
