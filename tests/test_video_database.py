@@ -387,9 +387,23 @@ def test_enrichment_breakdown_unmatched_retry(db):
     b = db.upsert_movie("plex", {"server_id": "m2", "title": "B"})
     db.enrichment_apply("tmdb", "movie", a, matched=True, external_id=1)
     db.enrichment_apply("tmdb", "movie", b, matched=False)
-    assert db.enrichment_breakdown("tmdb")["movie"] == {"matched": 1, "not_found": 1, "pending": 0}
+    assert db.enrichment_breakdown("tmdb")["movie"] == {"matched": 1, "not_found": 1, "errors": 0, "pending": 0}
     un = db.enrichment_unmatched("tmdb", "movie", status="not_found")
     assert [i["title"] for i in un["items"]] == ["B"] and un["total"] == 1
+    assert db.enrichment_retry("tmdb", "movie", scope="failed") == 1
+    assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 1
+
+
+def test_error_status_is_distinct_and_retryable_in_ui(db):
+    a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+    db.enrichment_apply("tmdb", "movie", a, matched=False, error=True)
+    bd = db.enrichment_breakdown("tmdb")["movie"]
+    assert bd == {"matched": 0, "not_found": 0, "errors": 1, "pending": 0}
+    # Errored items surface in the modal's "unmatched" list so they can be retried.
+    assert db.enrichment_unmatched("tmdb", "movie", status="unmatched")["total"] == 1
+    # ...but NOT in the strict 'not_found'-only view.
+    assert db.enrichment_unmatched("tmdb", "movie", status="not_found")["total"] == 0
+    # "Retry all failed" re-queues errors too (back to pending/NULL).
     assert db.enrichment_retry("tmdb", "movie", scope="failed") == 1
     assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 1
 

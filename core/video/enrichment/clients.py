@@ -62,6 +62,10 @@ class TMDBClient:
             if year:
                 params["year" if kind == "movie" else "first_air_date_year"] = year
             resp = requests.get(self.BASE + path, params=params, timeout=15)
+            # A non-200 (429 rate-limit, 5xx, timeout-as-error) is a FAILED call,
+            # not "no match" — raise so the worker records 'error' (retried later)
+            # instead of burning the item to 'not_found'.
+            resp.raise_for_status()
             results = (resp.json() or {}).get("results") or []
             if not results:
                 return None
@@ -112,30 +116,41 @@ class TVDBClient:
             logger.exception("TVDB test failed")
             return False, "Could not reach TVDB"
 
-    def _auth(self):
-        if self._token:
+    def _auth(self, force=False):
+        if self._token and not force:
             return self._token
         import requests
+        self._token = None
         r = requests.post(self.BASE + "/login", json={"apikey": self.api_key}, timeout=15).json() or {}
         self._token = (r.get("data") or {}).get("token")
         return self._token
 
-    def match(self, kind, title, year, known_id=None):
-        if kind != "show" or not self.api_key:
-            return None
+    def _authed_get(self, path, params=None):
+        """GET with the bearer token, transparently re-authenticating once if the
+        cached token has expired (401). Raises on any other non-200 so the worker
+        records 'error' rather than a false 'not_found'."""
         import requests
         token = self._auth()
         if not token:
             return None
-        headers = {"Authorization": "Bearer " + token}
+        r = requests.get(self.BASE + path, headers={"Authorization": "Bearer " + token},
+                         params=params, timeout=15)
+        if r.status_code == 401 and self._auth(force=True):   # token expired → refresh once
+            r = requests.get(self.BASE + path, headers={"Authorization": "Bearer " + self._token},
+                             params=params, timeout=15)
+        r.raise_for_status()
+        return r.json() or {}
+
+    def match(self, kind, title, year, known_id=None):
+        if kind != "show" or not self.api_key:
+            return None
         tvdb_id = _int(known_id)
         meta = {}
         if tvdb_id is None:
             if not title:
                 return None
-            r = requests.get(self.BASE + "/search", headers=headers,
-                             params={"query": title, "type": "series"}, timeout=15).json() or {}
-            results = r.get("data") or []
+            r = self._authed_get("/search", {"query": title, "type": "series"})
+            results = (r or {}).get("data") or []
             if not results:
                 return None
             top = results[0]
@@ -144,9 +159,8 @@ class TVDBClient:
         else:
             # Known id from the server → fetch the series directly for its overview.
             try:
-                dr = requests.get(self.BASE + "/series/" + str(tvdb_id),
-                                  headers=headers, timeout=15).json() or {}
-                meta["overview"] = (dr.get("data") or {}).get("overview")
+                dr = self._authed_get("/series/" + str(tvdb_id))
+                meta["overview"] = ((dr or {}).get("data") or {}).get("overview")
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

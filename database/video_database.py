@@ -170,7 +170,8 @@ class VideoDatabase:
                     return _row(row, kind, idc)
             for kind, (tbl, idc, sc, ac) in kinds.items():
                 row = conn.execute(
-                    f"SELECT id, title, year, {idc} FROM {tbl} WHERE {sc}='not_found' "
+                    f"SELECT id, title, year, {idc} FROM {tbl} "
+                    f"WHERE {sc} IN ('not_found','error') "
                     f"AND ({ac} IS NULL OR {ac} < ?) ORDER BY {ac} LIMIT 1", (cutoff,)).fetchone()
                 if row:
                     return _row(row, kind, idc)
@@ -179,14 +180,22 @@ class VideoDatabase:
             conn.close()
 
     def enrichment_apply(self, service: str, kind: str, item_id: int, matched: bool,
-                         external_id=None, metadata: dict | None = None) -> None:
+                         external_id=None, metadata: dict | None = None,
+                         error: bool = False) -> None:
         """Record a match result: set match_status + last_attempted, the external
-        id (when matched), and any whitelisted metadata columns."""
+        id (when matched), and any whitelisted metadata columns.
+
+        Status is one of 'matched' / 'not_found' / 'error'. 'error' means the
+        lookup CALL failed (network/rate-limit/timeout) — distinct from a genuine
+        'not_found' so a transient blip isn't permanently recorded as "no match"
+        (mirrors the music workers). Both 'not_found' and 'error' are retried by
+        enrichment_next after retry_days."""
         spec = _ENRICH.get(service, {}).get(kind)
         if not spec:
             return
         tbl, idc, sc, ac = spec
         allowed = _ENRICH_META_COLS.get(tbl, set())
+        status = "matched" if matched else "error" if error else "not_found"
         # On legacy DBs tmdb_id/tvdb_id may still carry a UNIQUE index; if a match
         # would collide with another row's id we drop the id columns and keep the
         # existing (authoritative) id, still recording status + metadata.
@@ -194,7 +203,7 @@ class VideoDatabase:
 
         def build(include_ids):
             sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
-            params = ["matched" if matched else "not_found"]
+            params = [status]
             if matched and external_id is not None and include_ids:
                 sets.append(f"{idc}=?")
                 params.append(external_id)
@@ -231,6 +240,7 @@ class VideoDatabase:
                 out[kind] = {
                     "matched": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='matched'").fetchone()[0],
                     "not_found": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='not_found'").fetchone()[0],
+                    "errors": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='error'").fetchone()[0],
                     "pending": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc} IS NULL").fetchone()[0],
                 }
             return out
@@ -247,7 +257,7 @@ class VideoDatabase:
         if status == "pending":
             where.append(f"{sc} IS NULL")
         elif status == "unmatched":
-            where.append(f"({sc} IS NULL OR {sc}='not_found')")
+            where.append(f"({sc} IS NULL OR {sc} IN ('not_found','error'))")
         else:
             where.append(f"{sc}='not_found'")
         if search:
@@ -282,7 +292,8 @@ class VideoDatabase:
             if scope == "item" and item_id is not None:
                 cur = conn.execute(f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE id=?", (item_id,))
             else:
-                cur = conn.execute(f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE {sc}='not_found'")
+                cur = conn.execute(
+                    f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE {sc} IN ('not_found','error')")
             conn.commit()
             return cur.rowcount
         finally:

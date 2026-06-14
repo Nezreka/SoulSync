@@ -168,8 +168,11 @@
         var kinds = Object.keys(bd);
         host.innerHTML = kinds.map(function (e) {
             var d = bd[e] || {};
-            var total = (d.matched || 0) + (d.not_found || 0) + (d.pending || 0);
-            var matched = d.matched || 0, nf = d.not_found || 0, pend = d.pending || 0;
+            // Errored items are outstanding (retried later) — show them with the
+            // pending bucket so the bar/total stay honest.
+            var matched = d.matched || 0, nf = d.not_found || 0;
+            var pend = (d.pending || 0) + (d.errors || 0);
+            var total = matched + nf + pend;
             var pct = total ? Math.round(matched / total * 100) : 0;
             var seg = function (n) { return total ? (n / total) * 100 : 0; };
             var active = e === state.kind ? ' em-card--current' : '';
@@ -189,7 +192,7 @@
             var m = 0, t = 0;
             kinds.forEach(function (e) {
                 var d = bd[e] || {}; m += d.matched || 0;
-                t += (d.matched || 0) + (d.not_found || 0) + (d.pending || 0);
+                t += (d.matched || 0) + (d.not_found || 0) + (d.pending || 0) + (d.errors || 0);
             });
             overall.innerHTML = t ? '<strong>' + (t ? Math.round(m / t * 100) : 0) + '%</strong> matched · '
                 + m + ' of ' + t : '';

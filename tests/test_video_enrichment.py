@@ -16,7 +16,7 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.worker import VideoEnrichmentWorker
 from core.video.enrichment.engine import VideoEnrichmentEngine
-from core.video.enrichment.clients import TMDBClient
+from core.video.enrichment.clients import TMDBClient, TVDBClient
 
 
 class FakeClient:
@@ -83,6 +83,52 @@ def test_tmdb_client_with_known_id_skips_the_search(monkeypatch):
     assert not any("/search/" in u for u in urls)
 
 
+def test_tmdb_client_raises_on_rate_limit(monkeypatch):
+    # A 429 must raise (→ worker records 'error'), not silently return no-match.
+    class _Resp429:
+        status_code = 429
+        def raise_for_status(self):
+            raise RuntimeError("429 Too Many Requests")
+        def json(self):
+            return {}
+
+    fake = types.SimpleNamespace(get=lambda url, **kw: _Resp429())
+    monkeypatch.setitem(sys.modules, "requests", fake)
+    with pytest.raises(Exception):
+        TMDBClient("KEY").match("movie", "Dune", 2021)
+
+
+def test_tvdb_client_refreshes_expired_token(monkeypatch):
+    # Cached token returns 401 → the client must re-login once and retry, not fail.
+    logins = []
+    state = {"calls": 0}
+
+    class _Resp:
+        def __init__(self, code, body):
+            self.status_code = code
+            self._body = body
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise RuntimeError("HTTP " + str(self.status_code))
+        def json(self):
+            return self._body
+
+    def fake_post(url, **kw):
+        logins.append(url)
+        return _Resp(200, {"data": {"token": "tok%d" % len(logins)}})
+
+    def fake_get(url, **kw):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            return _Resp(401, {})                      # stale token rejected
+        return _Resp(200, {"data": [{"tvdb_id": 77, "overview": "O"}]})
+
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get, post=fake_post))
+    res = TVDBClient("KEY").match("show", "Some Show", 2020)
+    assert res["id"] == 77
+    assert len(logins) == 2          # initial login + one refresh after the 401
+
+
 def test_worker_process_one_not_found(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
     w = VideoEnrichmentWorker(db, "tmdb", FakeClient(None))
@@ -96,7 +142,10 @@ def test_worker_process_one_no_items_returns_false(db):
     assert VideoEnrichmentWorker(db, "tmdb", FakeClient(None)).process_one() is False
 
 
-def test_worker_match_exception_marks_not_found_and_counts_error(db):
+def test_worker_match_exception_marks_error_not_notfound(db):
+    # A failed CALL must be recorded as 'error' (a transient failure), NOT
+    # 'not_found' — otherwise a network blip permanently logs the item as "no
+    # match" and it won't retry for retry_days. Mirrors the music workers.
     db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
 
     class Boom:
@@ -107,7 +156,22 @@ def test_worker_match_exception_marks_not_found_and_counts_error(db):
     assert w.process_one() is True   # doesn't crash the loop
     assert w.stats["errors"] == 1
     with db.connect() as c:
-        assert c.execute("SELECT tmdb_match_status FROM movies").fetchone()["tmdb_match_status"] == "not_found"
+        assert c.execute("SELECT tmdb_match_status FROM movies").fetchone()["tmdb_match_status"] == "error"
+
+
+def test_errored_item_is_retried_after_retry_days(db):
+    # An 'error' row is re-queued by enrichment_next once it's older than the
+    # retry window (just like 'not_found'), so transient failures recover.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
+    db.enrichment_apply("tmdb", "movie", mid, matched=False, error=True)
+    # Just attempted → still inside the retry window → not yet due.
+    assert db.enrichment_next("tmdb", retry_days=30) is None
+    # Backdate the attempt → now older than the window → re-queued for retry.
+    with db.connect() as c:
+        c.execute("UPDATE movies SET tmdb_last_attempted='2000-01-01 00:00:00' WHERE id=?", (mid,))
+        c.commit()
+    again = db.enrichment_next("tmdb", retry_days=30)
+    assert again is not None and again["id"] == mid
 
 
 def test_worker_get_stats_shape(db):

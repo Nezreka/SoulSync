@@ -110,7 +110,10 @@ class VideoEnrichmentWorker:
         except Exception:
             logger.exception("video enrichment %s match failed for %s", self.service, item["title"])
             self.stats["errors"] += 1
-            self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False)
+            # The CALL failed (network/rate-limit/timeout) — record 'error', NOT
+            # 'not_found', so a transient blip isn't permanently logged as "no
+            # match". enrichment_next retries 'error' items after retry_days.
+            self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False, error=True)
             return True
         if result and result.get("id"):
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=True,
@@ -124,12 +127,14 @@ class VideoEnrichmentWorker:
     # ── status (same shape the music enrichment API returns) ──────────────────
     def get_stats(self) -> dict:
         breakdown = self.db.enrichment_breakdown(self.service)
-        pending = sum(b["pending"] for b in breakdown.values())
+        # Errored items are outstanding (retried later), so they count as pending
+        # work — the worker isn't "Complete" while any remain.
+        pending = sum(b["pending"] + b.get("errors", 0) for b in breakdown.values())
         running = self.running and not self.paused and self.enabled
         idle = running and pending == 0 and self.current_item is None
         progress = {}
         for kind, b in breakdown.items():
-            total = b["matched"] + b["not_found"] + b["pending"]
+            total = b["matched"] + b["not_found"] + b.get("errors", 0) + b["pending"]
             done = b["matched"] + b["not_found"]
             progress[kind] = {"matched": b["matched"], "total": total,
                               "percent": round(done / total * 100) if total else 0}
