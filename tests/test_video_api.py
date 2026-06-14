@@ -32,6 +32,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/scan/request" in rules
     assert "/api/video/scan/status" in rules
     assert "/api/video/library" in rules
+    assert "/api/video/libraries" in rules
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -56,6 +57,27 @@ def test_library_endpoint_lists_content(tmp_path):
         data = resp.get_json()
         assert [m["title"] for m in data["movies"]] == ["A"]
         assert data["shows"] == []
+    finally:
+        videoapi._video_db = None
+
+
+def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        import core.video.sources as vs
+        monkeypatch.setattr(vs, "list_video_libraries", lambda: {
+            "server": "plex", "movies": [{"title": "Movies"}], "tv": [{"title": "TV"}]})
+        import config.settings as cs
+        monkeypatch.setattr(cs.config_manager, "get_active_media_server", lambda: "plex")
+
+        data = client.get("/api/video/libraries").get_json()
+        assert data["server"] == "plex"
+        assert [m["title"] for m in data["movies"]] == ["Movies"]
+        assert data["selected"]["movies"] is None
+
+        assert client.post("/api/video/libraries", json={"movies": "Movies", "tv": "TV"}).status_code == 200
+        data2 = client.get("/api/video/libraries").get_json()
+        assert data2["selected"] == {"movies": "Movies", "tv": "TV"}
     finally:
         videoapi._video_db = None
 

@@ -22,13 +22,10 @@ logger = get_logger("video_sources")
 PLEX_SCAN_TIMEOUT = 120
 
 
-def get_active_video_source():
-    """Return a media source for the active server, or None when the active
-    server has no video support (Navidrome/standalone) or isn't configured.
-
-    Reuses the SHARED connection config (config_manager) — we don't reinvent
-    auth — but Plex gets a dedicated, long-timeout connection for the bulk scan
-    so it never inherits the shared client's short interactive timeout."""
+def _build_source(movies_lib=None, tv_lib=None):
+    """Build a media source for the active server, restricted to the named
+    Movies/TV libraries when given. Reuses the SHARED connection config — but
+    Plex gets a dedicated long-timeout connection for the bulk scan."""
     try:
         from config.settings import config_manager
     except Exception:
@@ -45,7 +42,7 @@ def get_active_video_source():
         try:
             from plexapi.server import PlexServer
             srv = PlexServer(base_url, token, timeout=PLEX_SCAN_TIMEOUT)
-            return PlexVideoSource(srv)
+            return PlexVideoSource(srv, movies_lib=movies_lib, tv_lib=tv_lib)
         except Exception:
             logger.exception("video sources: Plex connect failed")
             return None
@@ -56,7 +53,7 @@ def get_active_video_source():
             engine = get_media_server_engine()
             client = engine.client("jellyfin") if engine else None
             if client and client.ensure_connection() and getattr(client, "user_id", None):
-                return JellyfinVideoSource(client)
+                return JellyfinVideoSource(client, movies_lib=movies_lib, tv_lib=tv_lib)
         except Exception:
             logger.exception("video sources: Jellyfin connect failed")
         return None
@@ -64,18 +61,59 @@ def get_active_video_source():
     return None
 
 
+def _load_selection():
+    """The user's Movies/TV library choice for the active server (or {})."""
+    try:
+        from config.settings import config_manager
+        from database.video_database import VideoDatabase
+        server = config_manager.get_active_media_server()
+        return VideoDatabase().get_library_selection(server)
+    except Exception:
+        logger.exception("video sources: could not load library selection")
+        return {}
+
+
+def get_active_video_source():
+    """Source for SCANNING — restricted to the user-mapped Movies/TV libraries.
+    Falls back to all libraries when nothing is mapped yet."""
+    sel = _load_selection() or {}
+    return _build_source(sel.get("movies") or None, sel.get("tv") or None)
+
+
+def list_video_libraries():
+    """Discover the active server's video libraries for the mapping UI:
+    {'server', 'movies': [{'title'}], 'tv': [{'title'}]} or None."""
+    src = _build_source()
+    if src is None:
+        return None
+    out = src.available_libraries()
+    out["server"] = src.server_name
+    return out
+
+
 # ── Plex ──────────────────────────────────────────────────────────────────────
 class PlexVideoSource:
     server_name = "plex"
 
-    def __init__(self, server):
+    def __init__(self, server, movies_lib=None, tv_lib=None):
         self._server = server
+        self._movies_lib = movies_lib
+        self._tv_lib = tv_lib
 
-    def _sections(self, kind: str):
-        return [s for s in self._server.library.sections() if s.type == kind]
+    def _sections(self, kind: str, name=None):
+        secs = [s for s in self._server.library.sections() if s.type == kind]
+        if name:
+            secs = [s for s in secs if s.title == name]
+        return secs
+
+    def available_libraries(self) -> dict:
+        return {
+            "movies": [{"title": s.title} for s in self._sections("movie")],
+            "tv": [{"title": s.title} for s in self._sections("show")],
+        }
 
     def iter_movies(self, incremental=False):
-        for section in self._sections("movie"):
+        for section in self._sections("movie", self._movies_lib):
             items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
             for m in items:
                 try:
@@ -84,7 +122,7 @@ class PlexVideoSource:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
     def iter_shows(self, incremental=False):
-        for section in self._sections("show"):
+        for section in self._sections("show", self._tv_lib):
             items = section.search(sort="addedAt:desc", maxresults=50) if incremental else section.all()
             for sh in items:
                 try:
@@ -174,17 +212,28 @@ _JF_EP_FIELDS = "Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumbe
 class JellyfinVideoSource:
     server_name = "jellyfin"
 
-    def __init__(self, client):
+    def __init__(self, client, movies_lib=None, tv_lib=None):
         self._c = client
         self.uid = client.user_id
+        self._movies_lib = movies_lib
+        self._tv_lib = tv_lib
 
     def _req(self, path, params=None):
         return self._c._make_request(path, params=params)
 
-    def _views(self, collection_type: str):
+    def _views(self, collection_type: str, name=None):
         resp = self._req(f"/Users/{self.uid}/Views") or {}
-        return [v for v in resp.get("Items", [])
-                if (v.get("CollectionType") or "").lower() == collection_type]
+        views = [v for v in resp.get("Items", [])
+                 if (v.get("CollectionType") or "").lower() == collection_type]
+        if name:
+            views = [v for v in views if v.get("Name") == name]
+        return views
+
+    def available_libraries(self) -> dict:
+        return {
+            "movies": [{"title": v.get("Name")} for v in self._views("movies")],
+            "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
+        }
 
     @staticmethod
     def _ticks_to_seconds(ticks):
@@ -210,7 +259,7 @@ class JellyfinVideoSource:
         }
 
     def iter_movies(self, incremental=False):
-        for view in self._views("movies"):
+        for view in self._views("movies", self._movies_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
                       "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
             if incremental:
@@ -235,7 +284,7 @@ class JellyfinVideoSource:
         }
 
     def iter_shows(self, incremental=False):
-        for view in self._views("tvshows"):
+        for view in self._views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating"}
             if incremental:
