@@ -418,6 +418,10 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
         if add_to_wishlist is None:
             raise AttributeError("Wishlist service does not expose an add-to-wishlist method")
 
+        # Count tracks whose file couldn't be probed — surfaces a systematic
+        # path/access problem (e.g. the library mount differs in this container).
+        probe_failed_count = 0
+
         # Scan each track
         for idx, track_row in enumerate(tracks_to_scan, 1):
             # Check for stop request
@@ -430,12 +434,30 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
 
                 # Probe the REAL audio quality (bit depth / sample rate / bitrate)
                 # and check it against the ranked targets — same core as the
-                # download guard. Extension tier is only a fallback label when the
-                # file can't be probed.
-                aq = deps.probe_audio_quality(file_path) if deps.probe_audio_quality else None
+                # download guard. The library path may be a Windows/host path that
+                # needs Docker resolution before mutagen can open it.
+                resolved_path = file_path
+                try:
+                    from core.imports.paths import docker_resolve_path
+                    resolved_path = docker_resolve_path(file_path) if file_path else file_path
+                except Exception:
+                    resolved_path = file_path
+
+                aq = deps.probe_audio_quality(resolved_path) if deps.probe_audio_quality else None
                 if aq is not None:
                     tier_name = aq.label()
                 else:
+                    # Probe failed — the file couldn't be read at resolved_path.
+                    # Bit-depth/sample-rate can't be assessed without reading the
+                    # file, so this track can't be judged. Count + log it so a
+                    # systematic path problem is visible instead of silently
+                    # passing the whole library.
+                    probe_failed_count += 1
+                    if probe_failed_count <= 5:
+                        logger.warning(
+                            "[Quality Scanner] Could not probe audio quality (file not "
+                            "readable?): db_path=%r resolved=%r", file_path, resolved_path,
+                        )
                     tier_name = deps.get_quality_tier_from_extension(file_path)[0]
 
                 # Update progress
@@ -632,6 +654,14 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
             except Exception as track_error:
                 logger.error(f"[Quality Scanner] Error processing track: {track_error}")
                 continue
+
+        if probe_failed_count:
+            logger.warning(
+                "[Quality Scanner] %d/%d tracks could not be probed (file unreadable) — "
+                "their quality could NOT be verified and they were left unflagged. If this "
+                "is most of the library, the stored file paths don't resolve to readable "
+                "files in this container.", probe_failed_count, total_tracks,
+            )
 
         # Scan complete (don't overwrite if already stopped by user)
         with deps.quality_scanner_lock:
