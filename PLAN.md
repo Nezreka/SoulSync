@@ -45,6 +45,27 @@ v2-Profile werden automatisch migriert.
 
 ---
 
+## Bekannte Bugs / offene Fragen
+
+### BUG: HiFi/Monochrome liefert nur 30s Audio — wird nicht erkannt
+
+**Symptom:** Jeder Download von Monochrome-Instanzen enthält nur ~30 Sekunden echtes Audio. Der Rest der Datei ist Stille.
+
+**Warum es durchrutscht:**
+- Monochrome liefert einen HLS-Stream, aber nur die ersten ~30s der Segmente haben Audiodaten
+- ffmpeg muxed diese Segmente in einen Container mit der **vollen Laufzeit** (z.B. 3:30) — stille Segmente = Stille in der Datei
+- `mutagen` liest die Container-Länge (3:30 ✓) → Duration-Check besteht
+- `probe_audio_quality()` prüft Format/Bitrate/Sample-Rate → alles OK
+- Niemand prüft den **tatsächlichen Audioinhalt** — die Stille bleibt unerkannt
+
+**Qobuz hat bereits einen Fix** (`duration_s < 35` in `qobuz_client.py:1315`) — aber der greift nur wenn die Datei selbst kurz ist, nicht beim Silence-Padding.
+
+**Geplanter Fix:** `ffmpeg silencedetect` nach dem Download. Wenn die letzten X% der Datei unter -50dB → Preview → Quarantäne/Retry.
+
+**Offene Frage (erst klären!):** Ist das ein bekanntes Monochrome-Problem (Preview-Limitation der API), oder ein Bug im HLS-Downloader von SoulSync?
+
+---
+
 ## Was noch fehlt — nächste Schritte
 
 ### A) Andere Quellen anbinden (Source-Mapper)
