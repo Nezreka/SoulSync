@@ -307,9 +307,32 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def server_ids(self, table: str, server_source: str) -> set:
+        """All server_ids already stored for a server (for incremental early-stop)."""
+        if table not in ("movies", "shows"):
+            return set()
+        conn = self._get_connection()
+        try:
+            return {str(r[0]) for r in conn.execute(
+                f"SELECT server_id FROM {table} WHERE server_source=?", (server_source,)).fetchall()}
+        finally:
+            conn.close()
+
+    def table_count(self, table: str) -> int:
+        if table not in ("movies", "shows", "episodes"):
+            return 0
+        conn = self._get_connection()
+        try:
+            return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        finally:
+            conn.close()
+
     def prune_missing(self, table: str, server_source: str, seen_ids) -> int:
         """Delete top-level rows for a server that the scan no longer saw.
-        ``table`` is internal ('movies'|'shows'); cascades clean children."""
+        ``table`` is internal ('movies'|'shows'); cascades clean children.
+
+        Safety (mirrors music's deep scan): if removal would wipe >50% of a
+        >100-row library, assume a partial server failure and skip it."""
         if table not in ("movies", "shows"):
             raise ValueError(f"prune_missing: unexpected table {table!r}")
         seen = {str(s) for s in seen_ids}
@@ -319,6 +342,11 @@ class VideoDatabase:
                 f"SELECT server_id FROM {table} WHERE server_source=?", (server_source,)
             ).fetchall()]
             stale = [sid for sid in existing if str(sid) not in seen]
+            if len(stale) > len(existing) * 0.5 and len(existing) > 100:
+                logger.warning(
+                    "Video deep scan: %d/%d %s stale (>50%%) — skipping removal (likely a "
+                    "partial server response)", len(stale), len(existing), table)
+                return 0
             for sid in stale:
                 conn.execute(f"DELETE FROM {table} WHERE server_source=? AND server_id=?",
                              (server_source, sid))

@@ -76,6 +76,9 @@ def test_empty_deep_scan_does_not_wipe_library(db):
 
 
 def test_incremental_mode_requests_incremental_from_source(db):
+    # Populate past the small-library fallback so incremental stays incremental.
+    for i in range(60):
+        db.upsert_movie("plex", {"server_id": "p%d" % i, "title": str(i)})
     src = FakeSource([{"server_id": "m1", "title": "A"}], [])
     VideoLibraryScanner(db).scan_sync(lambda: src, mode="incremental")
     assert ("movies", True) in src.incremental_calls
@@ -121,6 +124,47 @@ def test_scan_cancel_stops_midway(db):
     st = scanner.scan_sync(lambda: S())
     assert st["state"] == "cancelled"
     assert db.dashboard_stats()["library"]["movies"] == 1   # only the first was saved
+
+
+def test_incremental_skips_known_and_early_stops(db):
+    # Past the small-library fallback, with everything already known.
+    for i in range(60):
+        db.upsert_movie("plex", {"server_id": "k%d" % i, "title": "K%d" % i})
+    new_item = {"server_id": "new1", "title": "New"}
+    known = [{"server_id": "k%d" % i, "title": "K%d" % i} for i in range(60)]
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 61, "shows": 0}
+        def iter_movies(self, incremental=False):
+            assert incremental is True          # NOT fallen back (library big enough)
+            return iter([new_item] + known)     # one new, then a long run of known
+        def iter_shows(self, incremental=False):
+            return iter([])
+
+    st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
+    assert st["state"] == "done"
+    assert st["movies"] == 1                     # only the new one; known skipped
+    assert db.table_count("movies") == 61
+
+
+def test_incremental_falls_back_to_full_on_small_library(db):
+    captured = {}
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 3, "shows": 0}
+        def iter_movies(self, incremental=False):
+            captured["incremental"] = incremental
+            return iter([{"server_id": "m%d" % i, "title": str(i)} for i in range(3)])
+        def iter_shows(self, incremental=False):
+            return iter([])
+
+    st = VideoLibraryScanner(db).scan_sync(lambda: S(), mode="incremental")
+    assert captured["incremental"] is False      # empty DB (<50) -> full pass
+    assert st["movies"] == 3
 
 
 def test_core_video_imports_nothing_from_music():

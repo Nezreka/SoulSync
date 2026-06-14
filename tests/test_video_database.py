@@ -224,6 +224,15 @@ def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
     assert eps == [1]
 
 
+def test_prune_missing_skips_when_over_half_would_be_removed(db):
+    # >100 movies; a scan that "sees" only a couple must NOT wipe the rest
+    # (mirrors music's deep-scan 50% safety against partial server failures).
+    for i in range(150):
+        db.upsert_movie("plex", {"server_id": "m%d" % i, "title": "M%d" % i})
+    assert db.prune_missing("movies", "plex", {"m0", "m1"}) == 0
+    assert db.table_count("movies") == 150
+
+
 def test_upsert_show_tree_skips_episodes_without_number(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
         {"season_number": 1, "episodes": [

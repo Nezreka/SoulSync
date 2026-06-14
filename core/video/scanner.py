@@ -30,6 +30,13 @@ logger = get_logger("video_scanner")
 
 VALID_MODES = ("incremental", "full", "deep")
 
+# Incremental stops after this many consecutive already-known items (recent
+# first), mirroring music's "25 consecutive complete albums" early-stop.
+INCREMENTAL_STOP_AFTER = 25
+# Below this library size, an incremental scan falls back to a full pass (music
+# does the same when the DB is too small to be worth an incremental).
+INCREMENTAL_MIN_LIBRARY = 50
+
 
 class VideoLibraryScanner:
     """Reads the active media server and upserts movies/shows into video.db."""
@@ -105,6 +112,11 @@ class VideoLibraryScanner:
             incremental = mode == "incremental"
             do_prune = mode == "deep"
 
+            # Incremental on a near-empty library is pointless — fall back to a
+            # full pass so the first scan actually populates (music does this).
+            if incremental and (self.db.table_count("movies") + self.db.table_count("shows")) < INCREMENTAL_MIN_LIBRARY:
+                incremental = False
+
             # Totals up front so the progress bar shows a REAL percentage
             # (movies + shows are the unit; episodes ride along under each show).
             total = 0
@@ -118,15 +130,28 @@ class VideoLibraryScanner:
             def pct():
                 return round(processed / total * 100) if total else None
 
+            known_movies = self.db.server_ids("movies", server) if incremental else set()
+            known_shows = self.db.server_ids("shows", server) if incremental else set()
+
             # ── Movies ──
             self._set(phase="scanning movies", total=total, percent=pct())
             seen_movies: set[str] = set()
             movies = 0
+            consec = 0
             for item in source.iter_movies(incremental=incremental):
                 if self._cancel:
                     return self._finish_cancelled(movies, 0, 0)
+                sid = str(item["server_id"])
+                # Incremental early-stop: skip already-known items and bail after
+                # a run of consecutive known ones (server lists recent first).
+                if incremental and sid in known_movies:
+                    consec += 1
+                    if consec >= INCREMENTAL_STOP_AFTER:
+                        break
+                    continue
+                consec = 0
                 self.db.upsert_movie(server, item)
-                seen_movies.add(str(item["server_id"]))
+                seen_movies.add(sid)
                 movies += 1
                 processed += 1
                 if movies % 10 == 0:
@@ -142,11 +167,19 @@ class VideoLibraryScanner:
             seen_shows: set[str] = set()
             shows = 0
             episodes = 0
+            consec = 0
             for show in source.iter_shows(incremental=incremental):
                 if self._cancel:
                     return self._finish_cancelled(movies, shows, episodes)
+                sid = str(show["server_id"])
+                if incremental and sid in known_shows:
+                    consec += 1
+                    if consec >= INCREMENTAL_STOP_AFTER:
+                        break
+                    continue
+                consec = 0
                 self.db.upsert_show_tree(server, show)
-                seen_shows.add(str(show["server_id"]))
+                seen_shows.add(sid)
                 shows += 1
                 episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
                 processed += 1
