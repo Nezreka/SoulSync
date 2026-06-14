@@ -120,6 +120,31 @@ def test_engine_restores_paused_workers_on_build(db):
     assert eng.worker("tmdb").paused is False
 
 
+def test_scan_pause_resumes_only_what_it_paused(db):
+    eng = VideoEnrichmentEngine(db, {"tmdb": FakeClient(None), "tvdb": FakeClient(None)})
+    # User manually paused tvdb (persisted); tmdb is running.
+    eng.worker("tvdb").pause()
+    assert eng.worker("tvdb").paused and not eng.worker("tmdb").paused
+
+    paused = eng.pause_for_scan()
+    assert paused == {"tmdb"}                        # only the running one
+    assert eng.worker("tmdb").paused and eng.worker("tvdb").paused
+
+    eng.resume_after_scan()
+    assert not eng.worker("tmdb").paused             # we paused it → resumed
+    assert eng.worker("tvdb").paused                 # user's pause left alone
+
+
+def test_scan_pause_does_not_persist(db):
+    eng = VideoEnrichmentEngine(db, {"tmdb": FakeClient(None)})
+    eng.pause_for_scan()
+    # Transient: the durable flag is untouched, so a restart mid-scan won't
+    # restore the worker as "paused".
+    assert (db.get_setting("tmdb_paused") or "") != "1"
+    eng.resume_after_scan()
+    assert (db.get_setting("tmdb_paused") or "") != "1"
+
+
 def test_enrichment_package_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "core" / "video" / "enrichment"
     for py in base.glob("*.py"):

@@ -41,12 +41,16 @@ INCREMENTAL_MIN_LIBRARY = 50
 class VideoLibraryScanner:
     """Reads the active media server and upserts movies/shows into video.db."""
 
-    def __init__(self, db):
+    def __init__(self, db, pause_workers=None, resume_workers=None):
         self.db = db
         self._lock = threading.Lock()
         self._status = {"state": "idle"}
         self._thread = None
         self._cancel = False
+        # Optional hooks: pause enrichment workers while a scan runs, resume after
+        # (injected by get_video_scanner; left None in tests so no engine spins up).
+        self._pause_workers = pause_workers
+        self._resume_workers = resume_workers
 
     def get_status(self) -> dict:
         with self._lock:
@@ -101,7 +105,30 @@ class VideoLibraryScanner:
                   movies=movies, shows=shows, episodes=episodes)
         logger.info("Video scan cancelled at %d movies, %d shows", movies, shows)
 
+    def _pause_for_scan(self) -> bool:
+        """Pause enrichment workers for the duration of the scan. Best-effort —
+        a failure here must never abort the scan."""
+        if not self._pause_workers:
+            return False
+        try:
+            self._pause_workers()
+            return True
+        except Exception:
+            logger.debug("video scan: pausing enrichment workers failed", exc_info=True)
+            return False
+
+    def _resume_after_scan(self) -> None:
+        if not self._resume_workers:
+            return
+        try:
+            self._resume_workers()
+        except Exception:
+            logger.debug("video scan: resuming enrichment workers failed", exc_info=True)
+
     def _run(self, source_factory, mode: str = "full") -> None:
+        # Enrichment steps aside for the scan (all modes, both entry points), and
+        # the finally guarantees it resumes on success, cancel, or error.
+        paused = self._pause_for_scan()
         try:
             source = source_factory()
             if source is None:
@@ -203,6 +230,9 @@ class VideoLibraryScanner:
         except Exception as e:  # noqa: BLE001 - report any failure to the UI
             logger.exception("Video library scan failed")
             self._set(state="error", phase="failed", error=str(e))
+        finally:
+            if paused:
+                self._resume_after_scan()
 
 
 # Module-level singleton, bound to the (single) video DB.
@@ -210,10 +240,22 @@ _scanner = None
 _scanner_lock = threading.Lock()
 
 
+def _engine_pause_for_scan() -> None:
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    get_video_enrichment_engine().pause_for_scan()
+
+
+def _engine_resume_after_scan() -> None:
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    get_video_enrichment_engine().resume_after_scan()
+
+
 def get_video_scanner(db) -> VideoLibraryScanner:
     global _scanner
     if _scanner is None:
         with _scanner_lock:
             if _scanner is None:
-                _scanner = VideoLibraryScanner(db)
+                _scanner = VideoLibraryScanner(
+                    db, pause_workers=_engine_pause_for_scan,
+                    resume_workers=_engine_resume_after_scan)
     return _scanner
