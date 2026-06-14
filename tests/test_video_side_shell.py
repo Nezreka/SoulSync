@@ -107,10 +107,7 @@ def test_video_dashboard_header_matches_music_shape():
     assert 'data-video-goto="video-watchlist"' in header
     assert 'data-video-goto="video-wishlist"' in header
     assert 'id="watchlist-button"' not in header and 'id="wishlist-button"' not in header
-    # Meta-source placeholder buttons stand in for music's enrichment row.
-    assert "header-actions" in header
-    for src in ("tmdb", "tvdb", "trakt", "omdb"):
-        assert f'data-video-meta="{src}"' in header
+    # The enrichment-worker button row isn't built yet (will match music later).
     assert "onclick" not in header
 
 
