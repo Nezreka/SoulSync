@@ -100,7 +100,7 @@ def test_enrichment_endpoints(tmp_path):
 
     class FakeClient:
         enabled = True
-        def match(self, *a): return None
+        def match(self, *a, **k): return None
         def test(self): return (True, "ok")
 
     db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
