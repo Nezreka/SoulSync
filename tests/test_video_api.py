@@ -35,6 +35,9 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/library" in rules
     assert "/api/video/libraries" in rules
     assert any(r.startswith("/api/video/poster/") for r in rules)
+    assert "/api/video/enrichment/services" in rules
+    assert "/api/video/enrichment/<service>/status" in rules
+    assert "/api/video/enrichment/<service>/unmatched" in rules
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -85,6 +88,46 @@ def test_libraries_endpoint_lists_and_saves(tmp_path, monkeypatch):
         assert data2["selected"] == {"movies": "Movies", "tv": "TV"}
     finally:
         videoapi._video_db = None
+
+
+def test_enrichment_endpoints(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    import core.video.enrichment.engine as eng_mod
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+
+    class FakeClient:
+        enabled = True
+        def match(self, *a): return None
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    eng_mod._engine = VideoEnrichmentEngine(db, {"tmdb": FakeClient(), "tvdb": FakeClient()})
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        svc = client.get("/api/video/enrichment/services").get_json()
+        assert {s["id"] for s in svc["services"]} == {"tmdb", "tvdb"}
+
+        mid = db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
+        st = client.get("/api/video/enrichment/tmdb/status").get_json()
+        assert st["enabled"] is True and st["stats"]["pending"] == 1
+
+        db.enrichment_apply("tmdb", "movie", mid, matched=False)
+        bd = client.get("/api/video/enrichment/tmdb/breakdown").get_json()
+        assert bd["breakdown"]["movie"]["not_found"] == 1
+        un = client.get("/api/video/enrichment/tmdb/unmatched?kind=movie&status=not_found").get_json()
+        assert un["total"] == 1 and un["kind"] == "movie"
+
+        assert client.post("/api/video/enrichment/tmdb/pause").get_json()["status"] == "paused"
+        assert client.post("/api/video/enrichment/tmdb/resume").get_json()["status"] == "running"
+        assert client.post("/api/video/enrichment/tmdb/retry",
+                           json={"kind": "movie", "scope": "failed"}).get_json()["reset"] == 1
+        assert client.get("/api/video/enrichment/nope/status").status_code == 404
+    finally:
+        videoapi._video_db = None
+        eng_mod._engine = None
 
 
 def test_video_api_imports_nothing_from_music():
