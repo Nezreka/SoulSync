@@ -71,6 +71,28 @@ def load_profile_targets() -> Tuple[List[QualityTarget], bool]:
     return targets, fallback_enabled
 
 
+_VALID_SEARCH_MODES = ("priority", "best_quality")
+
+
+def load_search_mode() -> str:
+    """Return the download search strategy from the user's quality profile.
+
+    ``'priority'`` (default) keeps today's behaviour — the first source in the
+    hybrid chain that meets a quality target wins. ``'best_quality'`` pools
+    candidates across all sources and works them best→worst by actual audio
+    quality. Any missing/unknown value resolves to ``'priority'`` so existing
+    installs are unaffected.
+    """
+    from database.music_database import MusicDatabase
+
+    try:
+        profile = MusicDatabase().get_quality_profile()
+        mode = profile.get("search_mode", "priority")
+    except Exception:
+        return "priority"
+    return mode if mode in _VALID_SEARCH_MODES else "priority"
+
+
 def rank_for_profile(candidates: list) -> Tuple[list, bool]:
     """Load the user's quality profile and rank *candidates* against it.
 

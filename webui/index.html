@@ -5095,12 +5095,38 @@
                                     </div>
                                 </div>
 
+                                <!-- Search strategy -->
+                                <div class="form-group">
+                                    <label for="quality-search-mode" style="display:block;margin-bottom:4px;font-weight:600;">Search strategy</label>
+                                    <select id="quality-search-mode" style="width:100%;max-width:420px;">
+                                        <option value="priority">Source priority — fastest, stops at first good source</option>
+                                        <option value="best_quality">Best quality — search all sources, pick the highest</option>
+                                    </select>
+                                    <div class="help-text" style="margin-top:4px">
+                                        <strong>Source priority</strong> takes the first source in your chain that meets
+                                        a target — fast, fewer lookups. <strong>Best quality</strong> searches
+                                        <em>every</em> source for each track, pools the results, and downloads them
+                                        best→worst by actual audio quality (source order only breaks ties). Slower and
+                                        more API calls, but it won't settle for a passable Soulseek file when HiFi/Qobuz
+                                        has a higher-resolution version. Retry budgets are unchanged: a source that spends
+                                        its budget is dropped from the whole pool.
+                                    </div>
+                                </div>
+
                                 <!-- Fallback Option -->
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="quality-fallback-enabled" checked>
-                                        Allow fallback to any quality if no target is available
+                                        Accept off-list quality when nothing in the list is available
                                     </label>
+                                    <div class="help-text" style="margin-top:4px">
+                                        ⚠️ This does <strong>not</strong> mean "walk down my list" — the list already
+                                        does that on its own. When <strong>on</strong>, a file that matches
+                                        <em>none</em> of your targets (e.g. a 16-bit FLAC or MP3 when you only listed
+                                        24-bit) is <strong>accepted anyway</strong> as a last resort. Turn it
+                                        <strong>off</strong> to strictly enforce your list — anything off-list is then
+                                        quarantined instead of completed.
+                                    </div>
                                 </div>
 
                                 <div class="help-text">
@@ -5111,6 +5137,10 @@
                                     <em>minimum</em> threshold (≥), so VBR and mono files aren't falsely rejected. After
                                     download the real file is verified against the same list. With fallback off, a track
                                     is left missing rather than accepting a quality below every target.
+                                    <br><br>
+                                    <strong>Note:</strong> the <em>Downsample hi-res</em> option (under Lossy Copy) also
+                                    bypasses this gate — if off-list files keep slipping through with fallback off, check
+                                    that setting too.
                                 </div>
                             </div>
 

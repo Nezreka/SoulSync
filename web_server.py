@@ -18101,9 +18101,9 @@ def _build_candidates_deps():
     )
 
 
-def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None):
+def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None, **kwargs):
     return _downloads_candidates.attempt_download_with_candidates(
-        task_id, candidates, track, batch_id, _build_candidates_deps()
+        task_id, candidates, track, batch_id, _build_candidates_deps(), **kwargs
     )
 
 
