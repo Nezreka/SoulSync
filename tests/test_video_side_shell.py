@@ -235,6 +235,25 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     assert 'class="api-service-frame stg-service" data-service="tvdb"' in _INDEX
 
 
+def test_dashboard_enrichment_buttons_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    assert 'data-video-enrich="tmdb"' in block and 'data-video-enrich="tvdb"' in block
+    assert "data-video-manage-workers" in block
+    assert "video-enrich-spinner" in block          # spins while running
+    assert "onclick" not in block
+
+
+def test_video_enrichment_module_referenced_and_isolated():
+    assert "video/video-enrichment.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-enrichment.js").read_text(encoding="utf-8")
+    assert src.strip().startswith("/*") or src.strip().startswith("(function")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src
+    assert "/api/video/enrichment/" in src
+    assert "music" not in src.lower()
+
+
 def test_video_settings_module_referenced_and_isolated():
     assert "video/video-settings.js" in _INDEX
     stripped = _VSETTINGS_JS.strip()
