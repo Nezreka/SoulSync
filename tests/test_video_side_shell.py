@@ -184,6 +184,8 @@ def test_dashboard_library_card_has_refresh_and_deep_buttons():
     assert 'data-video-scan-mode="full"' in block   # Refresh
     assert 'data-video-scan-mode="deep"' in block    # Deep Scan
     assert "library-status-actions" in block
+    # The card shows live scan progress (parity with the music dashboard).
+    assert "data-video-dash-progress" in block and "data-video-dash-bar" in block
 
 
 def test_scan_module_referenced_and_isolated():
