@@ -229,6 +229,98 @@ body[data-side="video"] .dashboard-header-sweep {
 .video-manage-workers-btn:hover { transform: translateY(-1px); border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); }
 .video-manage-workers-icon img { width: 22px; height: 22px; display: block; }
 
+/* ── Video Manage-Workers modal: only the bits not covered by music's global
+   .em-* classes, ALL scoped to #vem-overlay so music is never affected. ───── */
+#vem-overlay .vem-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: #fff;
+    flex-shrink: 0;
+}
+#vem-overlay .em-panel-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+#vem-overlay .em-ph-main { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+#vem-overlay .em-ph-status { color: var(--text-secondary, #9aa0aa); font-size: 13px; }
+#vem-overlay .em-ph-current { color: var(--text-secondary, #9aa0aa); font-size: 12px; opacity: 0.85; }
+#vem-overlay .em-pause-btn {
+    margin-left: auto;
+    padding: 7px 16px;
+    border-radius: 9px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary, #e8e8ea);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#vem-overlay .em-pause-btn:disabled { opacity: 0.45; cursor: default; }
+#vem-overlay .em-unmatched-controls { display: flex; align-items: center; justify-content: space-between; margin: 14px 0 8px; }
+#vem-overlay .em-section-sub { color: var(--text-secondary, #9aa0aa); font-size: 13px; }
+#vem-overlay .em-retry-all-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.4);
+    background: rgba(var(--accent-rgb, 88 101 242), 0.12);
+    color: rgb(var(--accent-light-rgb, var(--accent-rgb, 88 101 242)));
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+#vem-overlay .em-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 6px;
+}
+#vem-overlay .em-item-img {
+    width: 38px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+}
+#vem-overlay .em-item-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+#vem-overlay .em-item-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#vem-overlay .em-item-sub { font-size: 12px; color: var(--text-secondary, #9aa0aa); }
+#vem-overlay .em-item-retry {
+    padding: 5px 12px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: transparent;
+    color: var(--text-secondary, #9aa0aa);
+    font-size: 12px;
+    cursor: pointer;
+}
+#vem-overlay .em-item-retry:hover { color: #fff; border-color: rgba(255, 255, 255, 0.25); }
+#vem-overlay .em-empty { padding: 30px; text-align: center; color: var(--text-secondary, #9aa0aa); }
+#vem-overlay .em-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; }
+#vem-overlay .em-pg {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary, #e8e8ea);
+    cursor: pointer;
+}
+#vem-overlay .em-pg:disabled { opacity: 0.4; cursor: default; }
+#vem-overlay .em-pg-info { font-size: 13px; color: var(--text-secondary, #9aa0aa); }
+
 /* ── Subpages: one built video page shown at a time ────────────────────── */
 /* Each real page is a .video-subpage inside #video-page-host; the controller
    toggles the [hidden] attribute. Be explicit so no reused .dash-* rule can

@@ -256,6 +256,21 @@ def test_video_enrichment_module_referenced_and_isolated():
     assert "openEnrichmentManager" not in src
 
 
+def test_video_enrichment_manager_isolated():
+    assert "video/video-enrichment-manager.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-enrichment-manager.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src
+    assert "soulsync:video-open-workers" in src      # opened by the dashboard button
+    assert "/api/video/enrichment/" in src           # targets the video API
+    assert "/api/enrichment/" not in src             # NOT the music API
+    assert "openEnrichmentManager" not in src        # never calls the music modal
+    # Reuses the shared music modal CSS classes (design parity).
+    assert "enrichment-manager-modal" in src and "em-rail" in src
+    # Its own overlay id (not music's) so the two never collide.
+    assert "vem-overlay" in src and "enrichment-manager-overlay" not in src
+
+
 def test_video_settings_module_referenced_and_isolated():
     assert "video/video-settings.js" in _INDEX
     stripped = _VSETTINGS_JS.strip()
