@@ -2689,6 +2689,7 @@ function _verifQuarRows() {
             </div>
             <div class="verif-actions" onclick="event.stopPropagation()">
                 <span class="verif-reason-badge ${trigClass}" title="${_adlEsc(q.reason || '')}">${trigLabel}</span>
+                ${q.quality ? `<span class="adl-quality-chip" title="Audio quality of the quarantined file (read from the file itself)">${_adlEsc(q.quality)}</span>` : ''}
                 ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
                 <button class="verif-act verif-act-play" onclick="verifQuarPlay(${idx})" title="Play the quarantined file in the media player">▶</button>
                 <button class="verif-act" onclick="verifQuarCompare(${idx}, this)" title="Find the expected track on Soulseek/streaming sources and play it in the media player — compare against the quarantined file">⇆</button>

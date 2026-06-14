@@ -11749,6 +11749,9 @@ def _sync_tracks_to_server(track_rows, server_type):
     return result
 
 
+_resolve_library_diag_logged = False
+
+
 def _resolve_library_file_path(file_path):
     """Resolve a library file path to an actual file on disk."""
     if not file_path:
@@ -11806,6 +11809,17 @@ def _resolve_library_file_path(file_path):
             if found:
                 return found
 
+    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
+    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
+    # a configured library path).
+    global _resolve_library_diag_logged
+    if not _resolve_library_diag_logged:
+        _resolve_library_diag_logged = True
+        logger.warning(
+            "[PathResolve] Could not resolve %r under any base dir — searched transfer=%r "
+            "download=%r library=%r. If files live elsewhere, add it under Settings > Library music paths.",
+            file_path, transfer_dir, download_dir, sorted(library_dirs),
+        )
     return None
 
 
