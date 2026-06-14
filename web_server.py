@@ -17662,6 +17662,7 @@ def _build_quality_scanner_deps():
         get_quality_tier_from_extension=_get_quality_tier_from_extension,
         add_activity_item=add_activity_item,
         probe_audio_quality=_probe_audio_quality,
+        resolve_library_file_path=_resolve_library_file_path,
     )
 
 

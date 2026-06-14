@@ -175,6 +175,7 @@ def _build_deps(
         get_quality_tier_from_extension=lambda fp: quality_tier_result,
         add_activity_item=lambda *a, **kw: None,
         probe_audio_quality=probe_fn or _default_probe,
+        resolve_library_file_path=lambda fp: fp,  # identity — tests use direct paths
     )
     return deps
 
@@ -261,6 +262,30 @@ def test_high_quality_tracks_skipped(mock_db_and_wishlist):
 
     assert state['quality_met'] == 1
     assert state['low_quality'] == 0
+
+
+def test_scanner_resolves_relative_path_before_probing(mock_db_and_wishlist):
+    """DB stores RELATIVE paths (Artist/Album/Track.flac); the scanner must
+    resolve them to absolute via resolve_library_file_path before probing,
+    otherwise mutagen can't open the file and the whole library passes."""
+    from core.quality.model import AudioQuality
+
+    db, _ = mock_db_and_wishlist
+    db._watchlist_artists = [_WatchlistArtist('A')]
+    db._tracks = [_track_row(file_path='Artist/Album/Track.flac')]
+    state = {}
+    probed = []
+
+    def _probe(fp):
+        probed.append(fp)
+        return AudioQuality('flac', bit_depth=16, sample_rate=44100)
+
+    deps = _build_deps(state=state, probe_fn=_probe)
+    deps.resolve_library_file_path = lambda fp: '/music/' + fp
+
+    qs.run_quality_scanner('watchlist', 1, deps)
+
+    assert probed == ['/music/Artist/Album/Track.flac']
 
 
 def test_low_quality_tracks_attempted(mock_db_and_wishlist):

@@ -77,6 +77,10 @@ class QualityScannerDeps:
     # so the scan checks against the SAME ranked-target core as the download
     # quality guard — not just the file extension. Injected for testability.
     probe_audio_quality: Callable = None
+    # Resolve a DB-stored (often RELATIVE, e.g. "Artist/Album/Track.flac") path
+    # to an absolute on-disk file by checking the transfer/download/library
+    # dirs. Without this the probe opens a relative path and fails.
+    resolve_library_file_path: Callable = None
 
 
 def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
@@ -438,14 +442,21 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
 
                 # Probe the REAL audio quality (bit depth / sample rate / bitrate)
                 # and check it against the ranked targets — same core as the
-                # download guard. The library path may be a Windows/host path that
-                # needs Docker resolution before mutagen can open it.
-                resolved_path = file_path
-                try:
-                    from core.imports.paths import docker_resolve_path
-                    resolved_path = docker_resolve_path(file_path) if file_path else file_path
-                except Exception:
-                    resolved_path = file_path
+                # download guard. The DB stores paths RELATIVE to the library root
+                # (e.g. "Artist/Album/Track.flac"), so resolve to an absolute
+                # on-disk path first or mutagen can't open the file.
+                resolved_path = None
+                if deps.resolve_library_file_path:
+                    try:
+                        resolved_path = deps.resolve_library_file_path(file_path)
+                    except Exception:
+                        resolved_path = None
+                if not resolved_path:
+                    try:
+                        from core.imports.paths import docker_resolve_path
+                        resolved_path = docker_resolve_path(file_path) if file_path else file_path
+                    except Exception:
+                        resolved_path = file_path
 
                 aq = deps.probe_audio_quality(resolved_path) if deps.probe_audio_quality else None
                 if aq is not None:
