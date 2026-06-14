@@ -192,6 +192,9 @@ def test_scan_module_referenced_and_isolated():
     assert "addEventListener" in _SCAN_JS
     assert "soulsync:video-scan-done" in _SCAN_JS
     assert "/api/video/scan/request" in _SCAN_JS
+    # Rehydrates a running scan after a page refresh (parity with music tools).
+    assert "/api/video/scan/status" in _SCAN_JS
+    assert "resumeIfScanning" in _SCAN_JS
 
 
 def test_video_settings_reuses_real_music_settings_page():
