@@ -117,8 +117,43 @@
         loadStats();
     }
 
+    // ── Library card: live scan progress (parity with the music dashboard) ──
+    // The scan buttons (data-video-scan-mode) are wired by video-scan.js; here
+    // we reflect progress on the card and hydrate if a scan is already running
+    // (video-scan.js re-emits the progress event on load).
+    function dashButtons() {
+        return document.querySelectorAll(
+            '.video-subpage[data-video-subpage="video-dashboard"] [data-video-scan-mode]');
+    }
+
+    function onDashScanProgress(e) {
+        var s = e.detail || {};
+        if (s.state !== 'scanning') return;
+        var prog = document.querySelector('[data-video-dash-progress]');
+        if (prog) prog.classList.remove('hidden');
+        var phase = (s.phase || 'scanning');
+        var phaseEl = document.querySelector('[data-video-dash-phase]');
+        if (phaseEl) phaseEl.textContent = phase.charAt(0).toUpperCase() + phase.slice(1);
+        var bar = document.querySelector('[data-video-dash-bar]');
+        if (bar) bar.style.width = (s.percent != null ? s.percent : 100) + '%';
+        var detail = document.querySelector('[data-video-dash-detail]');
+        if (detail) {
+            detail.textContent = (s.movies || 0) + ' movies, ' + (s.shows || 0) + ' shows'
+                + (s.percent != null ? ' · ' + s.percent + '%' : '');
+        }
+        var btns = dashButtons();
+        for (var i = 0; i < btns.length; i++) btns[i].disabled = true;
+    }
+
+    function onDashScanDone() {
+        var prog = document.querySelector('[data-video-dash-progress]');
+        if (prog) prog.classList.add('hidden');
+        var btns = dashButtons();
+        for (var i = 0; i < btns.length; i++) btns[i].disabled = false;
+        loadStats();
+    }
+
     document.addEventListener('soulsync:video-page-shown', onPageShown);
-    // Dashboard scan buttons (data-video-scan-mode) are wired by video-scan.js;
-    // refresh the live counts whenever any scan finishes.
-    document.addEventListener('soulsync:video-scan-done', function () { loadStats(); });
+    document.addEventListener('soulsync:video-scan-progress', onDashScanProgress);
+    document.addEventListener('soulsync:video-scan-done', onDashScanDone);
 })();
