@@ -38,6 +38,8 @@ def create_video_blueprint() -> Blueprint:
     bp = Blueprint("video_api", __name__)
 
     from .dashboard import register_routes as reg_dashboard
+    from .scan import register_routes as reg_scan
     reg_dashboard(bp)
+    reg_scan(bp)
 
     return bp
