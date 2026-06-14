@@ -3112,7 +3112,16 @@ function _adlRender() {
                    </button>`
                 : '';
 
-            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}">
+            // In the Unverified review sub-view, make the whole row clickable to
+            // open the audit/info modal (same as the 🔍 button) — mirrors the
+            // Quarantine rows, which are row-clickable for their details. The
+            // action buttons stopPropagation so they don't double-trigger.
+            const _unvHid = _adlFilter === 'unverified' ? verifHistoryId(dl) : null;
+            const reviewRowClick = _unvHid
+                ? ` onclick="verifAudit('${_unvHid}')" style="cursor:pointer" title="Click to show download details (audit trail, embedded tags, lyrics)"`
+                : '';
+
+            html += `<div class="adl-row adl-row-${statusClass}" data-task-id="${dl.task_id}" data-batch-id="${dl.batch_id || ''}"${reviewRowClick}>
                 ${colorBar}
                 ${artHtml}
                 <div class="adl-row-info">

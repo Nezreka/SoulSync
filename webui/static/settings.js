@@ -1821,16 +1821,16 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality profile is Soulseek-only (it only affects Soulseek downloads) and
-    // downloads-tab-only. Gate the WHOLE collapsible tile (#quality-profile-tile
-    // = header + body) as a unit, so it either fully shows (Soulseek active) or
-    // fully hides — never an empty expandable shell (the earlier bug came from
-    // gating only the inner #quality-profile-section).
+    // Quality profile is now a GLOBAL system — the same ranked-target list
+    // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
+    // no longer Soulseek-gated. Show the whole collapsible tile whenever the
+    // downloads tab is active (gated as a unit so there's never an empty
+    // expandable shell).
     const qualityProfileTile = document.getElementById('quality-profile-tile');
     if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
         const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+        qualityProfileTile.style.display = onDownloadsTab ? '' : 'none';
     }
 
     if (activeSources.has('tidal')) {
