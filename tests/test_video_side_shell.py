@@ -207,6 +207,13 @@ def test_video_library_mapping_ui_present_and_video_only():
     assert 'body[data-side="video"] #plex-library-selector-container' in css
 
 
+def test_video_side_hides_music_api_config_and_shows_placeholders():
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="video"] [data-music-only]' in css   # music API hidden on video
+    assert "data-music-only" in _INDEX                          # the music API group is marked
+    assert "TMDB API Key" in _INDEX and "TVDB API Key" in _INDEX  # video placeholders
+
+
 def test_video_settings_module_referenced_and_isolated():
     assert "video/video-settings.js" in _INDEX
     stripped = _VSETTINGS_JS.strip()

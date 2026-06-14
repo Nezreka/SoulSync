@@ -4288,7 +4288,7 @@
                         <!-- Left Column - API Configuration -->
                         <div class="settings-left-column">
                             <!-- API Configuration -->
-                            <div class="settings-group" data-stg="connections">
+                            <div class="settings-group" data-stg="connections" data-music-only>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
 
                                 <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
@@ -4736,6 +4736,22 @@
                                         Last.fm</button>
                                     <button class="test-button" onclick="testConnection('genius')">Test
                                         Genius</button>
+                                </div>
+                            </div>
+
+                            <!-- Video API Configuration (placeholders; shown only on the video
+                                 side in place of the music API services). -->
+                            <div class="settings-group" data-stg="connections" data-video-only>
+                                <h3>API Configuration</h3>
+                                <div class="form-group">
+                                    <label>TMDB API Key</label>
+                                    <input type="text" placeholder="The Movie Database — movie &amp; TV metadata" disabled>
+                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">Coming soon — primary movie/TV metadata source.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>TVDB API Key</label>
+                                    <input type="text" placeholder="TheTVDB — TV series metadata" disabled>
+                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">Coming soon — TV metadata source.</small>
                                 </div>
                             </div>
 
