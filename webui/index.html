@@ -470,9 +470,12 @@
                                         </div>
                                     </div>
                                 </div>
-                                <button class="video-manage-workers-btn" type="button" data-video-manage-workers title="Manage video enrichment workers">
-                                    <span class="video-manage-workers-icon"><img src="/static/trans2.png" alt="" /></span>
-                                    <span class="video-manage-workers-label">Manage Workers</span>
+                                <!-- Reuses music's .em-manage-btn* classes verbatim so it's
+                                     pixel-identical; wired by data-attribute (no inline
+                                     handler) via video-enrichment.js, never music's. -->
+                                <button class="em-manage-btn" type="button" data-video-manage-workers title="Manage video enrichment workers">
+                                    <span class="em-manage-btn-icon"><img src="/static/trans2.png" alt="SoulSync" class="em-manage-btn-logo"></span>
+                                    <span class="em-manage-btn-label">Manage Workers</span>
                                 </button>
                             </div>
                             <!-- Watchlist / Wishlist quick-nav (top-right corner) — same as

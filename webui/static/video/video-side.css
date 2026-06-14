@@ -179,7 +179,17 @@ body[data-side="video"] .dashboard-header-sweep {
     box-shadow: 0 6px 24px rgba(var(--ve-accent, 88, 101, 242), 0.4),
         0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
-.video-enrich-button.paused { opacity: 0.6; }
+/* Paused → amber accent, identical to music's .musicbrainz-button.paused. */
+.video-enrich-button.paused {
+    background: linear-gradient(135deg, rgba(255, 193, 7, 0.12) 0%, rgba(255, 152, 0, 0.18) 100%);
+    border-color: rgba(255, 193, 7, 0.35);
+    box-shadow: 0 4px 16px rgba(255, 193, 7, 0.2),
+        0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.video-enrich-button.paused:hover {
+    border-color: rgba(255, 193, 7, 0.5);
+    box-shadow: 0 6px 20px rgba(255, 193, 7, 0.3), 0 3px 12px rgba(0, 0, 0, 0.2);
+}
 .video-enrich-button.disabled { opacity: 0.4; cursor: default; }
 .video-enrich-logo {
     width: 24px;
@@ -221,6 +231,8 @@ body[data-side="video"] .dashboard-header-sweep {
 .video-enrich-tooltip .tooltip-header { color: rgba(var(--ve-accent, 88, 101, 242), 0.95); }
 .video-enrich-tooltip .tooltip-content::before { border-bottom-color: rgba(var(--ve-accent, 88, 101, 242), 0.3); }
 .video-enrich-tooltip [data-video-enrich-status] { color: rgb(var(--ve-accent, 88, 101, 242)); font-weight: 600; }
+/* Paused status text goes amber too, matching music. */
+.video-enrich-button.paused ~ .video-enrich-tooltip [data-video-enrich-status] { color: #ffc107; }
 
 /* Positioning wrapper only — the content reuses music's shared .tooltip-content
    / .tooltip-header / .tooltip-body styling, so it looks identical to the music
@@ -242,23 +254,9 @@ body[data-side="video"] .dashboard-header-sweep {
     transform: translateX(-50%) translateY(0);
 }
 
-.video-manage-workers-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 46px;
-    padding: 0 16px;
-    border-radius: 23px;
-    background: rgba(18, 18, 22, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--text-primary, #e8e8ea);
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.2s ease, transform 0.15s ease;
-}
-.video-manage-workers-btn:hover { transform: translateY(-1px); border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); }
-.video-manage-workers-icon img { width: 22px; height: 22px; display: block; }
+/* The Manage Workers button reuses music's .em-manage-btn* classes verbatim
+   (see index.html), so it needs no styling of its own here — identical by reuse. */
+
 /* Service logo in the settings API-config frame headers (TMDB/TVDB). */
 .video-svc-logo { width: 18px; height: 18px; object-fit: contain; margin-right: 2px; }
 .video-svc-logo--tvdb { filter: invert(1); }
