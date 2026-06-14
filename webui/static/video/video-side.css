@@ -108,6 +108,16 @@ body[data-side="video"] .status-section {
     display: none;
 }
 
+/* ── Shared pages: show the REAL music page on the video side ───────────── */
+/* For now Settings is shown identically (no hiding of music-only bits yet).
+   The id selector + extra attribute outrank the blanket music-page hide rule. */
+body[data-side="video"][data-video-page="video-settings"] #settings-page {
+    display: block !important;
+}
+body[data-side="video"][data-video-page="video-settings"] #video-page-host {
+    display: none !important;
+}
+
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
    we only mute the ambient sweep on the video side (equiv may return later,

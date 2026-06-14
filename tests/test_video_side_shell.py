@@ -184,6 +184,16 @@ def test_scan_module_referenced_and_isolated():
     assert "/api/video/scan/request" in _SCAN_JS
 
 
+def test_video_settings_reuses_real_music_settings_page():
+    # The video Settings nav shows the actual #settings-page (identically, for
+    # now) via CSS + the shared loadPageData loader — not a video subpage.
+    assert "'video-settings': 'settings'" in _JS or '"video-settings": "settings"' in _JS
+    assert "loadPageData" in _JS
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'data-video-page="video-settings"] #settings-page' in css
+    assert 'data-video-page="video-settings"] #video-page-host' in css
+
+
 def test_controller_is_isolated_iife_with_no_globals():
     stripped = _JS.strip()
     # Wrapped in an IIFE → declares no module-level globals that could collide
