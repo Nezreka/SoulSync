@@ -158,6 +158,8 @@ def test_video_library_module_referenced_and_isolated():
     assert stripped.startswith("/*") or stripped.startswith("(function")
     assert "(function" in _LIB_JS and "})();" in _LIB_JS
     assert "soulsync:video-page-shown" in _LIB_JS  # decoupled via the event
+    # Cards/poster URLs use the SINGULAR kind (movie/show); the API uses plural.
+    assert "cardKind" in _LIB_JS and "apiKind" in _LIB_JS
     assert "addEventListener" in _LIB_JS
     assert "window." not in _LIB_JS
 

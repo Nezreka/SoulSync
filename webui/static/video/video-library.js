@@ -118,20 +118,21 @@
     function load() {
         state.loaded = true;
         showLoading(true);
-        var kind = state.tab === 'movies' ? 'movies' : 'shows';
+        var apiKind = state.tab === 'movies' ? 'movies' : 'shows';   // query param (plural)
+        var cardKind = state.tab === 'movies' ? 'movie' : 'show';    // card + poster URL (singular)
         var params = new URLSearchParams({
-            kind: kind, search: state.search, letter: state.letter, sort: state.sort,
+            kind: apiKind, search: state.search, letter: state.letter, sort: state.sort,
             status: state.status, page: state.page, limit: state.limit });
         fetch(LIBRARY_URL + '?' + params.toString(), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 showLoading(false);
-                if (!d || d.error) { renderItems([], kind); updatePagination(null); setCount(0); return; }
-                renderItems(d.items || [], kind);
+                if (!d || d.error) { renderItems([], cardKind); updatePagination(null); setCount(0); return; }
+                renderItems(d.items || [], cardKind);
                 updatePagination(d.pagination);
                 setCount(d.pagination ? d.pagination.total_count : 0);
             })
-            .catch(function () { showLoading(false); renderItems([], kind); updatePagination(null); setCount(0); });
+            .catch(function () { showLoading(false); renderItems([], cardKind); updatePagination(null); setCount(0); });
     }
 
     function reload() { state.page = 1; load(); }
