@@ -25,6 +25,9 @@ class VideoEnrichmentEngine:
             service: VideoEnrichmentWorker(db, service, client, display_name=_DISPLAY.get(service))
             for service, client in clients.items()
         }
+        # Restore each worker's persisted pause state (survives restart).
+        for w in self.workers.values():
+            w.restore_paused()
 
     def start_all(self):
         for w in self.workers.values():

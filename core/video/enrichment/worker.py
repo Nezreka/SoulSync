@@ -52,9 +52,24 @@ class VideoEnrichmentWorker:
 
     def pause(self):
         self.paused = True
+        self._persist_paused()
 
     def resume(self):
         self.paused = False
+        self._persist_paused()
+
+    def _persist_paused(self):
+        # Survives restart, like music's <service>_enrichment_paused config flag.
+        try:
+            self.db.set_setting(self.service + "_paused", "1" if self.paused else "0")
+        except Exception:
+            logger.exception("video enrichment: could not persist pause for %s", self.service)
+
+    def restore_paused(self):
+        try:
+            self.paused = str(self.db.get_setting(self.service + "_paused") or "") == "1"
+        except Exception:
+            logger.exception("video enrichment: could not restore pause for %s", self.service)
 
     @property
     def enabled(self):
