@@ -40,6 +40,30 @@ from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_so
 
 logger = get_logger("hifi_client")
 
+# A media playlist whose total runtime is below this fraction of the track's
+# real duration is a preview (some Monochrome instances only have 30s Tidal
+# DOWNLOAD access — a 220s track comes back as ~30s of segments + ENDLIST).
+_PREVIEW_DURATION_RATIO = 0.85
+_EXTINF_RE = re.compile(r'#EXTINF:\s*([0-9.]+)')
+
+
+def hls_total_seconds(playlist_text: str) -> float:
+    """Sum the ``#EXTINF`` segment durations in an HLS media playlist."""
+    return sum(float(x) for x in _EXTINF_RE.findall(playlist_text or ''))
+
+
+def is_preview_playlist(playlist_s: float, track_s: float,
+                        ratio: float = _PREVIEW_DURATION_RATIO) -> bool:
+    """True when the playlist runtime is far shorter than the track's real
+    duration (a preview). Returns False when either duration is unknown, so a
+    missing reference never false-positives — the post-download audio guard is
+    the safety net.
+    """
+    if not playlist_s or not track_s or track_s <= 0:
+        return False
+    return playlist_s < track_s * ratio
+
+
 # HLS quality presets mapping to /trackManifests/ format parameters
 HLS_QUALITY_MAP = {
     'hires': {
@@ -623,7 +647,8 @@ class HiFiClient(DownloadSourcePlugin):
 
         return init_uri, segment_uris
 
-    def _get_hls_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
+    def _get_hls_manifest(self, track_id: int, quality: str = 'lossless',
+                          expected_duration_s: float = 0) -> Optional[Dict]:
         q_info = HLS_QUALITY_MAP.get(quality, HLS_QUALITY_MAP['lossless'])
         formats = q_info['formats']
 
@@ -663,6 +688,7 @@ class HiFiClient(DownloadSourcePlugin):
             logger.warning(f"Failed to parse HLS playlist for track {track_id}: {e}")
             return None
 
+        media_text = playlist_text
         if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
             playlist_uri = segment_uris[0]
             try:
@@ -670,10 +696,25 @@ class HiFiClient(DownloadSourcePlugin):
                 variant_resp = self.session.get(playlist_uri, allow_redirects=True, timeout=30)
                 variant_resp.raise_for_status()
                 variant_text = variant_resp.text
+                media_text = variant_text
                 init_uri, segment_uris = self._parse_hls_playlist(variant_text, playlist_uri)
             except Exception as e:
                 logger.warning(f"Failed to fetch variant playlist for track {track_id}: {e}")
                 return None
+
+        # Preview detection — some instances only have 30s Tidal DOWNLOAD
+        # access, returning a playlist far shorter than the real track. Decline
+        # it (and rotate the instance) so the orchestrator falls through to a
+        # real source instead of fetching a 30s file that gets quarantined.
+        playlist_s = hls_total_seconds(media_text)
+        if is_preview_playlist(playlist_s, expected_duration_s):
+            logger.warning(
+                f"HiFi manifest for track {track_id} ({quality}) is a "
+                f"{playlist_s:.0f}s preview of a {expected_duration_s:.0f}s track — "
+                f"declining this instance"
+            )
+            self._rotate_instance(self._current_instance)
+            return None
 
         if init_uri:
             logger.info(f"HiFi HLS manifest for track {track_id}: "
@@ -842,12 +883,21 @@ class HiFiClient(DownloadSourcePlugin):
 
         MIN_AUDIO_SIZE = 100 * 1024
 
+        # Real track duration — lets _get_hls_manifest reject 30s preview
+        # manifests before we download them. Best-effort: 0 disables the check.
+        try:
+            _info = self.get_track_info(track_id) or {}
+            expected_duration_s = float(_info.get('duration_s') or 0)
+        except Exception:
+            expected_duration_s = 0
+
         for q_key in chain:
             if self.shutdown_check and self.shutdown_check():
                 logger.info("Shutdown detected, aborting HiFi download")
                 return None
 
-            manifest_info = self._get_hls_manifest(track_id, quality=q_key)
+            manifest_info = self._get_hls_manifest(track_id, quality=q_key,
+                                                   expected_duration_s=expected_duration_s)
             if (
                 not manifest_info
                 or (
