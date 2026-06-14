@@ -122,13 +122,13 @@ class PlexVideoSource:
             "file": self._part_file(m),
         }
 
-    def _episode(self, ep, snum) -> dict:
+    def _episode(self, ep, snum, enum) -> dict:
         dur = getattr(ep, "duration", None)
         aired = getattr(ep, "originallyAvailableAt", None)
         return {
             "server_id": str(ep.ratingKey),
             "season_number": snum,
-            "episode_number": getattr(ep, "index", 0),
+            "episode_number": enum,
             "title": ep.title,
             "overview": getattr(ep, "summary", None),
             "air_date": aired.date().isoformat() if aired else None,
@@ -142,8 +142,12 @@ class PlexVideoSource:
         seasons_map = {}
         try:
             for ep in sh.episodes():
+                enum = getattr(ep, "index", None)
+                if enum is None:
+                    # No episode number (unmatched/special) — can't key it; skip.
+                    continue
                 snum = ep.parentIndex if getattr(ep, "parentIndex", None) is not None else 0
-                seasons_map.setdefault(snum, []).append(self._episode(ep, snum))
+                seasons_map.setdefault(snum, []).append(self._episode(ep, snum, enum))
         except Exception:
             logger.exception("Plex: failed reading episodes for %s", getattr(sh, "title", "?"))
         seasons = [{"server_id": None, "season_number": n, "title": None,

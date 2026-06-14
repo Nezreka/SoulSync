@@ -252,7 +252,9 @@ class VideoDatabase:
                 ).fetchone()["id"]
 
                 for ep in season.get("episodes", []):
-                    enum = ep["episode_number"]
+                    enum = ep.get("episode_number")
+                    if enum is None or snum is None:
+                        continue  # can't key an episode without season+episode numbers
                     seen_eps.add((snum, enum))
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "

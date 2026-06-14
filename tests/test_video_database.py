@@ -216,6 +216,17 @@ def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
     assert eps == [1]
 
 
+def test_upsert_show_tree_skips_episodes_without_number(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"episode_number": 1, "title": "E1"},
+            {"episode_number": None, "title": "Unmatched special"}]}]})
+    with db.connect() as c:
+        eps = [r["episode_number"] for r in c.execute(
+            "SELECT episode_number FROM episodes WHERE show_id=?", (sid,)).fetchall()]
+    assert eps == [1]
+
+
 def test_prune_missing_removes_unseen_top_level(db):
     db.upsert_movie("plex", {"server_id": "a", "title": "A"})
     db.upsert_movie("plex", {"server_id": "b", "title": "B"})
