@@ -93,6 +93,32 @@ def test_video_dashboard_subpage_present_with_expected_cards():
     assert "onclick" not in block
 
 
+def test_video_dashboard_header_matches_music_shape():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    header = _block(block, r'<div class="dashboard-header">', "<div class=\"dash-grid\">")
+    # Same shell as music: sweep band + icon title + subtitle.
+    assert "dashboard-header-sweep" in header
+    assert "page-header-icon" in header and "header-title" in header
+    assert "header-subtitle" in header
+    # Watchlist/Wishlist quick-nav present, navigating to the video pages (no
+    # music IDs — would duplicate + bind music JS — just classes + data-goto).
+    assert "header-quick-nav" in header
+    assert 'data-video-goto="video-watchlist"' in header
+    assert 'data-video-goto="video-wishlist"' in header
+    assert 'id="watchlist-button"' not in header and 'id="wishlist-button"' not in header
+    # Meta-source placeholder buttons stand in for music's enrichment row.
+    assert "header-actions" in header
+    for src in ("tmdb", "tvdb", "trakt", "omdb"):
+        assert f'data-video-meta="{src}"' in header
+    assert "onclick" not in header
+
+
+def test_video_dashboard_sweep_hidden_on_video_side():
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="video"] .dashboard-header-sweep' in css
+
+
 def test_video_dashboard_has_placeholder_slot_for_unbuilt_pages():
     assert 'id="video-placeholder-slot"' in _INDEX
 
