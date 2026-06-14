@@ -322,6 +322,61 @@ def test_query_library_shows_status_and_counts(db):
     assert (owned["episode_count"], owned["owned_count"]) == (1, 1)
 
 
+# ── enrichment plumbing ───────────────────────────────────────────────────────
+
+def test_enrichment_columns_present(db):
+    with db.connect() as c:
+        mcols = {r[1] for r in c.execute("PRAGMA table_info(movies)").fetchall()}
+        scols = {r[1] for r in c.execute("PRAGMA table_info(shows)").fetchall()}
+    assert {"tmdb_match_status", "tmdb_last_attempted"} <= mcols
+    assert {"tmdb_match_status", "tvdb_match_status", "tvdb_last_attempted"} <= scols
+
+
+def test_ensure_columns_is_idempotent(db):
+    # Running the migration again on an already-migrated DB must not error.
+    with db.connect() as c:
+        db._ensure_columns(c)
+        c.commit()
+    assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 0
+
+
+def test_enrichment_next_pending_then_none_when_fresh(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "B", "tmdb_id": 5})
+    nxt = db.enrichment_next("tmdb")
+    assert nxt and nxt["kind"] == "movie"
+    db.enrichment_apply("tmdb", "movie", nxt["id"], matched=True, external_id=1)
+    nxt2 = db.enrichment_next("tmdb")
+    assert nxt2 and nxt2["id"] != nxt["id"]
+    db.enrichment_apply("tmdb", "movie", nxt2["id"], matched=False)
+    # both attempted; not_found is fresh (<30d) so nothing is due
+    assert db.enrichment_next("tmdb") is None
+
+
+def test_enrichment_apply_matched_sets_id_status_and_metadata(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=27205,
+                        metadata={"overview": "O", "backdrop_url": "/b.jpg", "imdb_id": "tt1",
+                                  "bogus_col": "x"})
+    with db.connect() as c:
+        row = c.execute("SELECT tmdb_id, tmdb_match_status, overview, backdrop_url, imdb_id "
+                        "FROM movies WHERE id=?", (mid,)).fetchone()
+    assert (row["tmdb_id"], row["tmdb_match_status"]) == (27205, "matched")
+    assert (row["overview"], row["backdrop_url"], row["imdb_id"]) == ("O", "/b.jpg", "tt1")
+
+
+def test_enrichment_breakdown_unmatched_retry(db):
+    a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+    b = db.upsert_movie("plex", {"server_id": "m2", "title": "B"})
+    db.enrichment_apply("tmdb", "movie", a, matched=True, external_id=1)
+    db.enrichment_apply("tmdb", "movie", b, matched=False)
+    assert db.enrichment_breakdown("tmdb")["movie"] == {"matched": 1, "not_found": 1, "pending": 0}
+    un = db.enrichment_unmatched("tmdb", "movie", status="not_found")
+    assert [i["title"] for i in un["items"]] == ["B"] and un["total"] == 1
+    assert db.enrichment_retry("tmdb", "movie", scope="failed") == 1
+    assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 1
+
+
 # ── isolation: the video DB imports nothing from music ───────────────────────
 
 def test_video_db_module_imports_nothing_from_music():

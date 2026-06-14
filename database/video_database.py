@@ -20,6 +20,7 @@ import os
 import re
 import sqlite3
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from utils.logging_config import get_logger
@@ -44,6 +45,38 @@ _ARTICLE_RE = re.compile(r"^(the|a|an)\s+", re.IGNORECASE)
 
 def _sort_title(title) -> str:
     return _ARTICLE_RE.sub("", (title or "").strip()).lower()
+
+
+# Enrichment plumbing (parallels music's per-source columns). Maps a service +
+# content kind to (table, id_col, match_status_col, last_attempted_col).
+_ENRICH = {
+    "tmdb": {
+        "movie": ("movies", "tmdb_id", "tmdb_match_status", "tmdb_last_attempted"),
+        "show": ("shows", "tmdb_id", "tmdb_match_status", "tmdb_last_attempted"),
+    },
+    "tvdb": {
+        "show": ("shows", "tvdb_id", "tvdb_match_status", "tvdb_last_attempted"),
+    },
+}
+
+# Whitelist of metadata columns enrichment may write per table (guards against
+# arbitrary keys; backfill semantics applied by the caller).
+_ENRICH_META_COLS = {
+    "movies": {"overview", "backdrop_url", "release_date", "status", "content_rating",
+               "runtime_minutes", "studio", "imdb_id", "tmdb_id"},
+    "shows": {"overview", "backdrop_url", "status", "network", "content_rating",
+              "imdb_id", "tmdb_id", "tvdb_id"},
+}
+
+# Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
+_COLUMN_MIGRATIONS = [
+    ("movies", "tmdb_match_status", "TEXT"),
+    ("movies", "tmdb_last_attempted", "TEXT"),
+    ("shows", "tmdb_match_status", "TEXT"),
+    ("shows", "tmdb_last_attempted", "TEXT"),
+    ("shows", "tvdb_match_status", "TEXT"),
+    ("shows", "tvdb_last_attempted", "TEXT"),
+]
 
 
 class VideoDatabase:
@@ -90,6 +123,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             conn.executescript(schema)
+            self._ensure_columns(conn)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
             logger.info(
@@ -100,6 +134,132 @@ class VideoDatabase:
             conn.rollback()
             logger.exception("Failed to initialize video database at %s", self.database_path)
             raise
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _ensure_columns(conn) -> None:
+        """Add any new columns to an existing DB (idempotent ALTER TABLE)."""
+        for table, col, coltype in _COLUMN_MIGRATIONS:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+
+    # ── enrichment plumbing (per-source match status, like music) ─────────────
+    def enrichment_next(self, service: str, retry_days: int = 30) -> dict | None:
+        """Next item that needs enrichment for a service: pending (never tried)
+        first, then a not_found item older than retry_days. Returns
+        {kind, id, title, year} or None."""
+        kinds = _ENRICH.get(service)
+        if not kinds:
+            return None
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retry_days)).strftime("%Y-%m-%d %H:%M:%S")
+        conn = self._get_connection()
+        try:
+            for kind, (tbl, _idc, sc, _ac) in kinds.items():
+                row = conn.execute(
+                    f"SELECT id, title, year FROM {tbl} WHERE {sc} IS NULL ORDER BY id LIMIT 1").fetchone()
+                if row:
+                    return {"kind": kind, "id": row["id"], "title": row["title"], "year": row["year"]}
+            for kind, (tbl, _idc, sc, ac) in kinds.items():
+                row = conn.execute(
+                    f"SELECT id, title, year FROM {tbl} WHERE {sc}='not_found' "
+                    f"AND ({ac} IS NULL OR {ac} < ?) ORDER BY {ac} LIMIT 1", (cutoff,)).fetchone()
+                if row:
+                    return {"kind": kind, "id": row["id"], "title": row["title"], "year": row["year"]}
+            return None
+        finally:
+            conn.close()
+
+    def enrichment_apply(self, service: str, kind: str, item_id: int, matched: bool,
+                         external_id=None, metadata: dict | None = None) -> None:
+        """Record a match result: set match_status + last_attempted, the external
+        id (when matched), and any whitelisted metadata columns."""
+        spec = _ENRICH.get(service, {}).get(kind)
+        if not spec:
+            return
+        tbl, idc, sc, ac = spec
+        sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
+        params = ["matched" if matched else "not_found"]
+        if matched and external_id is not None:
+            sets.append(f"{idc}=?")
+            params.append(external_id)
+        allowed = _ENRICH_META_COLS.get(tbl, set())
+        for col, val in (metadata or {}).items():
+            if val is not None and col in allowed:
+                sets.append(f"{col}=?")
+                params.append(val)
+        params.append(item_id)
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def enrichment_breakdown(self, service: str) -> dict:
+        kinds = _ENRICH.get(service, {})
+        out = {}
+        conn = self._get_connection()
+        try:
+            for kind, (tbl, _idc, sc, _ac) in kinds.items():
+                out[kind] = {
+                    "matched": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='matched'").fetchone()[0],
+                    "not_found": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='not_found'").fetchone()[0],
+                    "pending": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc} IS NULL").fetchone()[0],
+                }
+            return out
+        finally:
+            conn.close()
+
+    def enrichment_unmatched(self, service: str, kind: str, status: str = "not_found",
+                             search=None, limit: int = 50, offset: int = 0) -> dict:
+        spec = _ENRICH.get(service, {}).get(kind)
+        if not spec:
+            return {"items": [], "total": 0}
+        tbl, _idc, sc, ac = spec
+        where, params = [], []
+        if status == "pending":
+            where.append(f"{sc} IS NULL")
+        elif status == "unmatched":
+            where.append(f"({sc} IS NULL OR {sc}='not_found')")
+        else:
+            where.append(f"{sc}='not_found'")
+        if search:
+            where.append("title LIKE ? COLLATE NOCASE")
+            params.append("%" + search + "%")
+        where_sql = " WHERE " + " AND ".join(where)
+        conn = self._get_connection()
+        try:
+            total = conn.execute(f"SELECT COUNT(*) FROM {tbl}{where_sql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT id, title, year, {ac} AS last_attempted, "
+                f"(poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
+                f"FROM {tbl}{where_sql} ORDER BY COALESCE(sort_title, title) COLLATE NOCASE "
+                f"LIMIT ? OFFSET ?", params + [limit, offset]).fetchall()
+            items = []
+            for r in rows:
+                d = dict(r)
+                d["has_poster"] = bool(d.get("has_poster"))
+                items.append(d)
+            return {"items": items, "total": total}
+        finally:
+            conn.close()
+
+    def enrichment_retry(self, service: str, kind: str, scope: str = "failed", item_id=None) -> int:
+        """Re-queue items by resetting status/last_attempted to NULL."""
+        spec = _ENRICH.get(service, {}).get(kind)
+        if not spec:
+            return 0
+        tbl, _idc, sc, ac = spec
+        conn = self._get_connection()
+        try:
+            if scope == "item" and item_id is not None:
+                cur = conn.execute(f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE id=?", (item_id,))
+            else:
+                cur = conn.execute(f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE {sc}='not_found'")
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 
