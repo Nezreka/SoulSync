@@ -108,6 +108,35 @@ body[data-side="video"] .status-section {
     display: none;
 }
 
+/* ── Dashboard header: match music, minus the sweep animation ──────────── */
+/* The header reuses music's .dashboard-header markup/CSS for an identical look;
+   we only mute the ambient sweep on the video side (equiv may return later,
+   driven by meta sources). Scoped to data-side="video" so music is untouched. */
+body[data-side="video"] .dashboard-header-sweep {
+    display: none;
+}
+
+/* Video meta-source buttons — the placeholder equivalents of music's round
+   enrichment buttons. Disabled pills until the video meta sources are wired. */
+.video-meta-button {
+    height: 40px;
+    padding: 0 18px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary, #9aa0aa);
+    background: rgba(18, 18, 22, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    backdrop-filter: blur(8px) saturate(1.2);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    cursor: not-allowed;
+    opacity: 0.55;
+}
+.video-meta-button:disabled {
+    cursor: not-allowed;
+}
+
 /* ── Subpages: one built video page shown at a time ────────────────────── */
 /* Each real page is a .video-subpage inside #video-page-host; the controller
    toggles the [hidden] attribute. Be explicit so no reused .dash-* rule can

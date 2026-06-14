@@ -425,10 +425,35 @@
             <div class="page video-page" id="video-page-host">
                 <section class="video-subpage" data-video-subpage="video-dashboard">
                     <div class="page-shell dashboard-container">
-                        <div class="dashboard-header">
+                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                             <div class="header-text">
-                                <h2 class="header-title"><span>Video Dashboard</span></h2>
+                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Video Dashboard</span></h2>
                                 <p class="header-subtitle">Monitor your video library, downloads and services</p>
+                            </div>
+                            <!-- Video meta-source buttons (TMDB/TVDB/Trakt/OMDb) — disabled
+                                 placeholders; the music side's enrichment-button equivalents,
+                                 wired live once the video meta sources exist. -->
+                            <div class="header-actions">
+                                <button class="video-meta-button" type="button" data-video-meta="tmdb" disabled title="TMDB — coming soon">TMDB</button>
+                                <button class="video-meta-button" type="button" data-video-meta="tvdb" disabled title="TVDB — coming soon">TVDB</button>
+                                <button class="video-meta-button" type="button" data-video-meta="trakt" disabled title="Trakt — coming soon">Trakt</button>
+                                <button class="video-meta-button" type="button" data-video-meta="omdb" disabled title="OMDb — coming soon">OMDb</button>
+                            </div>
+                            <!-- Watchlist / Wishlist quick-nav (top-right corner) — same as
+                                 music; navigates to the video pages via data-video-goto. -->
+                            <div class="header-quick-nav">
+                                <button class="header-button watchlist-button" type="button" data-video-goto="video-watchlist">
+                                    <span class="hero-btn-icon">&#128065;</span>
+                                    <span class="hero-btn-label">Watchlist</span>
+                                    <span class="hero-btn-badge" data-video-badge="watchlist">0</span>
+                                    <span class="hero-btn-shimmer"></span>
+                                </button>
+                                <button class="header-button wishlist-button" type="button" data-video-goto="video-wishlist">
+                                    <span class="hero-btn-icon">&#11088;</span>
+                                    <span class="hero-btn-label">Wishlist</span>
+                                    <span class="hero-btn-badge" data-video-badge="wishlist">0</span>
+                                    <span class="hero-btn-shimmer"></span>
+                                </button>
                             </div>
                         </div>
                         <div class="dash-grid">
