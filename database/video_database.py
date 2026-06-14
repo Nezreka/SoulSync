@@ -161,6 +161,159 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── scan upserts (server is the source of truth) ──────────────────────────
+    # The scanner passes normalized, server-agnostic dicts (a Plex/Jellyfin
+    # adapter produces them) so this layer never touches a media-server SDK.
+    @staticmethod
+    def _set_media_file(conn, owner_col: str, owner_id: int, file: dict | None) -> None:
+        """Replace the media_files row(s) for one owner. owner_col is internal
+        ('movie_id'|'episode_id'|'video_id'), never user input."""
+        conn.execute(f"DELETE FROM media_files WHERE {owner_col} = ?", (owner_id,))
+        if not file:
+            return
+        conn.execute(
+            f"INSERT INTO media_files ({owner_col}, relative_path, size_bytes, resolution, "
+            "video_codec, audio_codec, release_source, quality, runtime_seconds) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (owner_id,
+             file.get("relative_path") or file.get("path") or "",
+             file.get("size_bytes"), file.get("resolution"), file.get("video_codec"),
+             file.get("audio_codec"), file.get("release_source"), file.get("quality"),
+             file.get("runtime_seconds")),
+        )
+
+    def upsert_movie(self, server_source: str, item: dict) -> int:
+        """Insert/update one movie (keyed on server id) and its file. Returns row id."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO movies (server_source, server_id, title, year, overview, "
+                "runtime_minutes, content_rating, studio, poster_url, has_file, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(server_source, server_id) DO UPDATE SET "
+                "title=excluded.title, year=excluded.year, overview=excluded.overview, "
+                "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
+                "studio=excluded.studio, poster_url=excluded.poster_url, "
+                "has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
+                (server_source, item["server_id"], item.get("title"), item.get("year"),
+                 item.get("overview"), item.get("runtime_minutes"), item.get("content_rating"),
+                 item.get("studio"), item.get("poster_url"), 1 if item.get("file") else 0),
+            )
+            movie_id = conn.execute(
+                "SELECT id FROM movies WHERE server_source=? AND server_id=?",
+                (server_source, item["server_id"]),
+            ).fetchone()["id"]
+            self._set_media_file(conn, "movie_id", movie_id, item.get("file"))
+            conn.commit()
+            return movie_id
+        finally:
+            conn.close()
+
+    def upsert_show_tree(self, server_source: str, item: dict) -> int:
+        """Insert/update a show with its seasons + episodes (and files) in one
+        transaction. Episodes/seasons no longer present on the server for this
+        show are pruned. Returns the show row id."""
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO shows (server_source, server_id, title, year, overview, status, "
+                "network, runtime_minutes, content_rating, poster_url, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(server_source, server_id) DO UPDATE SET "
+                "title=excluded.title, year=excluded.year, overview=excluded.overview, "
+                "status=excluded.status, network=excluded.network, "
+                "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
+                "poster_url=excluded.poster_url, updated_at=CURRENT_TIMESTAMP",
+                (server_source, item["server_id"], item.get("title"), item.get("year"),
+                 item.get("overview"), item.get("status"), item.get("network"),
+                 item.get("runtime_minutes"), item.get("content_rating"), item.get("poster_url")),
+            )
+            show_id = conn.execute(
+                "SELECT id FROM shows WHERE server_source=? AND server_id=?",
+                (server_source, item["server_id"]),
+            ).fetchone()["id"]
+
+            seen_seasons: set[int] = set()
+            seen_eps: set[tuple[int, int]] = set()
+            for season in item.get("seasons", []):
+                snum = season["season_number"]
+                seen_seasons.add(snum)
+                conn.execute(
+                    "INSERT INTO seasons (show_id, server_id, season_number, title, overview, poster_url) "
+                    "VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(show_id, season_number) DO UPDATE SET "
+                    "server_id=excluded.server_id, title=excluded.title, "
+                    "overview=excluded.overview, poster_url=excluded.poster_url",
+                    (show_id, season.get("server_id"), snum, season.get("title"),
+                     season.get("overview"), season.get("poster_url")),
+                )
+                season_id = conn.execute(
+                    "SELECT id FROM seasons WHERE show_id=? AND season_number=?", (show_id, snum)
+                ).fetchone()["id"]
+
+                for ep in season.get("episodes", []):
+                    enum = ep["episode_number"]
+                    seen_eps.add((snum, enum))
+                    conn.execute(
+                        "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
+                        "season_number, episode_number, title, overview, air_date, "
+                        "runtime_minutes, has_file) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
+                        "season_id=excluded.season_id, server_source=excluded.server_source, "
+                        "server_id=excluded.server_id, title=excluded.title, "
+                        "overview=excluded.overview, air_date=excluded.air_date, "
+                        "runtime_minutes=excluded.runtime_minutes, has_file=excluded.has_file",
+                        (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
+                         ep.get("title"), ep.get("overview"), ep.get("air_date"),
+                         ep.get("runtime_minutes"), 1 if ep.get("file") else 0),
+                    )
+                    ep_id = conn.execute(
+                        "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
+                        (show_id, snum, enum),
+                    ).fetchone()["id"]
+                    self._set_media_file(conn, "episode_id", ep_id, ep.get("file"))
+
+            # Prune episodes/seasons that vanished from the server for this show.
+            for row in conn.execute(
+                "SELECT season_number, episode_number FROM episodes WHERE show_id=?", (show_id,)
+            ).fetchall():
+                if (row["season_number"], row["episode_number"]) not in seen_eps:
+                    conn.execute(
+                        "DELETE FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
+                        (show_id, row["season_number"], row["episode_number"]),
+                    )
+            for row in conn.execute(
+                "SELECT season_number FROM seasons WHERE show_id=?", (show_id,)
+            ).fetchall():
+                if row["season_number"] not in seen_seasons:
+                    conn.execute("DELETE FROM seasons WHERE show_id=? AND season_number=?",
+                                 (show_id, row["season_number"]))
+            conn.commit()
+            return show_id
+        finally:
+            conn.close()
+
+    def prune_missing(self, table: str, server_source: str, seen_ids) -> int:
+        """Delete top-level rows for a server that the scan no longer saw.
+        ``table`` is internal ('movies'|'shows'); cascades clean children."""
+        if table not in ("movies", "shows"):
+            raise ValueError(f"prune_missing: unexpected table {table!r}")
+        seen = {str(s) for s in seen_ids}
+        conn = self._get_connection()
+        try:
+            existing = [r["server_id"] for r in conn.execute(
+                f"SELECT server_id FROM {table} WHERE server_source=?", (server_source,)
+            ).fetchall()]
+            stale = [sid for sid in existing if str(sid) not in seen]
+            for sid in stale:
+                conn.execute(f"DELETE FROM {table} WHERE server_source=? AND server_id=?",
+                             (server_source, sid))
+            conn.commit()
+            return len(stale)
+        finally:
+            conn.close()
+
     # ── health ───────────────────────────────────────────────────────────────
     def health_check(self) -> bool:
         """True when the DB opens and passes a quick integrity check."""

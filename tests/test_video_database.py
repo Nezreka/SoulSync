@@ -170,6 +170,61 @@ def test_settings_kv_roundtrip(db):
     assert db.get_setting("download_dir") == "/data/video2"
 
 
+# ── scan upserts (server source of truth) ────────────────────────────────────
+
+def test_upsert_movie_inserts_updates_and_attaches_file(db):
+    mid = db.upsert_movie("plex", {
+        "server_id": "p1", "title": "Dune", "year": 2021,
+        "file": {"relative_path": "Dune.mkv", "size_bytes": 2000, "resolution": "2160p"}})
+    with db.connect() as c:
+        row = c.execute("SELECT title,year,has_file FROM movies WHERE id=?", (mid,)).fetchone()
+        assert (row["title"], row["year"], row["has_file"]) == ("Dune", 2021, 1)
+        f = c.execute("SELECT relative_path,size_bytes,resolution FROM media_files WHERE movie_id=?",
+                      (mid,)).fetchone()
+        assert (f["relative_path"], f["size_bytes"], f["resolution"]) == ("Dune.mkv", 2000, "2160p")
+    # Re-scan same server id -> same row, updated fields, file replaced (not duplicated).
+    mid2 = db.upsert_movie("plex", {
+        "server_id": "p1", "title": "Dune: Part One", "year": 2021,
+        "file": {"relative_path": "Dune1.mkv", "size_bytes": 3000}})
+    assert mid2 == mid
+    with db.connect() as c:
+        assert c.execute("SELECT title FROM movies WHERE id=?", (mid,)).fetchone()["title"] == "Dune: Part One"
+        files = c.execute("SELECT relative_path FROM media_files WHERE movie_id=?", (mid,)).fetchall()
+        assert [r["relative_path"] for r in files] == ["Dune1.mkv"]
+    assert db.dashboard_stats()["library"]["movies"] == 1
+
+
+def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
+    item = {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "server_id": "se1", "episodes": [
+            {"episode_number": 1, "title": "E1", "air_date": "2020-01-01",
+             "file": {"relative_path": "e1.mkv", "size_bytes": 10}},
+            {"episode_number": 2, "title": "E2", "air_date": "2020-01-08"}]}]}
+    sid = db.upsert_show_tree("plex", item)
+    with db.connect() as c:
+        assert c.execute("SELECT COUNT(*) FROM episodes WHERE show_id=?", (sid,)).fetchone()[0] == 2
+        assert c.execute("SELECT has_file FROM episodes WHERE show_id=? AND episode_number=1",
+                         (sid,)).fetchone()["has_file"] == 1
+        assert c.execute("SELECT has_file FROM episodes WHERE show_id=? AND episode_number=2",
+                         (sid,)).fetchone()["has_file"] == 0
+    # Re-scan with E2 removed from the server -> it gets pruned.
+    item["seasons"][0]["episodes"] = item["seasons"][0]["episodes"][:1]
+    assert db.upsert_show_tree("plex", item) == sid
+    with db.connect() as c:
+        eps = [r["episode_number"] for r in c.execute(
+            "SELECT episode_number FROM episodes WHERE show_id=?", (sid,)).fetchall()]
+    assert eps == [1]
+
+
+def test_prune_missing_removes_unseen_top_level(db):
+    db.upsert_movie("plex", {"server_id": "a", "title": "A"})
+    db.upsert_movie("plex", {"server_id": "b", "title": "B"})
+    assert db.prune_missing("movies", "plex", {"a"}) == 1
+    with db.connect() as c:
+        ids = {r["server_id"] for r in c.execute("SELECT server_id FROM movies").fetchall()}
+    assert ids == {"a"}
+
+
 # ── isolation: the video DB imports nothing from music ───────────────────────
 
 def test_video_db_module_imports_nothing_from_music():
