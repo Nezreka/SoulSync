@@ -12,8 +12,8 @@
     'use strict';
 
     var WORKERS = [
-        { id: 'tmdb', name: 'TMDB' },
-        { id: 'tvdb', name: 'TVDB' },
+        { id: 'tmdb', name: 'TMDB', color: '#38bdf8', rgb: '56, 189, 248' },
+        { id: 'tvdb', name: 'TVDB', color: '#a855f7', rgb: '168, 85, 247' },
     ];
     var LOGOS = {
         tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
@@ -97,7 +97,7 @@
             var pct = overallPct(s);
             var cov = pct == null ? '' :
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
-            return '<button class="em-worker-row" data-em-select="' + w.id + '">' +
+            return '<button class="em-worker-row" data-em-select="' + w.id + '" style="--row-accent: ' + w.rgb + '">' +
                 '<span class="em-worker-icon"><img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt=""></span>' +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
                 '<span class="em-worker-sub">' + esc(railSub(s)) + '</span>' + cov + '</span>' +
@@ -112,6 +112,10 @@
     function renderPanel() {
         var panel = byId('vem-panel');
         if (!panel) return;
+        // Theme the panel to the selected worker's accent (like the music modal).
+        var w = WORKERS.find(function (x) { return x.id === state.selected; }) || WORKERS[0];
+        panel.style.setProperty('--em-accent', w.color);
+        panel.style.setProperty('--em-accent-rgb', w.rgb);
         panel.innerHTML =
             '<div class="em-panel-header" id="vem-panel-header"></div>' +
             '<div class="em-section-label em-section-label--row"><span>Coverage</span>' +
