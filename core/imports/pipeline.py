@@ -356,6 +356,52 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 f"drift={integrity.checks.get('length_drift_s', 'n/a')})"
             )
 
+        # Silence guard — runs right where the length is verified, BEFORE the
+        # AcoustID/quality gates, so a mostly-silent file (correct container
+        # duration but only ~30s real audio, e.g. HiFi/Monochrome HLS padding)
+        # is caught regardless of its quality verdict and gets the right reason.
+        # Same quarantine + next-candidate retry pattern as the integrity check.
+        _skip_silence = _should_skip_quarantine_check(context, 'silence')
+        silence_reason = None if _skip_silence else detect_mostly_silent(file_path)
+        if silence_reason:
+            logger.error(f"[Silence] Rejected {_basename}: {silence_reason}")
+            context['_silence_rejected'] = True
+            try:
+                quarantine_path = move_to_quarantine(
+                    file_path, context, silence_reason, automation_engine,
+                    trigger='silence',
+                )
+                _mark_task_quarantined(context, quarantine_path)
+                logger.warning("File quarantined — mostly silent: %s", quarantine_path)
+            except Exception as quarantine_error:
+                logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
+                try:
+                    os.remove(file_path)
+                except Exception as del_error:
+                    logger.debug("delete silent file fallback: %s", del_error)
+
+            with matched_context_lock:
+                matched_downloads_context.pop(context_key, None)
+
+            task_id = context.get('task_id')
+            batch_id = context.get('batch_id')
+            # Try the next-best candidate before giving up — same pattern as
+            # the integrity / AcoustID / quality failures.
+            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'silence'):
+                logger.info(
+                    "Mostly-silent file for task %s — retrying next-best candidate: %s",
+                    task_id, silence_reason,
+                )
+                return
+            if task_id:
+                with tasks_lock:
+                    if task_id in download_tasks:
+                        download_tasks[task_id]['status'] = 'failed'
+                        download_tasks[task_id]['error_message'] = f"Silence guard: {silence_reason}"
+            if task_id and batch_id:
+                _notify_download_completed(batch_id, task_id, success=False)
+            return
+
         _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
         if _skip_acoustid:
             logger.info(f"[AcoustID] Skipped (user approval) for {_basename}")
@@ -630,51 +676,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 if task_id and batch_id:
                     _notify_download_completed(batch_id, task_id, success=False)
                 return
-
-        # Silence guard — catch preview/truncated files that are mostly silence
-        # (correct container duration but only ~30s real audio, e.g. HiFi/
-        # Monochrome HLS padding). Same quarantine + next-candidate retry
-        # pattern as the quality guard above.
-        _skip_silence = _should_skip_quarantine_check(context, 'silence')
-        silence_reason = None if _skip_silence else detect_mostly_silent(file_path)
-        if silence_reason:
-            try:
-                quarantine_path = move_to_quarantine(
-                    file_path, context, silence_reason, automation_engine,
-                    trigger='silence',
-                )
-                _mark_task_quarantined(context, quarantine_path)
-                logger.warning("File quarantined — mostly silent: %s", quarantine_path)
-            except Exception as quarantine_error:
-                logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-                try:
-                    os.remove(file_path)
-                except Exception as e:
-                    logger.debug("delete quarantine fallback: %s", e)
-
-            context['_silence_rejected'] = True
-            task_id = context.get('task_id')
-            batch_id = context.get('batch_id')
-            with matched_context_lock:
-                matched_downloads_context.pop(context_key, None)
-
-            # Try the next-best candidate before giving up — same pattern as
-            # the AcoustID / integrity / quality failures.
-            if _requeue_quarantined_task_for_retry(task_id, batch_id, 'silence'):
-                logger.info(
-                    "Mostly-silent file for task %s — retrying next-best candidate: %s",
-                    task_id, silence_reason,
-                )
-                return
-
-            if task_id:
-                with tasks_lock:
-                    if task_id in download_tasks:
-                        download_tasks[task_id]['status'] = 'failed'
-                        download_tasks[task_id]['error_message'] = f"Silence guard: {silence_reason}"
-            if task_id and batch_id:
-                _notify_download_completed(batch_id, task_id, success=False)
-            return
 
         file_ext = os.path.splitext(file_path)[1]
         clean_track_name = get_import_clean_title(
