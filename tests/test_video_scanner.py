@@ -87,6 +87,42 @@ def test_scan_sync_no_source_reports_error(db):
     assert st["state"] == "error" and "error" in st
 
 
+def test_scan_reports_percent_from_counts(db):
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 4, "shows": 0}
+        def iter_movies(self, incremental=False):
+            return iter([{"server_id": "m%d" % i, "title": str(i)} for i in range(4)])
+        def iter_shows(self, incremental=False):
+            return iter([])
+    st = VideoLibraryScanner(db).scan_sync(lambda: S())
+    assert st["state"] == "done"
+    assert st["percent"] == 100
+
+
+def test_scan_cancel_stops_midway(db):
+    scanner = VideoLibraryScanner(db)
+
+    def gen():
+        yield {"server_id": "m1", "title": "A"}
+        scanner.cancel()                 # request stop after the first item
+        yield {"server_id": "m2", "title": "B"}
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 2, "shows": 0}
+        def iter_movies(self, incremental=False):
+            return gen()
+        def iter_shows(self, incremental=False):
+            return iter([])
+
+    st = scanner.scan_sync(lambda: S())
+    assert st["state"] == "cancelled"
+    assert db.dashboard_stats()["library"]["movies"] == 1   # only the first was saved
+
+
 def test_core_video_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "core" / "video"
     for py in base.glob("*.py"):

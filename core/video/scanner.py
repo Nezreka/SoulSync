@@ -39,6 +39,7 @@ class VideoLibraryScanner:
         self._lock = threading.Lock()
         self._status = {"state": "idle"}
         self._thread = None
+        self._cancel = False
 
     def get_status(self) -> dict:
         with self._lock:
@@ -47,6 +48,15 @@ class VideoLibraryScanner:
     def _set(self, **kw) -> None:
         with self._lock:
             self._status.update(kw)
+
+    def cancel(self) -> dict:
+        """Request the running scan to stop after the current item."""
+        with self._lock:
+            if self._status.get("state") == "scanning":
+                self._cancel = True
+                self._status["phase"] = "cancelling"
+                return {"status": "cancelling"}
+        return {"status": "idle"}
 
     @staticmethod
     def _norm_mode(mode) -> str:
@@ -59,8 +69,9 @@ class VideoLibraryScanner:
         with self._lock:
             if self._status.get("state") == "scanning":
                 return {"status": "in_progress"}
+            self._cancel = False
             self._status = {"state": "scanning", "phase": "starting", "mode": mode,
-                            "started_at": time.time(),
+                            "started_at": time.time(), "percent": None,
                             "movies": 0, "shows": 0, "episodes": 0}
         self._thread = threading.Thread(
             target=self._run, args=(source_factory, mode), daemon=True)
@@ -71,11 +82,17 @@ class VideoLibraryScanner:
         """Run a scan inline (used by tests / callers that want to block)."""
         mode = self._norm_mode(mode)
         with self._lock:
+            self._cancel = False
             self._status = {"state": "scanning", "phase": "starting", "mode": mode,
-                            "started_at": time.time(),
+                            "started_at": time.time(), "percent": None,
                             "movies": 0, "shows": 0, "episodes": 0}
         self._run(source_factory, mode)
         return self.get_status()
+
+    def _finish_cancelled(self, movies, shows, episodes) -> None:
+        self._set(state="cancelled", phase="cancelled", finished_at=time.time(),
+                  movies=movies, shows=shows, episodes=episodes)
+        logger.info("Video scan cancelled at %d movies, %d shows", movies, shows)
 
     def _run(self, source_factory, mode: str = "full") -> None:
         try:
@@ -88,17 +105,33 @@ class VideoLibraryScanner:
             incremental = mode == "incremental"
             do_prune = mode == "deep"
 
+            # Totals up front so the progress bar shows a REAL percentage
+            # (movies + shows are the unit; episodes ride along under each show).
+            total = 0
+            try:
+                c = source.counts(incremental=incremental) or {}
+                total = int(c.get("movies", 0) or 0) + int(c.get("shows", 0) or 0)
+            except Exception:
+                logger.debug("video scan: counts() unavailable; progress will be indeterminate")
+            processed = 0
+
+            def pct():
+                return round(processed / total * 100) if total else None
+
             # ── Movies ──
-            self._set(phase="scanning movies")
+            self._set(phase="scanning movies", total=total, percent=pct())
             seen_movies: set[str] = set()
             movies = 0
             for item in source.iter_movies(incremental=incremental):
+                if self._cancel:
+                    return self._finish_cancelled(movies, 0, 0)
                 self.db.upsert_movie(server, item)
                 seen_movies.add(str(item["server_id"]))
                 movies += 1
-                if movies % 25 == 0:
-                    self._set(movies=movies)
-            self._set(movies=movies)
+                processed += 1
+                if movies % 10 == 0:
+                    self._set(movies=movies, percent=pct())
+            self._set(movies=movies, percent=pct())
             # Prune ONLY on a deep scan, and only when we actually saw items —
             # so a transient empty response can never wipe the library.
             removed_m = (self.db.prune_missing("movies", server, seen_movies)
@@ -110,16 +143,19 @@ class VideoLibraryScanner:
             shows = 0
             episodes = 0
             for show in source.iter_shows(incremental=incremental):
+                if self._cancel:
+                    return self._finish_cancelled(movies, shows, episodes)
                 self.db.upsert_show_tree(server, show)
                 seen_shows.add(str(show["server_id"]))
                 shows += 1
                 episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
-                self._set(shows=shows, episodes=episodes)
+                processed += 1
+                self._set(shows=shows, episodes=episodes, percent=pct())
             removed_s = (self.db.prune_missing("shows", server, seen_shows)
                          if do_prune and seen_shows else 0)
 
             self._set(state="done", phase="complete", finished_at=time.time(),
-                      movies=movies, shows=shows, episodes=episodes,
+                      movies=movies, shows=shows, episodes=episodes, percent=100,
                       removed=removed_m + removed_s)
             logger.info("Video scan (%s) complete: %d movies, %d shows, %d episodes (%d pruned)",
                         mode, movies, shows, episodes, removed_m + removed_s)
