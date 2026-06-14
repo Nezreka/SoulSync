@@ -1930,6 +1930,9 @@ function populateQualityProfileUI(profile) {
 
     const fallbackCheckbox = document.getElementById('quality-fallback-enabled');
     if (fallbackCheckbox) fallbackCheckbox.checked = profile.fallback_enabled !== false;
+
+    const searchModeSelect = document.getElementById('quality-search-mode');
+    if (searchModeSelect) searchModeSelect.value = profile.search_mode === 'best_quality' ? 'best_quality' : 'priority';
 }
 
 function renderRankedTargets() {
@@ -2071,6 +2074,7 @@ function collectQualityProfileFromUI() {
         version: 3,
         preset: (currentQualityProfile && currentQualityProfile.preset) || 'custom',
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
+        search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         ranked_targets,
     };
 }

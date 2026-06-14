@@ -460,6 +460,49 @@ class DownloadEngine:
         )
         return ([], [])
 
+    async def search_all_sources(self, query: str, source_chain,
+                                 timeout=None, progress_callback=None,
+                                 exclude_sources=None):
+        """Best-quality mode: pool RAW tracks from EVERY configured source in
+        ``source_chain`` instead of stopping at the first satisfying one.
+
+        Unlike :meth:`search_with_fallback`, no source short-circuits the
+        search — the caller (orchestrator/worker) ranks the combined pool
+        best→worst by actual audio quality. ``exclude_sources`` drops sources
+        whose per-source retry budget is already spent (so their candidates
+        never re-enter the pool). Unconfigured / unregistered / raising sources
+        are skipped exactly like the fallback path. Returns
+        ``(combined_tracks, combined_albums)``.
+        """
+        excluded = {s.lower() for s in (exclude_sources or []) if s}
+        pooled_tracks = []
+        pooled_albums = []
+
+        for source_name in source_chain:
+            if source_name.lower() in excluded:
+                continue
+            plugin = self._plugins.get(source_name)
+            if plugin is None:
+                logger.info(f"Skipping {source_name} (not available)")
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                logger.info(f"Skipping {source_name} (not configured)")
+                continue
+            try:
+                tracks, albums = await plugin.search(query, timeout, progress_callback)
+                if tracks:
+                    pooled_tracks.extend(tracks)
+                if albums:
+                    pooled_albums.extend(albums)
+            except Exception as e:
+                logger.warning(f"{source_name} search failed: {e}")
+
+        logger.info(
+            "Best-quality pool: %d candidates across %s for: %s",
+            len(pooled_tracks), ', '.join(source_chain), query,
+        )
+        return (pooled_tracks, pooled_albums)
+
     async def download_with_fallback(self, username: str, filename: str,
                                      file_size: int, source_chain) -> Optional[str]:
         """Try each source in ``source_chain`` until one accepts the

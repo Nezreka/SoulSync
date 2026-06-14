@@ -28,6 +28,7 @@ from config.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.selection import load_search_mode
 
 logger = get_logger("download_orchestrator")
 
@@ -344,6 +345,11 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
+        if load_search_mode() == 'best_quality':
+            logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
+            return await self.engine.search_all_sources(
+                query, chain, timeout, progress_callback,
+            )
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
         return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
