@@ -211,7 +211,9 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'body[data-side="video"] [data-music-only]' in css   # music API hidden on video
     assert "data-music-only" in _INDEX                          # the music API group is marked
-    assert "TMDB API Key" in _INDEX and "TVDB API Key" in _INDEX  # video placeholders
+    # Video placeholders use the SAME .api-service-frame structure as music.
+    assert 'class="api-service-frame stg-service" data-service="tmdb"' in _INDEX
+    assert 'class="api-service-frame stg-service" data-service="tvdb"' in _INDEX
 
 
 def test_video_settings_module_referenced_and_isolated():

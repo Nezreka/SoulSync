@@ -4740,18 +4740,43 @@
                             </div>
 
                             <!-- Video API Configuration (placeholders; shown only on the video
-                                 side in place of the music API services). -->
+                                 side in place of the music API services). Same structure as the
+                                 music service frames above. -->
                             <div class="settings-group" data-stg="connections" data-video-only>
-                                <h3>API Configuration</h3>
-                                <div class="form-group">
-                                    <label>TMDB API Key</label>
-                                    <input type="text" placeholder="The Movie Database — movie &amp; TV metadata" disabled>
-                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">Coming soon — primary movie/TV metadata source.</small>
+                                <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
+                                <div class="api-service-frame stg-service" data-service="tmdb">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #01b4e4;"></span>
+                                        <h4 class="service-title">TMDB</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="tmdb-api-key" placeholder="The Movie Database API Key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your key from <a href="https://www.themoviedb.org/settings/api" target="_blank" style="color: #01b4e4;">TMDB API Settings</a></div>
+                                            <div class="callback-help">Primary movie &amp; TV metadata source.</div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="form-group">
-                                    <label>TVDB API Key</label>
-                                    <input type="text" placeholder="TheTVDB — TV series metadata" disabled>
-                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">Coming soon — TV metadata source.</small>
+                                <div class="api-service-frame stg-service" data-service="tvdb">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #6cd391;"></span>
+                                        <h4 class="service-title">TVDB</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="tvdb-api-key" placeholder="TheTVDB API Key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get your key from <a href="https://thetvdb.com/dashboard/account/apikey" target="_blank" style="color: #6cd391;">TheTVDB API</a></div>
+                                            <div class="callback-help">TV series metadata source.</div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
