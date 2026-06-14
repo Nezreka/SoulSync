@@ -314,6 +314,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── library listing ───────────────────────────────────────────────────────
+    def list_movies(self) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, title, year, poster_url, has_file, monitored "
+                "FROM movies ORDER BY COALESCE(sort_title, title) COLLATE NOCASE, title"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def list_shows(self) -> list[dict]:
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT s.id, s.title, s.year, s.poster_url, s.monitored, "
+                "(SELECT COUNT(*) FROM episodes e WHERE e.show_id = s.id) AS episode_count, "
+                "(SELECT COUNT(*) FROM episodes e WHERE e.show_id = s.id AND e.has_file = 1) AS owned_count "
+                "FROM shows s ORDER BY COALESCE(s.sort_title, s.title) COLLATE NOCASE, s.title"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     # ── health ───────────────────────────────────────────────────────────────
     def health_check(self) -> bool:
         """True when the DB opens and passes a quick integrity check."""

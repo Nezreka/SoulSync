@@ -669,6 +669,31 @@
                         </div>
                     </div>
                 </section>
+                <section class="video-subpage" data-video-subpage="video-library" hidden>
+                    <div class="page-shell">
+                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
+                            <div class="header-text">
+                                <h2 class="header-title"><img src="/static/dashboard.png" class="page-header-icon" alt=""><span>Library</span></h2>
+                                <p class="header-subtitle">Movies and shows from your media server</p>
+                            </div>
+                            <div class="header-quick-nav">
+                                <button class="header-button watchlist-button" type="button" data-video-scan>
+                                    <span class="hero-btn-icon">&#128260;</span>
+                                    <span class="hero-btn-label" data-video-scan-label>Scan Library</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="video-library-toolbar">
+                            <div class="video-library-tabs">
+                                <button class="video-lib-tab active" type="button" data-video-lib-tab="movies">Movies</button>
+                                <button class="video-lib-tab" type="button" data-video-lib-tab="shows">Shows</button>
+                            </div>
+                            <span class="video-library-count" data-video-lib-count></span>
+                        </div>
+                        <div class="video-library-grid" data-video-lib-grid></div>
+                        <p class="video-empty-note" data-video-lib-empty hidden>Nothing here yet — run a scan to pull your library from the media server.</p>
+                    </div>
+                </section>
                 <div class="video-placeholder-slot" id="video-placeholder-slot" hidden></div>
             </div>
 
@@ -8799,6 +8824,8 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
+    <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
+    <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
 </body>
 
 </html>

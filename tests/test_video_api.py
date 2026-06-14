@@ -31,6 +31,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/dashboard" in rules
     assert "/api/video/scan/request" in rules
     assert "/api/video/scan/status" in rules
+    assert "/api/video/library" in rules
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -44,6 +45,19 @@ def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
         assert data["watchlist"] == 0 and data["wishlist"] == 0
     finally:
         videoapi._video_db = None  # don't leak the tmp DB to other tests
+
+
+def test_library_endpoint_lists_content(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        videoapi._video_db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+        resp = client.get("/api/video/library")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert [m["title"] for m in data["movies"]] == ["A"]
+        assert data["shows"] == []
+    finally:
+        videoapi._video_db = None
 
 
 def test_video_api_imports_nothing_from_music():

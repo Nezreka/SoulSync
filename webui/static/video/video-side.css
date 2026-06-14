@@ -146,3 +146,83 @@ body[data-side="video"] .dashboard-header-sweep {
     color: var(--text-secondary, #9aa0aa);
     font-size: 14px;
 }
+
+/* ── Library page ──────────────────────────────────────────────────────── */
+.video-library-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+.video-library-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+}
+.video-lib-tab {
+    padding: 8px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary, #9aa0aa);
+    background: transparent;
+    border: none;
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.video-lib-tab:hover { color: var(--text-primary, #e8e8ea); }
+.video-lib-tab.active {
+    color: #fff;
+    background: rgb(var(--accent-rgb, 88 101 242));
+}
+.video-library-count {
+    font-size: 13px;
+    color: var(--text-secondary, #9aa0aa);
+}
+
+.video-library-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 18px;
+}
+.video-card { cursor: default; }
+.video-card-poster {
+    position: relative;
+    aspect-ratio: 2 / 3;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 88 101 242), 0.25), rgba(0, 0, 0, 0.4));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.video-card-poster img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.video-card-poster-letter {
+    font-size: 40px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.55);
+}
+.video-card-title {
+    margin-top: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #e8e8ea);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.video-card-meta {
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--text-secondary, #9aa0aa);
+}

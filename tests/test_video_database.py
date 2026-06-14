@@ -225,6 +225,19 @@ def test_prune_missing_removes_unseen_top_level(db):
     assert ids == {"a"}
 
 
+def test_list_movies_and_shows(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Zardoz", "year": 1974})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "Akira", "year": 1988})
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"episode_number": 1, "file": {"relative_path": "e1.mkv"}},
+            {"episode_number": 2}]}]})
+    assert [m["title"] for m in db.list_movies()] == ["Akira", "Zardoz"]  # title NOCASE sort
+    shows = db.list_shows()
+    assert len(shows) == 1
+    assert (shows[0]["episode_count"], shows[0]["owned_count"]) == (2, 1)
+
+
 # ── isolation: the video DB imports nothing from music ───────────────────────
 
 def test_video_db_module_imports_nothing_from_music():
