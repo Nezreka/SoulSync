@@ -119,9 +119,14 @@ class VideoEnrichmentWorker:
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=True,
                                      external_id=result["id"], metadata=result.get("metadata"))
             self.stats["matched"] += 1
+            # Visible progress in app.log, mirroring the music workers' style.
+            logger.info("Matched %s '%s' -> %s ID: %s%s", item["kind"], item["title"],
+                        self.display_name, result["id"],
+                        " (by server id)" if item.get("known_id") else "")
         else:
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False)
             self.stats["not_found"] += 1
+            logger.info("No %s match for %s '%s'", self.display_name, item["kind"], item["title"])
         return True
 
     # ── status (same shape the music enrichment API returns) ──────────────────

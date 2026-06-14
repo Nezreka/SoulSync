@@ -129,6 +129,17 @@ def test_tvdb_client_refreshes_expired_token(monkeypatch):
     assert len(logins) == 2          # initial login + one refresh after the 401
 
 
+def test_worker_logs_match_progress(db, caplog):
+    # The worker must log each match at INFO (under soulsync.*) so progress is
+    # visible in app.log like the music workers — otherwise it looks dead.
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "year": 2021})
+    w = VideoEnrichmentWorker(db, "tmdb", FakeClient({"id": 438631, "metadata": {}}))
+    with caplog.at_level("INFO", logger="soulsync.video_enrichment.worker"):
+        w.process_one()
+    assert any("Matched movie 'Dune'" in r.message and "TMDB ID: 438631" in r.message
+               for r in caplog.records)
+
+
 def test_worker_process_one_not_found(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
     w = VideoEnrichmentWorker(db, "tmdb", FakeClient(None))
