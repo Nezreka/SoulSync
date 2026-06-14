@@ -96,6 +96,30 @@ def test_engine_builds_and_lists_workers(db):
     assert eng.worker("tmdb") is not None and eng.worker("nope") is None
 
 
+def test_pause_persists_to_db_and_resume_clears_it(db):
+    w = VideoEnrichmentWorker(db, "tmdb", FakeClient(None))
+    w.pause()
+    assert db.get_setting("tmdb_paused") == "1"
+    w.resume()
+    assert db.get_setting("tmdb_paused") == "0"
+
+
+def test_paused_state_survives_a_fresh_worker(db):
+    VideoEnrichmentWorker(db, "tmdb", FakeClient(None)).pause()
+    # A brand-new worker (as if after restart) restores the saved pause.
+    fresh = VideoEnrichmentWorker(db, "tmdb", FakeClient(None))
+    assert fresh.paused is False           # not restored until asked
+    fresh.restore_paused()
+    assert fresh.paused is True
+
+
+def test_engine_restores_paused_workers_on_build(db):
+    db.set_setting("tvdb_paused", "1")     # tvdb was paused before "restart"
+    eng = VideoEnrichmentEngine(db, {"tmdb": FakeClient(None), "tvdb": FakeClient(None)})
+    assert eng.worker("tvdb").paused is True
+    assert eng.worker("tmdb").paused is False
+
+
 def test_enrichment_package_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "core" / "video" / "enrichment"
     for py in base.glob("*.py"):
