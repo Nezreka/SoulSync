@@ -38,6 +38,9 @@
         { id: 'video-settings', label: 'Settings' },
         { id: 'video-issues', label: 'Issues', shared: true },
         { id: 'video-help', label: 'Help & Docs', shared: true },
+        // Drill-in detail pages — reachable from cards, not the sidebar nav.
+        { id: 'video-show-detail', label: 'Show' },
+        { id: 'video-movie-detail', label: 'Movie' },
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
@@ -180,6 +183,15 @@
                 });
             })(gotos[k]);
         }
+
+        // Drill-in: a card fires soulsync:video-open-detail {kind, id}. We just
+        // navigate to the matching detail subpage; video-detail.js (listening to
+        // the same event) loads the data. Keeps the two concerns decoupled.
+        document.addEventListener('soulsync:video-open-detail', function (e) {
+            var kind = e && e.detail && e.detail.kind;
+            if (kind === 'movie') navigate('video-movie-detail');
+            else if (kind === 'show') navigate('video-show-detail');
+        });
 
         var defaultNav = document.querySelector(
             '.video-nav .nav-button[data-video-page="' + DEFAULT_VIDEO_PAGE + '"]');
