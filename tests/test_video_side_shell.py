@@ -202,7 +202,9 @@ def test_video_library_mapping_ui_present_and_video_only():
     assert 'data-video-lib-select="tv"' in _INDEX
     assert "data-video-only" in _INDEX
     css = _CSS_PATH.read_text(encoding="utf-8")
-    assert 'body[data-side="music"] [data-video-only]' in css  # hidden on music side
+    assert 'body[data-side="music"] [data-video-only]' in css  # video bits hidden on music side
+    # ...and the music-library picker is hidden on the video side.
+    assert 'body[data-side="video"] #plex-library-selector-container' in css
 
 
 def test_video_settings_module_referenced_and_isolated():

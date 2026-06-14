@@ -122,6 +122,13 @@ body[data-side="video"][data-video-page="video-settings"] #video-page-host {
 body[data-side="music"] [data-video-only] {
     display: none !important;
 }
+/* Conversely, the music-library picker is irrelevant on the video side — hide
+   it there (the Movies/TV mapping is its replacement). */
+body[data-side="video"] #plex-library-selector-container,
+body[data-side="video"] #jellyfin-library-selector-container,
+body[data-side="video"] #navidrome-folder-selector-container {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
