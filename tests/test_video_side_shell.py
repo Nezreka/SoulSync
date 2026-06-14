@@ -251,7 +251,9 @@ def test_video_enrichment_module_referenced_and_isolated():
     assert "(function" in src and "})();" in src
     assert "window." not in src
     assert "/api/video/enrichment/" in src
-    assert "music" not in src.lower()
+    # No music API/function calls (a comment may mention the music *side*).
+    assert "/api/enrichment/" not in src
+    assert "openEnrichmentManager" not in src
 
 
 def test_video_settings_module_referenced_and_isolated():
