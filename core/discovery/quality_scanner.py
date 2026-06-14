@@ -11,8 +11,11 @@ and add provider matches to the wishlist:
    - other → all library tracks.
 3. For each track:
    - Stop-request gate (state['status'] != 'running').
-   - Quality-tier check via _get_quality_tier_from_extension(file_path).
-   - Skip tracks meeting standards (tier_num <= min_acceptable_tier).
+   - Probe REAL audio quality (bit depth / sample rate / bitrate) and check it
+     against the user's v3 ranked targets via quality_meets_profile — the SAME
+     strict core the download import guard uses (fallback ignored). Extension
+     tier is only a fallback label when the file can't be probed.
+   - Skip tracks that satisfy a target (quality_met).
    - For low-quality tracks: matching_engine search query gen, score
      candidates against the configured metadata source priority
      (artist + title similarity, album-type bonus), pick best match >=
@@ -66,6 +69,10 @@ class QualityScannerDeps:
     automation_engine: Any
     get_quality_tier_from_extension: Callable
     add_activity_item: Callable
+    # Probe real audio quality (mutagen-read bit depth / sample rate / bitrate)
+    # so the scan checks against the SAME ranked-target core as the download
+    # quality guard — not just the file extension. Injected for testability.
+    probe_audio_quality: Callable = None
 
 
 def _extract_lookup_value(value: Any, *names: str, default: Any = None) -> Any:
@@ -325,27 +332,20 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
         # Get database instance
         db = MusicDatabase()
 
-        # Get quality profile to determine preferred quality
+        # Load the user's v3 ranked targets — the SAME quality definition the
+        # download import guard uses. A track is "low quality" when its REAL
+        # measured quality (bit depth + sample rate + bitrate) satisfies none of
+        # the targets. Strict: fallback is ignored (it's a download-time
+        # concession, not a definition of what counts as good enough), so the
+        # scanner surfaces every genuinely-upgradeable track.
+        from core.quality.selection import targets_from_profile, quality_meets_profile
         quality_profile = db.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        profile_targets, _fallback_enabled = targets_from_profile(quality_profile)
 
-        # Determine minimum acceptable tier based on enabled qualities
-        min_acceptable_tier = 999
-        for quality_name, quality_config in preferred_qualities.items():
-            if quality_config.get('enabled', False):
-                # Map quality profile names to tier names
-                tier_map = {
-                    'flac': 'lossless',
-                    'mp3_320': 'low_lossy',
-                    'mp3_256': 'low_lossy',
-                    'mp3_192': 'low_lossy'
-                }
-                tier_name = tier_map.get(quality_name)
-                if tier_name:
-                    tier_num = deps.QUALITY_TIERS[tier_name]['tier']
-                    min_acceptable_tier = min(min_acceptable_tier, tier_num)
-
-        logger.info(f"[Quality Scanner] Minimum acceptable tier: {min_acceptable_tier}")
+        logger.info(
+            "[Quality Scanner] Profile targets (strict): %s",
+            [t.label for t in profile_targets] or "(none — no constraint)",
+        )
 
         # Get tracks to scan based on scope
         with deps.quality_scanner_lock:
@@ -428,8 +428,15 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
             try:
                 track_id, title, artist_id, album_id, file_path, bitrate, artist_name, album_title = track_row
 
-                # Check quality tier
-                tier_name, tier_num = deps.get_quality_tier_from_extension(file_path)
+                # Probe the REAL audio quality (bit depth / sample rate / bitrate)
+                # and check it against the ranked targets — same core as the
+                # download guard. Extension tier is only a fallback label when the
+                # file can't be probed.
+                aq = deps.probe_audio_quality(file_path) if deps.probe_audio_quality else None
+                if aq is not None:
+                    tier_name = aq.label()
+                else:
+                    tier_name = deps.get_quality_tier_from_extension(file_path)[0]
 
                 # Update progress
                 with deps.quality_scanner_lock:
@@ -437,8 +444,8 @@ def run_quality_scanner(scope='watchlist', profile_id=1, deps: QualityScannerDep
                     deps.quality_scanner_state["progress"] = (idx / total_tracks) * 100
                     deps.quality_scanner_state["phase"] = f"Scanning: {artist_name} - {title}"
 
-                # Check if meets quality standards
-                if tier_num <= min_acceptable_tier:
+                # Check if it meets the profile (strict — satisfies a real target).
+                if quality_meets_profile(aq, profile_targets):
                     # Quality met
                     with deps.quality_scanner_lock:
                         deps.quality_scanner_state["quality_met"] += 1

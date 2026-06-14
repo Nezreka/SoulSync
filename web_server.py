@@ -15012,6 +15012,14 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         return '', _sanitize_filename(full_path)
 
 
+def _probe_audio_quality(file_path):
+    """Probe real measured audio quality (bit depth / sample rate / bitrate)
+    as an AudioQuality, for the library quality scanner. Delegates to the same
+    core the download import guard uses. Returns None on any error."""
+    from core.imports.file_ops import probe_audio_quality
+    return probe_audio_quality(file_path)
+
+
 def _get_audio_quality_string(file_path):
     """
     Read audio file and return a quality descriptor string.
@@ -17653,6 +17661,7 @@ def _build_quality_scanner_deps():
         automation_engine=automation_engine,
         get_quality_tier_from_extension=_get_quality_tier_from_extension,
         add_activity_item=add_activity_item,
+        probe_audio_quality=_probe_audio_quality,
     )
 
 

@@ -125,7 +125,7 @@ def check_quality_target(file_path: str, context: dict) -> Optional[str]:
     logic here.
     """
     from core.imports.file_ops import probe_audio_quality
-    from core.quality.model import QualityTarget, rank_candidate, v2_qualities_to_ranked_targets
+    from core.quality.selection import targets_from_profile, quality_meets_profile
 
     aq = probe_audio_quality(file_path)
     if aq is None:
@@ -133,26 +133,21 @@ def check_quality_target(file_path: str, context: dict) -> Optional[str]:
         return None
 
     profile = MusicDatabase().get_quality_profile()
-    raw_targets = profile.get("ranked_targets")
-    if not raw_targets and "qualities" in profile:
-        raw_targets = v2_qualities_to_ranked_targets(profile["qualities"])
+    targets, fallback_enabled = targets_from_profile(profile)
 
-    if not raw_targets:
+    if not targets:
         return None
 
-    targets = [QualityTarget.from_dict(t) for t in raw_targets]
-    fallback_enabled = profile.get("fallback_enabled", True)
     downsample_enabled = _get_config_manager().get("lossy_copy.downsample_hires", False)
 
-    target_idx, _ = rank_candidate(aq, targets)
-    matched = target_idx < len(targets)
+    matched = quality_meets_profile(aq, targets)
 
     track_info = context.get("track_info", {})
     track_name = track_info.get("name", os.path.basename(file_path))
     actual_label = aq.label()
 
     if matched:
-        logger.info("[QualityGuard] %s matched target '%s': %s", track_name, targets[target_idx].label, actual_label)
+        logger.info("[QualityGuard] %s meets profile: %s", track_name, actual_label)
         return None
 
     # No target matched

@@ -51,6 +51,19 @@ def rank_with_targets(
     return [], False
 
 
+def targets_from_profile(profile: dict) -> Tuple[List[QualityTarget], bool]:
+    """Convert a quality-profile dict into ``(targets, fallback_enabled)`` with
+    v2->v3 migration applied. The single conversion path shared by the import
+    guard, the download ranker and the library quality scanner."""
+    raw_targets = profile.get('ranked_targets')
+    if not raw_targets and 'qualities' in profile:
+        raw_targets = v2_qualities_to_ranked_targets(profile['qualities'])
+
+    targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
+    fallback_enabled = profile.get('fallback_enabled', True)
+    return targets, fallback_enabled
+
+
 def load_profile_targets() -> Tuple[List[QualityTarget], bool]:
     """Load the user's quality profile from the DB and return
     ``(targets, fallback_enabled)`` with v2->v3 migration applied.
@@ -61,14 +74,27 @@ def load_profile_targets() -> Tuple[List[QualityTarget], bool]:
     """
     from database.music_database import MusicDatabase
 
-    profile = MusicDatabase().get_quality_profile()
-    raw_targets = profile.get('ranked_targets')
-    if not raw_targets and 'qualities' in profile:
-        raw_targets = v2_qualities_to_ranked_targets(profile['qualities'])
+    return targets_from_profile(MusicDatabase().get_quality_profile())
 
-    targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
-    fallback_enabled = profile.get('fallback_enabled', True)
-    return targets, fallback_enabled
+
+def quality_meets_profile(aq, targets: List[QualityTarget]) -> bool:
+    """Strict: True iff *aq* satisfies at least one ranked *target*.
+
+    The shared definition of "good enough" for both the import guard and the
+    library scanner — bit depth + sample rate are minimums (see
+    :meth:`AudioQuality.matches_target`). Fallback is NOT consulted here; it's a
+    download-time last-resort concession, not part of what counts as meeting the
+    profile. ``targets`` empty → no constraint (True). ``aq`` None (probe
+    failed) → True, so an unreadable file is never falsely flagged.
+    """
+    if not targets:
+        return True
+    if aq is None:
+        return True
+    from core.quality.model import rank_candidate
+
+    idx, _ = rank_candidate(aq, targets)
+    return idx < len(targets)
 
 
 _VALID_SEARCH_MODES = ("priority", "best_quality")
