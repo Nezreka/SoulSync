@@ -134,6 +134,12 @@ body[data-side="video"] #navidrome-folder-selector-container {
 body[data-side="video"] [data-music-only] {
     display: none !important;
 }
+/* The whole Library tab is music-specific today (file-org templates, music
+   paths, post-processing, conversion, stats) — hide it all on the video side.
+   Future video library settings just need data-video-only to stay visible. */
+body[data-side="video"] [data-stg="library"]:not([data-video-only]) {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
