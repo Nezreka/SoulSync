@@ -16,6 +16,10 @@ database/music_library.db
 database/music_library.db-shm
 database/music_library.db-wal
 database/music_library.db.backup_*
+database/video_library.db
+database/video_library.db-shm
+database/video_library.db-wal
+database/video_library.db.backup_*
 database/api_call_history.json
 storage/image_cache/
 logs/*.log

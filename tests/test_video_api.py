@@ -12,10 +12,12 @@ from pathlib import Path
 from flask import Flask
 
 
-def _make_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIDEO_DATABASE_PATH", str(tmp_path / "video_library.db"))
+def _make_client(tmp_path):
+    # Inject a tmp-backed DB directly so the endpoint never falls back to the
+    # real default path (no stray database/video_library.db in the repo).
     import api.video as videoapi
-    videoapi._video_db = None  # drop any cached handle so the env path is used
+    from database.video_database import VideoDatabase
+    videoapi._video_db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
     app = Flask(__name__)
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     return app.test_client(), videoapi
@@ -27,10 +29,12 @@ def test_blueprint_exposes_dashboard_route():
     app.register_blueprint(create_video_blueprint(), url_prefix="/api/video")
     rules = {r.rule for r in app.url_map.iter_rules()}
     assert "/api/video/dashboard" in rules
+    assert "/api/video/scan/request" in rules
+    assert "/api/video/scan/status" in rules
 
 
-def test_dashboard_endpoint_returns_zeroed_json(tmp_path, monkeypatch):
-    client, videoapi = _make_client(tmp_path, monkeypatch)
+def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
+    client, videoapi = _make_client(tmp_path)
     try:
         resp = client.get("/api/video/dashboard")
         assert resp.status_code == 200
