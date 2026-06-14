@@ -72,6 +72,37 @@ def test_skips_unconfigured_and_swallows_raising_source():
     assert {t.name for t in tracks} == {'c1'}  # a skipped, b raised, c survives
 
 
+def test_searches_run_concurrently_and_wait_for_slow_source():
+    import time
+
+    class _SlowPlugin:
+        def __init__(self, name, delay):
+            self._name = name
+            self._delay = delay
+            self.searched = False
+
+        def is_configured(self):
+            return True
+
+        async def search(self, query, timeout=None, progress_callback=None):
+            self.searched = True
+            await asyncio.sleep(self._delay)
+            return ([_Cand(self._name)], [])
+
+    slow = _SlowPlugin('usenet', 0.20)   # a slow release-level source
+    fast = _SlowPlugin('hifi', 0.05)
+    eng = _engine_with({'usenet': slow, 'hifi': fast})
+
+    start = time.monotonic()
+    tracks, _ = asyncio.run(eng.search_all_sources('q', ['usenet', 'hifi']))
+    elapsed = time.monotonic() - start
+
+    # Both included — the pool waits for the slow source.
+    assert {t.name for t in tracks} == {'usenet', 'hifi'}
+    # Concurrent: total ≈ max(0.20, 0.05), well under the sequential sum 0.25.
+    assert elapsed < 0.20 + 0.04
+
+
 def test_empty_when_all_sources_empty():
     a = _FakePlugin([])
     eng = _engine_with({'a': a})
