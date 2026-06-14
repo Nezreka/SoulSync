@@ -80,11 +80,29 @@
     function saveKeys() {
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
-        fetch(CONFIG_URL, {
+        return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({ tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '' })
         }).catch(function () { /* ignore */ });
+    }
+
+    function toast(msg, type) {
+        if (typeof showToast === 'function') showToast(msg, type);  // shared shell helper
+    }
+
+    // Mirrors music's testConnection(): save the key, then hit the test
+    // endpoint, then toast the result. Isolated -> /api/video/enrichment/<svc>/test.
+    function testConnection(svc) {
+        var name = svc.toUpperCase();
+        toast('Testing ' + name + ' connection…', 'info');
+        saveKeys().then(function () {
+            return fetch('/api/video/enrichment/' + svc + '/test',
+                { method: 'POST', headers: { 'Accept': 'application/json' } });
+        }).then(function (r) { return r.json(); }).then(function (res) {
+            if (res && res.success) toast(res.message || (name + ' connection successful'), 'success');
+            else toast(name + ' connection failed: ' + ((res && res.error) || 'unknown'), 'error');
+        }).catch(function () { toast('Failed to test ' + name + ' connection', 'error'); });
     }
 
     function onPageShown(e) {
@@ -105,6 +123,15 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', saveKeys);
         });
+        // Per-connection Test buttons (same behaviour as music's testConnection).
+        var testBtns = document.querySelectorAll('[data-video-test-service]');
+        for (var k = 0; k < testBtns.length; k++) {
+            (function (b) {
+                b.addEventListener('click', function () {
+                    testConnection(b.getAttribute('data-video-test-service'));
+                });
+            })(testBtns[k]);
+        }
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
