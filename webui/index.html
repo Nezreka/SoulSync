@@ -552,39 +552,56 @@
                                     <div class="library-status-card">
                                         <div class="library-status-glow"></div>
                                         <div class="library-status-header">
+                                            <div class="library-status-icon">
+                                                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg>
+                                            </div>
                                             <div class="library-status-info">
                                                 <h4 class="library-status-title">Video Library</h4>
-                                                <p class="library-status-subtitle">Not scanned yet</p>
+                                                <p class="library-status-subtitle">Movies, shows &amp; episodes</p>
                                             </div>
                                             <div class="library-status-actions">
                                                 <button class="library-status-btn" type="button" data-video-scan-mode="full">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                                                     <span>Refresh</span>
                                                 </button>
                                                 <button class="library-status-btn library-status-btn-secondary" type="button" data-video-scan-mode="deep">
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
                                                     <span>Deep Scan</span>
                                                 </button>
                                             </div>
                                         </div>
                                         <div class="library-status-stats">
                                             <div class="library-status-stat">
+                                                <div class="library-status-stat-icon">
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18"/><line x1="7" y1="2" x2="7" y2="22"/><line x1="17" y1="2" x2="17" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="2" y1="7" x2="7" y2="7"/><line x1="2" y1="17" x2="7" y2="17"/><line x1="17" y1="17" x2="22" y2="17"/><line x1="17" y1="7" x2="22" y2="7"/></svg>
+                                                </div>
                                                 <div class="library-status-stat-text">
                                                     <span class="library-status-stat-value" data-video-stat="movies">0</span>
                                                     <span class="library-status-stat-label">Movies</span>
                                                 </div>
                                             </div>
                                             <div class="library-status-stat">
+                                                <div class="library-status-stat-icon">
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
+                                                </div>
                                                 <div class="library-status-stat-text">
                                                     <span class="library-status-stat-value" data-video-stat="shows">0</span>
                                                     <span class="library-status-stat-label">Shows</span>
                                                 </div>
                                             </div>
                                             <div class="library-status-stat">
+                                                <div class="library-status-stat-icon">
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                                </div>
                                                 <div class="library-status-stat-text">
                                                     <span class="library-status-stat-value" data-video-stat="episodes">0</span>
                                                     <span class="library-status-stat-label">Episodes</span>
                                                 </div>
                                             </div>
                                             <div class="library-status-stat">
+                                                <div class="library-status-stat-icon">
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                                                </div>
                                                 <div class="library-status-stat-text">
                                                     <span class="library-status-stat-value" data-video-stat="library-size">--</span>
                                                     <span class="library-status-stat-label">Disk Size</span>
@@ -721,14 +738,21 @@
                                     <div class="tool-card-header">
                                         <h4 class="tool-card-title">Library Scan</h4>
                                     </div>
-                                    <p class="tool-card-info">Pull movies &amp; shows from your media server into the video library. <strong>Incremental</strong>: recently-added only (fast). <strong>Full Refresh</strong>: re-read everything. <strong>Deep Scan</strong>: full re-read and remove items no longer on the server.</p>
-                                    <div class="tool-card-controls video-scan-controls">
-                                        <button class="video-tool-btn" type="button" data-video-scan-mode="incremental">Incremental</button>
-                                        <button class="video-tool-btn" type="button" data-video-scan-mode="full">Full Refresh</button>
-                                        <button class="video-tool-btn video-tool-btn--warn" type="button" data-video-scan-mode="deep">Deep Scan</button>
+                                    <p class="tool-card-info">Pull movies &amp; shows from your media server. Incremental = recently-added only; Full Refresh = re-read everything; Deep Scan = also remove items no longer on the server.</p>
+                                    <div class="tool-card-controls">
+                                        <select data-video-scan-select>
+                                            <option value="incremental">Incremental Update</option>
+                                            <option value="full">Full Refresh</option>
+                                            <option value="deep">Deep Scan</option>
+                                        </select>
+                                        <button type="button" data-video-scan-run>Scan Library</button>
                                     </div>
                                     <div class="tool-card-progress-section">
-                                        <p class="progress-phase-label" data-video-tools-scan-status>Idle</p>
+                                        <p class="progress-phase-label" data-video-scan-phase>Idle</p>
+                                        <div class="progress-bar-container">
+                                            <div class="progress-bar-fill" data-video-scan-bar style="width: 0%;"></div>
+                                        </div>
+                                        <p class="progress-details-label" data-video-scan-detail>0 movies, 0 shows</p>
                                     </div>
                                 </div>
                             </div>
@@ -8865,8 +8889,6 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
     <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
-    <!-- Video tools page (isolated; reflects scan progress) -->
-    <script src="{{ url_for('static', filename='video/video-tools.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
