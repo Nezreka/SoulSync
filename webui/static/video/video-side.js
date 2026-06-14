@@ -30,6 +30,7 @@
         { id: 'video-discover', label: 'Discover' },
         { id: 'video-library', label: 'Library' },
         { id: 'video-watchlist', label: 'Watchlist' },
+        { id: 'video-wishlist', label: 'Wishlist' },
         { id: 'video-downloads', label: 'Downloads' },
         { id: 'video-calendar', label: 'Calendar' },
         { id: 'video-import', label: 'Import', shared: true },
