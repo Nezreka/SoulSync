@@ -240,9 +240,28 @@ class PlexVideoSource:
                 seasons_map.setdefault(snum, []).append(self._episode(ep, snum, enum))
         except Exception:
             logger.exception("Plex: failed reading episodes for %s", getattr(sh, "title", "?"))
-        seasons = [{"server_id": None, "season_number": n, "title": None,
-                    "overview": None, "poster_url": None, "episodes": eps}
-                   for n, eps in sorted(seasons_map.items())]
+        # Season metadata (poster/title/overview) — one extra call per show gives
+        # real per-season art for the detail page.
+        season_meta = {}
+        try:
+            for se in sh.seasons():
+                sidx = getattr(se, "index", None)
+                if sidx is None:
+                    continue
+                season_meta[sidx] = {
+                    "server_id": str(getattr(se, "ratingKey", "")) or None,
+                    "title": getattr(se, "title", None),
+                    "overview": getattr(se, "summary", None),
+                    "poster_url": getattr(se, "thumb", None),
+                }
+        except Exception:
+            logger.exception("Plex: failed reading seasons for %s", getattr(sh, "title", "?"))
+        seasons = []
+        for n, eps in sorted(seasons_map.items()):
+            meta = season_meta.get(n, {})
+            seasons.append({"server_id": meta.get("server_id"), "season_number": n,
+                            "title": meta.get("title"), "overview": meta.get("overview"),
+                            "poster_url": meta.get("poster_url"), "episodes": eps})
         d = {
             "server_id": str(sh.ratingKey),
             "title": sh.title,
@@ -413,10 +432,28 @@ class JellyfinVideoSource:
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
                     "file": self._file(ep),
                 })
+            # Season metadata (poster/title/overview) — one extra call per show.
+            season_meta = {}
+            try:
+                seas = self._req(f"/Shows/{series_id}/Seasons",
+                                 {"UserId": self.uid, "Fields": "Overview"}) or {}
+                for se in seas.get("Items", []):
+                    sidx = se.get("IndexNumber")
+                    if sidx is None:
+                        continue
+                    season_meta[sidx] = {
+                        "server_id": str(se["Id"]) if se.get("Id") else None,
+                        "title": se.get("Name"),
+                        "overview": se.get("Overview"),
+                        "poster_url": (se.get("ImageTags") or {}).get("Primary"),
+                    }
+            except Exception:
+                logger.exception("Jellyfin: failed reading seasons for %s", it.get("Name", "?"))
             for snum, eps in sorted(by_season.items()):
-                seasons.append({"server_id": None, "season_number": snum,
-                                "title": None, "overview": None,
-                                "poster_url": None, "episodes": eps})
+                meta = season_meta.get(snum, {})
+                seasons.append({"server_id": meta.get("server_id"), "season_number": snum,
+                                "title": meta.get("title"), "overview": meta.get("overview"),
+                                "poster_url": meta.get("poster_url"), "episodes": eps})
         except Exception:
             logger.exception("Jellyfin: failed reading episodes for %s", it.get("Name", "?"))
         d = {
