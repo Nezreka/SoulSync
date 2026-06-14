@@ -168,6 +168,10 @@ def test_video_tools_page_has_three_scan_modes():
     assert "data-video-scan-run" in block and "data-video-scan-select" in block
     assert "data-video-scan-phase" in block          # reuses music progress markup
     assert "tool-card" in block and "tool-card-controls" in block  # reuses music classes
+    # Matches the music Database Updater card: help button, last-scan line, stats grid.
+    assert "tool-help-button" in block
+    assert "data-video-scan-last" in block
+    assert "tool-card-stats" in block and 'data-video-scan-stat="movies"' in block
     assert "onclick" not in block
 
 

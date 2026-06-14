@@ -32,3 +32,9 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.scanner import get_video_scanner
         return jsonify(get_video_scanner(get_video_db()).get_status())
+
+    @bp.route("/scan/stop", methods=["POST"])
+    def video_scan_stop():
+        from . import get_video_db
+        from core.video.scanner import get_video_scanner
+        return jsonify(get_video_scanner(get_video_db()).cancel())

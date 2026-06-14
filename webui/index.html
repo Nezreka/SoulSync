@@ -762,8 +762,27 @@
                                 <div class="tool-card">
                                     <div class="tool-card-header">
                                         <h4 class="tool-card-title">Library Scan</h4>
+                                        <button class="tool-help-button" data-tool="video-scan" title="Learn more about this tool">?</button>
                                     </div>
-                                    <p class="tool-card-info">Pull movies &amp; shows from your media server. Incremental = recently-added only; Full Refresh = re-read everything; Deep Scan = also remove items no longer on the server.</p>
+                                    <p class="tool-card-info">Last Scan: <span data-video-scan-last>Never</span></p>
+                                    <div class="tool-card-stats">
+                                        <div class="stat-item">
+                                            <span class="stat-item-label">Movies:</span>
+                                            <span class="stat-item-value" data-video-scan-stat="movies">0</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-item-label">Shows:</span>
+                                            <span class="stat-item-value" data-video-scan-stat="shows">0</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-item-label">Episodes:</span>
+                                            <span class="stat-item-value" data-video-scan-stat="episodes">0</span>
+                                        </div>
+                                        <div class="stat-item">
+                                            <span class="stat-item-label">Size:</span>
+                                            <span class="stat-item-value" data-video-scan-stat="size">0.0 MB</span>
+                                        </div>
+                                    </div>
                                     <div class="tool-card-controls">
                                         <select data-video-scan-select>
                                             <option value="incremental">Incremental Update</option>

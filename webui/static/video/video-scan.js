@@ -40,25 +40,70 @@
         return (s.movies || 0) + ' movies, ' + (s.shows || 0) + ' shows';
     }
 
+    function formatSize(bytes) {
+        bytes = Number(bytes) || 0;
+        var mb = bytes / 1048576;
+        if (mb >= 1048576) return (mb / 1048576).toFixed(2) + ' TB';
+        if (mb >= 1024) return (mb / 1024).toFixed(2) + ' GB';
+        return mb.toFixed(1) + ' MB';
+    }
+
+    // Populate the Tools card stat grid (Movies/Shows/Episodes/Size) from the
+    // same dashboard endpoint — reuses existing data, no new API.
+    function loadToolStats() {
+        if (!document.querySelector('[data-video-scan-stat]')) return;
+        fetch('/api/video/dashboard', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || d.error) return;
+                var lib = d.library || {};
+                var set = function (k, v) {
+                    var n = document.querySelector('[data-video-scan-stat="' + k + '"]');
+                    if (n) n.textContent = v;
+                };
+                set('movies', lib.movies || 0);
+                set('shows', lib.shows || 0);
+                set('episodes', lib.episodes || 0);
+                set('size', formatSize(lib.size_bytes));
+            })
+            .catch(function () { /* leave defaults */ });
+    }
+
+    function setRunLabel(text) {
+        var run = document.querySelector('[data-video-scan-run]');
+        if (run) run.textContent = text;
+    }
+
     function reflectProgress(s) {
         var phase = (s.phase || 'scanning');
         setText('[data-video-scan-phase]', phase.charAt(0).toUpperCase() + phase.slice(1));
-        setText('[data-video-scan-detail]', counts(s));
-        setBar(100);
+        var detail = counts(s);
+        if (s.percent != null) detail += ' · ' + s.percent + '%';
+        setText('[data-video-scan-detail]', detail);
+        // Real percentage when we know the total; otherwise a full bar as a
+        // "working" indicator.
+        setBar(s.percent != null ? s.percent : 100);
+        setRunLabel('Cancel');                   // button doubles as cancel while scanning
     }
 
     function reflectDone(s) {
-        var run = document.querySelector('[data-video-scan-run]');
-        if (run) run.disabled = false;
+        setRunLabel('Scan Library');
         if (s.state === 'error') {
             setText('[data-video-scan-phase]', 'Failed');
             setText('[data-video-scan-detail]', s.error || 'Scan failed');
             setBar(0);
+        } else if (s.state === 'cancelled') {
+            setText('[data-video-scan-phase]', 'Cancelled');
+            setText('[data-video-scan-detail]', counts(s) + ' (cancelled)');
+            setBar(0);
+            loadToolStats();
         } else {
             setText('[data-video-scan-phase]', 'Complete');
             setText('[data-video-scan-detail]',
                 counts(s) + (s.removed ? ', ' + s.removed + ' removed' : ''));
             setBar(100);
+            loadToolStats();
+            try { setText('[data-video-scan-last]', new Date().toLocaleString()); } catch (e) { /* ignore */ }
         }
     }
 
@@ -86,9 +131,7 @@
     function start(mode) {
         if (scanning) return;
         scanning = true;
-        var run = document.querySelector('[data-video-scan-run]');
-        if (run) run.disabled = true;
-        var pending = { state: 'scanning', phase: 'starting', mode: mode, movies: 0, shows: 0 };
+        var pending = { state: 'scanning', phase: 'starting', mode: mode, movies: 0, shows: 0, percent: 0 };
         reflectProgress(pending);
         emit('soulsync:video-scan-progress', pending);
         fetch(REQUEST_URL, {
@@ -102,6 +145,12 @@
                 reflectDone({ state: 'error' });
                 emit('soulsync:video-scan-done', { state: 'error' });
             });
+    }
+
+    function stop() {
+        setText('[data-video-scan-phase]', 'Cancelling…');
+        fetch('/api/video/scan/stop', { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .catch(function () { /* poll will reconcile */ });
     }
 
     function init() {
@@ -118,12 +167,16 @@
         if (run) {
             run.addEventListener('click', function (e) {
                 e.preventDefault();
+                if (scanning) { stop(); return; }   // button doubles as Cancel mid-scan
                 var sel = document.querySelector('[data-video-scan-select]');
                 start(sel ? sel.value : 'full');
             });
         }
         document.addEventListener('soulsync:video-scan-start', function (e) {
             start((e.detail && e.detail.mode) || 'full');
+        });
+        document.addEventListener('soulsync:video-page-shown', function (e) {
+            if (e && e.detail === 'video-tools') loadToolStats();
         });
     }
 

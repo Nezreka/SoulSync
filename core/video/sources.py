@@ -112,6 +112,14 @@ class PlexVideoSource:
             "tv": [{"title": s.title} for s in self._sections("show")],
         }
 
+    def counts(self, incremental=False) -> dict:
+        """Cheap item totals (no full fetch) for the progress bar."""
+        m = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._sections("movie", self._movies_lib))
+        sh = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._sections("show", self._tv_lib))
+        if incremental:
+            m, sh = min(m, 100), min(sh, 50)
+        return {"movies": m, "shows": sh}
+
     def iter_movies(self, incremental=False):
         for section in self._sections("movie", self._movies_lib):
             items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
@@ -234,6 +242,18 @@ class JellyfinVideoSource:
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
         }
+
+    def counts(self, incremental=False) -> dict:
+        def total(view, itype):
+            resp = self._req(f"/Users/{self.uid}/Items", {
+                "ParentId": view["Id"], "IncludeItemTypes": itype,
+                "Recursive": "true", "Limit": "0"}) or {}
+            return int(resp.get("TotalRecordCount", 0) or 0)
+        m = sum(total(v, "Movie") for v in self._views("movies", self._movies_lib))
+        sh = sum(total(v, "Series") for v in self._views("tvshows", self._tv_lib))
+        if incremental:
+            m, sh = min(m, 100), min(sh, 50)
+        return {"movies": m, "shows": sh}
 
     def _paged(self, path, params, page_size=500):
         """Yield items across pages so large libraries aren't capped/truncated."""
