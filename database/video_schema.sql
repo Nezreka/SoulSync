@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS video_settings (
 -- ── Content: Movies ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS movies (
     id                   INTEGER PRIMARY KEY,
+    server_source        TEXT,            -- 'plex' | 'jellyfin' (NULL = not on a server yet, e.g. wishlist)
+    server_id            TEXT,            -- media server native id (Plex ratingKey / Jellyfin Item Id)
     tmdb_id              INTEGER UNIQUE,
     imdb_id              TEXT,
     title                TEXT NOT NULL,
@@ -86,10 +88,15 @@ CREATE TABLE IF NOT EXISTS movies (
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
 CREATE INDEX IF NOT EXISTS idx_movies_release    ON movies(release_date);
+-- Upsert/stale-removal key: the server's native id. Multiple NULLs are allowed
+-- (wishlist items not yet on a server), so this never blocks non-server rows.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_movies_server ON movies(server_source, server_id);
 
 -- ── Content: TV (shows → seasons → episodes) ────────────────────────────────
 CREATE TABLE IF NOT EXISTS shows (
     id                 INTEGER PRIMARY KEY,
+    server_source      TEXT,             -- 'plex' | 'jellyfin' (NULL = not on a server yet)
+    server_id          TEXT,             -- media server native id
     tvdb_id            INTEGER UNIQUE,
     tmdb_id            INTEGER,
     imdb_id            TEXT,
@@ -112,10 +119,12 @@ CREATE TABLE IF NOT EXISTS shows (
 );
 CREATE INDEX IF NOT EXISTS idx_shows_tvdb      ON shows(tvdb_id);
 CREATE INDEX IF NOT EXISTS idx_shows_monitored ON shows(monitored);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_shows_server ON shows(server_source, server_id);
 
 CREATE TABLE IF NOT EXISTS seasons (
     id            INTEGER PRIMARY KEY,
     show_id       INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    server_id     TEXT,             -- media server native id (for reference/refresh)
     season_number INTEGER NOT NULL,
     title         TEXT,
     overview      TEXT,
@@ -129,6 +138,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     id              INTEGER PRIMARY KEY,
     show_id         INTEGER NOT NULL REFERENCES shows(id)   ON DELETE CASCADE,
     season_id       INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+    server_source   TEXT,             -- 'plex' | 'jellyfin'
+    server_id       TEXT,             -- media server native id
     season_number   INTEGER NOT NULL,
     episode_number  INTEGER NOT NULL,
     title           TEXT,
