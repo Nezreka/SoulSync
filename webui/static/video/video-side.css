@@ -491,22 +491,12 @@ body[data-side="video"] .dashboard-header-sweep {
     text-shadow: 0 2px 12px rgba(0,0,0,0.6);
     display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
-.vd-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
-.vd-btn {
-    display: inline-flex; align-items: center; gap: 8px; padding: 11px 22px; border-radius: 8px;
-    font-size: 14.5px; font-weight: 700; cursor: pointer; border: 1px solid transparent;
-    text-decoration: none; transition: transform 0.18s ease, background 0.2s ease, box-shadow 0.2s ease;
-}
-.vd-btn:hover { transform: translateY(-2px); }
-.vd-btn-ic { font-size: 16px; line-height: 1; }
-.vd-btn--primary { background: rgb(var(--vd-accent-rgb)); color: #fff;
-    box-shadow: 0 8px 24px rgba(var(--vd-accent-rgb), 0.45); }
-.vd-btn--primary:hover { box-shadow: 0 10px 30px rgba(var(--vd-accent-rgb), 0.6); filter: brightness(1.08); }
-.vd-btn--ghost { background: rgba(255,255,255,0.16); color: #fff; border-color: rgba(255,255,255,0.18); backdrop-filter: blur(6px); }
-.vd-btn--ghost:hover { background: rgba(255,255,255,0.26); }
-.vd-btn--link { background: rgba(0,0,0,0.35); color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.16);
-    font-size: 13px; padding: 10px 16px; backdrop-filter: blur(6px); }
-.vd-btn--link:hover { background: rgba(0,0,0,0.55); color: #fff; }
+/* Action buttons + source links reuse the music artist-detail classes verbatim
+   (.library-artist-watchlist-btn / .discog-download-btn / .artist-hero-badge);
+   only the billboard-specific bits live here. */
+.vd-actions { margin-bottom: 16px; }
+.vd-links { margin-bottom: 16px; }
+.vd-links .artist-hero-badge[title="TVDB"] img { filter: invert(1); }
 
 .vd-loading { padding: 50px 0; text-align: center; color: rgba(255,255,255,0.55); }
 
