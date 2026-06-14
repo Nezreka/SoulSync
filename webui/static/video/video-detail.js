@@ -14,9 +14,21 @@
     'use strict';
 
     var DETAIL_URL = '/api/video/detail/';
+    var TMDB_LOGO = 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg';
+    var TVDB_LOGO = 'https://www.svgrepo.com/show/443500/brand-tvdb.svg';
     var data = null;
     var selectedSeason = null;
     var menuOpen = false;
+
+    // Mirrors the music artist-hero badge: logo img with a short text fallback.
+    function badge(logo, fallback, title, url) {
+        var inner = logo
+            ? '<img src="' + logo + '" alt="' + fallback + '" onerror="this.parentNode.textContent=\'' + fallback + '\'">'
+            : '<span style="font-size:9px;font-weight:700;">' + fallback + '</span>';
+        return url
+            ? '<a class="artist-hero-badge" title="' + title + '" href="' + url + '" target="_blank" rel="noopener noreferrer">' + inner + '</a>'
+            : '<div class="artist-hero-badge" title="' + title + '">' + inner + '</div>';
+    }
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -104,25 +116,29 @@
         if (d.network) meta.push('<span>' + esc(d.network) + '</span>');
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
-        // actions — Netflix buttons + real external links
-        var links = [];
-        if (d.imdb_id) links.push(['IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/']);
-        if (d.tmdb_id) links.push(['TMDB', 'https://www.themoviedb.org/tv/' + d.tmdb_id]);
-        if (d.tvdb_id) links.push(['TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series']);
+        // Action buttons — reuse the EXACT music artist hero button styles.
         var a = q('[data-vd-actions]');
         if (a) {
             a.innerHTML =
-                '<button class="vd-btn vd-btn--primary" type="button" data-vd-act="watchlist">' +
-                '<span class="vd-btn-ic">＋</span> Watchlist</button>' +
-                '<button class="vd-btn vd-btn--ghost" type="button" data-vd-act="download">' +
-                '<span class="vd-btn-ic">⭳</span> Get Missing</button>' +
-                links.map(function (l) {
-                    return '<a class="vd-btn vd-btn--link" href="' + l[1] + '" target="_blank" rel="noopener">' +
-                        esc(l[0]) + ' ↗</a>';
-                }).join('');
+                '<button class="library-artist-watchlist-btn" type="button" data-vd-act="watchlist">' +
+                '<span class="watchlist-icon">＋</span><span class="watchlist-text">Watchlist</span></button>' +
+                '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="download">' +
+                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
+                '<span class="discog-btn-shimmer"></span></button>';
         }
+
+        // External-source links as artist-hero-badge chips (logo + text fallback).
+        var l = q('[data-vd-links]');
+        if (l) {
+            var badges = [];
+            if (d.imdb_id) badges.push(badge('', 'IMDb', 'IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/'));
+            if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB', 'https://www.themoviedb.org/tv/' + d.tmdb_id));
+            if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
+            l.innerHTML = badges.join('');
+        }
+
         var g = q('[data-vd-genres]');
-        if (g) g.innerHTML = d.network ? '' : '';   // genres land with "capture everything"
+        if (g) g.innerHTML = '';                     // genres land with "capture everything"
     }
 
     // ── season dropdown ───────────────────────────────────────────────────────
