@@ -49,6 +49,58 @@ def test_scan_sync_populates_library(db):
     assert (lib["movies"], lib["shows"], lib["episodes"]) == (1, 1, 1)
 
 
+def test_scan_pauses_and_resumes_enrichment_workers(db):
+    events = []
+    scanner = VideoLibraryScanner(
+        db, pause_workers=lambda: events.append("pause"),
+        resume_workers=lambda: events.append("resume"))
+    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []))
+    assert events == ["pause", "resume"]             # paused first, resumed after
+
+
+def test_scan_resumes_enrichment_even_on_error(db):
+    events = []
+    scanner = VideoLibraryScanner(
+        db, pause_workers=lambda: events.append("pause"),
+        resume_workers=lambda: events.append("resume"))
+
+    def boom():
+        raise RuntimeError("server blew up")
+
+    scanner.scan_sync(boom)                           # source_factory raises
+    assert scanner.get_status()["state"] == "error"
+    assert events == ["pause", "resume"]              # resumed despite the failure
+
+
+def test_scan_resumes_enrichment_on_cancel(db):
+    events = []
+    scanner = VideoLibraryScanner(
+        db, pause_workers=lambda: events.append("pause"),
+        resume_workers=lambda: events.append("resume"))
+
+    class S:
+        server_name = "plex"
+        def counts(self, incremental=False):
+            return {"movies": 5, "shows": 0}
+        def iter_movies(self, incremental=False):
+            for i in range(5):
+                scanner._cancel = True               # cancel mid-iteration
+                yield {"server_id": "m%d" % i, "title": "M%d" % i}
+        def iter_shows(self, incremental=False):
+            return iter([])
+
+    scanner.scan_sync(lambda: S())
+    assert scanner.get_status()["state"] == "cancelled"
+    assert events == ["pause", "resume"]              # resumed after cancel too
+
+
+def test_scanner_with_no_hooks_does_not_pause(db):
+    # Default construction (as in tests / when no engine wired) must be inert.
+    scanner = VideoLibraryScanner(db)
+    st = scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []))
+    assert st["state"] == "done"                      # scans fine without hooks
+
+
 def test_deep_scan_prunes_removed_items(db):
     scanner = VideoLibraryScanner(db)
     scanner.scan_sync(lambda: FakeSource(

@@ -50,13 +50,15 @@ class VideoEnrichmentWorker:
             self._thread.join(timeout=1.0)
         self.running = False
 
-    def pause(self):
+    def pause(self, persist=True):
         self.paused = True
-        self._persist_paused()
+        if persist:
+            self._persist_paused()
 
-    def resume(self):
+    def resume(self, persist=True):
         self.paused = False
-        self._persist_paused()
+        if persist:
+            self._persist_paused()
 
     def _persist_paused(self):
         # Survives restart, like music's <service>_enrichment_paused config flag.

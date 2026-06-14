@@ -37,6 +37,34 @@ class VideoEnrichmentEngine:
         for w in self.workers.values():
             w.stop()
 
+    # ── scan coupling ─────────────────────────────────────────────────────────
+    # While a library scan runs, the enrichment workers step aside to cut DB lock
+    # contention — exactly like the music side. We pause ONLY workers that were
+    # actually running (never a user's manual pause) and remember which, so the
+    # post-scan resume can't un-pause something the user deliberately paused. The
+    # auto-pause is transient (persist=False) so it never leaks into the saved
+    # <service>_paused flag and survives a restart as a "real" pause.
+    def pause_for_scan(self) -> set:
+        self._scan_paused = set()
+        for service, w in self.workers.items():
+            if not w.paused:
+                w.pause(persist=False)
+                self._scan_paused.add(service)
+        if self._scan_paused:
+            logger.info("video enrichment: paused %s for library scan",
+                        ", ".join(sorted(self._scan_paused)))
+        return self._scan_paused
+
+    def resume_after_scan(self) -> None:
+        for service in getattr(self, "_scan_paused", set()):
+            w = self.workers.get(service)
+            if w:
+                w.resume(persist=False)
+        if getattr(self, "_scan_paused", None):
+            logger.info("video enrichment: resumed %s after library scan",
+                        ", ".join(sorted(self._scan_paused)))
+        self._scan_paused = set()
+
     def worker(self, service):
         return self.workers.get(service)
 
