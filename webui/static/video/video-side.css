@@ -117,6 +117,11 @@ body[data-side="video"][data-video-page="video-settings"] #settings-page {
 body[data-side="video"][data-video-page="video-settings"] #video-page-host {
     display: none !important;
 }
+/* Video-only additions inside the shared settings page (e.g. the Movies/TV
+   library mapping) — hidden on the music side. */
+body[data-side="music"] [data-video-only] {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;

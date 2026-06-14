@@ -19,6 +19,7 @@ _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encodin
 _DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
 _LIB_JS = (_ROOT / "webui" / "static" / "video" / "video-library.js").read_text(encoding="utf-8")
 _SCAN_JS = (_ROOT / "webui" / "static" / "video" / "video-scan.js").read_text(encoding="utf-8")
+_VSETTINGS_JS = (_ROOT / "webui" / "static" / "video" / "video-settings.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
@@ -192,6 +193,28 @@ def test_video_settings_reuses_real_music_settings_page():
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'data-video-page="video-settings"] #settings-page' in css
     assert 'data-video-page="video-settings"] #video-page-host' in css
+
+
+def test_video_library_mapping_ui_present_and_video_only():
+    # Movies/TV selectors live next to the music library selector, marked
+    # data-video-only so they show only on the video side.
+    assert 'data-video-lib-select="movies"' in _INDEX
+    assert 'data-video-lib-select="tv"' in _INDEX
+    assert "data-video-lib-save" in _INDEX
+    assert "data-video-only" in _INDEX
+    css = _CSS_PATH.read_text(encoding="utf-8")
+    assert 'body[data-side="music"] [data-video-only]' in css  # hidden on music side
+
+
+def test_video_settings_module_referenced_and_isolated():
+    assert "video/video-settings.js" in _INDEX
+    stripped = _VSETTINGS_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _VSETTINGS_JS and "})();" in _VSETTINGS_JS
+    assert "window." not in _VSETTINGS_JS
+    assert "addEventListener" in _VSETTINGS_JS
+    assert "/api/video/libraries" in _VSETTINGS_JS
+    assert "soulsync:video-page-shown" in _VSETTINGS_JS
 
 
 def test_controller_is_isolated_iife_with_no_globals():
