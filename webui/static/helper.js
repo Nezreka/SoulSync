@@ -1872,9 +1872,9 @@ const HELPER_CONTENT = {
         title: 'Quality Preset',
         description: 'One-click quality configuration. Presets set all format enables, priorities, and bitrate ranges at once.',
     },
-    '.bit-depth-btn': {
-        title: 'FLAC Bit Depth',
-        description: 'Prefer 16-bit (CD quality, smaller), 24-bit (hi-res, larger), or Any. When a specific depth is chosen, the fallback toggle controls whether other depths are accepted.',
+    '.ranked-targets-editor': {
+        title: 'Quality Priority List',
+        description: 'Ordered list of acceptable qualities (1st = most preferred). Each source is checked top-down; the first target it can satisfy wins. Lossless matches on bit depth + sample rate; MP3/AAC use a minimum bitrate (≥) so VBR/mono files aren\'t falsely rejected. Drag to reorder.',
         docsId: 'set-quality'
     },
     '#quality-fallback-enabled': {
