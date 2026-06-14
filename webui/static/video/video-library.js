@@ -76,7 +76,12 @@
         if (kind === 'movie') meta.push(it.has_file ? 'Owned' : 'Wanted');
         else meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
 
-        return '<div class="library-artist-card">' + img + badge +
+        // Shows drill into the detail page; movies aren't clickable until the
+        // movie-detail page lands (then this opens kind === 'movie' too).
+        var clickable = kind === 'show' ? ' video-card--clickable' : '';
+        var hook = kind === 'show'
+            ? ' data-video-card-open="show" data-video-card-id="' + it.id + '"' : '';
+        return '<div class="library-artist-card' + clickable + '"' + hook + '>' + img + badge +
             '<div class="library-artist-info">' +
             '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
             '<div class="library-artist-stats"><span class="library-artist-stat">' +
@@ -138,6 +143,18 @@
     function reload() { state.page = 1; load(); }
 
     function wire() {
+        // Card click → drill into the detail page (event-delegated on the grid).
+        var grid = $('[data-video-lib-grid]');
+        if (grid) {
+            grid.addEventListener('click', function (e) {
+                var card = e.target.closest('[data-video-card-open]');
+                if (!card || !grid.contains(card)) return;
+                document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                    detail: { kind: card.getAttribute('data-video-card-open'),
+                              id: parseInt(card.getAttribute('data-video-card-id'), 10) },
+                }));
+            });
+        }
         var tabs = document.querySelectorAll('[data-video-lib-tab]');
         for (var i = 0; i < tabs.length; i++) {
             (function (tab) {

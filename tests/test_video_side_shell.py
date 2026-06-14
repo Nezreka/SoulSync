@@ -327,6 +327,39 @@ def test_video_worker_orbs_referenced_and_isolated():
     assert "/api/enrichment/" not in src
 
 
+def test_show_detail_subpage_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-show-detail"', "</section>")
+    # Hero + season tree containers the renderer fills.
+    for hook in ('data-vd-backdrop', 'data-vd-poster', 'data-vd-title', 'data-vd-badges',
+                 'data-vd-overview', 'data-vd-stats', 'data-vd-seasons'):
+        assert hook in block, hook
+    # Back button reuses the shared data-video-goto nav (no inline handler).
+    assert 'data-video-goto="video-library"' in block
+    assert "onclick" not in block
+
+
+def test_video_detail_module_referenced_and_isolated():
+    assert "video/video-detail.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src                         # declares no globals
+    assert "/api/video/detail/" in src                  # video API only
+    assert "/api/enrichment/" not in src and "artist-detail" not in src
+    assert "soulsync:video-open-detail" in src          # opened via the shared event
+
+
+def test_library_cards_open_detail():
+    src = _LIB_JS
+    assert "soulsync:video-open-detail" in src          # show cards drill in
+    assert "data-video-card-open" in src
+
+
+def test_video_side_registers_detail_pages_and_open_event():
+    assert "video-show-detail" in _JS and "video-movie-detail" in _JS
+    assert "soulsync:video-open-detail" in _JS          # navigates on the event
+
+
 def test_music_worker_orbs_untouched_by_video():
     # The video orbs are a separate file; the music orbs must not learn about
     # the video side (one-way isolation — music never depends on video).

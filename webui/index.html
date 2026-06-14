@@ -812,6 +812,34 @@
                         </div>
                     </div>
                 </section>
+                <!-- TV-show detail (drill-in from a show card; not a nav page).
+                     Isolated: built by video/video-detail.js, styled by .vd-* in
+                     video-side.css. Inspired by the music artist-detail vibe. -->
+                <section class="video-subpage" data-video-subpage="video-show-detail" hidden>
+                    <div class="vd-page" data-video-detail="show">
+                        <div class="vd-backdrop" data-vd-backdrop aria-hidden="true"></div>
+                        <div class="vd-scrim" aria-hidden="true"></div>
+                        <div class="vd-content">
+                            <button class="vd-back" type="button" data-video-goto="video-library">
+                                <span aria-hidden="true">&larr;</span> Library
+                            </button>
+                            <div class="vd-hero">
+                                <div class="vd-poster">
+                                    <img data-vd-poster alt="" />
+                                    <div class="vd-poster-fallback" data-vd-poster-fallback>📺</div>
+                                </div>
+                                <div class="vd-hero-main">
+                                    <h1 class="vd-title" data-vd-title>—</h1>
+                                    <div class="vd-badges" data-vd-badges></div>
+                                    <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-stats" data-vd-stats></div>
+                                </div>
+                            </div>
+                            <div class="vd-loading" data-vd-loading hidden>Loading…</div>
+                            <div class="vd-seasons" data-vd-seasons></div>
+                        </div>
+                    </div>
+                </section>
                 <section class="video-subpage" data-video-subpage="video-tools" hidden>
                     <div class="page-shell tools-page-container">
                         <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
@@ -9067,6 +9095,8 @@
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
+    <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
+    <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
