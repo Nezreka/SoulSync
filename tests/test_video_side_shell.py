@@ -230,9 +230,13 @@ def test_video_side_hides_music_api_config_and_shows_placeholders():
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'body[data-side="video"] [data-music-only]' in css   # music API hidden on video
     assert "data-music-only" in _INDEX                          # the music API group is marked
-    # Video placeholders use the SAME .api-service-frame structure as music.
-    assert 'class="api-service-frame stg-service" data-service="tmdb"' in _INDEX
-    assert 'class="api-service-frame stg-service" data-service="tvdb"' in _INDEX
+    # Video API frames use the SAME .api-service-frame structure as music but a
+    # data-VIDEO-service attribute, so music's settings.js [data-service] verify
+    # loop can't pick them up ("Unknown service: tvdb").
+    assert 'class="api-service-frame stg-service" data-video-service="tmdb"' in _INDEX
+    assert 'class="api-service-frame stg-service" data-video-service="tvdb"' in _INDEX
+    # They must NOT carry the music-hooked data-service attribute.
+    assert 'data-service="tmdb"' not in _INDEX and 'data-service="tvdb"' not in _INDEX
 
 
 def test_dashboard_enrichment_buttons_present():
