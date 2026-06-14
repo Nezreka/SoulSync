@@ -21,20 +21,48 @@
 
     var DASHBOARD_ID = 'video-dashboard';
 
-    // Zeroed placeholder until the video DB is wired. Keys match the markup's
-    // data-video-stat attributes.
-    var STUB_STATS = {
+    var DASHBOARD_URL = '/api/video/dashboard';
+
+    // Fallback only — shown if the API call fails. (uptime/memory aren't in the
+    // video payload yet; they stay at their markup defaults for now.)
+    var FALLBACK_STATS = {
         'active-downloads': '0',
         'finished-downloads': '0',
         'download-speed': '0 KB/s',
         'disk-usage': '--',
-        'uptime': '0m',
-        'memory': '--',
         'movies': '0',
         'shows': '0',
         'episodes': '0',
         'library-size': '--'
     };
+
+    function formatBytes(n) {
+        n = Number(n) || 0;
+        if (n <= 0) return '0 B';
+        var units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        var i = Math.floor(Math.log(n) / Math.log(1024));
+        if (i >= units.length) i = units.length - 1;
+        return (n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+    }
+
+    function formatSpeed(bps) {
+        return formatBytes(bps) + '/s';
+    }
+
+    // Map the API payload onto the flat data-video-stat keys in the markup.
+    function flatten(d) {
+        var lib = d.library || {}, dl = d.downloads || {};
+        return {
+            'active-downloads': String(dl.active != null ? dl.active : 0),
+            'finished-downloads': String(dl.finished != null ? dl.finished : 0),
+            'download-speed': formatSpeed(dl.speed_bps),
+            'disk-usage': formatBytes(lib.size_bytes),
+            'movies': String(lib.movies != null ? lib.movies : 0),
+            'shows': String(lib.shows != null ? lib.shows : 0),
+            'episodes': String(lib.episodes != null ? lib.episodes : 0),
+            'library-size': formatBytes(lib.size_bytes)
+        };
+    }
 
     function applyStats(stats) {
         var nodes = document.querySelectorAll('[data-video-stat]');
@@ -46,9 +74,26 @@
         }
     }
 
+    function applyBadges(d) {
+        var nodes = document.querySelectorAll('[data-video-badge]');
+        for (var i = 0; i < nodes.length; i++) {
+            var key = nodes[i].getAttribute('data-video-badge');
+            if (d[key] != null) nodes[i].textContent = String(d[key]);
+        }
+    }
+
     function loadStats() {
-        // TODO(video.db): replace with fetch('/api/video/dashboard') -> applyStats(json).
-        applyStats(STUB_STATS);
+        fetch(DASHBOARD_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (d && !d.error) {
+                    applyStats(flatten(d));
+                    applyBadges(d);
+                } else {
+                    applyStats(FALLBACK_STATS);
+                }
+            })
+            .catch(function () { applyStats(FALLBACK_STATS); });
     }
 
     // Service "Test" buttons are inert until the video services exist. Mark them

@@ -37110,6 +37110,10 @@ _configure_enrichment_api(
 
 app.register_blueprint(_create_enrichment_blueprint())
 
+# Video side API (isolated: reads database/video_library.db only, never music)
+from api.video import create_video_blueprint as _create_video_blueprint
+app.register_blueprint(_create_video_blueprint(), url_prefix='/api/video')
+
 
 def _emit_rate_monitor_loop():
     """Background thread that pushes API call rate data every 1 second for speedometer gauges.
