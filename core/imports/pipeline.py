@@ -403,6 +403,62 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 _notify_download_completed(batch_id, task_id, success=False)
             return
 
+        # QUALITY GATE — runs BEFORE AcoustID so (1) a wrong-quality file is
+        # rejected without paying for an AcoustID fingerprint, and (2) the real
+        # audio quality is recorded on the context (→ quarantine sidecar) for
+        # EVERY trigger, so it's known when reviewing/approving any quarantined
+        # file. force_import still never fires on a quality mismatch.
+        context['_audio_quality'] = get_audio_quality_string(file_path)
+        if context['_audio_quality']:
+            logger.info(f"Audio quality detected: {context['_audio_quality']}")
+
+            _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
+                            _should_skip_quarantine_check(context, 'quality')
+            rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
+            if _skip_quality:
+                logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
+            if rejection_reason:
+                try:
+                    quarantine_path = move_to_quarantine(
+                        file_path,
+                        context,
+                        rejection_reason,
+                        automation_engine,
+                        trigger='quality',
+                    )
+                    _mark_task_quarantined(context, quarantine_path)
+                    logger.info(f"File quarantined due to quality mismatch: {quarantine_path}")
+                except Exception as quarantine_error:
+                    logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
+                    try:
+                        os.remove(file_path)
+                    except Exception as e:
+                        logger.debug("delete quarantine fallback: %s", e)
+
+                context['_bitdepth_rejected'] = True
+                task_id = context.get('task_id')
+                batch_id = context.get('batch_id')
+                with matched_context_lock:
+                    matched_downloads_context.pop(context_key, None)
+
+                # Try the next-best candidate before giving up — same pattern
+                # as AcoustID and integrity failures.
+                if _requeue_quarantined_task_for_retry(task_id, batch_id, 'quality'):
+                    logger.info(
+                        "Quality mismatch for task %s — retrying next-best candidate: %s",
+                        task_id, rejection_reason,
+                    )
+                    return
+
+                if task_id:
+                    with tasks_lock:
+                        if task_id in download_tasks:
+                            download_tasks[task_id]['status'] = 'failed'
+                            download_tasks[task_id]['error_message'] = f"Quality filter: {rejection_reason}"
+                if task_id and batch_id:
+                    _notify_download_completed(batch_id, task_id, success=False)
+                return
+
         _skip_acoustid = _should_skip_quarantine_check(context, 'acoustid')
         if _skip_acoustid:
             logger.info(f"[AcoustID] Skipped (user approval) for {_basename}")
@@ -626,57 +682,6 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 "EXPLICIT ALBUM DOWNLOAD - preserving album name=%r; skipping smart grouping",
                 album_info.get('album_name', 'None'),
             )
-
-        context['_audio_quality'] = get_audio_quality_string(file_path)
-        if context['_audio_quality']:
-            logger.info(f"Audio quality detected: {context['_audio_quality']}")
-
-            _skip_quality = _should_skip_quarantine_check(context, 'bit_depth') or \
-                            _should_skip_quarantine_check(context, 'quality')
-            rejection_reason = None if _skip_quality else check_quality_target(file_path, context)
-            if _skip_quality:
-                logger.info(f"[QualityGuard] Skipped (user approval) for {_basename}")
-            if rejection_reason:
-                try:
-                    quarantine_path = move_to_quarantine(
-                        file_path,
-                        context,
-                        rejection_reason,
-                        automation_engine,
-                        trigger='quality',
-                    )
-                    _mark_task_quarantined(context, quarantine_path)
-                    logger.info(f"File quarantined due to quality mismatch: {quarantine_path}")
-                except Exception as quarantine_error:
-                    logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-                    try:
-                        os.remove(file_path)
-                    except Exception as e:
-                        logger.debug("delete quarantine fallback: %s", e)
-
-                context['_bitdepth_rejected'] = True
-                task_id = context.get('task_id')
-                batch_id = context.get('batch_id')
-                with matched_context_lock:
-                    matched_downloads_context.pop(context_key, None)
-
-                # Try the next-best candidate before giving up — same pattern
-                # as AcoustID and integrity failures.
-                if _requeue_quarantined_task_for_retry(task_id, batch_id, 'quality'):
-                    logger.info(
-                        "Quality mismatch for task %s — retrying next-best candidate: %s",
-                        task_id, rejection_reason,
-                    )
-                    return
-
-                if task_id:
-                    with tasks_lock:
-                        if task_id in download_tasks:
-                            download_tasks[task_id]['status'] = 'failed'
-                            download_tasks[task_id]['error_message'] = f"Quality filter: {rejection_reason}"
-                if task_id and batch_id:
-                    _notify_download_completed(batch_id, task_id, success=False)
-                return
 
         file_ext = os.path.splitext(file_path)[1]
         clean_track_name = get_import_clean_title(
