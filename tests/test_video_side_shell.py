@@ -200,7 +200,6 @@ def test_video_library_mapping_ui_present_and_video_only():
     # data-video-only so they show only on the video side.
     assert 'data-video-lib-select="movies"' in _INDEX
     assert 'data-video-lib-select="tv"' in _INDEX
-    assert "data-video-lib-save" in _INDEX
     assert "data-video-only" in _INDEX
     css = _CSS_PATH.read_text(encoding="utf-8")
     assert 'body[data-side="music"] [data-video-only]' in css  # hidden on music side
@@ -215,6 +214,7 @@ def test_video_settings_module_referenced_and_isolated():
     assert "addEventListener" in _VSETTINGS_JS
     assert "/api/video/libraries" in _VSETTINGS_JS
     assert "soulsync:video-page-shown" in _VSETTINGS_JS
+    assert "'change'" in _VSETTINGS_JS  # saves on change, like the music selector
 
 
 def test_controller_is_isolated_iife_with_no_globals():

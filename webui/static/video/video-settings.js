@@ -67,8 +67,12 @@
     }
 
     function init() {
-        var btn = document.querySelector('[data-video-lib-save]');
-        if (btn) btn.addEventListener('click', save);
+        // Save the moment a library is picked — same behaviour as the music
+        // 'Music Library' selector above (which saves on change, no button).
+        var selects = document.querySelectorAll('[data-video-lib-select]');
+        for (var i = 0; i < selects.length; i++) {
+            selects[i].addEventListener('change', save);
+        }
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
