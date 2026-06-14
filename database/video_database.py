@@ -179,21 +179,39 @@ class VideoDatabase:
         if not spec:
             return
         tbl, idc, sc, ac = spec
-        sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
-        params = ["matched" if matched else "not_found"]
-        if matched and external_id is not None:
-            sets.append(f"{idc}=?")
-            params.append(external_id)
         allowed = _ENRICH_META_COLS.get(tbl, set())
-        for col, val in (metadata or {}).items():
-            if val is not None and col in allowed:
+        # On legacy DBs tmdb_id/tvdb_id may still carry a UNIQUE index; if a match
+        # would collide with another row's id we drop the id columns and keep the
+        # existing (authoritative) id, still recording status + metadata.
+        id_cols = {"tmdb_id", "tvdb_id", "imdb_id"}
+
+        def build(include_ids):
+            sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
+            params = ["matched" if matched else "not_found"]
+            if matched and external_id is not None and include_ids:
+                sets.append(f"{idc}=?")
+                params.append(external_id)
+            for col, val in (metadata or {}).items():
+                if val is None or col not in allowed:
+                    continue
+                if not include_ids and col in id_cols:
+                    continue
                 sets.append(f"{col}=?")
                 params.append(val)
-        params.append(item_id)
+            params.append(item_id)
+            return f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params
+
         conn = self._get_connection()
         try:
-            conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
-            conn.commit()
+            sql, params = build(True)
+            try:
+                conn.execute(sql, params)
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.rollback()
+                sql, params = build(False)   # keep existing id, just record status/metadata
+                conn.execute(sql, params)
+                conn.commit()
         finally:
             conn.close()
 
