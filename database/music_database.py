@@ -8653,11 +8653,16 @@ class MusicDatabase:
 
     def get_quality_preset(self, preset_name: str) -> dict:
         """Get a predefined quality preset (v3 format with ranked_targets)."""
-        _FLAC_HI_RES_TARGETS = [
+        # Strict 24-bit FLAC ladder — no 16-bit, no lossy. This is what
+        # "audiophile" means: only true hi-res passes.
+        _FLAC_24BIT_TARGETS = [
             {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
             {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
             {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
             {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+        ]
+        # Lossless ladder used by "balanced" — hi-res first, then CD-quality 16-bit.
+        _FLAC_HI_RES_TARGETS = _FLAC_24BIT_TARGETS + [
             {"label": "FLAC 16-bit",        "format": "flac", "bit_depth": 16},
         ]
         _MP3_TARGETS = [
@@ -8668,7 +8673,7 @@ class MusicDatabase:
         presets = {
             "audiophile": {
                 "version": 3, "preset": "audiophile", "fallback_enabled": False,
-                "ranked_targets": _FLAC_HI_RES_TARGETS,
+                "ranked_targets": _FLAC_24BIT_TARGETS,
             },
             "balanced": {
                 "version": 3, "preset": "balanced", "fallback_enabled": True,
