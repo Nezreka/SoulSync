@@ -129,6 +129,11 @@ body[data-side="video"] #jellyfin-library-selector-container,
 body[data-side="video"] #navidrome-folder-selector-container {
     display: none !important;
 }
+/* Music-only settings sections (e.g. the music API services) are hidden on the
+   video side; their video counterparts carry data-video-only. */
+body[data-side="video"] [data-music-only] {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
