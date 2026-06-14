@@ -103,7 +103,10 @@ class VideoEnrichmentWorker:
             return False
         self.current_item = {"type": item["kind"], "name": item["title"]}
         try:
-            result = self.client.match(item["kind"], item["title"], item.get("year"))
+            # Prefer the provider id the server already gave us (enrich BY ID, no
+            # re-search); the client falls back to a title/year search if it's None.
+            result = self.client.match(item["kind"], item["title"], item.get("year"),
+                                       known_id=item.get("known_id"))
         except Exception:
             logger.exception("video enrichment %s match failed for %s", self.service, item["title"])
             self.stats["errors"] += 1

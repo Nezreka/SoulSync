@@ -7,6 +7,8 @@ nothing from the music side.
 
 from __future__ import annotations
 
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,7 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.worker import VideoEnrichmentWorker
 from core.video.enrichment.engine import VideoEnrichmentEngine
+from core.video.enrichment.clients import TMDBClient
 
 
 class FakeClient:
@@ -23,8 +26,8 @@ class FakeClient:
         self._result = result
         self.calls = []
 
-    def match(self, kind, title, year):
-        self.calls.append((kind, title, year))
+    def match(self, kind, title, year, known_id=None):
+        self.calls.append((kind, title, year, known_id))
         return self._result
 
 
@@ -38,11 +41,46 @@ def test_worker_process_one_matches(db):
     client = FakeClient({"id": 438631, "metadata": {"overview": "O", "backdrop_url": "/b.jpg"}})
     w = VideoEnrichmentWorker(db, "tmdb", client)
     assert w.process_one() is True
-    assert client.calls == [("movie", "Dune", 2021)]
+    assert client.calls == [("movie", "Dune", 2021, None)]    # no server id → search
     with db.connect() as c:
         row = c.execute("SELECT tmdb_id, tmdb_match_status, overview FROM movies").fetchone()
     assert (row["tmdb_id"], row["tmdb_match_status"], row["overview"]) == (438631, "matched", "O")
     assert w.stats["matched"] == 1
+
+
+def test_worker_enriches_by_server_id_instead_of_searching(db):
+    # The server already gave us tmdb_id during the scan → the worker must pass
+    # it through (enrich BY ID, no title re-search).
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "year": 2021, "tmdb_id": 438631})
+    client = FakeClient({"id": 438631, "metadata": {"overview": "O"}})
+    w = VideoEnrichmentWorker(db, "tmdb", client)
+    assert w.process_one() is True
+    assert client.calls == [("movie", "Dune", 2021, 438631)]   # known_id forwarded
+    assert db.enrichment_next("tmdb") is None                  # nothing left pending
+
+
+def test_enrichment_next_surfaces_known_id(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 99})
+    nxt = db.enrichment_next("tmdb")
+    assert nxt["known_id"] == 99 and nxt["kind"] == "movie"
+
+
+def test_tmdb_client_with_known_id_skips_the_search(monkeypatch):
+    # With a known id, the client must hit /movie/<id> directly and never the
+    # /search endpoint (no chance of a wrong title-search match).
+    urls = []
+
+    class _Resp:
+        def json(self):
+            return {"overview": "by-id overview", "backdrop_path": "/b.jpg"}
+
+    fake = types.SimpleNamespace(get=lambda url, **kw: (urls.append(url), _Resp())[1])
+    monkeypatch.setitem(sys.modules, "requests", fake)
+
+    res = TMDBClient("KEY").match("movie", "Whatever", 2021, known_id=438631)
+    assert res["id"] == 438631
+    assert any("/movie/438631" in u for u in urls)
+    assert not any("/search/" in u for u in urls)
 
 
 def test_worker_process_one_not_found(db):
@@ -63,7 +101,7 @@ def test_worker_match_exception_marks_not_found_and_counts_error(db):
 
     class Boom:
         enabled = True
-        def match(self, *a): raise RuntimeError("api down")
+        def match(self, *a, **k): raise RuntimeError("api down")
 
     w = VideoEnrichmentWorker(db, "tmdb", Boom())
     assert w.process_one() is True   # doesn't crash the loop

@@ -149,24 +149,31 @@ class VideoDatabase:
     def enrichment_next(self, service: str, retry_days: int = 30) -> dict | None:
         """Next item that needs enrichment for a service: pending (never tried)
         first, then a not_found item older than retry_days. Returns
-        {kind, id, title, year} or None."""
+        {kind, id, title, year, known_id} or None. ``known_id`` is the provider
+        id the media server already supplied (e.g. tmdb_id/tvdb_id) so the worker
+        can enrich BY ID instead of re-searching by title."""
         kinds = _ENRICH.get(service)
         if not kinds:
             return None
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retry_days)).strftime("%Y-%m-%d %H:%M:%S")
         conn = self._get_connection()
+
+        def _row(row, kind, idc):
+            return {"kind": kind, "id": row["id"], "title": row["title"],
+                    "year": row["year"], "known_id": row[idc]}
+
         try:
-            for kind, (tbl, _idc, sc, _ac) in kinds.items():
+            for kind, (tbl, idc, sc, _ac) in kinds.items():
                 row = conn.execute(
-                    f"SELECT id, title, year FROM {tbl} WHERE {sc} IS NULL ORDER BY id LIMIT 1").fetchone()
+                    f"SELECT id, title, year, {idc} FROM {tbl} WHERE {sc} IS NULL ORDER BY id LIMIT 1").fetchone()
                 if row:
-                    return {"kind": kind, "id": row["id"], "title": row["title"], "year": row["year"]}
-            for kind, (tbl, _idc, sc, ac) in kinds.items():
+                    return _row(row, kind, idc)
+            for kind, (tbl, idc, sc, ac) in kinds.items():
                 row = conn.execute(
-                    f"SELECT id, title, year FROM {tbl} WHERE {sc}='not_found' "
+                    f"SELECT id, title, year, {idc} FROM {tbl} WHERE {sc}='not_found' "
                     f"AND ({ac} IS NULL OR {ac} < ?) ORDER BY {ac} LIMIT 1", (cutoff,)).fetchone()
                 if row:
-                    return {"kind": kind, "id": row["id"], "title": row["title"], "year": row["year"]}
+                    return _row(row, kind, idc)
             return None
         finally:
             conn.close()

@@ -46,27 +46,35 @@ class TMDBClient:
             logger.exception("TMDB test failed")
             return False, "Could not reach TMDB"
 
-    def match(self, kind, title, year):
-        if not self.api_key or not title:
+    def match(self, kind, title, year, known_id=None):
+        if not self.api_key:
             return None
         import requests
-        path = "/search/movie" if kind == "movie" else "/search/tv"
-        params = {"api_key": self.api_key, "query": title}
-        if year:
-            params["year" if kind == "movie" else "first_air_date_year"] = year
-        resp = requests.get(self.BASE + path, params=params, timeout=15)
-        results = (resp.json() or {}).get("results") or []
-        if not results:
-            return None
-        top = results[0]
-        tmdb_id = top.get("id")
-        meta = {"overview": top.get("overview")}
+        # The server already knows the TMDB id → go straight to the details
+        # fetch (accurate, one call). Otherwise fall back to a title/year search.
+        tmdb_id = _int(known_id)
+        meta = {}
+        if tmdb_id is None:
+            if not title:
+                return None
+            path = "/search/movie" if kind == "movie" else "/search/tv"
+            params = {"api_key": self.api_key, "query": title}
+            if year:
+                params["year" if kind == "movie" else "first_air_date_year"] = year
+            resp = requests.get(self.BASE + path, params=params, timeout=15)
+            results = (resp.json() or {}).get("results") or []
+            if not results:
+                return None
+            tmdb_id = results[0].get("id")
+            meta["overview"] = results[0].get("overview")
+            if tmdb_id is None:
+                return None
         try:
             detail_path = "/movie/" if kind == "movie" else "/tv/"
             dr = requests.get(self.BASE + detail_path + str(tmdb_id),
                               params={"api_key": self.api_key, "append_to_response": "external_ids"},
                               timeout=15).json() or {}
-            meta["overview"] = dr.get("overview") or meta["overview"]
+            meta["overview"] = dr.get("overview") or meta.get("overview")
             if dr.get("backdrop_path"):
                 meta["backdrop_url"] = self.IMG + dr["backdrop_path"]
             ext = dr.get("external_ids") or {}
@@ -77,7 +85,7 @@ class TMDBClient:
                 meta["status"] = dr.get("status")
                 meta["tvdb_id"] = _int(ext.get("tvdb_id"))
         except Exception:
-            logger.exception("TMDB details fetch failed for %s", title)
+            logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
         return {"id": tmdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
 
@@ -112,21 +120,37 @@ class TVDBClient:
         self._token = (r.get("data") or {}).get("token")
         return self._token
 
-    def match(self, kind, title, year):
-        if kind != "show" or not self.api_key or not title:
+    def match(self, kind, title, year, known_id=None):
+        if kind != "show" or not self.api_key:
             return None
         import requests
         token = self._auth()
         if not token:
             return None
-        r = requests.get(self.BASE + "/search", headers={"Authorization": "Bearer " + token},
-                         params={"query": title, "type": "series"}, timeout=15).json() or {}
-        results = r.get("data") or []
-        if not results:
+        headers = {"Authorization": "Bearer " + token}
+        tvdb_id = _int(known_id)
+        meta = {}
+        if tvdb_id is None:
+            if not title:
+                return None
+            r = requests.get(self.BASE + "/search", headers=headers,
+                             params={"query": title, "type": "series"}, timeout=15).json() or {}
+            results = r.get("data") or []
+            if not results:
+                return None
+            top = results[0]
+            tvdb_id = _int(top.get("tvdb_id") or top.get("id"))
+            meta["overview"] = top.get("overview")
+        else:
+            # Known id from the server → fetch the series directly for its overview.
+            try:
+                dr = requests.get(self.BASE + "/series/" + str(tvdb_id),
+                                  headers=headers, timeout=15).json() or {}
+                meta["overview"] = (dr.get("data") or {}).get("overview")
+            except Exception:
+                logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
+        if tvdb_id is None:
             return None
-        top = results[0]
-        tvdb_id = _int(top.get("tvdb_id") or top.get("id"))
-        meta = {"overview": top.get("overview")}
         return {"id": tvdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
 
