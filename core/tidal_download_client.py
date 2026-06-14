@@ -33,6 +33,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_tidal_tier
 
 logger = get_logger("tidal_download_client")
 
@@ -457,11 +458,15 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
             quality_key = config_manager.get('tidal_download.quality', 'lossless')
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
+            # Stamp the configured tier (what will actually be downloaded) so
+            # the global ranker sees real sample_rate/bit_depth.
+            tier_quality = quality_from_tidal_tier(quality_key)
 
             track_results = []
             for track in tidal_tracks:
                 try:
                     track_result = self._tidal_to_track_result(track, quality_info)
+                    track_result.set_quality(tier_quality)
                     track_results.append(track_result)
                 except Exception as e:
                     logger.debug(f"Skipping track conversion error: {e}")

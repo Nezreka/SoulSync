@@ -29,6 +29,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_qobuz
 
 logger = get_logger("qobuz_client")
 
@@ -1071,6 +1072,14 @@ class QobuzClient(DownloadSourcePlugin):
             album=album_name,
             track_number=track.get('track_number'),
         )
+
+        # Stamp real API quality so the global ranker sees actual
+        # sample_rate/bit_depth. Hi-res only when the track itself is
+        # hires-streamable; otherwise it streams as CD-quality FLAC.
+        if hires_streamable and max_bit_depth >= 24:
+            track_result.set_quality(quality_from_qobuz(max_sample_rate, max_bit_depth))
+        else:
+            track_result.set_quality(quality_from_qobuz(44.1, 16))
 
         return track_result
 

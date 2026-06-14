@@ -36,6 +36,7 @@ import requests as http_requests
 from utils.logging_config import get_logger
 from config.settings import config_manager
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_tidal_tier
 
 logger = get_logger("hifi_client")
 
@@ -754,10 +755,15 @@ class HiFiClient(DownloadSourcePlugin):
             quality_key = config_manager.get('hifi_download.quality', 'lossless')
             q_info = HLS_QUALITY_MAP.get(quality_key, HLS_QUALITY_MAP['lossless'])
 
+            # HiFi is Tidal-backed; stamp the configured tier so the global
+            # ranker sees real sample_rate/bit_depth, not just 'flac'.
+            tier_quality = quality_from_tidal_tier(quality_key)
+
             results = []
             for t in tracks:
                 try:
                     tr = self._to_track_result(t, q_info)
+                    tr.set_quality(tier_quality)
                     results.append(tr)
                 except Exception as e:
                     logger.debug(f"Skipping track result conversion: {e}")

@@ -48,6 +48,22 @@ class SearchResult:
             bit_depth=self.bit_depth,
         )
 
+    def set_quality(self, aq: AudioQuality) -> None:
+        """Merge a mapped :class:`AudioQuality` onto this result's fields.
+
+        Used by streaming sources to stamp their claimed tier (Tidal/HiFi
+        tier strings, Qobuz API values, …) so ``audio_quality`` ranks
+        correctly. Mapper-provided fields win; a ``None`` from the mapper
+        leaves any already-reported value (e.g. a probed bitrate) intact.
+        """
+        self.quality = aq.format
+        if aq.bitrate is not None:
+            self.bitrate = aq.bitrate
+        if aq.sample_rate is not None:
+            self.sample_rate = aq.sample_rate
+        if aq.bit_depth is not None:
+            self.bit_depth = aq.bit_depth
+
     @property
     def quality_score(self) -> float:
         quality_weights = {
