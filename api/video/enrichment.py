@@ -38,6 +38,31 @@ def register_routes(bp):
             logger.exception("video enrichment services failed")
             return jsonify({"services": []})
 
+    @bp.route("/enrichment/config", methods=["GET"])
+    def video_enrichment_config():
+        from . import get_video_db
+        db = get_video_db()
+        return jsonify({
+            "tmdb_api_key": db.get_setting("tmdb_api_key") or "",
+            "tvdb_api_key": db.get_setting("tvdb_api_key") or "",
+        })
+
+    @bp.route("/enrichment/config", methods=["POST"])
+    def video_enrichment_config_save():
+        from . import get_video_db
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        if "tmdb_api_key" in body:
+            db.set_setting("tmdb_api_key", body.get("tmdb_api_key") or "")
+        if "tvdb_api_key" in body:
+            db.set_setting("tvdb_api_key", body.get("tvdb_api_key") or "")
+        try:
+            from core.video.enrichment.engine import rebuild_video_enrichment_engine
+            rebuild_video_enrichment_engine()
+        except Exception:
+            logger.exception("video enrichment: engine rebuild after key change failed")
+        return jsonify({"status": "saved"})
+
     @bp.route("/enrichment/<service>/status", methods=["GET"])
     def video_enrichment_status(service):
         w = engine().worker(service)

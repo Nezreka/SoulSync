@@ -38,6 +38,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/enrichment/services" in rules
     assert "/api/video/enrichment/<service>/status" in rules
     assert "/api/video/enrichment/<service>/unmatched" in rules
+    assert "/api/video/enrichment/config" in rules
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -128,6 +129,29 @@ def test_enrichment_endpoints(tmp_path):
     finally:
         videoapi._video_db = None
         eng_mod._engine = None
+
+
+def test_enrichment_config_save_load(tmp_path, monkeypatch):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+    import core.video.enrichment.engine as eng_mod
+    # Don't build a real engine (would open the default-path DB + start threads).
+    monkeypatch.setattr(eng_mod, "rebuild_video_enrichment_engine", lambda: None)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        assert client.get("/api/video/enrichment/config").get_json() == {
+            "tmdb_api_key": "", "tvdb_api_key": ""}
+        client.post("/api/video/enrichment/config", json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz"})
+        assert client.get("/api/video/enrichment/config").get_json() == {
+            "tmdb_api_key": "abc", "tvdb_api_key": "xyz"}
+        assert db.get_setting("tmdb_api_key") == "abc"
+    finally:
+        videoapi._video_db = None
 
 
 def test_video_api_imports_nothing_from_music():
