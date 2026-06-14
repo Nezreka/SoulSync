@@ -394,6 +394,17 @@ def test_enrichment_breakdown_unmatched_retry(db):
     assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 1
 
 
+def test_tvdb_is_shows_only(db):
+    # TVDB enriches shows, never movies. The breakdown must not advertise a
+    # movie bucket, and asking for tvdb movies returns empty (never garbage) —
+    # this is what keeps the Manage-Workers modal from showing a Movies view
+    # for TVDB.
+    assert "movie" not in db.enrichment_breakdown("tvdb")
+    assert "show" in db.enrichment_breakdown("tvdb")
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+    assert db.enrichment_unmatched("tvdb", "movie") == {"items": [], "total": 0}
+
+
 # ── isolation: the video DB imports nothing from music ───────────────────────
 
 def test_video_db_module_imports_nothing_from_music():

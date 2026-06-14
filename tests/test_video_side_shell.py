@@ -280,6 +280,13 @@ def test_video_enrichment_manager_isolated():
     assert "enrichment-manager-modal" in src and "em-rail" in src
     # Its own overlay id (not music's) so the two never collide.
     assert "vem-overlay" in src and "enrichment-manager-overlay" not in src
+    # TVDB is shows-only: each worker declares its kinds and the panel defaults
+    # to the worker's first kind — never a hardcoded 'movie' (which would show a
+    # bogus empty Movies view for TVDB).
+    assert "kinds: ['show']" in src                  # tvdb
+    assert "kinds: ['movie', 'show']" in src         # tmdb
+    assert "state.kind = defaultKind(id)" in src
+    assert "state.kind = 'movie'" not in src
 
 
 def test_video_settings_module_referenced_and_isolated():

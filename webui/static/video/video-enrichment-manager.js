@@ -11,10 +11,22 @@
 (function () {
     'use strict';
 
+    // `kinds` = the entity kinds each service actually enriches (must match the
+    // backend's _ENRICH map). TVDB is shows-only, so it must NOT default to the
+    // Movies view — it would query tvdb+movie (always empty) and look broken.
     var WORKERS = [
-        { id: 'tmdb', name: 'TMDB', color: '#38bdf8', rgb: '56, 189, 248' },
-        { id: 'tvdb', name: 'TVDB', color: '#a855f7', rgb: '168, 85, 247' },
+        { id: 'tmdb', name: 'TMDB', color: '#38bdf8', rgb: '56, 189, 248', kinds: ['movie', 'show'] },
+        { id: 'tvdb', name: 'TVDB', color: '#a855f7', rgb: '168, 85, 247', kinds: ['show'] },
     ];
+
+    function workerDef(id) {
+        for (var i = 0; i < WORKERS.length; i++) { if (WORKERS[i].id === id) return WORKERS[i]; }
+        return null;
+    }
+    function defaultKind(id) {
+        var w = workerDef(id);
+        return (w && w.kinds && w.kinds[0]) || 'movie';
+    }
     var LOGOS = {
         tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
         tvdb: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg',
@@ -224,7 +236,7 @@
     // ── selection / actions ────────────────────────────────────────────────────
     function selectWorker(id) {
         state.selected = id; state.breakdown = null; state.unmatched = null;
-        state.kind = 'movie'; state.page = 0;
+        state.kind = defaultKind(id); state.page = 0;
         renderRail(); renderPanel();
         Promise.all([loadBreakdown(id), loadUnmatched()]).then(function () { renderPanel(); });
     }
