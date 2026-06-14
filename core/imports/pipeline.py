@@ -35,7 +35,7 @@ from core.imports.context import (
 from core.imports.file_integrity import check_audio_integrity, expected_duration_for_check, resolve_duration_tolerance
 from core.imports.filename import extract_track_number_from_filename
 from core.imports.guards import check_flac_bit_depth, check_quality_target, move_to_quarantine
-from core.imports.silence import detect_mostly_silent
+from core.imports.silence import detect_broken_audio
 from core.imports.quarantine import (
     approve_quarantine_entry,
     entry_id_from_quarantined_filename,
@@ -163,7 +163,7 @@ def import_rejection_reason(context: dict) -> str | None:
     if context.get('_bitdepth_rejected'):
         return "rejected by quality filter"
     if context.get('_silence_rejected'):
-        return "rejected by silence guard (file is mostly silence)"
+        return "rejected by audio guard (incomplete or silent audio)"
     if context.get('_race_guard_failed'):
         return "source file disappeared before import completed"
     return None
@@ -356,29 +356,30 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 f"drift={integrity.checks.get('length_drift_s', 'n/a')})"
             )
 
-        # Silence guard — runs right where the length is verified, BEFORE the
-        # AcoustID/quality gates, so a mostly-silent file (correct container
-        # duration but only ~30s real audio, e.g. HiFi/Monochrome HLS padding)
-        # is caught regardless of its quality verdict and gets the right reason.
-        # Same quarantine + next-candidate retry pattern as the integrity check.
-        _skip_silence = _should_skip_quarantine_check(context, 'silence')
-        silence_reason = None if _skip_silence else detect_mostly_silent(file_path)
-        if silence_reason:
-            logger.error(f"[Silence] Rejected {_basename}: {silence_reason}")
+        # Audio-completeness guard — runs right where the length is verified,
+        # BEFORE the AcoustID/quality gates, so a truncated file (container
+        # claims the full length but only ~30s actually decodes, e.g. HiFi/
+        # Monochrome HLS assembly) or a mostly-silent file is caught regardless
+        # of its quality verdict and gets the right reason. Same quarantine +
+        # next-candidate retry pattern as the integrity check.
+        _skip_audio = _should_skip_quarantine_check(context, 'silence')
+        audio_reason = None if _skip_audio else detect_broken_audio(file_path)
+        if audio_reason:
+            logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
             context['_silence_rejected'] = True
             try:
                 quarantine_path = move_to_quarantine(
-                    file_path, context, silence_reason, automation_engine,
+                    file_path, context, audio_reason, automation_engine,
                     trigger='silence',
                 )
                 _mark_task_quarantined(context, quarantine_path)
-                logger.warning("File quarantined — mostly silent: %s", quarantine_path)
+                logger.warning("File quarantined — incomplete/silent audio: %s", quarantine_path)
             except Exception as quarantine_error:
                 logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
                 try:
                     os.remove(file_path)
                 except Exception as del_error:
-                    logger.debug("delete silent file fallback: %s", del_error)
+                    logger.debug("delete broken file fallback: %s", del_error)
 
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
@@ -389,15 +390,15 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
             # the integrity / AcoustID / quality failures.
             if _requeue_quarantined_task_for_retry(task_id, batch_id, 'silence'):
                 logger.info(
-                    "Mostly-silent file for task %s — retrying next-best candidate: %s",
-                    task_id, silence_reason,
+                    "Incomplete/silent audio for task %s — retrying next-best candidate: %s",
+                    task_id, audio_reason,
                 )
                 return
             if task_id:
                 with tasks_lock:
                     if task_id in download_tasks:
                         download_tasks[task_id]['status'] = 'failed'
-                        download_tasks[task_id]['error_message'] = f"Silence guard: {silence_reason}"
+                        download_tasks[task_id]['error_message'] = f"Audio guard: {audio_reason}"
             if task_id and batch_id:
                 _notify_download_completed(batch_id, task_id, success=False)
             return
