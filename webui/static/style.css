@@ -4090,6 +4090,150 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Quality tier cards - upgraded inner cards */
+/* ── Ranked-targets editor (v3 quality profile) ───────────────────────── */
+.ranked-targets-editor {
+    margin-bottom: 16px;
+}
+
+.ranked-targets-label {
+    display: block;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ranked-targets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.ranked-targets-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-style: italic;
+    padding: 10px 12px;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+}
+
+.ranked-target-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.ranked-target-row:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.ranked-target-row.rt-dragging {
+    opacity: 0.4;
+}
+
+.ranked-target-row.rt-dragover {
+    border-color: rgba(99, 179, 237, 0.7);
+}
+
+.ranked-target-row .rt-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 14px;
+    user-select: none;
+}
+
+.ranked-target-row .rt-rank {
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.ranked-target-row .rt-label {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.ranked-target-row .rt-spacer {
+    flex: 1;
+}
+
+.ranked-target-row .rt-move,
+.ranked-target-row .rt-del {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 7px;
+    transition: background 0.15s ease;
+}
+
+.ranked-target-row .rt-move:hover,
+.ranked-target-row .rt-del:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.ranked-target-row .rt-del:hover {
+    background: rgba(229, 62, 62, 0.25);
+    border-color: rgba(229, 62, 62, 0.5);
+}
+
+.ranked-target-add {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+}
+
+.ranked-target-add select,
+.ranked-target-add input[type="number"] {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11px;
+    padding: 4px 6px;
+}
+
+.ranked-target-add .rt-inline-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ranked-target-add .rt-add-btn {
+    background: rgba(99, 179, 237, 0.18);
+    border: 1px solid rgba(99, 179, 237, 0.4);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    transition: background 0.15s ease;
+}
+
+.ranked-target-add .rt-add-btn:hover {
+    background: rgba(99, 179, 237, 0.3);
+}
+
 .quality-tier {
     margin-bottom: 16px;
     padding: 12px;

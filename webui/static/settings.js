@@ -1904,175 +1904,132 @@ async function loadQualityProfile() {
     }
 }
 
+// v3: the working copy of the ordered target list. Mirrors the DOM rows
+// and is the single source of truth that collectQualityProfileFromUI reads.
+let currentRankedTargets = [];
+
+function rtLabel(t) {
+    const fmt = (t.format || 'any').toUpperCase();
+    if (t.format === 'flac' || t.format === 'wav') {
+        const bd = t.bit_depth ? `${t.bit_depth}-bit` : '';
+        const sr = t.min_sample_rate ? `≥${t.min_sample_rate / 1000}kHz` : '';
+        const detail = [bd, sr].filter(Boolean).join('/');
+        return detail ? `${fmt} ${detail}` : fmt;
+    }
+    return t.min_bitrate ? `${fmt} ≥${t.min_bitrate}kbps` : fmt;
+}
+
 function populateQualityProfileUI(profile) {
     // Update preset buttons
-    document.querySelectorAll('.preset-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.preset-button').forEach(btn => btn.classList.remove('active'));
     const activePresetBtn = document.querySelector(`.preset-button[onclick*="${profile.preset}"]`);
-    if (activePresetBtn) {
-        activePresetBtn.classList.add('active');
-    }
+    if (activePresetBtn) activePresetBtn.classList.add('active');
 
-    // Populate each quality tier
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
-    qualities.forEach(quality => {
-        const config = profile.qualities[quality];
-        if (config) {
-            // Set enabled checkbox
-            const enabledCheckbox = document.getElementById(`quality-${quality}-enabled`);
-            if (enabledCheckbox) {
-                enabledCheckbox.checked = config.enabled;
-            }
+    // The API migrates v2 → v3, so ranked_targets is always present.
+    currentRankedTargets = Array.isArray(profile.ranked_targets)
+        ? profile.ranked_targets.map(t => ({ ...t }))
+        : [];
+    renderRankedTargets();
 
-            // Set min/max sliders
-            const minSlider = document.getElementById(`${quality}-min`);
-            const maxSlider = document.getElementById(`${quality}-max`);
-            if (minSlider && maxSlider) {
-                minSlider.value = config.min_kbps;
-                maxSlider.value = config.max_kbps;
-                updateQualityRange(quality);
-            }
-
-            // Set priority display
-            const prioritySpan = document.getElementById(`priority-${quality}`);
-            if (prioritySpan) {
-                prioritySpan.textContent = `Priority: ${config.priority}`;
-            }
-
-            // Toggle sliders visibility
-            const sliders = document.getElementById(`sliders-${quality}`);
-            if (sliders) {
-                if (config.enabled) {
-                    sliders.classList.remove('disabled');
-                } else {
-                    sliders.classList.add('disabled');
-                }
-            }
-
-            // FLAC-specific: restore bit depth selector and fallback toggle
-            if (quality === 'flac') {
-                const bitDepthValue = config.bit_depth || 'any';
-                document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.getAttribute('data-value') === bitDepthValue);
-                });
-                const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-                if (bitDepthSelector) {
-                    if (config.enabled) {
-                        bitDepthSelector.classList.remove('disabled');
-                    } else {
-                        bitDepthSelector.classList.add('disabled');
-                    }
-                }
-                // Show/hide and restore fallback toggle
-                const fallbackToggle = document.getElementById('flac-fallback-toggle');
-                if (fallbackToggle) {
-                    fallbackToggle.style.display = bitDepthValue === 'any' ? 'none' : 'block';
-                }
-                const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-                if (fallbackCb) {
-                    fallbackCb.checked = config.bit_depth_fallback !== false;
-                }
-            }
-        }
-    });
-
-    // Set fallback checkbox
     const fallbackCheckbox = document.getElementById('quality-fallback-enabled');
-    if (fallbackCheckbox) {
-        fallbackCheckbox.checked = profile.fallback_enabled;
-    }
+    if (fallbackCheckbox) fallbackCheckbox.checked = profile.fallback_enabled !== false;
 }
 
-function updateQualityRange(quality) {
-    const minSlider = document.getElementById(`${quality}-min`);
-    const maxSlider = document.getElementById(`${quality}-max`);
-    const minValue = document.getElementById(`${quality}-min-value`);
-    const maxValue = document.getElementById(`${quality}-max-value`);
+function renderRankedTargets() {
+    const list = document.getElementById('ranked-targets-list');
+    if (!list) return;
+    list.innerHTML = '';
 
-    if (!minSlider || !maxSlider || !minValue || !maxValue) return;
-
-    let min = parseInt(minSlider.value);
-    let max = parseInt(maxSlider.value);
-
-    // Ensure min doesn't exceed max
-    if (min > max) {
-        min = max;
-        minSlider.value = min;
+    if (currentRankedTargets.length === 0) {
+        list.innerHTML = '<div class="ranked-targets-empty">No targets yet — add one below. '
+            + 'With fallback off this would reject every download.</div>';
+        return;
     }
 
-    // Ensure max doesn't go below min
-    if (max < min) {
-        max = min;
-        maxSlider.value = max;
-    }
-
-    minValue.textContent = `${min} kbps`;
-    maxValue.textContent = `${max} kbps`;
-}
-
-function toggleQuality(quality) {
-    const checkbox = document.getElementById(`quality-${quality}-enabled`);
-    const sliders = document.getElementById(`sliders-${quality}`);
-
-    if (checkbox && sliders) {
-        if (checkbox.checked) {
-            sliders.classList.remove('disabled');
-        } else {
-            sliders.classList.add('disabled');
-        }
-    }
-
-    // Also toggle FLAC bit depth selector
-    if (quality === 'flac') {
-        const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-        if (bitDepthSelector && checkbox) {
-            if (checkbox.checked) {
-                bitDepthSelector.classList.remove('disabled');
-            } else {
-                bitDepthSelector.classList.add('disabled');
-            }
-        }
-    }
-
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
+    currentRankedTargets.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'ranked-target-row';
+        row.draggable = true;
+        row.dataset.index = String(i);
+        row.innerHTML = `
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">${i + 1}</span>
+            <span class="rt-label">${rtLabel(t)}</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(${i}, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(${i}, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(${i})">🗑</button>
+        `;
+        row.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', String(i));
+            row.classList.add('rt-dragging');
         });
-    }
-}
-
-function setFlacBitDepth(value) {
-    document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-value') === value);
+        row.addEventListener('dragend', () => row.classList.remove('rt-dragging'));
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('rt-dragover'); });
+        row.addEventListener('dragleave', () => row.classList.remove('rt-dragover'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('rt-dragover');
+            const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            if (!Number.isNaN(from) && from !== i) reorderRankedTarget(from, i);
+        });
+        list.appendChild(row);
     });
+}
 
-    // Show/hide fallback toggle — only relevant when a specific bit depth is selected
-    const fallbackToggle = document.getElementById('flac-fallback-toggle');
-    if (fallbackToggle) {
-        fallbackToggle.style.display = value === 'any' ? 'none' : 'block';
-    }
+function markQualityProfileCustom() {
+    if (currentQualityProfile) currentQualityProfile.preset = 'custom';
+    document.querySelectorAll('.preset-button').forEach(btn => btn.classList.remove('active'));
+}
 
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-    }
-
+function reorderRankedTarget(from, to) {
+    const [moved] = currentRankedTargets.splice(from, 1);
+    currentRankedTargets.splice(to, 0, moved);
+    markQualityProfileCustom();
+    renderRankedTargets();
     debouncedAutoSaveSettings();
 }
 
-function setFlacBitDepthFallback(enabled) {
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
+function moveRankedTarget(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= currentRankedTargets.length) return;
+    [currentRankedTargets[i], currentRankedTargets[j]] = [currentRankedTargets[j], currentRankedTargets[i]];
+    markQualityProfileCustom();
+    renderRankedTargets();
+    debouncedAutoSaveSettings();
+}
+
+function deleteRankedTarget(i) {
+    currentRankedTargets.splice(i, 1);
+    markQualityProfileCustom();
+    renderRankedTargets();
+    debouncedAutoSaveSettings();
+}
+
+function onRtAddFormatChange() {
+    const lossless = document.getElementById('rt-add-format')?.value === 'flac';
+    const llFields = document.querySelector('.rt-lossless-fields');
+    const lyFields = document.querySelector('.rt-lossy-fields');
+    if (llFields) llFields.style.display = lossless ? '' : 'none';
+    if (lyFields) lyFields.style.display = lossless ? 'none' : '';
+}
+
+function addRankedTarget() {
+    const fmt = document.getElementById('rt-add-format')?.value || 'flac';
+    const t = { format: fmt };
+    if (fmt === 'flac') {
+        const bd = document.getElementById('rt-add-bitdepth')?.value;
+        const sr = document.getElementById('rt-add-samplerate')?.value;
+        if (bd) t.bit_depth = parseInt(bd, 10);
+        if (sr) t.min_sample_rate = parseInt(sr, 10);
+    } else {
+        const br = document.getElementById('rt-add-bitrate')?.value;
+        if (br) t.min_bitrate = parseInt(br, 10);
     }
+    t.label = rtLabel(t);
+    currentRankedTargets.push(t);
+    markQualityProfileCustom();
+    renderRankedTargets();
     debouncedAutoSaveSettings();
 }
 
@@ -2102,45 +2059,23 @@ async function applyQualityPreset(presetName) {
 }
 
 function collectQualityProfileFromUI() {
-    const profile = {
-        version: 2,
-        preset: 'custom', // Will be overridden if a preset is active
-        qualities: {},
-        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
-    };
-
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
-
-    qualities.forEach((quality, index) => {
-        const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
-        const minSlider = document.getElementById(`${quality}-min`);
-        const maxSlider = document.getElementById(`${quality}-max`);
-
-        // Preserve priority from the currently loaded profile instead of using array order
-        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? (index + 1);
-
-        profile.qualities[quality] = {
-            enabled: enabled,
-            min_kbps: parseInt(minSlider?.value || 0),
-            max_kbps: parseInt(maxSlider?.value || 99999),
-            priority: existingPriority
-        };
-
-        // Add FLAC-specific bit_depth and fallback settings
-        if (quality === 'flac') {
-            const activeBtn = document.querySelector('.bit-depth-btn.active');
-            profile.qualities[quality].bit_depth = activeBtn ? activeBtn.getAttribute('data-value') : 'any';
-            const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-            profile.qualities[quality].bit_depth_fallback = fallbackCb ? fallbackCb.checked : true;
-        }
+    // v3: ordered target list. Drop empty/None fields so each target stays
+    // minimal (matches QualityTarget.to_dict on the backend).
+    const ranked_targets = currentRankedTargets.map(t => {
+        const out = { format: t.format };
+        if (t.label) out.label = t.label;
+        if (t.bit_depth) out.bit_depth = t.bit_depth;
+        if (t.min_sample_rate) out.min_sample_rate = t.min_sample_rate;
+        if (t.min_bitrate) out.min_bitrate = t.min_bitrate;
+        return out;
     });
 
-    // Check if current profile matches a preset
-    if (currentQualityProfile && currentQualityProfile.preset !== 'custom') {
-        profile.preset = currentQualityProfile.preset;
-    }
-
-    return profile;
+    return {
+        version: 3,
+        preset: (currentQualityProfile && currentQualityProfile.preset) || 'custom',
+        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
+        ranked_targets,
+    };
 }
 
 async function saveQualityProfile() {
