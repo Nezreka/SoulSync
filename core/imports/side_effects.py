@@ -252,7 +252,7 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
         origin, origin_context = derive_download_origin(context)
 
         db = get_database()
-        db.add_library_history_entry(
+        _history_id = db.add_library_history_entry(
             event_type="download",
             title=title,
             artist_name=artist_name,
@@ -270,6 +270,10 @@ def record_library_history_download(context: Dict[str, Any]) -> None:
             origin_context=origin_context,
             verification_status=context.get("_verification_status"),
         )
+        # Stash the row id so the live download task can link to its
+        # library_history row (the Unverified review queue needs it).
+        if isinstance(_history_id, int) and _history_id > 0:
+            context["_history_id"] = _history_id
     except Exception as e:
         logger.debug("library history record failed: %s", e)
 

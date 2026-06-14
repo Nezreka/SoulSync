@@ -68092,6 +68092,7 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
 .verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }
 .adl-retry-info { margin-left: 6px; font-size: 11px; color: #e67e22; cursor: help; }
+.adl-quality-chip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255,255,255,0.78); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 0 6px; line-height: 16px; cursor: help; vertical-align: middle; }
 .verif-badge.verif-human { color: #3498db; background: rgba(52,152,219,0.14); }
 .verif-actions { display: inline-flex; gap: 6px; margin-left: 10px; align-items: center; }
 .verif-act { border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; line-height: 18px; }

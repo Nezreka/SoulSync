@@ -796,6 +796,13 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'progress': progress,
                 'error': task.get('error_message'),
                 'verification_status': task.get('verification_status'),
+                # library_history row id (set at import) so the Unverified review
+                # queue can act on a still-live completed task before it becomes
+                # a persistent-history row.
+                'history_id': task.get('history_id'),
+                # Real probed audio quality (mutagen-read from the actual file),
+                # surfaced so the Downloads page can show what was downloaded.
+                'quality': task.get('quality') or '',
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
                 'batch_id': batch_id,

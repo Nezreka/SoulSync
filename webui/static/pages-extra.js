@@ -2430,6 +2430,14 @@ function _updateDlNavBadge(count) {
     }
 }
 
+function _adlQualityBadge(dl) {
+    // Show the real audio quality of a completed download (probed from the
+    // file itself — FLAC bit depth, MP3 bitrate, …), so you can see at a
+    // glance what was actually fetched.
+    if (dl.status !== 'completed' || !dl.quality) return '';
+    return ` <span class="adl-quality-chip" title="Audio quality of the downloaded file (read from the file itself)">${_adlEsc(dl.quality)}</span>`;
+}
+
 function _adlVerifBadge(dl) {
     // Verification badge for completed downloads — how this file passed
     // verification (status comes from library_history / the live task):
@@ -2457,9 +2465,15 @@ function _adlVerifBadge(dl) {
 
 function verifHistoryId(dl) {
     // Persistent history rows carry task_id 'history-<dbid>'.
-    if (!dl.is_persistent_history || !dl.task_id) return null;
-    const m = String(dl.task_id).match(/^history-(\d+)$/);
-    return m ? m[1] : null;
+    if (dl.is_persistent_history && dl.task_id) {
+        const m = String(dl.task_id).match(/^history-(\d+)$/);
+        if (m) return m[1];
+    }
+    // Still-live completed tasks carry the library_history id directly, so the
+    // review actions (play/audit/approve/delete) work before the task becomes
+    // a persistent-history row — otherwise the buttons "didn't always load".
+    if (dl.history_id) return String(dl.history_id);
+    return null;
 }
 
 function _verifTimeAgo(iso) {
@@ -3132,7 +3146,7 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}${_adlVerifBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
+                    ${statusLabel}${_adlVerifBadge(dl)}${_adlQualityBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
                 </div>
                 ${_adlReviewActions(dl)}
                 ${cancelBtnHtml}
