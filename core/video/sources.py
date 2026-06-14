@@ -59,14 +59,16 @@ class PlexVideoSource:
     def _sections(self, kind: str):
         return [s for s in self._server.library.sections() if s.type == kind]
 
-    def iter_movies(self):
+    def iter_movies(self, incremental=False):
         for section in self._sections("movie"):
-            for m in section.all():
+            items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
+            for m in items:
                 yield self._movie(m)
 
-    def iter_shows(self):
+    def iter_shows(self, incremental=False):
         for section in self._sections("show"):
-            for sh in section.all():
+            items = section.search(sort="addedAt:desc", maxresults=50) if incremental else section.all()
+            for sh in items:
                 yield self._show(sh)
 
     @staticmethod
@@ -185,11 +187,13 @@ class JellyfinVideoSource:
             "runtime_seconds": JellyfinVideoSource._ticks_to_seconds(item.get("RunTimeTicks")),
         }
 
-    def iter_movies(self):
+    def iter_movies(self, incremental=False):
         for view in self._views("movies"):
-            resp = self._req(f"/Users/{self.uid}/Items", {
-                "ParentId": view["Id"], "IncludeItemTypes": "Movie",
-                "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}) or {}
+            params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
+                      "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
+            if incremental:
+                params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
+            resp = self._req(f"/Users/{self.uid}/Items", params) or {}
             for it in resp.get("Items", []):
                 yield self._movie(it)
 
@@ -208,11 +212,13 @@ class JellyfinVideoSource:
             "file": self._file(it),
         }
 
-    def iter_shows(self):
+    def iter_shows(self, incremental=False):
         for view in self._views("tvshows"):
-            resp = self._req(f"/Users/{self.uid}/Items", {
-                "ParentId": view["Id"], "IncludeItemTypes": "Series",
-                "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating"}) or {}
+            params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
+                      "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating"}
+            if incremental:
+                params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "50"})
+            resp = self._req(f"/Users/{self.uid}/Items", params) or {}
             for it in resp.get("Items", []):
                 yield self._show(it)
 

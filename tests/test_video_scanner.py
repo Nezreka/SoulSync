@@ -21,11 +21,14 @@ class FakeSource:
 
     def __init__(self, movies, shows):
         self._movies, self._shows = movies, shows
+        self.incremental_calls = []
 
-    def iter_movies(self):
+    def iter_movies(self, incremental=False):
+        self.incremental_calls.append(("movies", incremental))
         return iter(self._movies)
 
-    def iter_shows(self):
+    def iter_shows(self, incremental=False):
+        self.incremental_calls.append(("shows", incremental))
         return iter(self._shows)
 
 
@@ -46,21 +49,37 @@ def test_scan_sync_populates_library(db):
     assert (lib["movies"], lib["shows"], lib["episodes"]) == (1, 1, 1)
 
 
-def test_scan_sync_prunes_removed_items(db):
+def test_deep_scan_prunes_removed_items(db):
     scanner = VideoLibraryScanner(db)
     scanner.scan_sync(lambda: FakeSource(
-        [{"server_id": "m1", "title": "A"}, {"server_id": "m2", "title": "B"}], []))
+        [{"server_id": "m1", "title": "A"}, {"server_id": "m2", "title": "B"}], []), mode="deep")
     assert db.dashboard_stats()["library"]["movies"] == 2
-    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []))
+    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []), mode="deep")
     assert db.dashboard_stats()["library"]["movies"] == 1
 
 
-def test_empty_scan_does_not_wipe_library(db):
-    # Safety: a scan that returns nothing (transient failure) must NOT prune.
+def test_full_refresh_does_not_prune(db):
+    # 'full' refreshes/adds but never removes — only 'deep' prunes.
     scanner = VideoLibraryScanner(db)
-    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []))
-    scanner.scan_sync(lambda: FakeSource([], []))
+    scanner.scan_sync(lambda: FakeSource(
+        [{"server_id": "m1", "title": "A"}, {"server_id": "m2", "title": "B"}], []), mode="deep")
+    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []), mode="full")
+    assert db.dashboard_stats()["library"]["movies"] == 2  # m2 NOT pruned
+
+
+def test_empty_deep_scan_does_not_wipe_library(db):
+    # Safety: a deep scan that returns nothing (transient failure) must NOT prune.
+    scanner = VideoLibraryScanner(db)
+    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []), mode="deep")
+    scanner.scan_sync(lambda: FakeSource([], []), mode="deep")
     assert db.dashboard_stats()["library"]["movies"] == 1
+
+
+def test_incremental_mode_requests_incremental_from_source(db):
+    src = FakeSource([{"server_id": "m1", "title": "A"}], [])
+    VideoLibraryScanner(db).scan_sync(lambda: src, mode="incremental")
+    assert ("movies", True) in src.incremental_calls
+    assert ("shows", True) in src.incremental_calls
 
 
 def test_scan_sync_no_source_reports_error(db):

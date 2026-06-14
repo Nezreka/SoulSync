@@ -8,8 +8,13 @@ Jellyfin adapters live in core/video/sources.py.
 
 A source must provide:
     source.server_name -> 'plex' | 'jellyfin'
-    source.iter_movies() -> iterable of normalized movie dicts
-    source.iter_shows()  -> iterable of normalized show dicts (with seasons/episodes)
+    source.iter_movies(incremental=False) -> iterable of normalized movie dicts
+    source.iter_shows(incremental=False)  -> iterable of normalized show dicts
+
+Scan MODES (mirroring the music side's full_refresh / incremental / deep_scan):
+    'incremental' - only recently-added items from the server; upsert; no prune.
+    'full'        - every item; upsert all (refresh metadata + add new); no prune.
+    'deep'        - every item; upsert; PRUNE what the server no longer has.
 
 ISOLATION: imports only video.db + shared infra; music never imports this.
 """
@@ -22,6 +27,8 @@ import time
 from utils.logging_config import get_logger
 
 logger = get_logger("video_scanner")
+
+VALID_MODES = ("incremental", "full", "deep")
 
 
 class VideoLibraryScanner:
@@ -41,30 +48,36 @@ class VideoLibraryScanner:
         with self._lock:
             self._status.update(kw)
 
-    def request_scan(self, source_factory) -> dict:
+    @staticmethod
+    def _norm_mode(mode) -> str:
+        return mode if mode in VALID_MODES else "full"
+
+    def request_scan(self, source_factory, mode: str = "full") -> dict:
         """Kick off a background scan. ``source_factory()`` returns a media
         source (or None if no video-capable server is connected)."""
+        mode = self._norm_mode(mode)
         with self._lock:
             if self._status.get("state") == "scanning":
                 return {"status": "in_progress"}
-            self._status = {"state": "scanning", "phase": "starting",
+            self._status = {"state": "scanning", "phase": "starting", "mode": mode,
                             "started_at": time.time(),
                             "movies": 0, "shows": 0, "episodes": 0}
         self._thread = threading.Thread(
-            target=self._run, args=(source_factory,), daemon=True)
+            target=self._run, args=(source_factory, mode), daemon=True)
         self._thread.start()
-        return {"status": "started"}
+        return {"status": "started", "mode": mode}
 
-    def scan_sync(self, source_factory) -> dict:
+    def scan_sync(self, source_factory, mode: str = "full") -> dict:
         """Run a scan inline (used by tests / callers that want to block)."""
+        mode = self._norm_mode(mode)
         with self._lock:
-            self._status = {"state": "scanning", "phase": "starting",
+            self._status = {"state": "scanning", "phase": "starting", "mode": mode,
                             "started_at": time.time(),
                             "movies": 0, "shows": 0, "episodes": 0}
-        self._run(source_factory)
+        self._run(source_factory, mode)
         return self.get_status()
 
-    def _run(self, source_factory) -> None:
+    def _run(self, source_factory, mode: str = "full") -> None:
         try:
             source = source_factory()
             if source is None:
@@ -72,40 +85,44 @@ class VideoLibraryScanner:
                           error="No connected Plex/Jellyfin video server")
                 return
             server = source.server_name
+            incremental = mode == "incremental"
+            do_prune = mode == "deep"
 
             # ── Movies ──
             self._set(phase="scanning movies")
             seen_movies: set[str] = set()
             movies = 0
-            for item in source.iter_movies():
+            for item in source.iter_movies(incremental=incremental):
                 self.db.upsert_movie(server, item)
                 seen_movies.add(str(item["server_id"]))
                 movies += 1
                 if movies % 25 == 0:
                     self._set(movies=movies)
             self._set(movies=movies)
-            # Prune only when we actually saw items — avoids wiping the library
-            # if the server returned nothing due to a transient failure.
-            removed_m = self.db.prune_missing("movies", server, seen_movies) if seen_movies else 0
+            # Prune ONLY on a deep scan, and only when we actually saw items —
+            # so a transient empty response can never wipe the library.
+            removed_m = (self.db.prune_missing("movies", server, seen_movies)
+                         if do_prune and seen_movies else 0)
 
             # ── Shows ──
             self._set(phase="scanning shows")
             seen_shows: set[str] = set()
             shows = 0
             episodes = 0
-            for show in source.iter_shows():
+            for show in source.iter_shows(incremental=incremental):
                 self.db.upsert_show_tree(server, show)
                 seen_shows.add(str(show["server_id"]))
                 shows += 1
                 episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
                 self._set(shows=shows, episodes=episodes)
-            removed_s = self.db.prune_missing("shows", server, seen_shows) if seen_shows else 0
+            removed_s = (self.db.prune_missing("shows", server, seen_shows)
+                         if do_prune and seen_shows else 0)
 
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes,
                       removed=removed_m + removed_s)
-            logger.info("Video scan complete: %d movies, %d shows, %d episodes (%d pruned)",
-                        movies, shows, episodes, removed_m + removed_s)
+            logger.info("Video scan (%s) complete: %d movies, %d shows, %d episodes (%d pruned)",
+                        mode, movies, shows, episodes, removed_m + removed_s)
         except Exception as e:  # noqa: BLE001 - report any failure to the UI
             logger.exception("Video library scan failed")
             self._set(state="error", phase="failed", error=str(e))

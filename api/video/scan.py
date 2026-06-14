@@ -9,7 +9,7 @@ server's own rescan (post-download) is wired separately into the download flow.
 
 from __future__ import annotations
 
-from flask import jsonify
+from flask import jsonify, request
 
 from utils.logging_config import get_logger
 
@@ -22,8 +22,10 @@ def register_routes(bp):
         from . import get_video_db
         from core.video.scanner import get_video_scanner
         from core.video.sources import get_active_video_source
+        body = request.get_json(silent=True) or {}
+        mode = body.get("mode", "full")
         scanner = get_video_scanner(get_video_db())
-        return jsonify(scanner.request_scan(get_active_video_source))
+        return jsonify(scanner.request_scan(get_active_video_source, mode))
 
     @bp.route("/scan/status", methods=["GET"])
     def video_scan_status():
