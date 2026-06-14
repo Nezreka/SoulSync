@@ -17725,6 +17725,11 @@ def start_quality_scan():
 
         logger.info(f"[Quality Scanner API] Starting scan with scope: {scope}")
 
+        # Re-arm the path-resolve diagnostic so each scan logs the searched dirs
+        # once (otherwise it only ever fires on the first scan after a restart).
+        global _resolve_library_diag_logged
+        _resolve_library_diag_logged = False
+
         # Reset state
         quality_scanner_state["status"] = "running"
         quality_scanner_state["phase"] = "Initializing..."
