@@ -162,6 +162,14 @@ def test_dashboard_stats_counts_content_and_downloads(db):
     assert s["watchlist"] == 1 and s["wishlist"] == 1
 
 
+def test_library_selection_roundtrip(db):
+    assert db.get_library_selection("plex") == {"movies": None, "tv": None}
+    db.set_library_selection("plex", "Movies", "TV Shows")
+    assert db.get_library_selection("plex") == {"movies": "Movies", "tv": "TV Shows"}
+    # Per-server keys don't collide.
+    assert db.get_library_selection("jellyfin") == {"movies": None, "tv": None}
+
+
 def test_settings_kv_roundtrip(db):
     assert db.get_setting("download_dir", "unset") == "unset"
     db.set_setting("download_dir", "/data/video")

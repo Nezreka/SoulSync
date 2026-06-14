@@ -127,6 +127,17 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── library mapping (which server library is Movies / TV) ─────────────────
+    def get_library_selection(self, server: str) -> dict:
+        return {
+            "movies": self.get_setting(server + ".movies_library"),
+            "tv": self.get_setting(server + ".tv_library"),
+        }
+
+    def set_library_selection(self, server: str, movies, tv) -> None:
+        self.set_setting(server + ".movies_library", movies or "")
+        self.set_setting(server + ".tv_library", tv or "")
+
     # ── dashboard ─────────────────────────────────────────────────────────────
     def dashboard_stats(self) -> dict:
         """Live counts for the video dashboard, straight from video.db.
