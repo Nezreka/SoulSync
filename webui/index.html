@@ -4740,21 +4740,15 @@
                                 <div id="tidal-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Tidal Download Quality:</label>
-                                        <select id="tidal-download-quality" class="form-select">
-                                            <option value="low">Low (AAC 96kbps)</option>
-                                            <option value="high">High (AAC 320kbps)</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Tidal downloads. HiRes requires a Tidal HiFi Plus subscription.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Tidal fetches the highest tier your profile accepts.
                                         </div>
                                         <label class="checkbox-inline" style="margin-top: 8px;">
                                             <input type="checkbox" id="tidal-allow-fallback" checked>
                                             Allow quality fallback
                                         </label>
                                         <div class="setting-help-text">
-                                            When disabled, only downloads at the exact quality selected. If unavailable, skips to the next source.
+                                            When disabled, only downloads at the exact derived quality. If unavailable, skips to the next source.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4774,14 +4768,8 @@
                                 <div id="qobuz-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Qobuz Download Quality:</label>
-                                        <select id="qobuz-quality" class="form-select">
-                                            <option value="mp3">MP3 320kbps</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">Hi-Res (FLAC 24-bit/96kHz)</option>
-                                            <option value="hires_max">Hi-Res Max (FLAC 24-bit/192kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Qobuz downloads. Hi-Res requires a Qobuz Studio or Sublime subscription.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Qobuz fetches the highest tier your profile accepts. Hi-Res requires a Qobuz Studio or Sublime subscription.
                                         </div>
                                         <label class="checkbox-inline" style="margin-top: 8px;">
                                             <input type="checkbox" id="qobuz-allow-fallback" checked>
@@ -4840,14 +4828,8 @@
                                 <div id="hifi-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>HiFi Download Quality:</label>
-                                        <select id="hifi-download-quality" class="form-select">
-                                            <option value="low">Low (AAC 96kbps)</option>
-                                            <option value="high">High (AAC 320kbps)</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for HiFi downloads. Uses public API instances — no account required.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — HiFi fetches the highest tier your profile accepts. Uses public API instances — no account required.
                                         </div>
                                         <label class="checkbox-inline" style="margin-top: 8px;">
                                             <input type="checkbox" id="hifi-allow-fallback" checked>
@@ -4888,14 +4870,8 @@
                                 <div id="deezer-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Deezer Download Quality:</label>
-                                        <select id="deezer-download-quality" class="form-select">
-                                            <option value="mp3_128">MP3 128kbps (Free)</option>
-                                            <option value="mp3_320">MP3 320kbps (Premium)</option>
-                                            <option value="flac">FLAC Lossless (HiFi)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Deezer downloads. FLAC requires a Deezer HiFi subscription.
-                                            MP3 320 requires Premium or higher.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Deezer fetches the highest tier your profile accepts. FLAC requires a Deezer HiFi subscription.
                                         </div>
                                         <label class="checkbox-inline" style="margin-top: 8px;">
                                             <input type="checkbox" id="deezer-allow-fallback" checked>
@@ -4930,14 +4906,8 @@
                                 <div id="amazon-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Amazon Music Quality:</label>
-                                        <select id="amazon-quality" class="form-select">
-                                            <option value="flac">FLAC Lossless (24-bit/48kHz Hi-Res)</option>
-                                            <option value="opus">Opus (320kbps)</option>
-                                            <option value="eac3">EAC3 Dolby Atmos (768kbps 5.1)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Preferred codec tier. FLAC is 24-bit/48kHz Hi-Res — no subscription required.
-                                            Downloads via T2Tunes proxy.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Amazon fetches FLAC (24-bit/48kHz Hi-Res) when your profile wants lossless, otherwise a lossy tier. Downloads via T2Tunes proxy.
                                         </div>
                                         <label class="checkbox-inline" style="margin-top: 8px;">
                                             <input type="checkbox" id="amazon-allow-fallback" checked>

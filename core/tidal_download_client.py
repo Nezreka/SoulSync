@@ -33,7 +33,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
-from core.quality.source_map import quality_from_tidal_tier
+from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
 logger = get_logger("tidal_download_client")
 
@@ -456,7 +456,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
             if successful_query and successful_query != query:
                 logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
-            quality_key = config_manager.get('tidal_download.quality', 'lossless')
+            quality_key = quality_tier_for_source('tidal', default='lossless')
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
             # Stamp the configured tier (what will actually be downloaded) so
             # the global ranker sees real sample_rate/bit_depth.
@@ -779,7 +779,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
             logger.error("Tidal session not authenticated")
             return None
 
-        quality_key = config_manager.get('tidal_download.quality', 'lossless')
+        quality_key = quality_tier_for_source('tidal', default='lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
         allow_fallback = config_manager.get('tidal_download.allow_fallback', True)

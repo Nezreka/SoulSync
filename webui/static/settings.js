@@ -1138,17 +1138,14 @@ async function loadSettingsData() {
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
-        document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
+        // Per-source download quality is now derived from the global Quality
+        // Profile (ranked targets) — the per-source quality selects were removed.
         document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
-        document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
         document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
-        document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
         document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
         loadHiFiInstances();
-        document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
         document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
-        document.getElementById('amazon-quality').value = settings.amazon_download?.quality || 'flac';
         document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
@@ -2946,11 +2943,10 @@ async function saveSettings(quiet = false) {
             usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
         },
         tidal_download: {
-            quality: document.getElementById('tidal-download-quality').value || 'lossless',
+            // quality derived from the global Quality Profile (ranked targets)
             allow_fallback: document.getElementById('tidal-allow-fallback').checked,
         },
         hifi_download: {
-            quality: document.getElementById('hifi-download-quality').value || 'lossless',
             allow_fallback: document.getElementById('hifi-allow-fallback').checked,
         },
         hifi: {
@@ -2958,12 +2954,10 @@ async function saveSettings(quiet = false) {
             tags: _collectServiceTags('hifi')
         },
         deezer_download: {
-            quality: document.getElementById('deezer-download-quality').value || 'flac',
             arl: document.getElementById('deezer-download-arl').value || '',
             allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
         amazon_download: {
-            quality: document.getElementById('amazon-quality').value || 'flac',
             allow_fallback: document.getElementById('amazon-allow-fallback').checked,
         },
         lidarr_download: {
@@ -2997,7 +2991,6 @@ async function saveSettings(quiet = false) {
             // to migrate existing configs.
         },
         qobuz: {
-            quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
             tags: _collectServiceTags('qobuz'),
             allow_fallback: document.getElementById('qobuz-allow-fallback').checked,

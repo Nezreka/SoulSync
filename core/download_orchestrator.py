@@ -102,12 +102,14 @@ class DownloadOrchestrator:
         deezer_dl = self.client('deezer_dl')
         if deezer_arl and deezer_dl:
             deezer_dl.reconnect(deezer_arl)
-            deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            deezer_dl._quality = quality_tier_for_source('deezer', default='flac')
 
         # Reload Amazon quality preference (T2Tunes needs no reconnect — public proxy)
         amazon = self.client('amazon')
         if amazon:
-            quality = config_manager.get('amazon_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            quality = quality_tier_for_source('amazon', default='flac')
             amazon._quality = quality
             amazon._allow_fallback = config_manager.get('amazon_download.allow_fallback', True)
             if hasattr(amazon, '_client') and amazon._client:
