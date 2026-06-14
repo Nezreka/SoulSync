@@ -1157,6 +1157,10 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     _mark_task_completed(task_id, context.get('track_info'))
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']
+                    if context.get('_history_id'):
+                        download_tasks[task_id]['history_id'] = context['_history_id']
+                    if context.get('_audio_quality'):
+                        download_tasks[task_id]['quality'] = context['_audio_quality']
             with matched_context_lock:
                 if context_key in matched_downloads_context:
                     del matched_downloads_context[context_key]
@@ -1171,6 +1175,10 @@ def post_process_matched_download_with_verification(context_key, context, file_p
                     download_tasks[task_id]['metadata_enhanced'] = True
                     if context.get('_verification_status'):
                         download_tasks[task_id]['verification_status'] = context['_verification_status']
+                    if context.get('_history_id'):
+                        download_tasks[task_id]['history_id'] = context['_history_id']
+                    if context.get('_audio_quality'):
+                        download_tasks[task_id]['quality'] = context['_audio_quality']
                     redownload_ctx = download_tasks[task_id].get('_redownload_context')
 
             with matched_context_lock:

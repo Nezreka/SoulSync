@@ -13062,7 +13062,10 @@ class MusicDatabase:
                   download_source, source_track_id, source_track_title, source_filename,
                   acoustid_result, source_artist, origin, origin_context, verification_status))
             conn.commit()
-            return True
+            # Return the new row id (truthy on success) so callers can link the
+            # live download task to its library_history row — e.g. the Unverified
+            # review queue needs the id for its play/approve/delete actions.
+            return cursor.lastrowid
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
