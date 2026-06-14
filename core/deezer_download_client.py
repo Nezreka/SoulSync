@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+from core.quality.source_map import quality_from_deezer
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")
@@ -581,7 +582,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     bitrate = 128
                     quality = 'mp3'
 
-                results.append(TrackResult(
+                tr = TrackResult(
                     username='deezer_dl',
                     filename=f"{track_id}||{artist} - {title}",
                     size=est_size,
@@ -595,7 +596,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     title=title,
                     album=album,
                     track_number=item.get('track_position'),
-                ))
+                )
+                # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
+                tr.set_quality(quality_from_deezer(self._quality))
+                results.append(tr)
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
             return results, []
