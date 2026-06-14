@@ -330,9 +330,9 @@ def test_video_worker_orbs_referenced_and_isolated():
 def test_show_detail_subpage_present():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-show-detail"', "</section>")
-    # Hero + season tree containers the renderer fills.
-    for hook in ('data-vd-backdrop', 'data-vd-poster', 'data-vd-title', 'data-vd-badges',
-                 'data-vd-overview', 'data-vd-stats', 'data-vd-seasons'):
+    # Netflix billboard + episodes containers the renderer fills.
+    for hook in ('data-vd-backdrop', 'data-vd-poster', 'data-vd-title', 'data-vd-meta',
+                 'data-vd-overview', 'data-vd-actions', 'data-vd-season-select', 'data-vd-episodes'):
         assert hook in block, hook
     # Back button reuses the shared data-video-goto nav (no inline handler).
     assert 'data-video-goto="video-library"' in block
