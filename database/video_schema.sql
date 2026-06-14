@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS movies (
     server_id            TEXT,            -- media server native id (Plex ratingKey / Jellyfin Item Id)
     tmdb_id              INTEGER,         -- not unique: same film can sit in >1 library
     imdb_id              TEXT,
+    tmdb_match_status    TEXT,            -- enrichment: NULL=pending | matched | not_found | error
+    tmdb_last_attempted  TEXT,
     title                TEXT NOT NULL,
     sort_title           TEXT,
     year                 INTEGER,
@@ -100,6 +102,10 @@ CREATE TABLE IF NOT EXISTS shows (
     tvdb_id            INTEGER,          -- not unique (same series can sit in >1 library)
     tmdb_id            INTEGER,
     imdb_id            TEXT,
+    tmdb_match_status  TEXT,             -- enrichment match state per source
+    tmdb_last_attempted TEXT,
+    tvdb_match_status  TEXT,
+    tvdb_last_attempted TEXT,
     title              TEXT NOT NULL,
     sort_title         TEXT,
     year               INTEGER,
