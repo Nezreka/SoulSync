@@ -58,18 +58,16 @@
         return VIDEO_PAGES[0];
     }
 
-    function showVideoPage(pageId) {
-        var meta = pageMeta(pageId);
+    function setActiveNav(pageId) {
         var navButtons = document.querySelectorAll('.video-nav .nav-button[data-video-page]');
         for (var i = 0; i < navButtons.length; i++) {
             navButtons[i].classList.toggle(
-                'active', navButtons[i].getAttribute('data-video-page') === meta.id);
+                'active', navButtons[i].getAttribute('data-video-page') === pageId);
         }
-        var host = document.getElementById('video-page-host');
-        if (!host) return;
+    }
+
+    function renderPlaceholder(slot, meta) {
         // Built from our own static constants only — no user input.
-        var shell = document.createElement('div');
-        shell.className = 'page-shell video-placeholder';
         var h2 = document.createElement('h2');
         h2.className = 'header-title';
         var span = document.createElement('span');
@@ -78,9 +76,37 @@
         var note = document.createElement('p');
         note.className = 'video-placeholder-note';
         note.textContent = 'The ' + meta.label + ' page for the video side is coming soon.';
-        host.textContent = '';
-        host.appendChild(h2);
-        host.appendChild(note);
+        slot.textContent = '';
+        slot.appendChild(h2);
+        slot.appendChild(note);
+    }
+
+    // Show one video page: reveal its built .video-subpage if one exists, else
+    // fall back to the placeholder slot. Then announce it so per-page data
+    // modules (e.g. video-dashboard.js) can populate themselves — they listen
+    // for this event instead of being called directly, keeping each isolated.
+    function showPage(pageId) {
+        var meta = pageMeta(pageId);
+        var host = document.getElementById('video-page-host');
+        if (!host) return;
+        var matched = null;
+        var subpages = host.querySelectorAll('.video-subpage');
+        for (var i = 0; i < subpages.length; i++) {
+            var isMatch = subpages[i].getAttribute('data-video-subpage') === meta.id;
+            subpages[i].hidden = !isMatch;
+            if (isMatch) matched = subpages[i];
+        }
+        var slot = document.getElementById('video-placeholder-slot');
+        if (slot) {
+            slot.hidden = !!matched;
+            if (!matched) renderPlaceholder(slot, meta);
+        }
+        document.dispatchEvent(new CustomEvent('soulsync:video-page-shown', { detail: meta.id }));
+    }
+
+    function navigate(pageId) {
+        setActiveNav(pageId);
+        showPage(pageId);
     }
 
     function applySide(side) {
@@ -94,7 +120,7 @@
         }
         if (side === 'video') {
             var active = document.querySelector('.video-nav .nav-button.active');
-            showVideoPage(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
+            navigate(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
         }
     }
 
@@ -119,9 +145,21 @@
             (function (btn) {
                 btn.addEventListener('click', function (e) {
                     e.preventDefault();
-                    showVideoPage(btn.getAttribute('data-video-page'));
+                    navigate(btn.getAttribute('data-video-page'));
                 });
             })(navButtons[j]);
+        }
+
+        // In-page jumps (e.g. dashboard Quick Action tiles) navigate the same
+        // way as the sidebar nav, via data-video-goto. No inline onclick.
+        var gotos = document.querySelectorAll('[data-video-goto]');
+        for (var k = 0; k < gotos.length; k++) {
+            (function (el) {
+                el.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    navigate(el.getAttribute('data-video-goto'));
+                });
+            })(gotos[k]);
         }
 
         var defaultNav = document.querySelector(

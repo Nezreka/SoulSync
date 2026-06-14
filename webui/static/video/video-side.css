@@ -108,16 +108,33 @@ body[data-side="video"] .status-section {
     display: none;
 }
 
-/* ── Placeholder content (until the real video pages land) ─────────────── */
-.video-placeholder {
+/* ── Subpages: one built video page shown at a time ────────────────────── */
+/* Each real page is a .video-subpage inside #video-page-host; the controller
+   toggles the [hidden] attribute. Be explicit so no reused .dash-* rule can
+   resurrect a hidden page. */
+.video-subpage[hidden],
+.video-placeholder-slot[hidden] {
+    display: none !important;
+}
+
+/* ── Placeholder content (for pages not built yet) ─────────────────────── */
+.video-placeholder-slot {
     padding: 48px 40px;
 }
-.video-placeholder .header-title {
+.video-placeholder-slot .header-title {
     font-size: 22px;
     font-weight: 700;
 }
 .video-placeholder-note {
     margin-top: 10px;
+    color: var(--text-secondary, #9aa0aa);
+    font-size: 14px;
+}
+
+/* Empty-state line inside reused dashboard cards (e.g. Recent Downloads). */
+.video-empty-note {
+    margin: 0;
+    padding: 8px 2px;
     color: var(--text-secondary, #9aa0aa);
     font-size: 14px;
 }

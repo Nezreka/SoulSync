@@ -16,6 +16,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 _INDEX = (_ROOT / "webui" / "index.html").read_text(encoding="utf-8", errors="replace")
 _JS = (_ROOT / "webui" / "static" / "video" / "video-side.js").read_text(encoding="utf-8")
+_DASH_JS = (_ROOT / "webui" / "static" / "video" / "video-dashboard.js").read_text(encoding="utf-8")
 _CSS_PATH = _ROOT / "webui" / "static" / "video" / "video-side.css"
 
 EXPECTED_VIDEO_PAGES = {
@@ -73,6 +74,39 @@ def test_music_sidebar_nav_still_intact():
         assert f'data-page="{page}"' in music_nav, f"music nav lost '{page}'"
     # The music subtitle is still the default in markup (JS swaps it at runtime).
     assert "Music Sync & Manager" in _INDEX
+
+
+# --- the video dashboard (first built page) -------------------------------
+
+def test_video_dashboard_subpage_present_with_expected_cards():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
+    # Mirrors the music dashboard's sections (minus enrichment), reusing its CSS.
+    for card in ("services", "stats", "library", "downloads", "tools", "activity"):
+        assert f'data-card="{card}"' in block, f"video dashboard missing the '{card}' card"
+    # Reuses music's dashboard classes so the look matches.
+    assert 'class="dash-grid"' in block
+    assert "stat-card-dashboard" in block
+    # Driven by data, not music code: stat values carry data-video-stat hooks.
+    assert "data-video-stat=" in block
+    # Isolation + integrity contract: no inline handlers anywhere in the page.
+    assert "onclick" not in block
+
+
+def test_video_dashboard_has_placeholder_slot_for_unbuilt_pages():
+    assert 'id="video-placeholder-slot"' in _INDEX
+
+
+def test_video_dashboard_data_module_referenced_and_isolated():
+    assert "video/video-dashboard.js" in _INDEX
+    stripped = _DASH_JS.strip()
+    assert stripped.startswith("/*") or stripped.startswith("(function")
+    assert "(function" in _DASH_JS and "})();" in _DASH_JS
+    # Decoupled from the controller: it listens for the page-shown event rather
+    # than being called directly, and adds no globals / inline handlers.
+    assert "soulsync:video-page-shown" in _DASH_JS
+    assert "addEventListener" in _DASH_JS
+    assert "window." not in _DASH_JS
 
 
 def test_controller_is_isolated_iife_with_no_globals():

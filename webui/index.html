@@ -415,8 +415,244 @@
             <canvas id="page-particles-canvas"></canvas>
             <div id="webui-react-root" class="page" data-react-app="router"></div>
 
-            <!-- Video side content host (shell-only; filled by video/video-side.js) -->
-            <div class="page video-page" id="video-page-host"></div>
+            <!-- Video side content host. Real pages live here as .video-subpage
+                 sections (shown one at a time by video/video-side.js); pages
+                 without a built page fall back to #video-placeholder-slot.
+                 ISOLATION: reuses music's .dash-grid/.dash-card CSS for an
+                 identical look, but every value is driven by video/video-*.js
+                 off the (future) video DB — no music code is referenced. No
+                 inline onclick (data-attrs + addEventListener only). -->
+            <div class="page video-page" id="video-page-host">
+                <section class="video-subpage" data-video-subpage="video-dashboard">
+                    <div class="page-shell dashboard-container">
+                        <div class="dashboard-header">
+                            <div class="header-text">
+                                <h2 class="header-title"><span>Video Dashboard</span></h2>
+                                <p class="header-subtitle">Monitor your video library, downloads and services</p>
+                            </div>
+                        </div>
+                        <div class="dash-grid">
+
+                            <!-- Service Status -->
+                            <article class="dash-card" data-card="services">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Service Status</h3>
+                                    <p class="dash-card__sub">Connection health for the video services.</p>
+                                </header>
+                                <div class="dash-card__body">
+                                    <div class="service-status-grid">
+                                        <div class="service-card" data-status-ready="false">
+                                            <div class="service-card-header">
+                                                <span class="service-card-title">Media Server</span>
+                                                <span class="service-card-indicator disconnected">&#9679;</span>
+                                            </div>
+                                            <p class="service-card-status-text">Not configured</p>
+                                            <p class="service-card-response-time">Response: --</p>
+                                            <div class="service-card-footer">
+                                                <button class="service-card-button" type="button" data-video-test="media-server">Test</button>
+                                            </div>
+                                        </div>
+                                        <div class="service-card" data-status-ready="false">
+                                            <div class="service-card-header">
+                                                <span class="service-card-title">Download Client</span>
+                                                <span class="service-card-indicator disconnected">&#9679;</span>
+                                            </div>
+                                            <p class="service-card-status-text">Not configured</p>
+                                            <p class="service-card-response-time">Response: --</p>
+                                            <div class="service-card-footer">
+                                                <button class="service-card-button" type="button" data-video-test="download-client">Test</button>
+                                            </div>
+                                        </div>
+                                        <div class="service-card" data-status-ready="false">
+                                            <div class="service-card-header">
+                                                <span class="service-card-title">Metadata Source</span>
+                                                <span class="service-card-indicator disconnected">&#9679;</span>
+                                            </div>
+                                            <p class="service-card-status-text">Not configured</p>
+                                            <p class="service-card-response-time">Response: --</p>
+                                            <div class="service-card-footer">
+                                                <button class="service-card-button" type="button" data-video-test="metadata-source">Test</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <!-- System Stats -->
+                            <article class="dash-card" data-card="stats">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">System Stats</h3>
+                                    <p class="dash-card__sub">Live performance metrics.</p>
+                                </header>
+                                <div class="dash-card__body">
+                                    <div class="stats-grid-dashboard">
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">Active Downloads</p>
+                                            <p class="stat-card-value" data-video-stat="active-downloads">0</p>
+                                            <p class="stat-card-subtitle">Currently downloading</p>
+                                        </div>
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">Finished Downloads</p>
+                                            <p class="stat-card-value" data-video-stat="finished-downloads">0</p>
+                                            <p class="stat-card-subtitle">Completed this session</p>
+                                        </div>
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">Download Speed</p>
+                                            <p class="stat-card-value" data-video-stat="download-speed">0 KB/s</p>
+                                            <p class="stat-card-subtitle">Combined speed</p>
+                                        </div>
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">Disk Usage</p>
+                                            <p class="stat-card-value" data-video-stat="disk-usage">--</p>
+                                            <p class="stat-card-subtitle">Video library size</p>
+                                        </div>
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">System Uptime</p>
+                                            <p class="stat-card-value" data-video-stat="uptime">0m</p>
+                                            <p class="stat-card-subtitle">Application runtime</p>
+                                        </div>
+                                        <div class="stat-card-dashboard">
+                                            <p class="stat-card-title">Memory Usage</p>
+                                            <p class="stat-card-value" data-video-stat="memory">--</p>
+                                            <p class="stat-card-subtitle">Current usage</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <!-- Library -->
+                            <article class="dash-card" data-card="library">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Library</h3>
+                                    <p class="dash-card__sub">Your collection at a glance.</p>
+                                </header>
+                                <div class="dash-card__body">
+                                    <div class="library-status-card">
+                                        <div class="library-status-glow"></div>
+                                        <div class="library-status-header">
+                                            <div class="library-status-info">
+                                                <h4 class="library-status-title">Video Library</h4>
+                                                <p class="library-status-subtitle">Not scanned yet</p>
+                                            </div>
+                                        </div>
+                                        <div class="library-status-stats">
+                                            <div class="library-status-stat">
+                                                <div class="library-status-stat-text">
+                                                    <span class="library-status-stat-value" data-video-stat="movies">0</span>
+                                                    <span class="library-status-stat-label">Movies</span>
+                                                </div>
+                                            </div>
+                                            <div class="library-status-stat">
+                                                <div class="library-status-stat-text">
+                                                    <span class="library-status-stat-value" data-video-stat="shows">0</span>
+                                                    <span class="library-status-stat-label">Shows</span>
+                                                </div>
+                                            </div>
+                                            <div class="library-status-stat">
+                                                <div class="library-status-stat-text">
+                                                    <span class="library-status-stat-value" data-video-stat="episodes">0</span>
+                                                    <span class="library-status-stat-label">Episodes</span>
+                                                </div>
+                                            </div>
+                                            <div class="library-status-stat">
+                                                <div class="library-status-stat-text">
+                                                    <span class="library-status-stat-value" data-video-stat="library-size">--</span>
+                                                    <span class="library-status-stat-label">Disk Size</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <!-- Recent Downloads -->
+                            <article class="dash-card" data-card="downloads">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Recent Downloads</h3>
+                                    <p class="dash-card__sub">Your latest grabs.</p>
+                                </header>
+                                <div class="dash-card__body">
+                                    <div class="sync-history-cards" data-video-recent-downloads>
+                                        <p class="video-empty-note">No downloads yet.</p>
+                                    </div>
+                                </div>
+                            </article>
+
+                            <!-- Quick Actions -->
+                            <article class="dash-card dash-card--quick-actions" data-card="tools">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Quick Actions</h3>
+                                    <p class="dash-card__sub">Jump straight into the video side.</p>
+                                </header>
+                                <div class="dash-card__body qa-bento">
+                                    <button class="qa-tile qa-tile--hero" type="button" data-video-goto="video-search" aria-label="Add a movie or show">
+                                        <div class="qa-tile__topline">
+                                            <span class="qa-tile__pulse" aria-hidden="true"></span>
+                                            <span class="qa-tile__kicker">Find &amp; add</span>
+                                        </div>
+                                        <div class="qa-tile__heading">
+                                            <strong class="qa-tile__title">Add Movie or Show</strong>
+                                            <p class="qa-tile__desc">Search across sources and start tracking something new.</p>
+                                        </div>
+                                        <div class="qa-tile__cta">
+                                            <span class="qa-tile__cta-label">Search</span>
+                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
+                                        </div>
+                                    </button>
+                                    <button class="qa-tile qa-tile--minor" type="button" data-video-goto="video-watchlist" aria-label="Open Watchlist">
+                                        <div class="qa-tile__topline">
+                                            <span class="qa-tile__kicker">Following</span>
+                                        </div>
+                                        <div class="qa-tile__heading">
+                                            <strong class="qa-tile__title">Watchlist</strong>
+                                            <p class="qa-tile__desc">Shows &amp; channels you monitor.</p>
+                                        </div>
+                                        <div class="qa-tile__cta">
+                                            <span class="qa-tile__cta-label">Open</span>
+                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
+                                        </div>
+                                    </button>
+                                    <button class="qa-tile qa-tile--minor" type="button" data-video-goto="video-downloads" aria-label="Open Downloads">
+                                        <div class="qa-tile__topline">
+                                            <span class="qa-tile__kicker">Activity</span>
+                                        </div>
+                                        <div class="qa-tile__heading">
+                                            <strong class="qa-tile__title">Downloads</strong>
+                                            <p class="qa-tile__desc">Queue, progress and history.</p>
+                                        </div>
+                                        <div class="qa-tile__cta">
+                                            <span class="qa-tile__cta-label">Open</span>
+                                            <span class="qa-tile__cta-arrow" aria-hidden="true">&rarr;</span>
+                                        </div>
+                                    </button>
+                                </div>
+                            </article>
+
+                            <!-- Recent Activity -->
+                            <article class="dash-card" data-card="activity">
+                                <header class="dash-card__head">
+                                    <h3 class="dash-card__title">Recent Activity</h3>
+                                    <p class="dash-card__sub">What just happened.</p>
+                                </header>
+                                <div class="dash-card__body">
+                                    <div class="activity-feed-container" data-video-activity-feed>
+                                        <div class="activity-item">
+                                            <span class="activity-icon">&#127909;</span>
+                                            <div class="activity-text-content">
+                                                <p class="activity-title">Video side ready</p>
+                                                <p class="activity-subtitle">Dashboard initialized successfully</p>
+                                            </div>
+                                            <p class="activity-time">Now</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </article>
+
+                        </div>
+                    </div>
+                </section>
+                <div class="video-placeholder-slot" id="video-placeholder-slot" hidden></div>
+            </div>
 
             <!-- Dashboard Page -->
             <div class="page" id="dashboard-page">
@@ -8543,6 +8779,8 @@
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
     <!-- Video side shell controller (isolated; music never references it) -->
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
+    <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
+    <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
 </body>
 
 </html>
