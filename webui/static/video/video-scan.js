@@ -159,6 +159,24 @@
             .catch(function () { /* poll will reconcile */ });
     }
 
+    // Rehydrate after a page refresh: the scan keeps running server-side, so if
+    // one is in progress, restore the UI (Cancel button, moving bar, phase) and
+    // resume polling — parity with the music tools.
+    function resumeIfScanning() {
+        if (scanning) return;
+        fetch(STATUS_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                if (s && s.state === 'scanning' && !scanning) {
+                    scanning = true;
+                    reflectProgress(s);
+                    emit('soulsync:video-scan-progress', s);
+                    setTimeout(poll, 1200);
+                }
+            })
+            .catch(function () { /* ignore */ });
+    }
+
     function init() {
         var triggers = document.querySelectorAll('[data-video-scan-mode],[data-video-scan]');
         for (var i = 0; i < triggers.length; i++) {
@@ -182,8 +200,11 @@
             start((e.detail && e.detail.mode) || 'full');
         });
         document.addEventListener('soulsync:video-page-shown', function (e) {
-            if (e && e.detail === 'video-tools') loadToolStats();
+            if (e && e.detail === 'video-tools') { loadToolStats(); resumeIfScanning(); }
         });
+        // On load: if a scan is already running (page was refreshed mid-scan),
+        // restore the live state instead of showing Idle.
+        resumeIfScanning();
     }
 
     if (document.readyState === 'loading') {
