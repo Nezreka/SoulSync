@@ -48,9 +48,11 @@ def test_acoustid_quarantine_without_message_still_flags():
 
 
 def test_bitdepth_rejection_detected():
+    # The _bitdepth_rejected flag now signals any quality-target rejection
+    # (bit depth, sample rate, format, bitrate) — the unified quality guard.
     reason = import_rejection_reason({'_bitdepth_rejected': True})
     assert reason is not None
-    assert 'bit-depth' in reason.lower()
+    assert 'quality filter' in reason.lower()
 
 
 def test_race_guard_failure_detected():
