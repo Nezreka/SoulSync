@@ -209,3 +209,25 @@ body[data-side="video"] .dashboard-header-sweep {
     color: #fff;
     background: rgb(var(--accent-rgb, 88 101 242));
 }
+.video-library-filters {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin: 4px 0;
+}
+/* Resolution chip on a poster card (top-left, above the gradient overlay). */
+.library-artist-card .video-card-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 3;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 5px;
+    backdrop-filter: blur(4px);
+}

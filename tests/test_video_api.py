@@ -55,13 +55,13 @@ def test_library_endpoint_lists_content(tmp_path):
     try:
         videoapi._video_db.upsert_movie("plex", {"server_id": "m1", "title": "A",
                                                  "poster_url": "/library/metadata/1/thumb/9"})
-        resp = client.get("/api/video/library")
+        resp = client.get("/api/video/library?kind=movies")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert [m["title"] for m in data["movies"]] == ["A"]
-        assert data["movies"][0]["has_poster"] is True          # flag, not the raw path
-        assert "poster_url" not in data["movies"][0]            # don't leak server paths
-        assert data["shows"] == []
+        assert [m["title"] for m in data["items"]] == ["A"]
+        assert data["items"][0]["has_poster"] is True           # flag, not the raw path
+        assert "poster_url" not in data["items"][0]             # don't leak server paths
+        assert data["pagination"]["total_count"] == 1
     finally:
         videoapi._video_db = None
 

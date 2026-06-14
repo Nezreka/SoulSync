@@ -729,6 +729,18 @@
                                     <input type="text" class="library-search-input" data-video-lib-search placeholder="Search movies...">
                                     <div class="library-search-icon">&#128269;</div>
                                 </div>
+                                <div class="video-library-filters">
+                                    <select class="library-source-filter-select" data-video-lib-sort title="Sort">
+                                        <option value="title">Title</option>
+                                        <option value="year">Year</option>
+                                        <option value="added">Recently Added</option>
+                                    </select>
+                                    <select class="library-source-filter-select" data-video-lib-status title="Filter">
+                                        <option value="all">All</option>
+                                        <option value="owned">Owned</option>
+                                        <option value="wanted">Wanted</option>
+                                    </select>
+                                </div>
                                 <div class="alphabet-selector">
                                     <div class="alphabet-selector-inner" data-video-lib-alphabet></div>
                                 </div>
@@ -743,6 +755,11 @@
                                     <div class="empty-icon">&#127916;</div>
                                     <div class="empty-title" data-video-lib-empty-title>Nothing here yet</div>
                                     <div class="empty-subtitle">Run a scan to pull your library from the media server.</div>
+                                </div>
+                                <div class="library-pagination hidden" data-video-lib-pagination>
+                                    <button class="pagination-btn" type="button" data-video-lib-prev disabled><span>&larr; Previous</span></button>
+                                    <div class="pagination-info"><span data-video-lib-pageinfo>Page 1 of 1</span></div>
+                                    <button class="pagination-btn" type="button" data-video-lib-next disabled><span>Next &rarr;</span></button>
                                 </div>
                             </div>
                         </div>

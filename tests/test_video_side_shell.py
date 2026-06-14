@@ -146,6 +146,9 @@ def test_video_library_subpage_present():
     assert "data-video-lib-grid" in block
     assert 'data-video-lib-tab="movies"' in block and 'data-video-lib-tab="shows"' in block
     assert "data-video-scan-mode" in block          # the Scan button
+    # Server-side paging + sort/filter controls (music parity).
+    assert "data-video-lib-pagination" in block and "data-video-lib-next" in block
+    assert "data-video-lib-sort" in block and "data-video-lib-status" in block
     assert "onclick" not in block                   # data-attr wired, no inline handlers
 
 
