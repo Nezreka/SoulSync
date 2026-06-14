@@ -29,7 +29,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
-from core.quality.source_map import quality_from_qobuz
+from core.quality.source_map import quality_from_qobuz, quality_tier_for_source
 
 logger = get_logger("qobuz_client")
 
@@ -988,7 +988,7 @@ class QobuzClient(DownloadSourcePlugin):
                 return ([], [])
 
             # Get configured quality for display
-            quality_key = config_manager.get('qobuz.quality', 'lossless')
+            quality_key = quality_tier_for_source('qobuz', default='lossless')
             quality_info = QOBUZ_QUALITY_MAP.get(quality_key, QOBUZ_QUALITY_MAP['lossless'])
 
             track_results = []
@@ -1190,7 +1190,7 @@ class QobuzClient(DownloadSourcePlugin):
 
         try:
             # Determine quality
-            quality_key = config_manager.get('qobuz.quality', 'lossless')
+            quality_key = quality_tier_for_source('qobuz', default='lossless')
             quality_info = QOBUZ_QUALITY_MAP.get(quality_key, QOBUZ_QUALITY_MAP['lossless'])
 
             # Quality fallback chain: hires_max → hires → lossless → mp3

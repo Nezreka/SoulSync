@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
-from core.quality.source_map import quality_from_deezer
+from core.quality.source_map import quality_from_deezer, quality_tier_for_source
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")
@@ -120,7 +120,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._authenticated = False
 
         # Quality preference
-        self._quality = config_manager.get('deezer_download.quality', 'flac')
+        self._quality = quality_tier_for_source('deezer', default='flac')
 
         # Try to authenticate on init if ARL is configured
         arl = config_manager.get('deezer_download.arl', '')

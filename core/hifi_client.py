@@ -36,7 +36,7 @@ import requests as http_requests
 from utils.logging_config import get_logger
 from config.settings import config_manager
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
-from core.quality.source_map import quality_from_tidal_tier
+from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
 logger = get_logger("hifi_client")
 
@@ -752,7 +752,7 @@ class HiFiClient(DownloadSourcePlugin):
             loop = asyncio.get_event_loop()
             tracks = await loop.run_in_executor(None, lambda: self.search_raw(query))
 
-            quality_key = config_manager.get('hifi_download.quality', 'lossless')
+            quality_key = quality_tier_for_source('hifi', default='lossless')
             q_info = HLS_QUALITY_MAP.get(quality_key, HLS_QUALITY_MAP['lossless'])
 
             # HiFi is Tidal-backed; stamp the configured tier so the global
@@ -834,7 +834,7 @@ class HiFiClient(DownloadSourcePlugin):
         )
 
     def _download_sync(self, download_id: str, track_id: int, display_name: str) -> Optional[str]:
-        quality_key = config_manager.get('hifi_download.quality', 'lossless')
+        quality_key = quality_tier_for_source('hifi', default='lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
         allow_fallback = config_manager.get('hifi_download.allow_fallback', True)

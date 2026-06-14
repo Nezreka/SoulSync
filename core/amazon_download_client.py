@@ -33,6 +33,7 @@ from core.amazon_client import AmazonClient, AmazonClientError
 from core.download_plugins.base import DownloadSourcePlugin
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
 from core.quality.model import AudioQuality
+from core.quality.source_map import quality_tier_for_source
 from utils.logging_config import get_logger
 
 logger = get_logger("amazon_download_client")
@@ -79,7 +80,7 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         self.download_path = Path(download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
 
-        self._quality = config_manager.get("amazon_download.quality", "flac")
+        self._quality = quality_tier_for_source("amazon", default="flac")
         self._allow_fallback = config_manager.get("amazon_download.allow_fallback", True)
 
         self._client = AmazonClient(preferred_codec=self._quality)

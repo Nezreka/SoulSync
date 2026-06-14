@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import Optional
 
 from core.quality.model import AudioQuality
+from core.quality.selection import load_profile_targets
 
 
 # ── Tidal / HiFi (Monochrome is Tidal-backed) ──────────────────────────────
@@ -102,3 +103,66 @@ def quality_from_amazon(
         sample_rate=sample_rate if sample_rate is not None else base.sample_rate,
         bit_depth=bit_depth if bit_depth is not None else base.bit_depth,
     )
+
+
+# ── Profile-driven download tier (replaces per-source quality settings) ─────
+#
+# Each source's selectable download tiers, ordered best → worst, with the
+# AudioQuality the tier delivers. ``quality_tier_for_source`` walks these to
+# request the LOWEST tier that satisfies the user's top global target — so the
+# global quality profile, not a per-source dropdown, decides what each source
+# fetches.
+
+_SOURCE_TIER_LADDERS: dict[str, list[tuple[str, AudioQuality]]] = {
+    'tidal': [
+        ('hires', AudioQuality('flac', sample_rate=96000, bit_depth=24)),
+        ('lossless', AudioQuality('flac', sample_rate=44100, bit_depth=16)),
+        ('high', AudioQuality('aac', bitrate=320)),
+        ('low', AudioQuality('aac', bitrate=96)),
+    ],
+    'hifi': [
+        ('hires', AudioQuality('flac', sample_rate=96000, bit_depth=24)),
+        ('lossless', AudioQuality('flac', sample_rate=44100, bit_depth=16)),
+        ('high', AudioQuality('aac', bitrate=320)),
+        ('low', AudioQuality('aac', bitrate=96)),
+    ],
+    'qobuz': [
+        ('hires_max', AudioQuality('flac', sample_rate=192000, bit_depth=24)),
+        ('hires', AudioQuality('flac', sample_rate=96000, bit_depth=24)),
+        ('lossless', AudioQuality('flac', sample_rate=44100, bit_depth=16)),
+        ('mp3', AudioQuality('mp3', bitrate=320)),
+    ],
+    'deezer': [
+        ('flac', AudioQuality('flac', sample_rate=44100, bit_depth=16)),
+        ('mp3_320', AudioQuality('mp3', bitrate=320)),
+        ('mp3_128', AudioQuality('mp3', bitrate=128)),
+    ],
+    'amazon': [
+        ('flac', AudioQuality('flac', sample_rate=48000, bit_depth=24)),
+        ('opus', AudioQuality('aac', bitrate=320)),
+    ],
+}
+
+
+def quality_tier_for_source(source_name: str, *, default: Optional[str] = None) -> Optional[str]:
+    """Return the source tier key to request, derived from the global profile.
+
+    Picks the lowest tier in the source's ladder that satisfies the user's
+    top (most-preferred) target — respecting the quality ceiling and saving
+    bandwidth. Falls back to the source's max tier when none can satisfy it
+    (best effort), or to the source's max when no targets are configured.
+    Returns *default* for an unknown source.
+    """
+    ladder = _SOURCE_TIER_LADDERS.get(source_name)
+    if not ladder:
+        return default
+
+    targets, _ = load_profile_targets()
+    if not targets:
+        return ladder[0][0]
+
+    top = targets[0]
+    for key, aq in reversed(ladder):           # low → high
+        if aq.matches_target(top):
+            return key
+    return ladder[0][0]                         # best effort: max tier
