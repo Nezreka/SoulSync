@@ -603,15 +603,24 @@ class VideoDatabase:
         return self.get_art_ref(kind, item_id, "poster")
 
     def get_art_ref(self, kind: str, item_id: int, art: str = "poster") -> dict | None:
-        """Server source/id + artwork path for one movie/show, for the image proxy.
-        ``art`` is 'poster' or 'backdrop'. Returns the path under 'poster_url' so
-        the proxy is artwork-agnostic."""
-        table = {"movie": "movies", "show": "shows"}.get(kind)
-        col = {"poster": "poster_url", "backdrop": "backdrop_url"}.get(art)
-        if not table or not col:
-            return None
+        """Server source/id + artwork path for one movie/show/season, for the image
+        proxy. ``art`` is 'poster' or 'backdrop'. Returns the path under
+        'poster_url' so the proxy is artwork-agnostic."""
         conn = self._get_connection()
         try:
+            if kind == "season":
+                if art != "poster":
+                    return None
+                # Seasons don't carry server_source — inherit the parent show's.
+                row = conn.execute(
+                    "SELECT sh.server_source, se.server_id, se.poster_url "
+                    "FROM seasons se JOIN shows sh ON sh.id = se.show_id WHERE se.id=?",
+                    (item_id,)).fetchone()
+                return dict(row) if row else None
+            table = {"movie": "movies", "show": "shows"}.get(kind)
+            col = {"poster": "poster_url", "backdrop": "backdrop_url"}.get(art)
+            if not table or not col:
+                return None
             row = conn.execute(
                 f"SELECT server_source, server_id, {col} AS poster_url FROM {table} WHERE id=?",
                 (item_id,)).fetchone()

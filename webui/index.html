@@ -817,13 +817,16 @@
                      video-side.css. Inspired by the music artist-detail vibe. -->
                 <section class="video-subpage" data-video-subpage="video-show-detail" hidden>
                     <div class="vd-page" data-video-detail="show">
-                        <div class="vd-backdrop" data-vd-backdrop aria-hidden="true"></div>
-                        <div class="vd-scrim" aria-hidden="true"></div>
-                        <div class="vd-content">
-                            <button class="vd-back" type="button" data-video-goto="video-library">
-                                <span aria-hidden="true">&larr;</span> Library
-                            </button>
-                            <div class="vd-hero">
+                        <button class="vd-back" type="button" data-video-goto="video-library">
+                            <span aria-hidden="true">&larr;</span> Library
+                        </button>
+                        <!-- Hero: a contained glass card with the backdrop blurred
+                             INSIDE it + gradient overlay (same treatment as the music
+                             artist hero), so there are no bare gaps. -->
+                        <div class="vd-hero">
+                            <div class="vd-hero-bg" data-vd-backdrop aria-hidden="true"></div>
+                            <div class="vd-hero-overlay" aria-hidden="true"></div>
+                            <div class="vd-hero-content">
                                 <div class="vd-poster">
                                     <img data-vd-poster alt="" />
                                     <div class="vd-poster-fallback" data-vd-poster-fallback>📺</div>
@@ -832,11 +835,18 @@
                                     <h1 class="vd-title" data-vd-title>—</h1>
                                     <div class="vd-badges" data-vd-badges></div>
                                     <p class="vd-overview" data-vd-overview></p>
+                                    <div class="vd-actions" data-vd-actions></div>
                                     <div class="vd-stats" data-vd-stats></div>
                                 </div>
                             </div>
-                            <div class="vd-loading" data-vd-loading hidden>Loading…</div>
+                        </div>
+                        <div class="vd-loading" data-vd-loading hidden>Loading…</div>
+                        <!-- Seasons as a poster-art card grid (season = album); the
+                             selected season's episodes render in the panel below. -->
+                        <div class="vd-body">
+                            <div class="vd-section-title" data-vd-seasons-title hidden>Seasons</div>
                             <div class="vd-seasons" data-vd-seasons></div>
+                            <div class="vd-episodes" data-vd-episodes></div>
                         </div>
                     </div>
                 </section>

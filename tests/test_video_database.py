@@ -296,6 +296,18 @@ def test_get_art_ref_poster_vs_backdrop(db):
     assert db.get_art_ref("show", sid, "bogus") is None
 
 
+def test_get_art_ref_season_inherits_show_server_source(db):
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "server_id": "se1", "poster_url": "/sp.jpg",
+         "episodes": [{"episode_number": 1}]}]})
+    with db.connect() as c:
+        seid = c.execute("SELECT id FROM seasons WHERE season_number=1").fetchone()["id"]
+    ref = db.get_art_ref("season", seid, "poster")
+    # Season carries its own poster + server_id, but inherits the show's source.
+    assert ref["poster_url"] == "/sp.jpg" and ref["server_source"] == "plex"
+    assert ref["server_id"] == "se1"
+
+
 def test_prune_missing_skips_when_over_half_would_be_removed(db):
     # >100 movies; a scan that "sees" only a couple must NOT wipe the rest
     # (mirrors music's deep-scan 50% safety against partial server failures).
