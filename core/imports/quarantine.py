@@ -220,6 +220,10 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "source_username": source_username,
                 "source_filename": source_filename,
                 "thumb_url": _extract_context_thumb(ctx),
+                # Real probed audio quality (recorded on the context before the
+                # quality/AcoustID gates) so the review UI shows what the file
+                # actually is when deciding to approve/delete.
+                "quality": ctx.get("_audio_quality", "") if isinstance(ctx, dict) else "",
             }
         )
 
