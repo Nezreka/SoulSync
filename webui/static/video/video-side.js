@@ -40,6 +40,11 @@
         { id: 'video-help', label: 'Help & Docs', shared: true },
     ];
 
+    // "Shared" video pages reuse the REAL music page (shown identically on the
+    // video side for now) instead of a video subpage: video page id -> music
+    // page id. CSS reveals the music page; we trigger its loader once shown.
+    var SHARED_PAGES = { 'video-settings': 'settings' };
+
     function readSide() {
         try {
             return localStorage.getItem(SIDE_KEY) === 'video' ? 'video' : 'music';
@@ -88,6 +93,19 @@
     // for this event instead of being called directly, keeping each isolated.
     function showPage(pageId) {
         var meta = pageMeta(pageId);
+        // Drives the CSS that reveals shared music pages (e.g. Settings) and
+        // hides the video host for them.
+        document.body.setAttribute('data-video-page', meta.id);
+
+        var sharedMusicId = SHARED_PAGES[meta.id];
+        if (sharedMusicId) {
+            // The real music page is shown by CSS; load its data the same way a
+            // music-side navigation would. (loadPageData is a shared global.)
+            if (typeof loadPageData === 'function') loadPageData(sharedMusicId);
+            document.dispatchEvent(new CustomEvent('soulsync:video-page-shown', { detail: meta.id }));
+            return;
+        }
+
         var host = document.getElementById('video-page-host');
         if (!host) return;
         var matched = null;
