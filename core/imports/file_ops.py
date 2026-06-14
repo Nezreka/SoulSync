@@ -192,6 +192,9 @@ def get_audio_quality_string(file_path):
         if ext == ".flac":
             from mutagen.flac import FLAC
             audio = FLAC(file_path)
+            sr = getattr(audio.info, "sample_rate", 0) or 0
+            if sr:
+                return f"FLAC {audio.info.bits_per_sample}bit/{sr / 1000:g}kHz"
             return f"FLAC {audio.info.bits_per_sample}bit"
 
         if ext == ".mp3":
