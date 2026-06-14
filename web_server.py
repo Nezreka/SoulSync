@@ -11796,7 +11796,12 @@ def _resolve_library_file_path(file_path):
     for base_dir in [transfer_dir, download_dir] + list(library_dirs):
         if not base_dir or not os.path.isdir(base_dir):
             continue
-        for i in range(1, len(path_parts)):
+        # Start at index 0 so a clean relative path ("Artist/Album/Track.flac")
+        # is tried in FULL first — the library scanner stores exactly that, and
+        # skipping index 0 dropped the artist folder so it never matched. A
+        # Windows drive-letter part 0 ("E:") simply fails this attempt and falls
+        # through to the shorter suffixes below, so this is safe for both.
+        for i in range(0, len(path_parts)):
             found = find_on_disk(base_dir, path_parts[i:])
             if found:
                 return found

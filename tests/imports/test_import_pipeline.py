@@ -235,6 +235,48 @@ def test_post_process_matched_download_forwards_separate_metadata_runtime(tmp_pa
 # write to the task directly — it stashes on context and the wrapper applies it)
 # ---------------------------------------------------------------------------
 
+def test_quality_gate_runs_before_acoustid(tmp_path, monkeypatch):
+    """The quality check must run BEFORE AcoustID: a wrong-quality file is
+    quarantined with trigger='quality' and AcoustID is never fingerprinted (so
+    quality is known on every quarantine entry, and no wasted AcoustID call)."""
+    src = tmp_path / "source.flac"
+    src.write_bytes(b"fLaC")
+
+    # Reach the quality gate: bypass integrity + silence guards.
+    from core.imports.file_integrity import IntegrityResult
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_kw: IntegrityResult(ok=True, checks={}))
+    monkeypatch.setattr(import_pipeline, "detect_broken_audio", lambda *_a, **_kw: None)
+
+    # Wrong quality → rejection.
+    monkeypatch.setattr(import_pipeline, "get_audio_quality_string", lambda fp: "FLAC 16bit/44.1kHz")
+    monkeypatch.setattr(import_pipeline, "check_quality_target", lambda fp, ctx: "Quality mismatch: FLAC 16bit")
+
+    triggers = []
+    monkeypatch.setattr(import_pipeline, "move_to_quarantine",
+                        lambda fp, ctx, reason, eng, trigger=None: triggers.append(trigger) or "/q/x.flac.quarantined")
+    monkeypatch.setattr(import_pipeline, "_mark_task_quarantined", lambda *a, **k: None)
+    monkeypatch.setattr(import_pipeline, "_requeue_quarantined_task_for_retry", lambda *a, **k: False)
+
+    # Spy: AcoustID must NOT be constructed when quality already rejected.
+    acoustid_constructed = []
+    fake_mod = types.SimpleNamespace(
+        AcoustIDVerification=lambda *a, **k: acoustid_constructed.append(True),
+        VerificationResult=types.SimpleNamespace(FAIL="fail"),
+    )
+    monkeypatch.setitem(sys.modules, "core.acoustid_verification", fake_mod)
+
+    runtime = types.SimpleNamespace(automation_engine=None, on_download_completed=None,
+                                    web_scan_manager=None, repair_worker=None)
+    context = {"track_info": {}, "task_id": None, "batch_id": None}
+
+    import_pipeline.post_process_matched_download("ctx", context, str(src), runtime)
+
+    assert triggers == ["quality"]            # quarantined for quality
+    assert acoustid_constructed == []         # AcoustID never ran
+    assert context.get("_audio_quality") == "FLAC 16bit/44.1kHz"  # recorded for the sidecar
+
+
 def test_mark_task_quarantined_stashes_entry_id_when_task_id_absent():
     ctx = {}  # wrapper popped task_id before the inner pipeline ran
     import_pipeline._mark_task_quarantined(ctx, "/q/20260514_120000_song.flac.quarantined")
