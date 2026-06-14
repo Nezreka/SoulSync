@@ -53,6 +53,12 @@
             }
         }
         setText(tip, '[data-video-enrich-progress]', 'Progress: ' + matched + ' / ' + total);
+
+        // Feed the idle worker-orbs animation real telemetry (isolated; no-op if
+        // the orbs script isn't present). Drives the inbound pulses to the hub.
+        if (window.videoWorkerOrbs && typeof window.videoWorkerOrbs.onStatus === 'function') {
+            window.videoWorkerOrbs.onStatus(svc, d);
+        }
     }
 
     function pollOne(svc) {

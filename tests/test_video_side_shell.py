@@ -255,7 +255,12 @@ def test_video_enrichment_module_referenced_and_isolated():
     src = (_ROOT / "webui" / "static" / "video" / "video-enrichment.js").read_text(encoding="utf-8")
     assert src.strip().startswith("/*") or src.strip().startswith("(function")
     assert "(function" in src and "})();" in src
-    assert "window." not in src
+    # The only window.* touch is the (optional) handoff to the VIDEO orbs global
+    # — never a music global, and it declares none of its own.
+    assert all(
+        ref == "window.videoWorkerOrbs"
+        for ref in re.findall(r"window\.\w+", src)
+    )
     assert "/api/video/enrichment/" in src
     # No music API/function calls (a comment may mention the music *side*).
     assert "/api/enrichment/" not in src
@@ -287,6 +292,34 @@ def test_video_settings_module_referenced_and_isolated():
     assert "/api/video/libraries" in _VSETTINGS_JS
     assert "soulsync:video-page-shown" in _VSETTINGS_JS
     assert "'change'" in _VSETTINGS_JS  # saves on change, like the music selector
+
+
+def test_video_worker_orbs_referenced_and_isolated():
+    assert "video/video-worker-orbs.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-worker-orbs.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    # Its own global namespace — never music's window.workerOrbs.
+    assert "window.videoWorkerOrbs" in src
+    assert "window.workerOrbs" not in src
+    # Activates only on the video dashboard (own page-awareness, not setPage).
+    assert "soulsync:video-page-shown" in src
+    assert 'data-video-subpage="video-dashboard"' in src
+    assert 'data-video-enrich="tmdb"' in src and 'data-video-enrich="tvdb"' in src
+    assert "data-video-manage-workers" in src
+    # Same 7-second idle that triggers the floating-orb collapse as music.
+    assert "COLLAPSE_DELAY_MS = 7000" in src
+    # Reuses the shared, generic orb CSS classes (design parity, no fork).
+    assert "worker-orb-hidden" in src and "worker-orb-canvas" in src
+    # Does NOT reach into the music dashboard or the music API.
+    assert "#dashboard-page" not in src
+    assert "/api/enrichment/" not in src
+
+
+def test_music_worker_orbs_untouched_by_video():
+    # The video orbs are a separate file; the music orbs must not learn about
+    # the video side (one-way isolation — music never depends on video).
+    music = (_ROOT / "webui" / "static" / "worker-orbs.js").read_text(encoding="utf-8")
+    assert "video" not in music.lower()
 
 
 def test_controller_is_isolated_iife_with_no_globals():
