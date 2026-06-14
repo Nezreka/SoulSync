@@ -1,0 +1,86 @@
+/*
+ * SoulSync — Video side shell styling.
+ *
+ * Loaded AFTER style.css so these rules win where specificity ties. Everything
+ * keys off body[data-side="music|video"] (set by video-side.js). The music side
+ * is the default and is never affected — these rules only do something once the
+ * body flips to data-side="video".
+ */
+
+/* ── The Music ↔ Video header toggle ───────────────────────────────────── */
+.side-toggle {
+    display: flex;
+    gap: 3px;
+    margin-top: 12px;
+    padding: 3px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 9px;
+}
+.side-toggle-btn {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--text-secondary, #9aa0aa);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+.side-toggle-btn:hover {
+    color: var(--text-primary, #e8e8ea);
+    background: rgba(255, 255, 255, 0.04);
+}
+.side-toggle-btn.active {
+    background: rgb(var(--accent-rgb, 88 101 242));
+    color: #fff;
+}
+
+/* ── Nav swap: music nav vs video nav ──────────────────────────────────── */
+/* The video nav reuses .sidebar-nav layout (same class) — only visibility
+   differs. Hidden by default (music side); shown when data-side="video". */
+.video-nav {
+    display: none;
+}
+body[data-side="video"] nav.sidebar-nav:not(.video-nav) {
+    display: none;
+}
+body[data-side="video"] .video-nav {
+    display: flex;
+}
+
+/* ── Page visibility per side ──────────────────────────────────────────── */
+/* Music pages hidden on the video side; video pages hidden on the music side.
+   The music router still controls .page.active among music pages; we just hide
+   the whole set while the video side is showing. */
+body[data-side="music"] .page.video-page {
+    display: none !important;
+}
+body[data-side="video"] .page:not(.video-page) {
+    display: none !important;
+}
+body[data-side="video"] .page.video-page {
+    display: block;
+}
+
+/* ── Service status: not needed on the video side (for now) ─────────────── */
+body[data-side="video"] .status-section {
+    display: none;
+}
+
+/* ── Placeholder content (until the real video pages land) ─────────────── */
+.video-placeholder {
+    padding: 48px 40px;
+}
+.video-placeholder .header-title {
+    font-size: 22px;
+    font-weight: 700;
+}
+.video-placeholder-note {
+    margin-top: 10px;
+    color: var(--text-secondary, #9aa0aa);
+    font-size: 14px;
+}

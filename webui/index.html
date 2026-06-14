@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='video/video-side.css', v=static_v) }}">
     {{ vite_assets('head')|safe }}
 </head>
 
@@ -219,6 +220,11 @@
                         <p class="app-subtitle">Music Sync & Manager</p>
                     </div>
                 </div>
+                <!-- Music ↔ Video side toggle (shell-only; wired by video/video-side.js) -->
+                <div class="side-toggle" role="group" aria-label="Switch between Music and Video">
+                    <button type="button" class="side-toggle-btn active" data-side-target="music">Music</button>
+                    <button type="button" class="side-toggle-btn" data-side-target="video">Video</button>
+                </div>
                 <div id="profile-indicator" class="profile-indicator" style="display: none;" title="Switch profile">
                     <div id="profile-indicator-avatar" class="profile-indicator-avatar"></div>
                     <span id="profile-indicator-name" class="profile-indicator-name"></span>
@@ -310,6 +316,46 @@
                 </a>
             </nav>
 
+            <!-- Video Navigation (shell-only; shown when body[data-side="video"], wired by video/video-side.js) -->
+            <nav class="sidebar-nav video-nav" aria-label="Video navigation">
+                <a class="nav-button" data-video-page="video-dashboard" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="7" rx="1"/></svg></span>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a class="nav-button" data-video-page="video-search" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></span>
+                    <span class="nav-text">Search</span>
+                </a>
+                <a class="nav-button" data-video-page="video-discover" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" opacity="0.2" stroke="currentColor"/></svg></span>
+                    <span class="nav-text">Discover</span>
+                </a>
+                <a class="nav-button" data-video-page="video-library" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></span>
+                    <span class="nav-text">Library</span>
+                </a>
+                <a class="nav-button" data-video-page="video-calendar" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
+                    <span class="nav-text">Calendar</span>
+                </a>
+                <a class="nav-button" data-video-page="video-import" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
+                    <span class="nav-text">Import</span>
+                </a>
+                <a class="nav-button" data-video-page="video-settings" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                    <span class="nav-text">Settings</span>
+                </a>
+                <a class="nav-button" data-video-page="video-issues" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+                    <span class="nav-text">Issues</span>
+                </a>
+                <a class="nav-button" data-video-page="video-help" href="#">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+                    <span class="nav-text">Help & Docs</span>
+                </a>
+            </nav>
+
             <!-- Spacer -->
             <div class="sidebar-spacer"></div>
 
@@ -349,6 +395,9 @@
             <!-- Global particle canvas for page background animations -->
             <canvas id="page-particles-canvas"></canvas>
             <div id="webui-react-root" class="page" data-react-app="router"></div>
+
+            <!-- Video side content host (shell-only; filled by video/video-side.js) -->
+            <div class="page video-page" id="video-page-host"></div>
 
             <!-- Dashboard Page -->
             <div class="page" id="dashboard-page">
@@ -8473,6 +8522,8 @@
     <script src="{{ url_for('static', filename='helper.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='particles.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='worker-orbs.js', v=static_v) }}"></script>
+    <!-- Video side shell controller (isolated; music never references it) -->
+    <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
 </body>
 
 </html>
