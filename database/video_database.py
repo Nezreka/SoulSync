@@ -127,6 +127,40 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── dashboard ─────────────────────────────────────────────────────────────
+    def dashboard_stats(self) -> dict:
+        """Live counts for the video dashboard, straight from video.db.
+
+        Shape is stable so the frontend can map it directly; with an empty
+        database every number is a real 0 (not a stub).
+        """
+        conn = self._get_connection()
+        try:
+            def scalar(sql: str):
+                return conn.execute(sql).fetchone()[0]
+
+            return {
+                "library": {
+                    "movies": scalar("SELECT COUNT(*) FROM movies"),
+                    "shows": scalar("SELECT COUNT(*) FROM shows"),
+                    "episodes": scalar("SELECT COUNT(*) FROM episodes"),
+                    "size_bytes": scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM media_files"),
+                },
+                "downloads": {
+                    "active": scalar(
+                        "SELECT COUNT(*) FROM downloads "
+                        "WHERE status IN ('queued','downloading','importing')"),
+                    "finished": scalar("SELECT COUNT(*) FROM downloads WHERE status = 'completed'"),
+                    "speed_bps": scalar(
+                        "SELECT COALESCE(SUM(download_speed_bps), 0) FROM downloads "
+                        "WHERE status = 'downloading'"),
+                },
+                "watchlist": scalar("SELECT COUNT(*) FROM v_watchlist"),
+                "wishlist": scalar("SELECT COUNT(*) FROM v_wishlist"),
+            }
+        finally:
+            conn.close()
+
     # ── health ───────────────────────────────────────────────────────────────
     def health_check(self) -> bool:
         """True when the DB opens and passes a quick integrity check."""

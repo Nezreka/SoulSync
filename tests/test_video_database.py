@@ -138,6 +138,30 @@ def test_wishlist_view_is_wanted_but_missing(db):
     assert ("episode", 2) not in rows  # future episode absent
 
 
+def test_dashboard_stats_empty_is_all_zero(db):
+    s = db.dashboard_stats()
+    assert s["library"] == {"movies": 0, "shows": 0, "episodes": 0, "size_bytes": 0}
+    assert s["downloads"] == {"active": 0, "finished": 0, "speed_bps": 0}
+    assert s["watchlist"] == 0 and s["wishlist"] == 0
+
+
+def test_dashboard_stats_counts_content_and_downloads(db):
+    with db.connect() as conn:
+        conn.execute("INSERT INTO movies(id,title,monitored,has_file) VALUES (1,'M',1,0)")
+        conn.execute("INSERT INTO shows(id,title,monitored) VALUES (1,'S',1)")
+        conn.execute("INSERT INTO seasons(id,show_id,season_number) VALUES (1,1,1)")
+        conn.execute("INSERT INTO episodes(id,show_id,season_id,season_number,episode_number) "
+                     "VALUES (1,1,1,1,1)")
+        conn.execute("INSERT INTO media_files(movie_id,relative_path,size_bytes) VALUES (1,'m.mkv',1000)")
+        conn.execute("INSERT INTO downloads(movie_id,title,status,download_speed_bps) "
+                     "VALUES (1,'d','downloading',500)")
+        conn.commit()
+    s = db.dashboard_stats()
+    assert s["library"] == {"movies": 1, "shows": 1, "episodes": 1, "size_bytes": 1000}
+    assert s["downloads"]["active"] == 1 and s["downloads"]["speed_bps"] == 500
+    assert s["watchlist"] == 1 and s["wishlist"] == 1
+
+
 def test_settings_kv_roundtrip(db):
     assert db.get_setting("download_dir", "unset") == "unset"
     db.set_setting("download_dir", "/data/video")
