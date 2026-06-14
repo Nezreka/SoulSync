@@ -365,6 +365,23 @@ def test_enrichment_apply_matched_sets_id_status_and_metadata(db):
     assert (row["overview"], row["backdrop_url"], row["imdb_id"]) == ("O", "/b.jpg", "tt1")
 
 
+def test_enrichment_apply_survives_legacy_unique(db):
+    # Simulate a pre-existing DB where tvdb_id still carries a UNIQUE index.
+    with db.connect() as c:
+        c.execute("CREATE UNIQUE INDEX ux_legacy_shows_tvdb ON shows(tvdb_id)")
+        c.commit()
+    a = db.upsert_show_tree("plex", {"server_id": "s1", "title": "A", "seasons": []})
+    b = db.upsert_show_tree("plex", {"server_id": "s2", "title": "B", "seasons": []})
+    db.enrichment_apply("tvdb", "show", a, matched=True, external_id=555, metadata={"overview": "OA"})
+    # b would collide on tvdb_id=555 — must NOT crash; keeps existing id, records the rest.
+    db.enrichment_apply("tvdb", "show", b, matched=True, external_id=555, metadata={"overview": "OB"})
+    with db.connect() as c:
+        ra = c.execute("SELECT tvdb_id, tvdb_match_status FROM shows WHERE id=?", (a,)).fetchone()
+        rb = c.execute("SELECT tvdb_id, tvdb_match_status, overview FROM shows WHERE id=?", (b,)).fetchone()
+    assert (ra["tvdb_id"], ra["tvdb_match_status"]) == (555, "matched")
+    assert rb["tvdb_id"] is None and rb["tvdb_match_status"] == "matched" and rb["overview"] == "OB"
+
+
 def test_enrichment_breakdown_unmatched_retry(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
     b = db.upsert_movie("plex", {"server_id": "m2", "title": "B"})
