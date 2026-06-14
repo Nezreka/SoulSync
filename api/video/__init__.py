@@ -42,10 +42,12 @@ def create_video_blueprint() -> Blueprint:
     from .library import register_routes as reg_library
     from .libraries import register_routes as reg_libraries
     from .poster import register_routes as reg_poster
+    from .enrichment import register_routes as reg_enrichment
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
     reg_libraries(bp)
     reg_poster(bp)
+    reg_enrichment(bp)
 
     return bp
