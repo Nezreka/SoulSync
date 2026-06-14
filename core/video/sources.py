@@ -235,6 +235,21 @@ class JellyfinVideoSource:
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
         }
 
+    def _paged(self, path, params, page_size=500):
+        """Yield items across pages so large libraries aren't capped/truncated."""
+        start = 0
+        while True:
+            p = dict(params)
+            p.update({"StartIndex": str(start), "Limit": str(page_size)})
+            resp = self._req(path, p) or {}
+            batch = resp.get("Items", [])
+            for it in batch:
+                yield it
+            start += len(batch)
+            total = resp.get("TotalRecordCount")
+            if not batch or len(batch) < page_size or (total is not None and start >= total):
+                break
+
     @staticmethod
     def _ticks_to_seconds(ticks):
         return int(ticks / 10_000_000) if ticks else None
@@ -259,14 +274,20 @@ class JellyfinVideoSource:
         }
 
     def iter_movies(self, incremental=False):
+        path = f"/Users/{self.uid}/Items"
         for view in self._views("movies", self._movies_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
                       "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
             if incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "100"})
-            resp = self._req(f"/Users/{self.uid}/Items", params) or {}
-            for it in resp.get("Items", []):
-                yield self._movie(it)
+                items = (self._req(path, params) or {}).get("Items", [])
+            else:
+                items = self._paged(path, params)
+            for it in items:
+                try:
+                    yield self._movie(it)
+                except Exception:
+                    logger.exception("Jellyfin: skipping movie %s", it.get("Name", "?"))
 
     def _movie(self, it) -> dict:
         studios = it.get("Studios") or []
@@ -284,14 +305,20 @@ class JellyfinVideoSource:
         }
 
     def iter_shows(self, incremental=False):
+        path = f"/Users/{self.uid}/Items"
         for view in self._views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating"}
             if incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "50"})
-            resp = self._req(f"/Users/{self.uid}/Items", params) or {}
-            for it in resp.get("Items", []):
-                yield self._show(it)
+                items = (self._req(path, params) or {}).get("Items", [])
+            else:
+                items = self._paged(path, params)
+            for it in items:
+                try:
+                    yield self._show(it)
+                except Exception:
+                    logger.exception("Jellyfin: skipping show %s", it.get("Name", "?"))
 
     def _show(self, it) -> dict:
         series_id = str(it["Id"])
@@ -301,13 +328,16 @@ class JellyfinVideoSource:
                 "UserId": self.uid, "Fields": _JF_EP_FIELDS}) or {}
             by_season: dict[int, list] = {}
             for ep in eps_resp.get("Items", []):
+                enum = ep.get("IndexNumber")
+                if enum is None:
+                    continue  # unnumbered/special — can't key it
                 snum = ep.get("ParentIndexNumber") or 0
                 aired = ep.get("PremiereDate")
                 ticks = ep.get("RunTimeTicks")
                 by_season.setdefault(snum, []).append({
                     "server_id": str(ep["Id"]),
                     "season_number": snum,
-                    "episode_number": ep.get("IndexNumber") or 0,
+                    "episode_number": enum,
                     "title": ep.get("Name"),
                     "overview": ep.get("Overview"),
                     "air_date": aired[:10] if aired else None,
