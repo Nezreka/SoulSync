@@ -98,7 +98,7 @@
             var cov = pct == null ? '' :
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
             return '<button class="em-worker-row" data-em-select="' + w.id + '">' +
-                '<span class="em-worker-icon"><img class="vem-logo" src="' + LOGOS[w.id] + '" alt=""></span>' +
+                '<span class="em-worker-icon"><img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt=""></span>' +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
                 '<span class="em-worker-sub">' + esc(railSub(s)) + '</span>' + cov + '</span>' +
                 '<span class="em-dot em-dot--' + info.cls + '" title="' + info.label + '"></span></button>';

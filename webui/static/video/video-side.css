@@ -157,26 +157,26 @@ body[data-side="video"] .dashboard-header-sweep {
     width: 46px;
     height: 46px;
     border-radius: 50%;
-    border: 1.5px solid rgba(var(--ve-accent, 88 101 242), 0.25);
+    border: 1.5px solid rgba(var(--ve-accent, 88, 101, 242), 0.25);
     background: rgba(18, 18, 22, 0.85);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 4px 16px rgba(var(--ve-accent, 88 101 242), 0.2),
+    box-shadow: 0 4px 16px rgba(var(--ve-accent, 88, 101, 242), 0.2),
         0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 .video-enrich-button:hover {
     transform: scale(1.05);
-    border-color: rgba(var(--ve-accent, 88 101 242), 0.4);
-    box-shadow: 0 6px 20px rgba(var(--ve-accent, 88 101 242), 0.3),
+    border-color: rgba(var(--ve-accent, 88, 101, 242), 0.4);
+    box-shadow: 0 6px 20px rgba(var(--ve-accent, 88, 101, 242), 0.3),
         0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .video-enrich-button.active,
 .video-enrich-button.complete {
-    border-color: rgba(var(--ve-accent, 88 101 242), 0.5);
-    box-shadow: 0 6px 24px rgba(var(--ve-accent, 88 101 242), 0.4),
+    border-color: rgba(var(--ve-accent, 88, 101, 242), 0.5);
+    box-shadow: 0 6px 24px rgba(var(--ve-accent, 88, 101, 242), 0.4),
         0 3px 12px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 .video-enrich-button.paused { opacity: 0.6; }
@@ -192,13 +192,17 @@ body[data-side="video"] .dashboard-header-sweep {
     transition: opacity 0.3s ease;
 }
 .video-enrich-button:hover .video-enrich-logo { opacity: 1; }
+/* The TVDB brand mark is dark — invert it so it reads on the dark UI. */
+.video-enrich-button[data-video-enrich="tvdb"] .video-enrich-logo {
+    filter: invert(1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
 .video-enrich-spinner {
     position: absolute;
     width: 46px;
     height: 46px;
     border: 3px solid transparent;
-    border-top-color: rgba(var(--ve-accent, 88 101 242), 0.8);
-    border-right-color: rgba(var(--ve-accent, 88 101 242), 0.5);
+    border-top-color: rgba(var(--ve-accent, 88, 101, 242), 0.8);
+    border-right-color: rgba(var(--ve-accent, 88, 101, 242), 0.5);
     border-radius: 50%;
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -210,13 +214,13 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Tint the reused .tooltip-content with the service accent (music's default is
    MusicBrainz purple; each service overrides — so we do the same per video svc). */
 .video-enrich-tooltip .tooltip-content {
-    border-color: rgba(var(--ve-accent, 88 101 242), 0.3);
+    border-color: rgba(var(--ve-accent, 88, 101, 242), 0.3);
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5),
-        0 6px 20px rgba(var(--ve-accent, 88 101 242), 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        0 6px 20px rgba(var(--ve-accent, 88, 101, 242), 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.1);
 }
-.video-enrich-tooltip .tooltip-header { color: rgba(var(--ve-accent, 88 101 242), 0.95); }
-.video-enrich-tooltip .tooltip-content::before { border-bottom-color: rgba(var(--ve-accent, 88 101 242), 0.3); }
-.video-enrich-tooltip [data-video-enrich-status] { color: rgb(var(--ve-accent, 88 101 242)); font-weight: 600; }
+.video-enrich-tooltip .tooltip-header { color: rgba(var(--ve-accent, 88, 101, 242), 0.95); }
+.video-enrich-tooltip .tooltip-content::before { border-bottom-color: rgba(var(--ve-accent, 88, 101, 242), 0.3); }
+.video-enrich-tooltip [data-video-enrich-status] { color: rgb(var(--ve-accent, 88, 101, 242)); font-weight: 600; }
 
 /* Positioning wrapper only — the content reuses music's shared .tooltip-content
    / .tooltip-header / .tooltip-body styling, so it looks identical to the music
@@ -257,10 +261,12 @@ body[data-side="video"] .dashboard-header-sweep {
 .video-manage-workers-icon img { width: 22px; height: 22px; display: block; }
 /* Service logo in the settings API-config frame headers (TMDB/TVDB). */
 .video-svc-logo { width: 18px; height: 18px; object-fit: contain; margin-right: 2px; }
+.video-svc-logo--tvdb { filter: invert(1); }
 
 /* ── Video Manage-Workers modal: only the bits not covered by music's global
    .em-* classes, ALL scoped to #vem-overlay so music is never affected. ───── */
 #vem-overlay .vem-logo { width: 22px; height: 22px; object-fit: contain; }
+#vem-overlay .vem-logo--tvdb { filter: invert(1); }
 #vem-overlay .vem-icon {
     width: 34px;
     height: 34px;
