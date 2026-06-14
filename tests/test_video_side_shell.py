@@ -138,10 +138,15 @@ def test_video_dashboard_data_module_referenced_and_isolated():
 def test_video_library_subpage_present():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-library"', "</section>")
-    assert "data-video-lib-grid" in block          # the card grid
-    assert "data-video-scan" in block              # the Scan button
+    # Reuses the music library structure verbatim (no reinvented markup).
+    assert "library-container" in block
+    assert "library-search-input" in block          # search bar
+    assert "alphabet-selector" in block             # A–Z selector
+    assert "library-artists-grid" in block          # the music card grid
+    assert "data-video-lib-grid" in block
     assert 'data-video-lib-tab="movies"' in block and 'data-video-lib-tab="shows"' in block
-    assert "onclick" not in block                  # data-attr wired, no inline handlers
+    assert "data-video-scan-mode" in block          # the Scan button
+    assert "onclick" not in block                   # data-attr wired, no inline handlers
 
 
 def test_video_library_module_referenced_and_isolated():

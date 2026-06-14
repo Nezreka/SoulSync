@@ -328,6 +328,14 @@ class VideoDatabase:
             conn.close()
 
     # ── library listing ───────────────────────────────────────────────────────
+    @staticmethod
+    def _with_poster_flag(row: dict) -> dict:
+        # Don't leak the raw server thumb path; just say whether a poster exists
+        # (the frontend hits /api/video/poster/<kind>/<id> when true).
+        d = dict(row)
+        d["has_poster"] = bool(d.pop("poster_url", None))
+        return d
+
     def list_movies(self) -> list[dict]:
         conn = self._get_connection()
         try:
@@ -335,7 +343,7 @@ class VideoDatabase:
                 "SELECT id, title, year, poster_url, has_file, monitored "
                 "FROM movies ORDER BY COALESCE(sort_title, title) COLLATE NOCASE, title"
             ).fetchall()
-            return [dict(r) for r in rows]
+            return [self._with_poster_flag(r) for r in rows]
         finally:
             conn.close()
 
@@ -348,7 +356,21 @@ class VideoDatabase:
                 "(SELECT COUNT(*) FROM episodes e WHERE e.show_id = s.id AND e.has_file = 1) AS owned_count "
                 "FROM shows s ORDER BY COALESCE(s.sort_title, s.title) COLLATE NOCASE, s.title"
             ).fetchall()
-            return [dict(r) for r in rows]
+            return [self._with_poster_flag(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_poster_ref(self, kind: str, item_id: int) -> dict | None:
+        """Server source/id/poster path for one movie or show, for the poster proxy."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT server_source, server_id, poster_url FROM {table} WHERE id=?",
+                (item_id,)).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 

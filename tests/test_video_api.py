@@ -33,6 +33,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/scan/status" in rules
     assert "/api/video/library" in rules
     assert "/api/video/libraries" in rules
+    assert any(r.startswith("/api/video/poster/") for r in rules)
 
 
 def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
@@ -51,11 +52,14 @@ def test_dashboard_endpoint_returns_zeroed_json(tmp_path):
 def test_library_endpoint_lists_content(tmp_path):
     client, videoapi = _make_client(tmp_path)
     try:
-        videoapi._video_db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
+        videoapi._video_db.upsert_movie("plex", {"server_id": "m1", "title": "A",
+                                                 "poster_url": "/library/metadata/1/thumb/9"})
         resp = client.get("/api/video/library")
         assert resp.status_code == 200
         data = resp.get_json()
         assert [m["title"] for m in data["movies"]] == ["A"]
+        assert data["movies"][0]["has_poster"] is True          # flag, not the raw path
+        assert "poster_url" not in data["movies"][0]            # don't leak server paths
         assert data["shows"] == []
     finally:
         videoapi._video_db = None
