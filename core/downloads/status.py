@@ -839,7 +839,14 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             live_identities.add(identity)
             appended_history += 1
 
-    # Sort: active first (by priority), then by timestamp desc within each group
+    # Sort: active first (by priority), then by timestamp desc within each group.
+    # NOTE: the array order is presentation-only — the Downloads page filters
+    # client-side per tab. What matters is that EVERY live task is present: an
+    # earlier `items[:limit]` truncation (active-first) starved completed/failed/
+    # unverified rows off the end during a busy batch, so those tabs stayed empty
+    # until the batch drained. `limit` now bounds only the persistent-history
+    # tail (handled above); live in-memory tasks are always returned in full
+    # (they're already bounded by the 5-min cleanup automation).
     items.sort(key=lambda x: (x['priority'], -x['timestamp']))
 
     # Build batch summaries for the batch context panel
@@ -867,7 +874,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
 
     return {
         'success': True,
-        'downloads': items[:limit],
+        'downloads': items,
         'total': len(items),
         'batches': batch_summaries,
         'timestamp': time.time(),

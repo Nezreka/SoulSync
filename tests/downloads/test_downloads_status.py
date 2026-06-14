@@ -667,15 +667,44 @@ def test_unified_response_includes_batch_summaries():
     assert bs['queued'] == 1
 
 
-def test_unified_response_respects_limit():
+def test_unified_response_returns_all_live_tasks_even_past_limit():
+    """`limit` bounds the persistent-history tail, NOT live in-memory tasks.
+
+    Live tasks are already bounded by the 5-min cleanup, and the Downloads page
+    filters them client-side per tab — truncating them (active-first) starved
+    completed/failed/unverified rows out of the response during a busy batch so
+    they never showed until the batch drained.
+    """
     deps, _ = _build_deps()
     for i in range(20):
         download_tasks[f't{i}'] = {
             'track_index': i, 'status': 'completed', 'track_info': {},
         }
     out = st.build_unified_downloads_response(5, deps)
-    assert len(out['downloads']) == 5
-    assert out['total'] == 20  # total still reflects all
+    assert len(out['downloads']) == 20  # all live tasks returned
+    assert out['total'] == 20
+
+
+def test_unified_response_does_not_truncate_terminal_tasks_behind_active():
+    """A busy batch (many queued/active tasks) must not push completed/failed
+    rows off the end of the response — they're what the Completed/Failed tabs
+    show during the run."""
+    deps, _ = _build_deps()
+    for i in range(120):
+        download_tasks[f'q{i}'] = {
+            'track_index': i, 'status': 'queued',
+            'track_info': {'name': f'Q{i}'}, 'status_change_time': i,
+        }
+    download_tasks['done'] = {
+        'status': 'completed', 'track_info': {'name': 'DONE'}, 'status_change_time': 999,
+    }
+    download_tasks['fail'] = {
+        'status': 'failed', 'track_info': {'name': 'FAIL'}, 'status_change_time': 999,
+    }
+    out = st.build_unified_downloads_response(100, deps)
+    titles = {d['title'] for d in out['downloads']}
+    assert 'DONE' in titles
+    assert 'FAIL' in titles
 
 
 def test_unified_response_includes_persistent_download_history():
