@@ -149,6 +149,86 @@ body[data-side="video"] .dashboard-header-sweep {
     display: none;
 }
 
+/* ── Dashboard enrichment-worker buttons (isolated; music untouched) ────── */
+.video-enrich-container { position: relative; }
+.video-enrich-button {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 2px solid rgba(var(--ve-accent, 88 101 242), 0.5);
+    background: rgba(18, 18, 22, 0.85);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+.video-enrich-button:hover { transform: translateY(-1px); border-color: rgb(var(--ve-accent, 88 101 242)); }
+.video-enrich-label { position: relative; z-index: 1; }
+.video-enrich-spinner {
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: rgb(var(--ve-accent, 88 101 242));
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+.video-enrich-button.active { box-shadow: 0 0 14px rgba(var(--ve-accent, 88 101 242), 0.45); }
+.video-enrich-button.active .video-enrich-spinner { opacity: 1; animation: video-enrich-spin 1.1s linear infinite; }
+.video-enrich-button.paused { opacity: 0.6; }
+.video-enrich-button.complete { border-color: rgb(var(--ve-accent, 88 101 242)); }
+.video-enrich-button.disabled { opacity: 0.4; cursor: default; }
+@keyframes video-enrich-spin { to { transform: rotate(360deg); } }
+
+.video-enrich-tooltip {
+    position: absolute;
+    top: 54px;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 190px;
+    padding: 10px 12px;
+    background: rgba(12, 12, 16, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+    z-index: 60;
+    font-size: 12px;
+    text-align: left;
+}
+.video-enrich-container:hover .video-enrich-tooltip { opacity: 1; }
+.video-enrich-tt-title { font-weight: 700; margin-bottom: 4px; color: var(--text-primary, #e8e8ea); }
+.video-enrich-tt-status, .video-enrich-tt-current, .video-enrich-tt-progress {
+    color: var(--text-secondary, #9aa0aa);
+    line-height: 1.5;
+}
+
+.video-manage-workers-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 46px;
+    padding: 0 16px;
+    border-radius: 23px;
+    background: rgba(18, 18, 22, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #e8e8ea);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.2s ease, transform 0.15s ease;
+}
+.video-manage-workers-btn:hover { transform: translateY(-1px); border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); }
+.video-manage-workers-icon img { width: 22px; height: 22px; display: block; }
+
 /* ── Subpages: one built video page shown at a time ────────────────────── */
 /* Each real page is a .video-subpage inside #video-page-host; the controller
    toggles the [hidden] attribute. Be explicit so no reused .dash-* rule can
