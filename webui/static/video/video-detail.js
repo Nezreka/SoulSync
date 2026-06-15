@@ -314,15 +314,30 @@
 
         var ps = q('[data-vd-providers-section]'), ph = q('[data-vd-providers]');
         if (ps && ph) {
+            var html = '';
+            // If it's on your media server, that's the best place to watch — lead
+            // with a "Play on Plex/Jellyfin" tile that deep-links to the item.
+            if (ex.server && ex.server.url) {
+                var sv = esc(ex.server.server || 'Server');
+                html += '<a class="vd-prov vd-prov--server" href="' + esc(ex.server.url) +
+                    '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
+                    '<span class="vd-prov-ph vd-prov-play">▶</span>' +
+                    '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
+            }
+            // Streaming providers (JustWatch via TMDB) link to the where-to-watch page.
+            var link = ex.providers_link || '';
             if (ex.providers && ex.providers.length) {
-                ps.hidden = false;
-                ph.innerHTML = ex.providers.map(function (p) {
+                html += ex.providers.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                    return '<div class="vd-prov" title="' + esc(p.name) + '">' + img +
-                        '<span class="vd-prov-name">' + esc(p.name) + '</span></div>';
+                    var inner = img + '<span class="vd-prov-name">' + esc(p.name) + '</span>';
+                    return link
+                        ? '<a class="vd-prov" href="' + esc(link) + '" target="_blank" rel="noopener" title="Where to watch — ' + esc(p.name) + '">' + inner + '</a>'
+                        : '<div class="vd-prov" title="' + esc(p.name) + '">' + inner + '</div>';
                 }).join('');
-            } else { ps.hidden = true; }
+            }
+            ps.hidden = !html;
+            ph.innerHTML = html;
         }
         var ss = q('[data-vd-similar-section]'), sh = q('[data-vd-similar]');
         if (ss && sh) {

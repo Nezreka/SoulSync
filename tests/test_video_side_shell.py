@@ -420,6 +420,10 @@ def test_detail_keeps_preview_items_in_app():
     # 'More like this' and cast now drill in via the shared event, not external links.
     assert "data-vd-sim" in src and "data-vd-person" in src
     assert "/video-detail/tmdb/" in src                  # similar/cast link in-app
+    # Where-to-watch: a "Play on your server" tile for owned items + clickable
+    # streaming providers.
+    assert "vd-prov--server" in src and "Play on " in src
+    assert "ex.providers_link" in src
     # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
     # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
     assert "www.themoviedb.org/' + (s.kind" not in src

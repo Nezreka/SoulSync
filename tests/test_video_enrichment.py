@@ -455,7 +455,18 @@ def test_tmdb_extras_parse(monkeypatch):
     assert ex["similar"][0]["title"] == "Other" and ex["similar"][0]["kind"] == "movie"
 
 
-def test_item_extras_needs_tmdb_and_id(db):
+def _no_server_config(monkeypatch):
+    """Stub the shared config_manager so no media-server watch link is added
+    (keeps these tests independent of the dev machine's Plex/Jellyfin config)."""
+    import config.settings as cs
+    class CM:
+        def get_plex_config(self): return {}
+        def get_jellyfin_config(self): return {}
+    monkeypatch.setattr(cs, "config_manager", CM())
+
+
+def test_item_extras_needs_tmdb_and_id(db, monkeypatch):
+    _no_server_config(monkeypatch)
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})   # no tmdb_id
 
     class C:
@@ -466,6 +477,49 @@ def test_item_extras_needs_tmdb_and_id(db):
     assert eng.item_extras("show", sid) == {}                        # no tmdb_id → no call
     sid2 = db.upsert_show_tree("plex", {"server_id": "s2", "title": "T", "tmdb_id": 1, "seasons": []})
     assert eng.item_extras("show", sid2) == {"trailer": {"key": "x"}}
+
+
+def test_item_extras_adds_jellyfin_watch_link(db, monkeypatch):
+    mid = db.upsert_movie("jellyfin", {"server_id": "abc123", "title": "Owned"})
+    import config.settings as cs
+    class CM:
+        def get_jellyfin_config(self): return {"base_url": "http://jelly:8096/"}
+        def get_plex_config(self): return {}
+    monkeypatch.setattr(cs, "config_manager", CM())
+    ex = VideoEnrichmentEngine(db, {}).item_extras("movie", mid)      # no tmdb worker needed
+    assert ex["server"] == {"server": "Jellyfin",
+                            "url": "http://jelly:8096/web/index.html#!/details?id=abc123"}
+
+
+def test_item_extras_adds_plex_watch_link(db, monkeypatch):
+    mid = db.upsert_movie("plex", {"server_id": "555", "title": "Owned"})
+    import config.settings as cs
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "T"}
+        def get_jellyfin_config(self): return {}
+    monkeypatch.setattr(cs, "config_manager", CM())
+    class _R:
+        text = ""
+        def json(self): return {"MediaContainer": {"machineIdentifier": "MID123"}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _R()))
+    ex = VideoEnrichmentEngine(db, {}).item_extras("movie", mid)
+    assert ex["server"]["server"] == "Plex"
+    assert "app.plex.tv" in ex["server"]["url"] and "MID123" in ex["server"]["url"]
+    assert "%2Flibrary%2Fmetadata%2F555" in ex["server"]["url"]      # url-encoded item key
+
+
+def test_item_extras_no_server_link_when_unowned(db, monkeypatch):
+    # A wishlist-style row with no server id → no watch link.
+    import config.settings as cs
+    class CM:
+        def get_plex_config(self): return {"base_url": "http://plex:32400", "token": "T"}
+        def get_jellyfin_config(self): return {}
+    monkeypatch.setattr(cs, "config_manager", CM())
+    with db.connect() as c:
+        c.execute("INSERT INTO movies (title, server_source, server_id) VALUES ('W', NULL, NULL)")
+        c.commit()
+        rid = c.execute("SELECT id FROM movies WHERE title='W'").fetchone()["id"]
+    assert "server" not in VideoEnrichmentEngine(db, {}).item_extras("movie", rid)
 
 
 def test_tmdb_season_episodes_parses(monkeypatch):
