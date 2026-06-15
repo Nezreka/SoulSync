@@ -287,7 +287,9 @@ class VideoEnrichmentEngine:
                   "has_poster": bool(d.get("poster_url")), "has_backdrop": bool(d.get("backdrop_url"))})
         ex = d.pop("_extras", {}) or {}
         d.update({"trailer": ex.get("trailer"), "providers": ex.get("providers") or [],
-                  "providers_link": ex.get("providers_link"), "similar": ex.get("similar") or []})
+                  "providers_link": ex.get("providers_link"), "similar": ex.get("similar") or [],
+                  "recommendations": ex.get("recommendations") or [], "collection": ex.get("collection"),
+                  "next_episode": ex.get("next_episode"), "last_episode": ex.get("last_episode")})
         if kind == "show":
             seasons = d.pop("_seasons", []) or []
             for s in seasons:

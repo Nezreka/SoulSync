@@ -541,6 +541,33 @@ def _no_server_config(monkeypatch):
     monkeypatch.setattr(cs, "config_manager", CM())
 
 
+def test_tmdb_extras_recommendations_and_collection(monkeypatch):
+    detail = {
+        "recommendations": {"results": [
+            {"id": 7, "title": "Rec", "media_type": "movie", "poster_path": "/r.jpg"}]},
+        "belongs_to_collection": {"id": 99, "name": "Saga Collection", "poster_path": "/c.jpg"}}
+    collection = {"parts": [
+        {"id": 2, "title": "Second", "release_date": "2003-01-01"},
+        {"id": 1, "title": "First", "release_date": "2001-01-01", "poster_path": "/1.jpg"}]}
+
+    def fake_get(url, **k):
+        return _Resp(collection if "/collection/" in url else detail)
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get))
+    ex = TMDBClient("KEY").extras("movie", 1)
+    assert ex["recommendations"][0]["tmdb_id"] == 7 and ex["recommendations"][0]["kind"] == "movie"
+    assert ex["collection"]["name"] == "Saga Collection"
+    assert [c["title"] for c in ex["collection"]["items"]] == ["First", "Second"]   # release order
+
+
+def test_tmdb_extras_tv_next_episode(monkeypatch):
+    detail = {"next_episode_to_air": {"season_number": 3, "episode_number": 4,
+                                      "name": "Finale", "air_date": "2026-12-25"}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    ex = TMDBClient("KEY").extras("show", 5)
+    assert ex["next_episode"] == {"season_number": 3, "episode_number": 4, "name": "Finale",
+                                  "air_date": "2026-12-25", "overview": None}
+
+
 def test_item_extras_needs_tmdb_and_id(db, monkeypatch):
     _no_server_config(monkeypatch)
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})   # no tmdb_id
