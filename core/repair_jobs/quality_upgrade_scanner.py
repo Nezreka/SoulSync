@@ -243,13 +243,22 @@ class QualityUpgradeScannerJob(RepairJob):
         return merged
 
     def _collect_music_dirs(self, context: JobContext) -> list:
-        """All existing music directories to walk, as absolute paths (dedup)."""
+        """The music-library directories to walk, as absolute paths (dedup).
+
+        Only the user's MUSIC LIBRARY is scanned — that's the "Output Folder
+        (Music Library)" setting (soulseek.transfer_path) plus any custom
+        library paths (library.music_paths, for media-server setups). The
+        download/staging folders are deliberately NOT walked: they hold raw,
+        pre-import downloads and leftovers, not the finished library, and the
+        user expects quality checks to run on their library only. Whatever
+        custom path the user configured for the output folder is respected,
+        because it's read live from config here.
+        """
         cm = context.config_manager
         raw = [context.transfer_folder]
         if cm:
             try:
                 raw.append(cm.get('soulseek.transfer_path', './Transfer'))
-                raw.append(cm.get('soulseek.download_path', './downloads'))
                 mp = cm.get('library.music_paths', []) or []
                 if isinstance(mp, list):
                     raw.extend([p for p in mp if isinstance(p, str) and p.strip()])
