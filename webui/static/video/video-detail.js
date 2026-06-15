@@ -348,6 +348,40 @@
         a.innerHTML = html;
     }
 
+    function mediaRes(r) {
+        if (!r) return '';
+        r = String(r).toLowerCase();
+        if (r.indexOf('2160') > -1 || r === '4k') return '4K';
+        if (r.indexOf('1080') > -1) return '1080p';
+        if (r.indexOf('720') > -1) return '720p';
+        if (r.indexOf('480') > -1 || r.indexOf('576') > -1) return 'SD';
+        return r.toUpperCase();
+    }
+    function prettyCodec(c) {
+        if (!c) return '';
+        var l = String(c).toLowerCase();
+        if (l.indexOf('hevc') > -1 || l.indexOf('265') > -1) return 'HEVC';
+        if (l.indexOf('264') > -1 || l === 'avc') return 'H.264';
+        if (l.indexOf('av1') > -1) return 'AV1';
+        if (l.indexOf('vp9') > -1) return 'VP9';
+        return String(c).toUpperCase();
+    }
+    function prettySource(s) {
+        var map = { bluray: 'Blu-ray', 'web-dl': 'WEB-DL', webdl: 'WEB-DL', webrip: 'WEBRip',
+            hdtv: 'HDTV', youtube: 'YouTube', dvd: 'DVD', remux: 'Remux' };
+        return map[String(s || '').toLowerCase()] || String(s || '');
+    }
+    function fmtBytes(n) {
+        if (!n) return '';
+        var gb = n / 1073741824;
+        return gb >= 1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round(n / 1048576) + ' MB';
+    }
+    function fileSummary(v) {
+        return [mediaRes(v.resolution), prettyCodec(v.video_codec),
+            v.audio_codec ? String(v.audio_codec).toUpperCase() : '', fmtBytes(v.size_bytes),
+            v.release_source ? prettySource(v.release_source) : ''].filter(Boolean).join(' · ');
+    }
+
     function renderDetails(d) {
         var host = q('[data-vd-details]');
         if (!host) return;
@@ -357,13 +391,30 @@
         if (d.studio) rows.push(['Studio', d.studio]);
         if (d.status) rows.push(['Status', statusLabel(d.status)]);
         if (d.rating_critic) rows.push(['Critic score', Math.round(d.rating_critic) + '%']);
-        if (d.file && d.file.resolution) rows.push(['Quality', String(d.file.resolution).toUpperCase()]);
-        host.innerHTML = rows.length
+        // Your media — the technical specs we scanned (Plex-grade).
+        var f = d.file;
+        if (f) {
+            if (f.resolution) rows.push(['Quality', mediaRes(f.resolution)]);
+            if (f.video_codec) rows.push(['Video', prettyCodec(f.video_codec)]);
+            if (f.audio_codec) rows.push(['Audio', String(f.audio_codec).toUpperCase()]);
+            if (f.release_source) rows.push(['Source', prettySource(f.release_source)]);
+            if (f.size_bytes) rows.push(['Size', fmtBytes(f.size_bytes)]);
+        }
+        var html = rows.length
             ? '<div class="vd-detail-grid">' + rows.map(function (r) {
                 return '<div class="vd-detail-row"><span class="vd-detail-k">' + esc(r[0]) +
                     '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
             }).join('') + '</div>'
             : '';
+        // Multiple versions / editions you own.
+        var files = d.files || [];
+        if (files.length > 1) {
+            html += '<div class="vd-versions"><div class="vd-versions-h">' + files.length + ' versions</div>' +
+                files.map(function (v) {
+                    return '<div class="vd-version">' + esc(fileSummary(v)) + '</div>';
+                }).join('') + '</div>';
+        }
+        host.innerHTML = html;
     }
 
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────

@@ -1416,3 +1416,12 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 /* settings: detail-pages preference toggle */
 .vid-pref-row { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-primary, #fff); }
 .vid-pref-row input { width: 16px; height: 16px; cursor: pointer; accent-color: #38bdf8; }
+
+/* ── owned media: multiple versions/editions ─────────────────────────────── */
+.vd-versions { margin-top: 18px; }
+.vd-versions-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(255, 255, 255, 0.45); margin-bottom: 8px; }
+.vd-version {
+    display: inline-block; margin: 0 8px 8px 0; padding: 7px 13px; border-radius: 8px;
+    font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+}

@@ -1156,10 +1156,10 @@ class VideoDatabase:
                 return None
             genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
             credits = self._credits_for(conn, "movie_id", movie_id)
-            f = conn.execute(
-                "SELECT resolution, quality, video_codec, audio_codec, size_bytes "
-                "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC LIMIT 1",
-                (movie_id,)).fetchone()
+            files = conn.execute(
+                "SELECT resolution, quality, video_codec, audio_codec, release_source, size_bytes "
+                "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC",
+                (movie_id,)).fetchall()
         finally:
             conn.close()
         return {
@@ -1174,7 +1174,8 @@ class VideoDatabase:
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
             "logo": m["logo_url"],
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),
-            "file": (dict(f) if f else None),
+            "file": (dict(files[0]) if files else None),       # best version (compat)
+            "files": [dict(x) for x in files],                 # all versions/editions
         }
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
