@@ -140,6 +140,12 @@ body[data-side="video"] [data-music-only] {
 body[data-side="video"] [data-stg="library"]:not([data-video-only]) {
     display: none !important;
 }
+/* The video side has its OWN server section (Video Source above) and reuses the
+   shared Plex/Jellyfin credentials — so hide music's Server Connections group
+   entirely on the video side. Video never configures or selects the MUSIC server. */
+body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-only]) {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
@@ -1479,6 +1485,9 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
 }
 .vid-source-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .vid-source-btn.active { background: rgba(56, 189, 248, 0.9); border-color: transparent; color: #fff; }
+.vid-source-btn--off { opacity: 0.45; cursor: not-allowed; }
+.vid-source-btn--off:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.8); }
+.vid-source-off { font-size: 11px; opacity: 0.85; }
 
 /* library: no-server gate banner */
 .video-noserver {
