@@ -36,11 +36,20 @@ class QualityUpgradeScannerJob(RepairJob):
     display_name = 'Quality Upgrade Scanner'
     description = 'Flags library tracks below your quality profile'
     help_text = (
-        'Scans your music folders on disk and checks every track\'s REAL audio '
-        'quality (bit depth, sample rate, bitrate — read from the file itself, '
-        'not just the extension) against your configured quality profile. This is '
-        'the same check the download pipeline runs, so a track flagged here is one '
-        'the downloader would also reject.\n\n'
+        'Scans your music library folder and verifies every track with the SAME '
+        'two-stage check the download/import pipeline runs:\n'
+        '1. Real-audio guard — ffmpeg actually decodes the file (truncation + '
+        'silence detection) to catch broken/incomplete audio the header hides.\n'
+        '2. Quality gate — measured bit depth / sample rate / bitrate vs your '
+        'configured quality profile.\n'
+        'A track flagged here is one the downloader would also reject. Because it '
+        'decodes each file, a full scan takes real time (seconds per track), not '
+        'milliseconds — that\'s the deep verification doing its job.\n\n'
+        'Settings:\n'
+        '- deep_audio_verify (default on): run the ffmpeg decode guard. Turn off '
+        'for a fast header-only pass.\n'
+        '- library_tracks_only (default off): only check files matched to a '
+        'library DB track.\n\n'
         'Each below-profile track is reported as a finding. You can:\n'
         '• Re-download — add the track to your wishlist and remove the low-quality file\n'
         '• Delete — remove the low-quality file\n'
@@ -56,8 +65,9 @@ class QualityUpgradeScannerJob(RepairJob):
     # audio file in the Music Library output folder, which is what users expect
     # ("check my library folder"). DB matching after a reset is unreliable and
     # would wrongly skip everything. Turn ON to ignore non-DB files.
-    default_settings = {'library_tracks_only': False}
-    setting_options = {'library_tracks_only': [True, False]}
+    default_settings = {'library_tracks_only': False, 'deep_audio_verify': True}
+    setting_options = {'library_tracks_only': [True, False],
+                       'deep_audio_verify': [True, False]}
     auto_fix = False  # User chooses fix action per finding
 
     def scan(self, context: JobContext) -> JobResult:
@@ -81,6 +91,10 @@ class QualityUpgradeScannerJob(RepairJob):
                     [t.label for t in targets])
 
         from core.imports.file_ops import probe_audio_quality
+        # Same real-file AudioGuard the download/import pipeline runs: ffmpeg
+        # DECODES the file (astats + silencedetect) to catch truncated or
+        # mostly-silent audio the header can't reveal.
+        from core.imports.silence import detect_broken_audio
 
         # --- Collect the music folders to walk (real dirs, abspath'd) ---
         base_dirs = self._collect_music_dirs(context)
@@ -123,7 +137,13 @@ class QualityUpgradeScannerJob(RepairJob):
         # residue after a DB reset) — those are orphans, not library tracks, and
         # belong to the Orphan File Detector, not a quality upgrade scan. Default
         # ON so the scan reflects the user's actual library, not download junk.
-        library_only = self._get_settings(context).get('library_tracks_only', True)
+        _settings = self._get_settings(context)
+        library_only = _settings.get('library_tracks_only', False)
+        # Deep verify = run the ffmpeg AudioGuard (real decode) per file, exactly
+        # like the download pipeline. Slower than a header read but it's the
+        # whole point: it verifies the REAL audio, not just the metadata. On by
+        # default; can be turned off for a fast header-only pass.
+        deep_verify = _settings.get('deep_audio_verify', True)
 
         probe_failed = 0
         not_in_library = 0
@@ -155,53 +175,77 @@ class QualityUpgradeScannerJob(RepairJob):
                     log_type='info',
                 )
 
+            # === Real-file verification — the SAME two stages the download /
+            # import pipeline runs on every file ===
+            #   1) AudioGuard: ffmpeg DECODES the audio (astats / silencedetect)
+            #      to catch truncated or mostly-silent files the header hides.
+            #   2) Quality gate: measured quality (mutagen) vs the ranked profile.
+            try:
+                broken_reason = detect_broken_audio(fpath) if deep_verify else None
+            except Exception as e:
+                logger.debug("AudioGuard failed for %s: %s", fname, e)
+                broken_reason = None
+
             try:
                 aq = probe_audio_quality(fpath)
             except Exception as e:
                 logger.debug("Probe failed for %s: %s", fname, e)
                 aq = None
-            if aq is None:
+
+            if broken_reason:
+                issue = 'broken_audio'
+                current_label = aq.label() if aq is not None else 'unknown'
+            elif aq is None:
+                # Header unreadable → can't judge quality; leave it unflagged.
                 probe_failed += 1
                 result.skipped += 1
                 continue
-
-            if quality_meets_profile(aq, targets):
+            elif not quality_meets_profile(aq, targets):
+                issue = 'below_profile'
+                current_label = aq.label()
+            else:
+                # Decodes fully AND meets the profile → genuinely good.
                 if context.update_progress and (i + 1) % 25 == 0:
                     context.update_progress(i + 1, total)
                 continue
 
-            # Below profile → build the finding from the resolved metadata.
-            current_label = aq.label()
+            # Build the finding (broken audio OR below profile).
             target_labels = [t.label for t in targets]
             disp_title = meta.get('title') or os.path.splitext(fname)[0]
             disp_artist = meta.get('artist') or 'Unknown'
+            if issue == 'broken_audio':
+                _title = f'Broken/incomplete audio: {disp_title}'
+                _desc = (f'"{disp_title}" by {disp_artist} failed real-audio '
+                         f'verification (ffmpeg): {broken_reason}')
+                _severity = 'warning'
+            else:
+                _title = f'Below quality: {disp_title} ({current_label})'
+                _desc = (f'"{disp_title}" by {disp_artist} is {current_label}, '
+                         f'which does not meet your quality profile '
+                         f'({", ".join(target_labels[:3])}'
+                         f'{"…" if len(target_labels) > 3 else ""}).')
+                _severity = 'info'
 
             if context.report_progress:
-                context.report_progress(
-                    log_line=f'Below quality: {disp_title} — {current_label}',
-                    log_type='error',
-                )
+                context.report_progress(log_line=_title, log_type='error')
             if context.create_finding:
                 inserted = context.create_finding(
                     job_id=self.job_id,
                     finding_type='quality_upgrade',
-                    severity='info',
+                    severity=_severity,
                     entity_type='track' if meta.get('track_id') else 'file',
                     entity_id=str(meta['track_id']) if meta.get('track_id') else None,
                     file_path=fpath,
-                    title=f'Below quality: {disp_title} ({current_label})',
-                    description=(
-                        f'"{disp_title}" by {disp_artist} is {current_label}, '
-                        f'which does not meet your quality profile '
-                        f'({", ".join(target_labels[:3])}'
-                        f'{"…" if len(target_labels) > 3 else ""}).'
-                    ),
+                    title=_title,
+                    description=_desc,
                     details={
+                        'quality_issue': issue,
+                        'broken_audio_reason': broken_reason or '',
                         'current_quality': current_label,
-                        'current_format': aq.format,
-                        'current_bitrate': aq.bitrate,
-                        'current_sample_rate': aq.sample_rate,
-                        'current_bit_depth': aq.bit_depth,
+                        'current_format': aq.format if aq is not None else '',
+                        'current_bitrate': aq.bitrate if aq is not None else None,
+                        'current_sample_rate': aq.sample_rate if aq is not None else None,
+                        'current_bit_depth': aq.bit_depth if aq is not None else None,
                         'target_qualities': target_labels,
                         'expected_title': disp_title,
                         'expected_artist': disp_artist,
