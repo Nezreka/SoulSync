@@ -445,15 +445,18 @@ body[data-side="video"] .dashboard-header-sweep {
 /* Break out of the host .page's 40px/90px padding so the billboard is truly
    edge-to-edge (Netflix full-bleed) — no bare gaps around it. */
 .vd-page { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); position: relative; margin: -40px -40px -90px; }
+/* Sticky so it stays reachable on these long detail pages (negative bottom margin
+   pulls the billboard up under it, keeping the full-bleed overlay look). */
 .vd-back {
-    position: absolute; top: 18px; left: 22px; z-index: 6;
+    position: sticky; top: 14px; z-index: 8; width: max-content;
+    margin: 0 0 -42px 22px;
     display: inline-flex; align-items: center; gap: 7px;
     padding: 8px 15px; border-radius: 999px;
-    background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.14);
     color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
-    backdrop-filter: blur(10px); transition: all 0.2s ease;
+    backdrop-filter: blur(10px); transition: background 0.2s ease, transform 0.2s ease;
 }
-.vd-back:hover { background: rgba(0,0,0,0.7); transform: translateX(-2px); }
+.vd-back:hover { background: rgba(0,0,0,0.8); transform: translateX(-2px); }
 .vd-back [data-vd-back-label] {
     display: inline-block; max-width: 230px; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; vertical-align: bottom;
