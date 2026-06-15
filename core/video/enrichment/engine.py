@@ -88,7 +88,8 @@ class VideoEnrichmentEngine:
         self.db.enrichment_apply("tmdb", "show", show_id, matched=True,
                                  external_id=result["id"], metadata=result.get("metadata"))
         try:
-            w._cascade_episodes(show_id, result["id"])     # episode stills too
+            nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
+            w._cascade_episodes(show_id, result["id"], nums)    # full list: owned + missing
         except Exception:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
         return {"ok": True}

@@ -296,8 +296,11 @@ def test_tmdb_show_returns_season_posters(monkeypatch):
         {"season_number": 2, "poster_path": None}]}
     monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
     m = TMDBClient("KEY").match("show", "Show", 2020, known_id=1396)["metadata"]
-    assert m["seasons"] == [{"season_number": 1,
-                             "poster_url": "https://image.tmdb.org/t/p/original/a.jpg"}]
+    # The FULL season list now comes back (poster None where TMDB has none) so the
+    # episode cascade can represent missing seasons too.
+    assert m["seasons"] == [
+        {"season_number": 1, "poster_url": "https://image.tmdb.org/t/p/original/a.jpg"},
+        {"season_number": 2, "poster_url": None}]
 
 
 def test_tmdb_client_raises_on_rate_limit(monkeypatch):
