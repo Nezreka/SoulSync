@@ -51,7 +51,10 @@ class QualityUpgradeScannerJob(RepairJob):
     icon = 'repair-icon-lossless'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {}
+    # library_tracks_only: only check files that match a library DB track. OFF
+    # would also flag loose files in transfer/downloads (pre-import leftovers).
+    default_settings = {'library_tracks_only': True}
+    setting_options = {'library_tracks_only': [True, False]}
     auto_fix = False  # User chooses fix action per finding
 
     def scan(self, context: JobContext) -> JobResult:
@@ -112,16 +115,35 @@ class QualityUpgradeScannerJob(RepairJob):
 
         # --- DB suffix index so a walked file maps back to its track row ---
         db_index = self._build_db_suffix_index(context)
+        # Only check files that are part of the LIBRARY (have a DB track row).
+        # The transfer/download folders also hold pre-import leftovers (e.g.
+        # residue after a DB reset) — those are orphans, not library tracks, and
+        # belong to the Orphan File Detector, not a quality upgrade scan. Default
+        # ON so the scan reflects the user's actual library, not download junk.
+        library_only = self._get_settings(context).get('library_tracks_only', True)
 
         probe_failed = 0
+        not_in_library = 0
         for i, fpath in enumerate(audio_files):
             if context.check_stop():
                 return result
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            result.scanned += 1
             fname = os.path.basename(fpath)
+
+            # Map to a DB track up front (cheap suffix lookup). When scoping to
+            # the library, skip anything with no DB row BEFORE probing — no point
+            # reading hundreds of orphan files.
+            meta = self._match_db(fpath, db_index)
+            if library_only and meta is None:
+                not_in_library += 1
+                result.skipped += 1
+                continue
+            if meta is None:
+                meta = self._read_file_tags(fpath)
+
+            result.scanned += 1
             if context.report_progress and i % 25 == 0:
                 context.report_progress(
                     scanned=i + 1, total=total,
@@ -145,8 +167,7 @@ class QualityUpgradeScannerJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
-            # Below profile → resolve metadata (DB row preferred, file tags fallback).
-            meta = self._lookup_meta(fpath, db_index)
+            # Below profile → build the finding from the resolved metadata.
             current_label = aq.label()
             target_labels = [t.label for t in targets]
             disp_title = meta.get('title') or os.path.splitext(fname)[0]
@@ -201,9 +222,25 @@ class QualityUpgradeScannerJob(RepairJob):
         if probe_failed:
             logger.warning("[QualityScan] %d/%d files could not be probed (unreadable)",
                            probe_failed, total)
+        if not_in_library:
+            logger.info(
+                "[QualityScan] %d/%d files skipped — not in the library DB (orphan "
+                "leftovers in transfer/downloads; disable 'library_tracks_only' to "
+                "include them)", not_in_library, total)
         logger.info("Quality upgrade scan: %d checked, %d below profile, %d skipped",
                     result.scanned, result.findings_created, result.skipped)
         return result
+
+    def _get_settings(self, context: JobContext) -> dict:
+        merged = dict(self.default_settings)
+        if context.config_manager:
+            try:
+                cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+                if isinstance(cfg, dict):
+                    merged.update(cfg)
+            except Exception as e:
+                logger.debug("settings read failed: %s", e)
+        return merged
 
     def _collect_music_dirs(self, context: JobContext) -> list:
         """All existing music directories to walk, as absolute paths (dedup)."""
@@ -273,16 +310,20 @@ class QualityUpgradeScannerJob(RepairJob):
                 conn.close()
         return index
 
-    def _lookup_meta(self, fpath: str, db_index: dict) -> dict:
-        """Match a walked file to a DB track via path suffix; fall back to the
-        file's own tags for title/artist/album when nothing matches."""
+    def _match_db(self, fpath: str, db_index: dict):
+        """Match a walked file to a DB track via path suffix. Returns the track
+        meta dict, or None when the file isn't part of the library."""
         parts = fpath.replace('\\', '/').split('/')
         for depth in range(min(3, len(parts)), 0, -1):
             suffix = '/'.join(parts[-depth:]).lower()
             hit = db_index.get(suffix)
             if hit:
                 return hit
-        # No DB row — read the file's own tags.
+        return None
+
+    def _read_file_tags(self, fpath: str) -> dict:
+        """Read title/artist/album from the file's own tags (for loose files
+        when library_tracks_only is off)."""
         meta = {'track_id': None}
         try:
             from mutagen import File as MutagenFile
