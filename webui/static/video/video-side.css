@@ -1205,3 +1205,26 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     font-size: 14px; line-height: 1.6; color: rgba(255, 255, 255, 0.7);
     max-width: 880px; margin: -8px 0 22px;
 }
+
+/* ── detail skeleton loader (shimmer billboard while data loads) ──────────── */
+.vd-skel {
+    position: absolute; top: 0; left: 0; right: 0; height: 76vh; min-height: 470px; z-index: 5; overflow: hidden;
+    background: radial-gradient(120% 90% at 70% 0%, rgba(var(--vd-accent-rgb, 88, 101, 242), 0.18), var(--bg-primary, #0b0b0f) 60%);
+}
+.vd-skel-content { position: absolute; left: 56px; bottom: 60px; width: min(60%, 600px); }
+.skel-shine {
+    border-radius: 8px;
+    background: linear-gradient(100deg, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.05) 70%);
+    background-size: 200% 100%; animation: vd-skel-shine 1.4s ease-in-out infinite;
+}
+@keyframes vd-skel-shine { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.vd-skel-logo { height: 54px; width: 320px; max-width: 80%; margin-bottom: 22px; }
+.vd-skel-meta { height: 16px; width: 280px; max-width: 70%; margin-bottom: 22px; }
+.vd-skel-text { height: 13px; width: 100%; margin-bottom: 10px; }
+.vd-skel-text.short { width: 70%; margin-bottom: 26px; }
+.vd-skel-btns { display: flex; gap: 12px; }
+.vd-skel-btns span { height: 44px; width: 130px; border-radius: 10px; display: block; }
+@media (max-width: 720px) {
+    .vd-skel-content { left: 22px; right: 22px; width: auto; bottom: 60px; }
+}
+@media (prefers-reduced-motion: reduce) { .skel-shine { animation: none; } }
