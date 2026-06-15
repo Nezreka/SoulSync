@@ -51,7 +51,7 @@
         return '<a class="vsr-card" href="' + href + '" ' +
             'data-vp-open="' + c.kind + '" data-vp-source="' + source + '" data-vp-cid="' + id + '">' +
             '<div class="vsr-poster">' + img + ribbon +
-            '<span class="vsr-play" aria-hidden="true">▶</span></div>' +
+            '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(c.title) + '">' + esc(c.title) +
             '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }

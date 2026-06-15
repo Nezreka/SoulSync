@@ -886,15 +886,17 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     transition: opacity 0.3s ease;
 }
 .vsr-card:hover .vsr-poster::after { opacity: 1; }
-.vsr-play {
+/* hover affordance = "view details" (an info badge), NOT a play button */
+.vsr-peek {
     position: absolute; left: 50%; top: 50%; z-index: 3;
-    width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-    background: rgba(var(--vd-accent-rgb), 0.92); color: #fff; font-size: 17px;
+    width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: rgba(var(--vd-accent-rgb), 0.92); color: #fff;
+    font-family: Georgia, 'Times New Roman', serif; font-style: italic; font-weight: 700; font-size: 22px;
     transform: translate(-50%, -50%) scale(0.5); opacity: 0;
     box-shadow: 0 6px 20px rgba(var(--vd-accent-rgb), 0.5);
     transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.4), opacity 0.25s ease;
 }
-.vsr-card:hover .vsr-play { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+.vsr-card:hover .vsr-peek { transform: translate(-50%, -50%) scale(1); opacity: 1; }
 
 /* ribbon + rating chips */
 .vsr-ribbon {
