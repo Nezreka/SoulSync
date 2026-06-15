@@ -98,6 +98,20 @@ def test_tmdb_pulls_full_metadata(monkeypatch):
     assert m["genres"] == ["Sci-Fi", "Drama"] and m["status"] == "Released" and m["imdb_id"] == "tt1"
 
 
+def test_tmdb_show_returns_season_posters(monkeypatch):
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    detail = {"overview": "O", "external_ids": {}, "seasons": [
+        {"season_number": 1, "poster_path": "/a.jpg"},
+        {"season_number": 2, "poster_path": None}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    m = TMDBClient("KEY").match("show", "Show", 2020, known_id=1396)["metadata"]
+    assert m["seasons"] == [{"season_number": 1,
+                             "poster_url": "https://image.tmdb.org/t/p/original/a.jpg"}]
+
+
 def test_tmdb_client_raises_on_rate_limit(monkeypatch):
     # A 429 must raise (→ worker records 'error'), not silently return no-match.
     class _Resp429:
