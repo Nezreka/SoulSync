@@ -832,37 +832,32 @@
                      linking to the owned library detail or the TMDB-backed detail.
                      Reuses the library card classes. Built by video/video-search.js. -->
                 <section class="video-subpage" data-video-subpage="video-search" hidden>
-                    <div class="library-page-embed">
-                        <div class="library-container">
-                            <div class="library-header">
-                                <div class="library-header-content">
-                                    <h2 class="library-title"><span class="vsr-title-ic" aria-hidden="true">&#128269;</span><span>Search</span></h2>
-                                    <p class="library-subtitle">Find any movie, show or person &mdash; owned or not, everything stays in-app</p>
-                                </div>
+                    <div class="vsr-page">
+                        <div class="vsr-hero">
+                            <div class="vsr-hero-glow" aria-hidden="true"></div>
+                            <h1 class="vsr-hero-title">Search</h1>
+                            <p class="vsr-hero-sub">Movies, TV shows &amp; people &mdash; everything stays in-app</p>
+                            <div class="vsr-searchbar">
+                                <span class="vsr-search-ic" aria-hidden="true">&#128269;</span>
+                                <input type="text" class="vsr-input" data-video-search-input
+                                       placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
                             </div>
-                            <div class="library-controls">
-                                <div class="library-search-container vsr-search-box">
-                                    <input type="text" class="library-search-input" data-video-search-input
-                                           placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
-                                    <div class="library-search-icon">&#128269;</div>
-                                </div>
+                        </div>
+                        <div class="vsr-body">
+                            <div class="vsr-loading hidden" data-video-search-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Searching&hellip;</div>
                             </div>
-                            <div class="library-content">
-                                <div class="library-loading hidden" data-video-search-loading>
-                                    <div class="loading-spinner"></div>
-                                    <div class="loading-text">Searching&hellip;</div>
-                                </div>
-                                <div class="vsr-results" data-video-search-results></div>
-                                <div class="library-empty" data-video-search-hint>
-                                    <div class="empty-icon">&#127902;</div>
-                                    <div class="empty-title">Search SoulSync</div>
-                                    <div class="empty-subtitle">Movies, TV shows and people. Owned titles open your library detail; the rest open a live preview &mdash; no external links.</div>
-                                </div>
-                                <div class="library-empty hidden" data-video-search-empty>
-                                    <div class="empty-icon">&#129300;</div>
-                                    <div class="empty-title">No results</div>
-                                    <div class="empty-subtitle">Try another title or name.</div>
-                                </div>
+                            <div class="vsr-results" data-video-search-results></div>
+                            <div class="vsr-state" data-video-search-hint>
+                                <div class="vsr-state-ic">&#127902;</div>
+                                <div class="vsr-state-title">Search SoulSync</div>
+                                <div class="vsr-state-sub">Find any movie, show or person. Owned titles open your library detail; the rest open a live preview &mdash; no external links.</div>
+                            </div>
+                            <div class="vsr-state hidden" data-video-search-empty>
+                                <div class="vsr-state-ic">&#129300;</div>
+                                <div class="vsr-state-title">No results</div>
+                                <div class="vsr-state-sub">Try another title or name.</div>
                             </div>
                         </div>
                     </div>
@@ -1029,7 +1024,8 @@
                      Bio + filmography, every credit links back into SoulSync. Built
                      by video/video-person.js, styled by .vp-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-person-detail" hidden>
-                    <div class="vp-page" data-video-person>
+                    <div class="vp-page" data-video-person data-has-bg="0">
+                        <div class="vp-ambient" data-vp-ambient aria-hidden="true"></div>
                         <button class="vd-back" type="button" data-video-detail-back>
                             <span aria-hidden="true">&larr;</span> Back
                         </button>
@@ -1042,13 +1038,16 @@
                             <div class="vp-hero-info">
                                 <h1 class="vp-name" data-vp-name></h1>
                                 <div class="vp-meta" data-vp-meta></div>
-                                <p class="vp-bio" data-vp-bio></p>
                             </div>
                         </div>
-                        <div class="vp-credits-section">
-                            <div class="vd-section-head"><h2 class="vd-section-title">Filmography</h2>
-                                <div class="vp-credit-tabs" data-vp-tabs></div></div>
-                            <div class="vsr-grid" data-vp-credits></div>
+                        <div class="vp-body">
+                            <p class="vp-bio" data-vp-bio></p>
+                            <button class="vp-bio-more" type="button" data-vp-bio-more hidden>Read more</button>
+                            <div class="vp-credits-section">
+                                <div class="vp-credits-head"><h2 class="vp-credits-title">Filmography</h2>
+                                    <div class="vp-credit-tabs" data-vp-tabs></div></div>
+                                <div class="vsr-grid" data-vp-credits></div>
+                            </div>
                         </div>
                     </div>
                 </section>

@@ -31,25 +31,22 @@
     function creditCard(c) {
         var fallback = c.kind === 'movie' ? '🎬' : '📺';
         var img = c.poster
-            ? '<div class="library-artist-image"><img src="' + esc(c.poster) + '" alt="" loading="lazy" ' +
-              'onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' + fallback + '</div>\'"></div>'
-            : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
+            ? '<img src="' + esc(c.poster) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<div class=&quot;vsr-poster-ph&quot;>' + fallback + '</div>\'">'
+            : '<div class="vsr-poster-ph">' + fallback + '</div>';
         var owned = c.library_id != null;
-        var ribbon = owned ? '<div class="vsr-ribbon vsr-ribbon--owned">In Library</div>'
-            : '<div class="vsr-ribbon vsr-ribbon--preview">Preview</div>';
-        var meta = [];
-        if (c.year) meta.push(String(c.year));
-        if (c.role) meta.push(c.role);
+        var ribbon = owned ? '<span class="vsr-ribbon vsr-ribbon--owned">In Library</span>'
+            : '<span class="vsr-ribbon vsr-ribbon--preview">Preview</span>';
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? c.library_id : c.tmdb_id;
         var href = '/video-detail/' + source + '/' + c.kind + '/' + id;
-        return '<a class="library-artist-card video-card--clickable vsr-card" href="' + href + '" ' +
+        var sub = [c.year, c.role].filter(Boolean).join(' · ');
+        return '<a class="vsr-card" href="' + href + '" ' +
             'data-vp-open="' + c.kind + '" data-vp-source="' + source + '" data-vp-cid="' + id + '">' +
-            img + ribbon +
-            '<div class="library-artist-info">' +
-            '<h3 class="library-artist-name" title="' + esc(c.title) + '">' + esc(c.title) + '</h3>' +
-            '<div class="library-artist-stats"><span class="library-artist-stat">' +
-            esc(meta.join(' · ')) + '</span></div></div></a>';
+            '<div class="vsr-poster">' + img + ribbon +
+            '<span class="vsr-play" aria-hidden="true">▶</span></div>' +
+            '<div class="vsr-info"><span class="vsr-name" title="' + esc(c.title) + '">' + esc(c.title) +
+            '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
     function renderTabs() {
@@ -91,6 +88,11 @@
                 photo.onerror = function () { photo.hidden = true; if (ph) ph.hidden = false; };
             } else { photo.hidden = true; if (ph) ph.hidden = false; }
         }
+        // Cinematic ambient backdrop sampled from the portrait (blurred in CSS).
+        var page = root(), amb = q('[data-vp-ambient]');
+        if (page) page.setAttribute('data-has-bg', d.photo ? '1' : '0');
+        if (amb) amb.style.setProperty('--vp-bg', d.photo ? "url('" + d.photo + "')" : 'none');
+
         setText('[data-vp-name]', d.name);
         var meta = [];
         if (d.known_for) meta.push(d.known_for);
@@ -98,8 +100,11 @@
         if (d.place_of_birth) meta.push(d.place_of_birth);
         var m = q('[data-vp-meta]');
         if (m) m.innerHTML = meta.map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
-        var bio = q('[data-vp-bio]');
-        if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; }
+
+        var bio = q('[data-vp-bio]'), more = q('[data-vp-bio-more]');
+        if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; bio.classList.remove('vp-bio--open'); }
+        if (more) { more.hidden = !((d.biography || '').length > 320); more.textContent = 'Read more'; }
+
         renderTabs(); renderCredits();
         var sub = document.querySelector('.video-subpage[data-video-subpage="video-person-detail"]');
         if (sub) sub.scrollTop = 0;
@@ -134,6 +139,15 @@
         var tabBtn = e.target.closest('[data-vp-tab]');
         if (tabBtn && r.contains(tabBtn)) {
             tab = tabBtn.getAttribute('data-vp-tab'); renderTabs(); renderCredits(); return;
+        }
+        var moreBtn = e.target.closest('[data-vp-bio-more]');
+        if (moreBtn && r.contains(moreBtn)) {
+            var bio = q('[data-vp-bio]');
+            if (bio) {
+                var open = bio.classList.toggle('vp-bio--open');
+                moreBtn.textContent = open ? 'Read less' : 'Read more';
+            }
+            return;
         }
         var card = e.target.closest('[data-vp-open]');
         if (card && r.contains(card)) {

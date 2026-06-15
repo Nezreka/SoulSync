@@ -33,46 +33,43 @@
     }
     function show(sel, on) { var n = $(sel); if (n) n.classList.toggle('hidden', !on); }
 
-    // movie/show card — mirrors the library card, plus an owned/preview ribbon.
+    // Netflix-style poster card with owned/preview ribbon + hover affordance.
     function titleCard(it) {
         var fallback = it.kind === 'movie' ? '🎬' : '📺';
         var img = it.poster
-            ? '<div class="library-artist-image"><img src="' + esc(it.poster) + '" alt="" loading="lazy" ' +
-              'onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>' + fallback + '</div>\'"></div>'
-            : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
+            ? '<img src="' + esc(it.poster) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<div class=&quot;vsr-poster-ph&quot;>' + fallback + '</div>\'">'
+            : '<div class="vsr-poster-ph">' + fallback + '</div>';
         var owned = it.library_id != null;
         var ribbon = owned
-            ? '<div class="vsr-ribbon vsr-ribbon--owned">In Library</div>'
-            : '<div class="vsr-ribbon vsr-ribbon--preview">Preview</div>';
-        var meta = [];
-        if (it.year) meta.push(String(it.year));
-        if (it.rating) meta.push('★ ' + (Math.round(it.rating * 10) / 10));
+            ? '<span class="vsr-ribbon vsr-ribbon--owned">In Library</span>'
+            : '<span class="vsr-ribbon vsr-ribbon--preview">Preview</span>';
+        var rating = it.rating
+            ? '<span class="vsr-rating">★ ' + (Math.round(it.rating * 10) / 10) + '</span>' : '';
         // Owned → real library detail; otherwise the TMDB-backed (preview) detail.
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? it.library_id : it.tmdb_id;
         var href = '/video-detail/' + source + '/' + it.kind + '/' + id;
-        return '<a class="library-artist-card video-card--clickable vsr-card" href="' + href + '" ' +
+        var sub = [it.year, it.kind === 'movie' ? 'Movie' : 'TV'].filter(Boolean).join(' · ');
+        return '<a class="vsr-card" href="' + href + '" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
-            img + ribbon +
-            '<div class="library-artist-info">' +
-            '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
-            '<div class="library-artist-stats"><span class="library-artist-stat">' +
-            esc(meta.join(' · ')) + '</span></div></div></a>';
+            '<div class="vsr-poster">' + img + ribbon + rating +
+            '<span class="vsr-play" aria-hidden="true">▶</span></div>' +
+            '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +
+            '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
     function personCard(it) {
         var img = it.poster
-            ? '<div class="library-artist-image vsr-person-img"><img src="' + esc(it.poster) + '" alt="" loading="lazy" ' +
-              'onerror="this.parentNode.innerHTML=\'<div class=&quot;library-artist-image-fallback&quot;>👤</div>\'"></div>'
-            : '<div class="library-artist-image vsr-person-img"><div class="library-artist-image-fallback">👤</div></div>';
+            ? '<img src="' + esc(it.poster) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<div class=&quot;vsr-poster-ph&quot;>👤</div>\'">'
+            : '<div class="vsr-poster-ph">👤</div>';
         var sub = it.known_for ? it.known_for : (it.department || '');
-        return '<a class="library-artist-card video-card--clickable vsr-card vsr-card--person" href="#" ' +
+        return '<a class="vsr-card vsr-card--person" href="#" ' +
             'data-vsr-open="person" data-vsr-id="' + it.tmdb_id + '">' +
-            img +
-            '<div class="library-artist-info">' +
-            '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
-            '<div class="library-artist-stats"><span class="library-artist-stat">' +
-            esc(sub) + '</span></div></div></a>';
+            '<div class="vsr-poster">' + img + '</div>' +
+            '<div class="vsr-info vsr-info--center"><span class="vsr-name" title="' + esc(it.title) + '">' +
+            esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
     function render(results) {
