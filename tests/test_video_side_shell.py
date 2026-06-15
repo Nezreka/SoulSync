@@ -424,6 +424,12 @@ def test_detail_keeps_preview_items_in_app():
     # streaming providers.
     assert "vd-prov--server" in src and "Play on " in src
     assert "ex.providers_link" in src
+    # Best-in-class billboard: primary Play CTA, director/creator line, collection
+    # row, recommendations (with similar fallback), next-episode + season overview.
+    assert "vd-play-btn" in src
+    assert "renderCrewLine" in src and "renderNextEpisode" in src
+    assert "data-vd-collection" in _INDEX and "renderSeasonOverview" in src
+    assert "ex.recommendations" in src
     # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
     # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
     assert "www.themoviedb.org/' + (s.kind" not in src
