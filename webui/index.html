@@ -5134,7 +5134,7 @@
                                  side in place of the music API services). Same structure as the
                                  music service frames above. -->
                             <!-- Video Source (which Plex/Jellyfin the video side uses) -->
-                            <div class="settings-group" data-video-only>
+                            <div class="settings-group" data-stg="connections" data-video-only>
                                 <h3>Video Source</h3>
                                 <div class="vid-source-panel" data-video-source-panel>
                                     <div class="callback-help">Checking…</div>
@@ -5199,8 +5199,8 @@
                                     </div>
                                 </div>
                             </div>
-                            <!-- Video Preferences (video-side only) -->
-                            <div class="settings-group" data-video-only>
+                            <!-- Video Preferences — lives on the Library settings tab -->
+                            <div class="settings-group" data-stg="library" data-video-only>
                                 <h3>Video Preferences</h3>
                                 <div class="api-service-frame stg-service" data-video-service="prefs">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
