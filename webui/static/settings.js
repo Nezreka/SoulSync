@@ -1034,6 +1034,10 @@ async function loadSettingsData() {
 
         // Set active server and toggle visibility
         const activeServer = settings.active_media_server || 'plex';
+        // Remember the persisted music server so a save from the VIDEO side keeps
+        // it unchanged (the toggle there is for opening a config panel, not picking
+        // the music server).
+        window._persistedActiveServer = activeServer;
         toggleServer(activeServer);
 
         // Load Plex music libraries if Plex is the active server
@@ -2867,11 +2871,6 @@ function _getTagConfig(path) {
 }
 
 async function saveSettings(quiet = false) {
-    // ISOLATION: this saves MUSIC settings (and persists active_media_server from
-    // the shared server toggle). The video side reuses this page but must never
-    // write music config — it saves via /api/video/* only. So never run here while
-    // on the video side, no matter what triggered it (auto-save OR manual).
-    if (document.body.getAttribute('data-side') === 'video') return;
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
     if (validationErrors.length > 0) {
@@ -2887,6 +2886,14 @@ async function saveSettings(quiet = false) {
         activeServer = 'navidrome';
     } else if (document.getElementById('soulsync-toggle')?.classList.contains('active')) {
         activeServer = 'soulsync';
+    }
+    // ISOLATION: this page is reused on the video side. Connection details (Plex/
+    // Jellyfin creds) ARE shared and save fine — but the video side must NEVER
+    // change the MUSIC active server. So when saving from the video side, keep
+    // active_media_server exactly as it was persisted (the toggle there only opens
+    // a config panel; it does not pick the music server).
+    if (document.body.getAttribute('data-side') === 'video' && window._persistedActiveServer) {
+        activeServer = window._persistedActiveServer;
     }
 
     const metadataSourceSelect = document.getElementById('metadata-fallback-source');
