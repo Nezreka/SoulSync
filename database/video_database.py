@@ -337,34 +337,50 @@ class VideoDatabase:
             conn.close()
 
     def backfill_episodes(self, show_id: int, season_number: int, episodes: list,
-                          season_overview: str | None = None) -> int:
-        """Gap-only backfill of episode still/overview/rating (and the season's
-        overview) from enrichment — never clobbers what the server provided.
+                          season_overview: str | None = None, season_poster: str | None = None) -> int:
+        """UPSERT a season's episodes from the metadata provider so the show's
+        FULL episode list is represented — owned episodes (from the server) keep
+        has_file=1, and episodes the server doesn't have are inserted as MISSING
+        (has_file=0). Existing rows get gap-only metadata fills (never clobbered);
+        the season row is created if it didn't exist (a fully-missing season).
         Returns the number of episode rows touched."""
         conn = self._get_connection()
         touched = 0
         try:
+            conn.execute("INSERT OR IGNORE INTO seasons (show_id, season_number) VALUES (?, ?)",
+                         (show_id, season_number))
+            season_id = conn.execute("SELECT id FROM seasons WHERE show_id=? AND season_number=?",
+                                     (show_id, season_number)).fetchone()["id"]
+            if season_overview or season_poster:
+                conn.execute("UPDATE seasons SET overview=COALESCE(NULLIF(overview, ''), ?), "
+                             "poster_url=COALESCE(NULLIF(poster_url, ''), ?) WHERE id=?",
+                             (season_overview, season_poster, season_id))
             for e in (episodes or []):
                 en = e.get("episode_number")
                 if en is None:
                     continue
-                sets, params = [], []
-                for col in ("still_url", "overview", "rating"):
-                    val = e.get(col)
-                    if val is None:
-                        continue
-                    sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
-                    params.append(val)
-                if not sets:
-                    continue
-                params += [show_id, season_number, en]
-                cur = conn.execute(
-                    f"UPDATE episodes SET {', '.join(sets)} "
-                    "WHERE show_id=? AND season_number=? AND episode_number=?", params)
-                touched += cur.rowcount
-            if season_overview:
-                conn.execute("UPDATE seasons SET overview=COALESCE(NULLIF(overview, ''), ?) "
-                             "WHERE show_id=? AND season_number=?", (season_overview, show_id, season_number))
+                row = conn.execute(
+                    "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
+                    (show_id, season_number, en)).fetchone()
+                if row:
+                    sets, params = [], []
+                    for col in ("title", "still_url", "overview", "air_date", "rating", "runtime_minutes"):
+                        if e.get(col) is None:
+                            continue
+                        sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
+                        params.append(e[col])
+                    if sets:
+                        params += [row["id"]]
+                        conn.execute(f"UPDATE episodes SET {', '.join(sets)} WHERE id=?", params)
+                        touched += 1
+                else:
+                    conn.execute(
+                        "INSERT INTO episodes (show_id, season_id, season_number, episode_number, title, "
+                        "overview, air_date, runtime_minutes, still_url, rating, has_file) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                        (show_id, season_id, season_number, en, e.get("title"), e.get("overview"),
+                         e.get("air_date"), e.get("runtime_minutes"), e.get("still_url"), e.get("rating")))
+                    touched += 1
             conn.commit()
             return touched
         finally:
@@ -724,9 +740,12 @@ class VideoDatabase:
                     ).fetchone()["id"]
                     self._set_media_file(conn, "episode_id", ep_id, ep.get("file"))
 
-            # Prune episodes/seasons that vanished from the server for this show.
+            # Prune only SERVER-originated rows that vanished (server_id set) — the
+            # full episode/season list now includes enrichment-added MISSING items
+            # (server_id NULL), which the scan must never remove.
             for row in conn.execute(
-                "SELECT season_number, episode_number FROM episodes WHERE show_id=?", (show_id,)
+                "SELECT season_number, episode_number FROM episodes "
+                "WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if (row["season_number"], row["episode_number"]) not in seen_eps:
                     conn.execute(
@@ -734,7 +753,7 @@ class VideoDatabase:
                         (show_id, row["season_number"], row["episode_number"]),
                     )
             for row in conn.execute(
-                "SELECT season_number FROM seasons WHERE show_id=?", (show_id,)
+                "SELECT season_number FROM seasons WHERE show_id=? AND server_id IS NOT NULL", (show_id,)
             ).fetchall():
                 if row["season_number"] not in seen_seasons:
                     conn.execute("DELETE FROM seasons WHERE show_id=? AND season_number=?",

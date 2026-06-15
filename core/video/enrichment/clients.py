@@ -104,13 +104,16 @@ class TMDBClient:
                 if ert:
                     meta["runtime_minutes"] = ert[0]
                 meta["tvdb_id"] = _int(ext.get("tvdb_id"))
-                # Per-season posters — the reliable source of distinct season art
-                # (the media server usually lacks it). Backfilled into seasons.
+                # The FULL season list (poster may be None) — drives both the
+                # season-poster backfill and the episode cascade (so missing
+                # episodes/seasons get represented, not just what's on the server).
                 seasons = []
                 for s in (dr.get("seasons") or []):
-                    pp, sn = s.get("poster_path"), s.get("season_number")
-                    if pp and sn is not None:
-                        seasons.append({"season_number": sn, "poster_url": self.IMG + pp})
+                    sn = s.get("season_number")
+                    if sn is None:
+                        continue
+                    seasons.append({"season_number": sn,
+                                    "poster_url": (self.IMG + s["poster_path"]) if s.get("poster_path") else None})
                 if seasons:
                     meta["seasons"] = seasons
             self._add_credits(meta, dr.get("credits") or {}, dr.get("created_by") or [])
@@ -222,12 +225,15 @@ class TMDBClient:
             en = e.get("episode_number")
             if en is None:
                 continue
-            ep = {"episode_number": en, "overview": e.get("overview"),
+            ep = {"episode_number": en, "title": e.get("name"), "overview": e.get("overview"),
+                  "air_date": e.get("air_date") or None, "runtime_minutes": e.get("runtime"),
                   "rating": e.get("vote_average") or None}
             if e.get("still_path"):
                 ep["still_url"] = self.IMG + e["still_path"]
             out.append(ep)
-        return {"overview": data.get("overview"), "episodes": out}
+        return {"overview": data.get("overview"),
+                "poster_url": (self.IMG + data["poster_path"]) if data.get("poster_path") else None,
+                "episodes": out}
 
 
 class TVDBClient:

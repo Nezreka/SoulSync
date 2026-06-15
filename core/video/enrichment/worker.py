@@ -132,26 +132,31 @@ class VideoEnrichmentWorker:
             # from the same provider (one call per season), so episodes ride along
             # with their show instead of being a separate (huge) queue.
             if item["kind"] == "show" and hasattr(self.client, "season_episodes"):
-                self._cascade_episodes(item["id"], result["id"])
+                nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
+                self._cascade_episodes(item["id"], result["id"], nums)
         else:
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False)
             self.stats["not_found"] += 1
             logger.info("No %s match for %s '%s'", self.display_name, item["kind"], item["title"])
         return True
 
-    def _cascade_episodes(self, show_id, tv_id) -> None:
-        """Backfill a show's episodes from the provider (one call per season).
-        Best-effort: a season failure never aborts the show's enrichment."""
-        try:
-            seasons = self.db.show_season_numbers(show_id)
-        except Exception:
-            logger.exception("episode backfill: season list failed for show %s", show_id)
-            return
+    def _cascade_episodes(self, show_id, tv_id, season_numbers=None) -> None:
+        """Backfill a show's FULL episode list from the provider (one call per
+        season) — owned + missing. Best-effort: a season failure never aborts the
+        show's enrichment. Falls back to the known seasons if none are passed."""
+        seasons = season_numbers
+        if not seasons:
+            try:
+                seasons = self.db.show_season_numbers(show_id)
+            except Exception:
+                logger.exception("episode backfill: season list failed for show %s", show_id)
+                return
         for snum in seasons:
             try:
                 data = self.client.season_episodes(tv_id, snum)
                 if data and data.get("episodes"):
-                    self.db.backfill_episodes(show_id, snum, data["episodes"], data.get("overview"))
+                    self.db.backfill_episodes(show_id, snum, data["episodes"],
+                                              data.get("overview"), data.get("poster_url"))
             except Exception:
                 logger.exception("episode backfill failed: show %s season %s", show_id, snum)
 

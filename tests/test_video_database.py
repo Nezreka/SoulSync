@@ -206,9 +206,9 @@ def test_upsert_movie_inserts_updates_and_attaches_file(db):
 def test_upsert_show_tree_builds_seasons_episodes_and_prunes(db):
     item = {"server_id": "s1", "title": "Show", "seasons": [
         {"season_number": 1, "server_id": "se1", "episodes": [
-            {"episode_number": 1, "title": "E1", "air_date": "2020-01-01",
+            {"episode_number": 1, "title": "E1", "server_id": "ep1", "air_date": "2020-01-01",
              "file": {"relative_path": "e1.mkv", "size_bytes": 10}},
-            {"episode_number": 2, "title": "E2", "air_date": "2020-01-08"}]}]}
+            {"episode_number": 2, "title": "E2", "server_id": "ep2", "air_date": "2020-01-08"}]}]}
     sid = db.upsert_show_tree("plex", item)
     with db.connect() as c:
         assert c.execute("SELECT COUNT(*) FROM episodes WHERE show_id=?", (sid,)).fetchone()[0] == 2
@@ -608,6 +608,46 @@ def test_backfill_episodes_gap_only_and_season_overview(db):
     with db.connect() as c:
         assert c.execute("SELECT overview FROM seasons WHERE show_id=? AND season_number=1",
                          (sid,)).fetchone()["overview"] == "Season one"
+
+
+def test_backfill_inserts_missing_episodes_as_unowned(db):
+    # Server has only E1; the provider's season has E1-E3 → E2/E3 are inserted
+    # MISSING (has_file=0) so the page shows what we have AND what we need.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e1.mkv"}}]}]})
+    db.backfill_episodes(sid, 1, [
+        {"episode_number": 1, "title": "One"},
+        {"episode_number": 2, "title": "Two", "air_date": "2020-01-08"},
+        {"episode_number": 3, "title": "Three"}])
+    s1 = db.show_detail(sid)["seasons"][0]
+    assert (s1["episode_total"], s1["episode_owned"]) == (3, 1)     # full list, 1 owned
+    by = {e["episode_number"]: e for e in s1["episodes"]}
+    assert by[1]["owned"] is True and by[2]["owned"] is False and by[3]["owned"] is False
+    assert by[2]["title"] == "Two" and by[2]["air_date"] == "2020-01-08"
+
+
+def test_backfill_creates_fully_missing_season(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1}]}]})
+    db.backfill_episodes(sid, 2, [{"episode_number": 1, "title": "S2E1"}],
+                         season_poster="https://img/s2.jpg")          # season 2 not on the server
+    d = db.show_detail(sid)
+    s2 = [s for s in d["seasons"] if s["season_number"] == 2][0]
+    assert (s2["episode_total"], s2["episode_owned"]) == (1, 0) and s2["has_poster"] is True
+
+
+def test_missing_episodes_survive_a_rescan_prune(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e1.mkv"}}]}]})
+    db.backfill_episodes(sid, 1, [{"episode_number": 1}, {"episode_number": 2}, {"episode_number": 3}])
+    # Re-scan: the server still only reports E1; the prune must NOT remove the
+    # enrichment-added missing episodes (server_id NULL).
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e1.mkv"}}]}]})
+    with db.connect() as c:
+        nums = [r["episode_number"] for r in c.execute(
+            "SELECT episode_number FROM episodes WHERE show_id=? ORDER BY episode_number", (sid,)).fetchall()]
+    assert nums == [1, 2, 3]
 
 
 def test_breakdown_reports_episode_art_coverage_for_tmdb(db):
