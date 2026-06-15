@@ -30,12 +30,20 @@ class _FakeDB:
         return self._p
 
 
-def _patch_guard(monkeypatch, probe_aq, profile, downsample=False):
+def _patch_guard(monkeypatch, probe_aq, profile, downsample=False, quality_filter=True):
     monkeypatch.setattr(file_ops, 'probe_audio_quality', lambda fp: probe_aq)
     monkeypatch.setattr(guards, 'MusicDatabase', lambda: _FakeDB(profile))
+
+    def _cfg_get(k, d=None):
+        if 'downsample' in k:
+            return downsample
+        if k == 'import.quality_filter_enabled':
+            return quality_filter
+        return d
+
     monkeypatch.setattr(
         guards, '_get_config_manager',
-        lambda: types.SimpleNamespace(get=lambda k, d=None: downsample if 'downsample' in k else d),
+        lambda: types.SimpleNamespace(get=_cfg_get),
     )
 
 
@@ -65,6 +73,16 @@ def test_accepts_when_target_met(monkeypatch):
 
 def test_accepts_via_fallback(monkeypatch):
     _patch_guard(monkeypatch, AudioQuality('flac', sample_rate=44100, bit_depth=16), _WANT_FLAC24_FALLBACK)
+    assert guards.check_quality_target('/x/song.flac', {}) is None
+
+
+def test_master_toggle_off_skips_filter(monkeypatch):
+    # import.quality_filter_enabled = False → a below-target file is accepted
+    # (imported) regardless of quality, even with fallback off.
+    _patch_guard(
+        monkeypatch, AudioQuality('flac', sample_rate=44100, bit_depth=16),
+        _WANT_FLAC24, quality_filter=False,
+    )
     assert guards.check_quality_target('/x/song.flac', {}) is None
 
 

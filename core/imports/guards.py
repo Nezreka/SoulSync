@@ -127,6 +127,17 @@ def check_quality_target(file_path: str, context: dict) -> Optional[str]:
     from core.imports.file_ops import probe_audio_quality
     from core.quality.selection import targets_from_profile, quality_meets_profile
 
+    # Master toggle (Settings → Import). When OFF, the quality check is skipped
+    # entirely and files import regardless of quality — the user opted out of
+    # quality-filtering on import. Default ON preserves existing behaviour. The
+    # library Quality Upgrade scanner still flags below-profile files either way.
+    if _get_config_manager().get("import.quality_filter_enabled", True) is False:
+        logger.debug(
+            "[QualityGuard] import.quality_filter_enabled=False — skipping quality "
+            "filter for %s", os.path.basename(file_path),
+        )
+        return None
+
     aq = probe_audio_quality(file_path)
     if aq is None:
         logger.debug("[QualityGuard] Could not probe %s — skipping check", os.path.basename(file_path))
