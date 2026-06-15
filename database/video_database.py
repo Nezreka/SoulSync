@@ -297,6 +297,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def show_match_info(self, show_id: int) -> dict | None:
+        """Title/year/tmdb_id for one show — for on-demand (lazy) art refresh."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT title, year, tmdb_id FROM shows WHERE id=?",
+                               (show_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def show_season_numbers(self, show_id: int) -> list:
         conn = self._get_connection()
         try:

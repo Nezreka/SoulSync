@@ -65,6 +65,34 @@ class VideoEnrichmentEngine:
                         ", ".join(sorted(self._scan_paused)))
         self._scan_paused = set()
 
+    def refresh_show_art(self, show_id) -> dict:
+        """On-demand (lazy) backfill of a show's season posters + episode art from
+        TMDB, used when the detail page is opened and art is missing. Works
+        regardless of the show's match status (sidesteps 'already matched, never
+        re-runs'), and caches the result so it's a one-time cost per show."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return {"ok": False, "reason": "tmdb_not_configured"}
+        info = self.db.show_match_info(show_id)
+        if not info:
+            return {"ok": False, "reason": "not_found"}
+        try:
+            result = w.client.match("show", info.get("title"), info.get("year"),
+                                    known_id=info.get("tmdb_id"))
+        except Exception:
+            logger.exception("refresh_show_art: match failed for show %s", show_id)
+            return {"ok": False, "reason": "match_error"}
+        if not result or not result.get("id"):
+            return {"ok": False, "reason": "no_match"}
+        # Backfills season posters + show metadata gaps (never clobbers).
+        self.db.enrichment_apply("tmdb", "show", show_id, matched=True,
+                                 external_id=result["id"], metadata=result.get("metadata"))
+        try:
+            w._cascade_episodes(show_id, result["id"])     # episode stills too
+        except Exception:
+            logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
+        return {"ok": True}
+
     def worker(self, service):
         return self.workers.get(service)
 

@@ -43,3 +43,15 @@ def register_routes(bp):
         if not data:
             return jsonify({"error": "not found"}), 404
         return jsonify(data)
+
+    @bp.route("/detail/show/<int:show_id>/refresh-art", methods=["POST"])
+    def video_show_refresh_art(show_id):
+        """Lazy on-view backfill: pull missing season posters / episode art from
+        TMDB and cache them. Best-effort — never errors the page."""
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            res = get_video_enrichment_engine().refresh_show_art(show_id)
+        except Exception:
+            logger.exception("refresh-art failed for show %s", show_id)
+            res = {"ok": False, "reason": "error"}
+        return jsonify(res)

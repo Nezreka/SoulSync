@@ -30,6 +30,8 @@
     var seasonView = 'rail';
     var menuOpen = false;
     var missingOnly = false;
+    var currentId = null;
+    var artAttemptedFor = null;     // lazy art refresh runs once per show view
 
     try { var sv = localStorage.getItem(VIEW_KEY); if (sv) seasonView = sv; } catch (e) { /* ignore */ }
 
@@ -286,6 +288,8 @@
 
     function loadShow(id) {
         if (!root()) return;
+        if (currentId !== id) artAttemptedFor = null;
+        currentId = id;
         showLoading(true);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
@@ -302,8 +306,36 @@
                 renderViewToggle(); renderSeasonNav(); renderEpisodes();
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
+                maybeRefreshArt(id);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });
+    }
+
+    // Lazy art: if any season lacks a poster, pull it from TMDB on view and cache
+    // it (once per show), then re-render. Sidesteps "already matched, never re-runs".
+    function maybeRefreshArt(id) {
+        if (artAttemptedFor === id || !data || data.id !== id) return;
+        if (!(data.seasons || []).some(function (s) { return !s.has_poster; })) return;
+        artAttemptedFor = id;
+        fetch(DETAIL_URL + 'show/' + id + '/refresh-art',
+            { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) { if (res && res.ok && currentId === id) reloadDetail(id); })
+            .catch(function () { /* best-effort */ });
+    }
+
+    function reloadDetail(id) {
+        fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d || d.error || currentId !== id) return;
+                data = d;
+                if (!seasonByNum(selectedSeason)) {
+                    selectedSeason = d.seasons && d.seasons.length ? d.seasons[0].season_number : null;
+                }
+                renderBillboard(d); renderSeasonNav(); renderEpisodes();
+            })
+            .catch(function () { /* ignore */ });
     }
 
     // ── events ────────────────────────────────────────────────────────────────
