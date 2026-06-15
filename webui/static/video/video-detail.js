@@ -17,6 +17,12 @@
     var DETAIL_URL = '/api/video/detail/';
     var TMDB_LOGO = 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg';
     var TVDB_LOGO = 'https://www.svgrepo.com/show/443500/brand-tvdb.svg';
+    // Real media-server logos for the "Play on your server" watch tile (same
+    // sources as the header server toggle).
+    var SERVER_LOGOS = {
+        Plex: 'https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg',
+        Jellyfin: 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png',
+    };
     var VIEW_KEY = 'soulsync_vd_season_view';
     var VIEWS = [
         { id: 'rail', label: 'Rail', ic: '▦' },
@@ -319,10 +325,14 @@
             // with a "Play on Plex/Jellyfin" tile that deep-links to the item.
             if (ex.server && ex.server.url) {
                 var sv = esc(ex.server.server || 'Server');
+                var slogo = SERVER_LOGOS[ex.server.server];
+                var sicon = slogo
+                    ? '<span class="vd-prov-ph vd-prov-server-logo"><img src="' + esc(slogo) + '" alt="' + sv +
+                      '" onerror="this.parentNode.textContent=\'▶\'"></span>'
+                    : '<span class="vd-prov-ph vd-prov-play">▶</span>';
                 html += '<a class="vd-prov vd-prov--server" href="' + esc(ex.server.url) +
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
-                    '<span class="vd-prov-ph vd-prov-play">▶</span>' +
-                    '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
+                    sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
             // Streaming providers (JustWatch via TMDB) link to the where-to-watch page.
             var link = ex.providers_link || '';

@@ -764,6 +764,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     background: linear-gradient(135deg, #22c55e, #15803d); color: #fff; font-size: 22px;
     box-shadow: 0 6px 18px rgba(34, 197, 94, 0.45); border-color: rgba(255, 255, 255, 0.2);
 }
+/* The actual Plex/Jellyfin logo on a dark tile with a green "you own it" glow. */
+.vd-prov--server .vd-prov-server-logo {
+    background: rgba(10, 12, 16, 0.9); padding: 11px;
+    box-shadow: 0 6px 18px rgba(34, 197, 94, 0.42); border-color: rgba(34, 197, 94, 0.55);
+}
+.vd-prov-server-logo img {
+    width: 100%; height: 100%; object-fit: contain;
+    border: 0; border-radius: 0; box-shadow: none;
+}
 .vd-prov--server .vd-prov-name { color: #6ee7a0; font-weight: 700; }
 
 .vd-similar { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x proximity; }
