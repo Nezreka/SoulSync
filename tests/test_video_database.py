@@ -265,6 +265,7 @@ def test_show_detail_builds_season_episode_tree_with_rollups(db):
     assert d["seasons"][0]["title"] == "Specials"
     s1 = d["seasons"][1]
     assert s1["title"] == "Season One"
+    assert isinstance(s1["id"], int)              # season id present for the poster proxy
     assert (s1["episode_total"], s1["episode_owned"]) == (2, 1)
     assert s1["episodes"][0]["owned"] is True and s1["episodes"][1]["owned"] is False
 
