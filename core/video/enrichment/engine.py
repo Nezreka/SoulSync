@@ -19,15 +19,42 @@ _DISPLAY = {"tmdb": "TMDB", "tvdb": "TVDB"}
 
 
 class VideoEnrichmentEngine:
-    def __init__(self, db, clients: dict):
+    def __init__(self, db, clients: dict, ratings_client=None):
         self.db = db
         self.workers = {
             service: VideoEnrichmentWorker(db, service, client, display_name=_DISPLAY.get(service))
             for service, client in clients.items()
         }
+        # OMDb ratings (IMDb/RT/Metacritic) — not a matcher, so not a worker;
+        # backfilled on the lazy detail refresh.
+        self.ratings_client = ratings_client
         # Restore each worker's persisted pause state (survives restart).
         for w in self.workers.values():
             w.restore_paused()
+
+    def _backfill_ratings(self, kind, item_id):
+        rc = self.ratings_client
+        if not rc or not getattr(rc, "enabled", False):
+            return
+        info = (self.db.movie_match_info(item_id) if kind == "movie"
+                else self.db.show_match_info(item_id))
+        # IMDb id lives on the row — fetch it directly.
+        row = None
+        try:
+            with self.db.connect() as c:
+                tbl = "movies" if kind == "movie" else "shows"
+                row = c.execute(f"SELECT imdb_id FROM {tbl} WHERE id=?", (item_id,)).fetchone()
+        except Exception:
+            return
+        imdb_id = row["imdb_id"] if row else None
+        if not imdb_id:
+            return
+        try:
+            ratings = rc.ratings(imdb_id)
+            if ratings:
+                self.db.apply_ratings(kind, item_id, ratings)
+        except Exception:
+            logger.exception("ratings backfill failed for %s %s", kind, item_id)
 
     def start_all(self):
         for w in self.workers.values():
@@ -92,6 +119,7 @@ class VideoEnrichmentEngine:
             w._cascade_episodes(show_id, result["id"], nums)    # full list: owned + missing
         except Exception:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
+        self._backfill_ratings("show", show_id)
         return {"ok": True}
 
     def refresh_movie_art(self, movie_id) -> dict:
@@ -114,6 +142,7 @@ class VideoEnrichmentEngine:
             return {"ok": False, "reason": "no_match"}
         self.db.enrichment_apply("tmdb", "movie", movie_id, matched=True,
                                  external_id=result["id"], metadata=result.get("metadata"))
+        self._backfill_ratings("movie", movie_id)
         return {"ok": True}
 
     def item_extras(self, kind, item_id) -> dict:
@@ -150,9 +179,10 @@ def get_video_enrichment_engine():
         with _lock:
             if _engine is None:
                 from database.video_database import VideoDatabase
-                from .clients import build_clients
+                from .clients import build_clients, OMDBClient
                 db = VideoDatabase()
-                eng = VideoEnrichmentEngine(db, build_clients(db))
+                eng = VideoEnrichmentEngine(db, build_clients(db),
+                                            ratings_client=OMDBClient(db.get_setting("omdb_api_key")))
                 eng.start_all()
                 _engine = eng
     return _engine

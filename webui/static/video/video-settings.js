@@ -71,8 +71,10 @@
                 if (!d) return;
                 var t = document.getElementById('tmdb-api-key');
                 var v = document.getElementById('tvdb-api-key');
+                var o = document.getElementById('omdb-api-key');
                 if (t && d.tmdb_api_key != null) t.value = d.tmdb_api_key;
                 if (v && d.tvdb_api_key != null) v.value = d.tvdb_api_key;
+                if (o && d.omdb_api_key != null) o.value = d.omdb_api_key;
             })
             .catch(function () { /* ignore */ });
     }
@@ -80,10 +82,14 @@
     function saveKeys() {
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
+        var o = document.getElementById('omdb-api-key');
         return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '' })
+            body: JSON.stringify({
+                tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '',
+                omdb_api_key: o ? o.value : '',
+            })
         }).catch(function () { /* ignore */ });
     }
 
@@ -119,7 +125,7 @@
             selects[i].addEventListener('change', save);
         }
         // Enrichment keys save on blur/change (turns the workers on).
-        ['tmdb-api-key', 'tvdb-api-key'].forEach(function (id) {
+        ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', saveKeys);
         });

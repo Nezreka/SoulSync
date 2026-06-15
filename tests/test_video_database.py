@@ -626,6 +626,17 @@ def test_backfill_inserts_missing_episodes_as_unowned(db):
     assert by[2]["title"] == "Two" and by[2]["air_date"] == "2020-01-08"
 
 
+def test_apply_ratings_and_payload(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune"})
+    db.apply_ratings("movie", mid, {"imdb_rating": 8.4, "rt_rating": 95, "metacritic": 74})
+    d = db.movie_detail(mid)
+    assert (d["imdb_rating"], d["rt_rating"], d["metacritic"]) == (8.4, 95, 74)
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    db.apply_ratings("show", sid, {"imdb_rating": 9.1})       # partial is fine
+    sd = db.show_detail(sid)
+    assert sd["imdb_rating"] == 9.1 and sd["rt_rating"] is None
+
+
 def test_episodes_synced_flag_drives_lazy_refresh(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
     assert db.show_detail(sid)["episodes_synced"] is False    # → lazy refresh will run

@@ -779,3 +779,19 @@ body[data-side="video"] .dashboard-header-sweep {
     font-size: 22px; line-height: 1; cursor: pointer; transition: background 0.2s ease;
 }
 .vd-trailer-close:hover { background: rgba(255, 255, 255, 0.25); }
+
+/* ── Rating badges (IMDb / Rotten Tomatoes / Metacritic, via OMDb) ────────── */
+.vd-ratings { display: flex; flex-wrap: wrap; gap: 10px; margin: -4px 0 16px; }
+.vd-rt {
+    display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 8px;
+    font-size: 14px; font-weight: 800; color: #fff; background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(6px);
+}
+.vd-rt-tag { font-size: 11px; font-weight: 900; padding: 1px 5px; border-radius: 4px; letter-spacing: 0.02em; }
+.vd-rt-ic { font-size: 15px; line-height: 1; }
+.vd-rt--imdb .vd-rt-tag { background: #f5c518; color: #000; }
+.vd-rt--rt { }
+.vd-rt--mc .vd-rt-tag { background: #fff; color: #000; }
+.vd-rt--mc-good .vd-rt-tag { background: #6c3; color: #000; }
+.vd-rt--mc-mid .vd-rt-tag { background: #fc3; color: #000; }
+.vd-rt--mc-bad .vd-rt-tag { background: #f00; color: #fff; }

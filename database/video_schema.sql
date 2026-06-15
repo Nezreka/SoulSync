@@ -78,8 +78,11 @@ CREATE TABLE IF NOT EXISTS movies (
     studio               TEXT,
     content_rating       TEXT,            -- e.g. PG-13
     tagline              TEXT,
-    rating               REAL,            -- audience score (0-10)
+    rating               REAL,            -- TMDB audience score (0-10)
     rating_critic        REAL,            -- critic score (0-100) when offered
+    imdb_rating          REAL,            -- IMDb (0-10, via OMDb)
+    rt_rating            INTEGER,         -- Rotten Tomatoes (0-100)
+    metacritic           INTEGER,         -- Metacritic (0-100)
     poster_url           TEXT,
     backdrop_url         TEXT,
     logo_url             TEXT,            -- transparent title logo (clearlogo)
@@ -119,7 +122,10 @@ CREATE TABLE IF NOT EXISTS shows (
     runtime_minutes    INTEGER,
     content_rating     TEXT,
     tagline            TEXT,
-    rating             REAL,             -- audience score (0-10)
+    rating             REAL,             -- TMDB audience score (0-10)
+    imdb_rating        REAL,             -- IMDb (0-10, via OMDb)
+    rt_rating          INTEGER,          -- Rotten Tomatoes (0-100)
+    metacritic         INTEGER,          -- Metacritic (0-100)
     first_air_date     TEXT,
     last_air_date      TEXT,
     poster_url         TEXT,

@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -91,6 +91,10 @@ _COLUMN_MIGRATIONS = [
     ("movies", "logo_url", "TEXT"),
     ("shows", "logo_url", "TEXT"),
     ("shows", "episodes_synced", "INTEGER NOT NULL DEFAULT 0"),
+    ("movies", "imdb_rating", "REAL"), ("movies", "rt_rating", "INTEGER"),
+    ("movies", "metacritic", "INTEGER"),
+    ("shows", "imdb_rating", "REAL"), ("shows", "rt_rating", "INTEGER"),
+    ("shows", "metacritic", "INTEGER"),
 ]
 
 
@@ -325,6 +329,26 @@ class VideoDatabase:
             row = conn.execute("SELECT title, year, tmdb_id FROM movies WHERE id=?",
                                (movie_id,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
+        """Store IMDb / RT / Metacritic scores (from OMDb). Ratings are dynamic, so
+        these overwrite (unlike the gap-only metadata backfill)."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        cols = {"imdb_rating", "rt_rating", "metacritic"}
+        sets, params = [], []
+        for c, v in (ratings or {}).items():
+            if c in cols and v is not None:
+                sets.append(f"{c}=?")
+                params.append(v)
+        if not table or not sets:
+            return
+        params.append(item_id)
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
         finally:
             conn.close()
 
@@ -986,6 +1010,8 @@ class VideoDatabase:
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
             "first_air_date": show["first_air_date"], "last_air_date": show["last_air_date"],
+            "imdb_rating": show["imdb_rating"], "rt_rating": show["rt_rating"],
+            "metacritic": show["metacritic"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
@@ -1034,6 +1060,7 @@ class VideoDatabase:
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],
             "rating": m["rating"], "rating_critic": m["rating_critic"], "genres": genres,
+            "imdb_rating": m["imdb_rating"], "rt_rating": m["rt_rating"], "metacritic": m["metacritic"],
             "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),

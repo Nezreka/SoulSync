@@ -16,7 +16,7 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.worker import VideoEnrichmentWorker
 from core.video.enrichment.engine import VideoEnrichmentEngine
-from core.video.enrichment.clients import TMDBClient, TVDBClient
+from core.video.enrichment.clients import TMDBClient, TVDBClient, OMDBClient
 
 
 class FakeClient:
@@ -165,6 +165,39 @@ def test_show_match_info(db):
                                        "tmdb_id": 1396, "seasons": []})
     assert db.show_match_info(sid) == {"title": "S", "year": 2019, "tmdb_id": 1396}
     assert db.show_match_info(999999) is None
+
+
+def test_omdb_ratings_parse(monkeypatch):
+    class _Resp:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {"Response": "True", "imdbRating": "8.4", "Metascore": "74",
+                    "Ratings": [{"Source": "Rotten Tomatoes", "Value": "95%"},
+                                {"Source": "Internet Movie Database", "Value": "8.4/10"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp()))
+    r = OMDBClient("KEY").ratings("tt1375666")
+    assert r == {"imdb_rating": 8.4, "rt_rating": 95, "metacritic": 74}
+
+
+def test_refresh_show_art_backfills_omdb_ratings(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396,
+                                       "imdb_id": "tt0903747", "seasons": []})
+
+    class Tmdb:
+        enabled = True
+        def match(self, *a, **k): return {"id": 1396, "metadata": {}}
+        def season_episodes(self, *a, **k): return None
+    class Omdb:
+        enabled = True
+        def ratings(self, imdb_id):
+            assert imdb_id == "tt0903747"
+            return {"imdb_rating": 9.5, "rt_rating": 96, "metacritic": 90}
+
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()}, ratings_client=Omdb())
+    assert eng.refresh_show_art(sid)["ok"] is True
+    d = db.show_detail(sid)
+    assert (d["imdb_rating"], d["rt_rating"], d["metacritic"]) == (9.5, 96, 90)
 
 
 def test_refresh_movie_art_backfills_cast_and_genres(db):

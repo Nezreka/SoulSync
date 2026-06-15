@@ -213,11 +213,12 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
     client = app.test_client()
     try:
         assert client.get("/api/video/enrichment/config").get_json() == {
-            "tmdb_api_key": "", "tvdb_api_key": ""}
-        client.post("/api/video/enrichment/config", json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz"})
+            "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": ""}
+        client.post("/api/video/enrichment/config",
+                    json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om"})
         assert client.get("/api/video/enrichment/config").get_json() == {
-            "tmdb_api_key": "abc", "tvdb_api_key": "xyz"}
-        assert db.get_setting("tmdb_api_key") == "abc"
+            "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om"}
+        assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
     finally:
         videoapi._video_db = None
 
