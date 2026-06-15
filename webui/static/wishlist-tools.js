@@ -2819,46 +2819,33 @@ async function handleQualityScanButtonClick() {
     const button = document.getElementById('quality-scan-button');
     const currentAction = button.textContent;
 
-    if (currentAction === 'Scan Library') {
-        const scopeSelect = document.getElementById('quality-scan-scope');
-        const scope = scopeSelect.value;
+    // The quality check now runs as a proper Library Maintenance job: it probes
+    // each library file's REAL audio quality (same pipeline as the download
+    // gate) and reports below-profile tracks as FINDINGS you can re-download /
+    // delete / ignore — instead of silently adding to the wishlist. Triggering
+    // here just kicks off a "Run Now" of that job; results land under
+    // Library Maintenance → Findings.
+    try {
+        button.disabled = true;
+        button.textContent = 'Starting...';
+        const response = await fetch('/api/repair/jobs/quality_upgrade_scanner/run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
 
-        try {
-            button.disabled = true;
-            button.textContent = 'Starting...';
-            const response = await fetch('/api/quality-scanner/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ scope: scope })
-            });
-
-            if (response.ok) {
-                showToast('Quality scan started!', 'success');
-                // Start polling immediately to get live status
-                checkAndUpdateQualityScanProgress();
-            } else {
-                const errorData = await response.json();
-                showToast(`Error: ${errorData.error}`, 'error');
-                button.disabled = false;
-                button.textContent = 'Scan Library';
-            }
-        } catch (error) {
-            showToast('Failed to start quality scan.', 'error');
-            button.disabled = false;
-            button.textContent = 'Scan Library';
+        if (response.ok) {
+            showToast('Quality scan started — below-quality tracks will appear under Library Maintenance → Findings.', 'success');
+        } else {
+            let msg = 'Error starting quality scan';
+            try { msg = (await response.json()).error || msg; } catch {}
+            showToast(msg, 'error');
         }
-
-    } else { // "Stop Scan"
-        try {
-            const response = await fetch('/api/quality-scanner/stop', { method: 'POST' });
-            if (response.ok) {
-                showToast('Stop request sent.', 'info');
-            } else {
-                showToast('Failed to send stop request.', 'error');
-            }
-        } catch (error) {
-            showToast('Error sending stop request.', 'error');
-        }
+    } catch (error) {
+        showToast('Failed to start quality scan.', 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = 'Scan Library';
     }
 }
 
