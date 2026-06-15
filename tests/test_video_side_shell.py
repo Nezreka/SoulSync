@@ -413,6 +413,9 @@ def test_person_subpage_and_module_isolated():
     # Cinematic hero bits: ambient backdrop, rotating accent ring, role tagline.
     assert "data-vp-ambient" in _INDEX and "vp-photo-ring" in _INDEX
     assert "data-vp-role" in _INDEX
+    # Filmography controls: sort + department filter (multi-hyphenate), age.
+    assert "data-vp-sort" in _INDEX and "data-vp-dept" in _INDEX
+    assert "renderDept" in src and "computeAge" in src
 
 
 def test_detail_keeps_preview_items_in_app():
