@@ -299,12 +299,19 @@
         document.addEventListener('soulsync:video-open-detail', function (e) {
             var d = e && e.detail; if (!d) return;
             // Capture the origin BEFORE navigating away from the current page.
-            var origin = d._restore ? null : currentOrigin();
+            var origin = (d._restore || d._replace) ? null : currentOrigin();
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
             else return;
-            if (!d._restore) {
+            if (d._replace) {
+                // A redirect (e.g. a tmdb link that's actually owned) → replace the
+                // entry being redirected FROM, keeping its layer + origin, so Back
+                // doesn't bounce back onto the redirecting URL.
+                var rstate = { videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library',
+                                              layer: _backStack.length } };
+                try { history.replaceState(rstate, '', buildDetailPath(d.source, d.kind, d.id)); } catch (e2) { /* ignore */ }
+            } else if (!d._restore) {
                 _backStack.push(origin);
                 var state = { videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library',
                                              layer: _backStack.length } };

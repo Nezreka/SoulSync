@@ -917,9 +917,11 @@
     }
 
     // An owned title reached via a tmdb URL → bounce to the real library detail.
+    // _replace so it REPLACES the tmdb history entry (which would redirect again on
+    // Back) instead of pushing a new layer — otherwise Back loops on the redirect.
     function reopen(rd) {
         document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
-            { detail: { kind: rd.kind, id: rd.id, source: rd.source || 'library' } }));
+            { detail: { kind: rd.kind, id: rd.id, source: rd.source || 'library', _replace: true } }));
     }
 
     // Lazy: backfill a movie's cast/genres/art from TMDB on view if missing.
