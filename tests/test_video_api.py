@@ -268,14 +268,17 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
     client = app.test_client()
     try:
         assert client.get("/api/video/enrichment/config").get_json() == {
-            "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": "", "billboard_autoplay": True}
+            "tmdb_api_key": "", "tvdb_api_key": "", "omdb_api_key": "",
+            "billboard_autoplay": True, "watch_region": "US"}
         client.post("/api/video/enrichment/config",
                     json={"tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
-                          "billboard_autoplay": False})
+                          "billboard_autoplay": False, "watch_region": "gb"})
         assert client.get("/api/video/enrichment/config").get_json() == {
-            "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om", "billboard_autoplay": False}
+            "tmdb_api_key": "abc", "tvdb_api_key": "xyz", "omdb_api_key": "om",
+            "billboard_autoplay": False, "watch_region": "GB"}
         assert db.get_setting("tmdb_api_key") == "abc" and db.get_setting("omdb_api_key") == "om"
-        assert client.get("/api/video/prefs").get_json() == {"billboard_autoplay": False}
+        assert client.get("/api/video/prefs").get_json() == {
+            "billboard_autoplay": False, "watch_region": "GB"}
     finally:
         videoapi._video_db = None
 

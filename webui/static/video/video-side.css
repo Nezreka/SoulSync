@@ -1458,3 +1458,10 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
     .vd-ep-extra { flex-direction: column; padding-left: 14px; }
     .vd-ep-extra-still { width: 100%; }
 }
+
+.vid-pref-row--select { justify-content: space-between; cursor: default; }
+.vid-pref-row--select select {
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--text-primary, #fff); border-radius: 8px; padding: 7px 10px; font-size: 13px; cursor: pointer;
+}
+.vid-pref-row--select select option { background: #16161c; color: #fff; }

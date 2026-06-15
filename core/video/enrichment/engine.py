@@ -38,6 +38,12 @@ class VideoEnrichmentEngine:
         for w in self.workers.values():
             w.restore_paused()
 
+    def _region(self):
+        try:
+            return (self.db.get_setting("watch_region") or "US").upper()
+        except Exception:
+            return "US"
+
     def _cache_get(self, key):
         return self._cache.get(key)
 
@@ -171,11 +177,12 @@ class VideoEnrichmentEngine:
             info = (self.db.movie_match_info(item_id) if kind == "movie"
                     else self.db.show_match_info(item_id))
             if info and info.get("tmdb_id"):
-                key = ("extras", kind, info["tmdb_id"])
+                region = self._region()
+                key = ("extras", kind, info["tmdb_id"], region)
                 cached = self._cache_get(key)
                 if cached is None:
                     try:
-                        cached = w.client.extras(kind, info["tmdb_id"]) or {}
+                        cached = w.client.extras(kind, info["tmdb_id"], region=region) or {}
                         self._cache_put(key, cached)
                     except Exception:
                         logger.exception("item_extras failed for %s %s", kind, item_id)
@@ -304,11 +311,12 @@ class VideoEnrichmentEngine:
         lib_id = self.db.library_id_for_tmdb(kind, tmdb_id)
         if lib_id:
             return {"redirect": {"source": "library", "kind": kind, "id": lib_id}}
-        cached = self._cache_get(("detail", kind, tmdb_id))
+        region = self._region()
+        cached = self._cache_get(("detail", kind, tmdb_id, region))
         if cached is not None:
             return dict(cached)
         try:
-            d = w.client.full_detail(kind, tmdb_id)
+            d = w.client.full_detail(kind, tmdb_id, region=region)
         except Exception:
             logger.exception("tmdb_detail failed for %s %s", kind, tmdb_id)
             return None
@@ -336,7 +344,7 @@ class VideoEnrichmentEngine:
             d["episode_total"] = sum(s["episode_total"] for s in seasons)
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
-        self._cache_put(("detail", kind, tmdb_id), d)
+        self._cache_put(("detail", kind, tmdb_id, region), d)
         return d
 
     def _fill_tmdb_ratings(self, d) -> None:

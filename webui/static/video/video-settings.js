@@ -77,15 +77,21 @@
                 if (o && d.omdb_api_key != null) o.value = d.omdb_api_key;
                 var ap = document.getElementById('video-billboard-autoplay');
                 if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
+                var wr = document.getElementById('video-watch-region');
+                if (wr && d.watch_region) wr.value = d.watch_region;
             })
             .catch(function () { /* ignore */ });
     }
 
-    function saveAutoplay() {
+    function savePrefs() {
         var ap = document.getElementById('video-billboard-autoplay');
+        var wr = document.getElementById('video-watch-region');
         fetch(CONFIG_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ billboard_autoplay: ap ? ap.checked : true })
+            body: JSON.stringify({
+                billboard_autoplay: ap ? ap.checked : true,
+                watch_region: wr ? wr.value : 'US',
+            })
         }).catch(function () { /* ignore */ });
     }
 
@@ -140,7 +146,9 @@
             if (el) el.addEventListener('change', saveKeys);
         });
         var autoplay = document.getElementById('video-billboard-autoplay');
-        if (autoplay) autoplay.addEventListener('change', saveAutoplay);
+        if (autoplay) autoplay.addEventListener('change', savePrefs);
+        var region = document.getElementById('video-watch-region');
+        if (region) region.addEventListener('change', savePrefs);
         // Per-connection Test buttons (same behaviour as music's testConnection).
         var testBtns = document.querySelectorAll('[data-video-test-service]');
         for (var k = 0; k < testBtns.length; k++) {

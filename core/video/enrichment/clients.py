@@ -466,7 +466,7 @@ class TMDBClient:
                             "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
         return out[:20]
 
-    def full_detail(self, kind, tmdb_id):
+    def full_detail(self, kind, tmdb_id, region="US"):
         """Complete detail for a TMDB title NOT in the library — shaped like the
         library detail payload but with direct image URLs (so the same detail UI
         renders it). Seasons carry counts; episodes load lazily per season."""
@@ -503,7 +503,7 @@ class TMDBClient:
                      for p in cmeta.get("cast") or []],
             "crew": [{"name": p["name"], "job": p.get("job"), "tmdb_id": p.get("tmdb_id")}
                      for p in cmeta.get("crew") or []],
-            "_extras": self._parse_extras(kind, dr),
+            "_extras": self._parse_extras(kind, dr, region),
         }
         self._fill_collection(out["_extras"])
         if kind == "movie":

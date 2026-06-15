@@ -217,7 +217,7 @@ def test_engine_tmdb_detail_redirects_when_owned(db):
 
     class Tmdb:
         enabled = True
-        def full_detail(self, kind, tid): raise AssertionError("must not fetch an owned title")
+        def full_detail(self, kind, tid, region="US"): raise AssertionError("must not fetch an owned title")
     eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
     assert eng.tmdb_detail("movie", 77) == {"redirect": {"source": "library", "kind": "movie", "id": mid}}
 
@@ -225,7 +225,7 @@ def test_engine_tmdb_detail_redirects_when_owned(db):
 def test_engine_tmdb_detail_assembles_show(db):
     class Tmdb:
         enabled = True
-        def full_detail(self, kind, tid):
+        def full_detail(self, kind, tid, region="US"):
             return {"kind": "show", "tmdb_id": tid, "title": "Loki", "imdb_id": None,
                     "poster_url": "http://p", "backdrop_url": None, "cast": [], "crew": [],
                     "_extras": {"similar": [{"title": "X", "tmdb_id": 5, "kind": "show"}]},
@@ -643,7 +643,7 @@ def test_item_extras_caches_tmdb_call(db, monkeypatch):
     calls = []
     class Tmdb:
         enabled = True
-        def extras(self, kind, tid): calls.append(tid); return {"keywords": ["x"]}
+        def extras(self, kind, tid, region="US"): calls.append(tid); return {"keywords": ["x"]}
     eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
     a = eng.item_extras("movie", mid)
     b = eng.item_extras("movie", mid)
