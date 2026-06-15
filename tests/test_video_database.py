@@ -312,10 +312,13 @@ def test_movie_detail_includes_owned_and_file(db):
     d = db.movie_detail(mid)
     assert d["title"] == "Dune" and d["owned"] is True and d["tmdb_id"] == 438631
     assert d["file"] and d["file"]["resolution"] == "2160p"
+    # Full media specs surface for the owned-media block.
+    assert "video_codec" in d["file"] and "release_source" in d["file"]
+    assert d["files"] == [d["file"]]                  # all versions (one here)
     # A wishlist movie with no file reports owned False, file None.
     mid2 = db.upsert_movie("plex", {"server_id": "m2", "title": "Wanted"})
     d2 = db.movie_detail(mid2)
-    assert d2["owned"] is False and d2["file"] is None
+    assert d2["owned"] is False and d2["file"] is None and d2["files"] == []
 
 
 def test_get_art_ref_poster_vs_backdrop(db):
