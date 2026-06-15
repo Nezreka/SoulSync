@@ -501,6 +501,12 @@
             }
             ps.hidden = !html;
             ph.innerHTML = html;
+            if (!ps.hidden) {
+                loadPrefs(function (p) {
+                    var h = ps.querySelector('.vd-section-h');
+                    if (h) h.textContent = 'Where to Watch' + (p && p.watch_region ? ' · ' + p.watch_region : '');
+                });
+            }
         }
         // Franchise / collection (movies) — the other films in the set.
         var cs = q('[data-vd-collection-section]'), ch = q('[data-vd-collection]'), ct = q('[data-vd-collection-title]');
