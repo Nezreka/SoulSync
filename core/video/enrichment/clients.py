@@ -83,10 +83,24 @@ class TMDBClient:
                 meta["backdrop_url"] = self.IMG + dr["backdrop_path"]
             ext = dr.get("external_ids") or {}
             meta["imdb_id"] = ext.get("imdb_id") or dr.get("imdb_id")
+            # Everything TMDB offers (same call) — the worker backfills only the
+            # gaps the server left.
+            meta["tagline"] = dr.get("tagline")
+            meta["status"] = dr.get("status")
+            if dr.get("vote_average"):
+                meta["rating"] = dr.get("vote_average")
+            gs = [g.get("name") for g in (dr.get("genres") or []) if g.get("name")]
+            if gs:
+                meta["genres"] = gs
             if kind == "movie":
                 meta["release_date"] = dr.get("release_date")
+                meta["runtime_minutes"] = dr.get("runtime")
             else:
-                meta["status"] = dr.get("status")
+                meta["first_air_date"] = dr.get("first_air_date")
+                meta["last_air_date"] = dr.get("last_air_date")
+                ert = dr.get("episode_run_time") or []
+                if ert:
+                    meta["runtime_minutes"] = ert[0]
                 meta["tvdb_id"] = _int(ext.get("tvdb_id"))
         except Exception:
             logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
@@ -157,10 +171,15 @@ class TVDBClient:
             tvdb_id = _int(top.get("tvdb_id") or top.get("id"))
             meta["overview"] = top.get("overview")
         else:
-            # Known id from the server → fetch the series directly for its overview.
+            # Known id from the server → fetch the extended record (overview +
+            # genres + everything TVDB offers).
             try:
-                dr = self._authed_get("/series/" + str(tvdb_id))
-                meta["overview"] = ((dr or {}).get("data") or {}).get("overview")
+                dr = self._authed_get("/series/" + str(tvdb_id) + "/extended")
+                sd = (dr or {}).get("data") or {}
+                meta["overview"] = sd.get("overview")
+                gs = [g.get("name") for g in (sd.get("genres") or []) if g.get("name")]
+                if gs:
+                    meta["genres"] = gs
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

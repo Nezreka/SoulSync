@@ -63,8 +63,10 @@ _ENRICH = {
 # arbitrary keys; backfill semantics applied by the caller).
 _ENRICH_META_COLS = {
     "movies": {"overview", "backdrop_url", "release_date", "status", "content_rating",
-               "runtime_minutes", "studio", "imdb_id", "tmdb_id"},
+               "runtime_minutes", "studio", "tagline", "rating", "rating_critic",
+               "imdb_id", "tmdb_id"},
     "shows": {"overview", "backdrop_url", "status", "network", "content_rating",
+              "tagline", "rating", "first_air_date", "last_air_date",
               "imdb_id", "tmdb_id", "tvdb_id"},
 }
 
@@ -222,7 +224,9 @@ class VideoDatabase:
                     continue
                 if not include_ids and col in id_cols:
                     continue
-                sets.append(f"{col}=?")
+                # BACKFILL: only fill a column the server left empty — enrichment
+                # fills gaps, it never clobbers data the media server provided.
+                sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
                 params.append(val)
             params.append(item_id)
             return f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params
@@ -232,12 +236,21 @@ class VideoDatabase:
             sql, params = build(True)
             try:
                 conn.execute(sql, params)
-                conn.commit()
             except sqlite3.IntegrityError:
                 conn.rollback()
                 sql, params = build(False)   # keep existing id, just record status/metadata
                 conn.execute(sql, params)
-                conn.commit()
+            # Genres backfill — only when the item has none yet (enrichment fills
+            # the gap the server didn't). Written to the normalised link tables.
+            genres = (metadata or {}).get("genres")
+            link = {"movies": ("movie_genres", "movie_id"),
+                    "shows": ("show_genres", "show_id")}.get(tbl)
+            if matched and genres and link:
+                lt, oc = link
+                has = conn.execute(f"SELECT 1 FROM {lt} WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
+                if not has:
+                    self._set_genres(conn, lt, oc, item_id, genres)
+            conn.commit()
         finally:
             conn.close()
 
