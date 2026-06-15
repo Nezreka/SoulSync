@@ -771,6 +771,13 @@
             .then(function (d) {
                 showEpSyncing(false);
                 if (!d || d.error || currentId !== id) return;
+                // Carry over the live extras (server / trailer / next-episode) the
+                // show_detail payload doesn't include, so the Play & Trailer buttons
+                // (and the next-ep banner) don't vanish on reload.
+                var prev = data || {};
+                d.server = prev.server || null;
+                d.trailer = prev.trailer || null;
+                d.next_episode = prev.next_episode || null;
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
                     selectedSeason = d.seasons && d.seasons.length ? d.seasons[0].season_number : null;

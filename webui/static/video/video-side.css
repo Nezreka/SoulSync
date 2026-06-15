@@ -1249,3 +1249,8 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 @keyframes vd-ep-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .vd-ep-syncing-spin { animation: none; } }
+
+/* A class with an explicit `display` (e.g. .vd-ep-syncing/.vd-next-ep) otherwise
+   beats the UA [hidden]{display:none}, so toggling el.hidden wouldn't hide it.
+   Guarantee hidden always hides on the video detail/search/person pages. */
+.vd-page [hidden], .vp-page [hidden], .vsr-page [hidden] { display: none !important; }
