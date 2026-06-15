@@ -99,6 +99,20 @@
         setText('[data-vd-title]', d.title);
         setText('[data-vd-overview]', d.overview);
 
+        // Clearlogo replaces the text title when available (Netflix/Plex feel).
+        var logo = q('[data-vd-logo]');
+        var titleEl = q('[data-vd-title]');
+        if (logo) {
+            if (d.logo) {
+                logo.src = d.logo; logo.alt = d.title || ''; logo.hidden = false;
+                logo.onerror = function () { logo.hidden = true; if (titleEl) titleEl.classList.remove('vd-title--logo'); };
+                if (titleEl) titleEl.classList.add('vd-title--logo');
+            } else {
+                logo.hidden = true; logo.removeAttribute('src');
+                if (titleEl) titleEl.classList.remove('vd-title--logo');
+            }
+        }
+
         var art = '/' + d.kind + '/' + d.id;
         var bg = q('[data-vd-backdrop]');
         if (bg) {
@@ -377,7 +391,8 @@
     // Lazy: backfill a movie's cast/genres/art from TMDB on view if missing.
     function maybeRefreshMovie(id) {
         if (artAttemptedFor === id || !data || data.id !== id) return;
-        var needs = !(data.cast && data.cast.length) || !(data.genres && data.genres.length) || !data.has_backdrop;
+        var needs = !(data.cast && data.cast.length) || !(data.genres && data.genres.length)
+            || !data.has_backdrop || !data.logo;
         if (!needs) return;
         artAttemptedFor = id;
         fetch(DETAIL_URL + 'movie/' + id + '/refresh-art',
@@ -424,7 +439,8 @@
     // it (once per show), then re-render. Sidesteps "already matched, never re-runs".
     function maybeRefreshArt(id) {
         if (artAttemptedFor === id || !data || data.id !== id) return;
-        if (!(data.seasons || []).some(function (s) { return !s.has_poster; })) return;
+        var needs = !data.logo || (data.seasons || []).some(function (s) { return !s.has_poster; });
+        if (!needs) return;
         artAttemptedFor = id;
         fetch(DETAIL_URL + 'show/' + id + '/refresh-art',
             { method: 'POST', headers: { 'Accept': 'application/json' } })

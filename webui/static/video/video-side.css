@@ -714,3 +714,16 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-detail-row { display: flex; flex-direction: column; gap: 3px; }
 .vd-detail-k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: rgba(255, 255, 255, 0.45); }
 .vd-detail-v { font-size: 14.5px; font-weight: 600; color: #fff; }
+
+/* ── Clearlogo title (replaces the text title when available) ─────────────── */
+.vd-logo {
+    display: block; max-width: min(440px, 60%); max-height: 150px; width: auto; height: auto;
+    margin: 0 0 16px; object-fit: contain; object-position: left bottom;
+    filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.7));
+    animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+/* Keep the title for screen readers, but hide it visually when the logo shows. */
+.vd-title--logo {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
