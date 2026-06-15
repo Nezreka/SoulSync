@@ -85,14 +85,22 @@ class QualityUpgradeScannerJob(RepairJob):
             context.update_progress(0, total)
 
         probe_failed = 0
+        _diag_logged = False
         for i, (track_id, info) in enumerate(track_list):
             if context.check_stop():
                 return result
             if i % 20 == 0 and context.wait_if_paused():
                 return result
 
-            resolved = self._resolve_path(info.get('file_path', ''), context)
+            raw_fp = info.get('file_path', '')
+            resolved = self._resolve_path(raw_fp, context)
             if not resolved:
+                # One-shot diagnostic on the first unresolved track — logs EXACTLY
+                # what the resolver tried (base dirs, cwd) so a path/mount mismatch
+                # is diagnosable instead of a silent "all skipped".
+                if not _diag_logged:
+                    _diag_logged = True
+                    self._log_resolve_diag(raw_fp, context)
                 result.skipped += 1
                 probe_failed += 1
                 continue
@@ -234,6 +242,30 @@ class QualityUpgradeScannerJob(RepairJob):
             transfer_folder=context.transfer_folder,
             config_manager=context.config_manager,
         )
+
+    def _log_resolve_diag(self, file_path, context):
+        """Log a detailed diagnostic for the first track whose path can't be
+        resolved — the only reliable way to tell apart a CWD problem, a wrong
+        transfer mount, or genuinely-missing files in this container."""
+        from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+        try:
+            _, attempt = resolve_library_file_path_with_diagnostic(
+                file_path,
+                transfer_folder=context.transfer_folder,
+                config_manager=context.config_manager,
+            )
+            tf = context.transfer_folder
+            abs_tf = os.path.abspath(tf) if tf else None
+            logger.warning(
+                "[QualityResolve] unresolved db_path=%r | cwd=%r | transfer_folder=%r "
+                "(abspath=%r, isdir=%s) | base_dirs_tried=%r | abs_join_exists=%s",
+                file_path, os.getcwd(), tf, abs_tf,
+                os.path.isdir(abs_tf) if abs_tf else None,
+                attempt.base_dirs_tried,
+                os.path.exists(os.path.join(abs_tf, file_path)) if abs_tf else None,
+            )
+        except Exception as e:
+            logger.warning("[QualityResolve] diagnostic failed: %s", e)
 
     def estimate_scope(self, context: JobContext) -> int:
         conn = None
