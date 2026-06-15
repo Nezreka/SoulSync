@@ -65,10 +65,18 @@ def register_routes(bp):
         from . import get_video_db
         db = get_video_db()
         body = request.get_json(silent=True) or {}
-        if "tmdb_api_key" in body:
-            db.set_setting("tmdb_api_key", body.get("tmdb_api_key") or "")
-        if "tvdb_api_key" in body:
-            db.set_setting("tvdb_api_key", body.get("tvdb_api_key") or "")
+        keys_changed = False
+
+        def put_key(field):
+            nonlocal keys_changed
+            if field in body:
+                val = body.get(field) or ""
+                if val != (db.get_setting(field) or ""):
+                    keys_changed = True
+                db.set_setting(field, val)
+
+        put_key("tmdb_api_key")
+        put_key("tvdb_api_key")
         if "billboard_autoplay" in body:
             db.set_setting("billboard_autoplay", "1" if body.get("billboard_autoplay") else "0")
         if "watch_region" in body:
@@ -78,6 +86,7 @@ def register_routes(bp):
             new_key = body.get("omdb_api_key") or ""
             changed = new_key != (db.get_setting("omdb_api_key") or "")
             db.set_setting("omdb_api_key", new_key)
+            keys_changed = keys_changed or changed
             # A new/changed OMDb key → re-try every title that still has no rating
             # (covers items wrongly marked 'synced' during a prior bad-key run).
             if new_key and changed:
@@ -86,11 +95,15 @@ def register_routes(bp):
                         db.enrichment_retry("omdb", kind, scope="failed")
                 except Exception:
                     logger.exception("video enrichment: omdb re-try reset failed")
-        try:
-            from core.video.enrichment.engine import rebuild_video_enrichment_engine
-            rebuild_video_enrichment_engine()
-        except Exception:
-            logger.exception("video enrichment: engine rebuild after key change failed")
+        # Only rebuild the workers when an API KEY actually changed — a prefs-only
+        # save (autoplay/region) must not churn the running enrichment engine
+        # (that restart was re-logging the OMDb limit warning on every save).
+        if keys_changed:
+            try:
+                from core.video.enrichment.engine import rebuild_video_enrichment_engine
+                rebuild_video_enrichment_engine()
+            except Exception:
+                logger.exception("video enrichment: engine rebuild after key change failed")
         return jsonify({"status": "saved"})
 
     @bp.route("/enrichment/<service>/status", methods=["GET"])

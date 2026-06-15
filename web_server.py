@@ -37250,6 +37250,29 @@ def _emit_enrichment_status_loop():
             except Exception as e:
                 logger.debug(f"Error emitting {name} status: {e}")
 
+def _emit_video_enrichment_status_loop():
+    """Push the VIDEO enrichment worker statuses over the socket every 2s, exactly
+    like the music enrichment loop — so the video dashboard listens instead of
+    polling /api/video/enrichment/<svc>/status (that browser polling was flooding
+    the access log). No-op until the video engine is actually running, so this
+    never spins it up on the music side."""
+    from core.video.enrichment.engine import peek_video_enrichment_engine
+    services = ('tmdb', 'tvdb', 'omdb')
+    while not globals().get('IS_SHUTTING_DOWN', False):
+        socketio.sleep(2)
+        eng = peek_video_enrichment_engine()
+        if eng is None:
+            continue
+        for svc in services:
+            try:
+                w = eng.worker(svc)
+                if w is None:
+                    continue
+                socketio.emit(f'enrichment:{svc}', w.get_stats())
+            except Exception as e:
+                logger.debug(f"Error emitting video {svc} status: {e}")
+
+
 def _emit_tool_progress_loop():
     """Background thread that pushes all tool progress statuses every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -37681,6 +37704,9 @@ def start_runtime_services():
         socketio.start_background_task(_emit_wishlist_count_loop)
         # Phase 3: Enrichment sidebar workers
         socketio.start_background_task(_emit_enrichment_status_loop)
+        # Phase 3 (video): push video enrichment status so the video dashboard
+        # listens instead of polling (matches music; no access-log flood).
+        socketio.start_background_task(_emit_video_enrichment_status_loop)
         # Phase 4: Tool progress pollers
         socketio.start_background_task(_emit_tool_progress_loop)
         # Phase 5: Sync/discovery progress + scans

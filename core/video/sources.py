@@ -63,26 +63,70 @@ def _parse_jf_providers(item) -> dict:
     }
 
 
+def _vdb(db=None):
+    """The video DB (the given one, or a fresh handle). None if unavailable."""
+    if db is not None:
+        return db
+    try:
+        from database.video_database import VideoDatabase
+        return VideoDatabase()
+    except Exception:
+        return None
+
+
+def video_plex_config(db=None):
+    """VIDEO's effective Plex connection: the video side's OWN stored creds
+    (video.db) when set, otherwise INHERITED read-only from the music config.
+    The video side never writes the music config, so this is one-way."""
+    db = _vdb(db)
+    try:
+        url = (db.get_setting("video_plex_url") or "").strip() if db else ""
+        token = (db.get_setting("video_plex_token") or "").strip() if db else ""
+    except Exception:
+        url, token = "", ""
+    if url and token:
+        return {"base_url": url, "token": token, "source": "video"}
+    try:
+        from config.settings import config_manager
+        cfg = config_manager.get_plex_config() or {}
+        return {"base_url": cfg.get("base_url") or "", "token": cfg.get("token") or "",
+                "source": "music"}
+    except Exception:
+        return {"base_url": "", "token": "", "source": "music"}
+
+
+def video_jellyfin_config(db=None):
+    """VIDEO's effective Jellyfin connection: the video side's OWN stored creds
+    when set, otherwise INHERITED read-only from the music config."""
+    db = _vdb(db)
+    try:
+        url = (db.get_setting("video_jellyfin_url") or "").strip() if db else ""
+        key = (db.get_setting("video_jellyfin_key") or "").strip() if db else ""
+    except Exception:
+        url, key = "", ""
+    if url and key:
+        return {"base_url": url, "api_key": key, "source": "video"}
+    try:
+        from config.settings import config_manager
+        cfg = config_manager.get_jellyfin_config() or {}
+        return {"base_url": cfg.get("base_url") or "", "api_key": cfg.get("api_key") or "",
+                "source": "music"}
+    except Exception:
+        return {"base_url": "", "api_key": "", "source": "music"}
+
+
 def resolve_video_server(db=None):
     """The server the VIDEO side uses — a configured Plex/Jellyfin, resolved
     INDEPENDENTLY of the music 'active server' pointer (so e.g. Navidrome-for-music
     + Plex-for-video works, and music-only servers never apply here). Returns
-    'plex' | 'jellyfin' | None. Order: explicit video pick → the music-active one if
-    it's video-capable → the single configured one → Plex if both → None."""
-    try:
-        from config.settings import config_manager
-    except Exception:
-        return None
-    plex_ok = bool((config_manager.get_plex_config() or {}).get("base_url"))
-    jelly_ok = bool((config_manager.get_jellyfin_config() or {}).get("base_url"))
+    'plex' | 'jellyfin' | None. Order: explicit video pick → the single configured
+    one → Plex when both → None. 'Configured' means video's EFFECTIVE config
+    (its own creds, or inherited from music) has a base_url."""
+    db = _vdb(db)
+    plex_ok = bool(video_plex_config(db).get("base_url"))
+    jelly_ok = bool(video_jellyfin_config(db).get("base_url"))
 
     pref = None
-    if db is None:
-        try:
-            from database.video_database import VideoDatabase
-            db = VideoDatabase()
-        except Exception:
-            db = None
     if db is not None:
         try:
             pref = db.get_setting("video_server")
@@ -105,20 +149,86 @@ def resolve_video_server(db=None):
     return None
 
 
-def _build_source(movies_lib=None, tv_lib=None):
-    """Build a media source for the VIDEO server (see resolve_video_server),
-    restricted to the named Movies/TV libraries when given. Reuses the SHARED
-    connection config — but Plex gets a dedicated long-timeout connection."""
+def _video_jellyfin_source(cfg, movies_lib=None, tv_lib=None):
+    """A JellyfinVideoSource connected with VIDEO's OWN config — independent of
+    music's shared singleton client. The video source only needs base_url/api_key
+    (for _make_request) and any valid user_id (for /Users/{id}/Items browsing)."""
+    base = (cfg.get("base_url") or "").rstrip("/")
+    key = cfg.get("api_key") or ""
+    if not base or not key:
+        return None
     try:
-        from config.settings import config_manager
+        from core.jellyfin_client import JellyfinClient
+        client = JellyfinClient()
+        client.base_url = base
+        client.api_key = key
+        users = client._make_request("/Users") or []
+        if not users:
+            return None
+        # Jellyfin scopes /Users/{id}/Views to that user's library access, so honor
+        # the user the operator explicitly picked (stored video_jellyfin_user). Until
+        # they pick, default to an ADMIN (full visibility) so nothing's hidden.
+        pref = ""
+        try:
+            _db = _vdb()
+            pref = (_db.get_setting("video_jellyfin_user") or "") if _db else ""
+        except Exception:
+            pref = ""
+        chosen = next((u for u in users if u.get("Id") == pref), None)
+        if chosen is None:
+            admins = [u for u in users if (u.get("Policy") or {}).get("IsAdministrator")]
+            chosen = (admins or users)[0]
+        uid = chosen.get("Id")
+        if not uid:
+            return None
+        client.user_id = uid
+        return JellyfinVideoSource(client, movies_lib=movies_lib, tv_lib=tv_lib)
     except Exception:
-        logger.exception("video sources: config unavailable")
+        logger.exception("video sources: Jellyfin connect failed")
         return None
 
-    server = resolve_video_server()
+
+def video_jellyfin_test(cfg):
+    """Diagnose the video Jellyfin connection precisely (for the Test button).
+    Returns (ok: bool, message: str). Distinguishes 'can't reach the server',
+    'API key rejected', and 'no users' instead of one vague failure — reuses the
+    same X-Emby-Token header the music client uses (_make_request)."""
+    base = (cfg.get("base_url") or "").rstrip("/")
+    key = cfg.get("api_key") or ""
+    if not base or not key:
+        return False, "Jellyfin URL/API key not set"
+    import requests
+    headers = {"X-Emby-Token": key}
+    try:
+        info = requests.get(base + "/System/Info", headers=headers, timeout=8)
+    except requests.exceptions.ConnectionError:
+        return False, "Can't reach Jellyfin at %s — is it running and reachable on that host/port?" % base
+    except requests.exceptions.RequestException as e:
+        return False, "Couldn't connect to Jellyfin: %s" % (e,)
+    if info.status_code in (401, 403):
+        return False, "Jellyfin rejected the API key (HTTP %d). Check the key." % info.status_code
+    if info.status_code != 200:
+        return False, "Jellyfin returned HTTP %d for /System/Info." % info.status_code
+    try:
+        users = requests.get(base + "/Users", headers=headers, timeout=8).json()
+    except Exception:
+        users = None
+    if not users:
+        return False, "Connected, but Jellyfin returned no users for this API key."
+    name = (info.json() or {}).get("ServerName") or "Jellyfin"
+    return True, "Connected to %s" % name
+
+
+def _build_source(movies_lib=None, tv_lib=None):
+    """Build a media source for the VIDEO server (see resolve_video_server),
+    restricted to the named Movies/TV libraries when given. Uses VIDEO's OWN
+    effective connection config (its creds, or inherited from music) — never the
+    music side's live connection, so the two stay independent."""
+    db = _vdb()
+    server = resolve_video_server(db)
 
     if server == "plex":
-        cfg = config_manager.get_plex_config() or {}
+        cfg = video_plex_config(db)
         base_url, token = cfg.get("base_url"), cfg.get("token")
         if not base_url or not token:
             return None
@@ -131,15 +241,7 @@ def _build_source(movies_lib=None, tv_lib=None):
             return None
 
     if server == "jellyfin":
-        try:
-            from core.media_server.engine import get_media_server_engine
-            engine = get_media_server_engine()
-            client = engine.client("jellyfin") if engine else None
-            if client and client.ensure_connection() and getattr(client, "user_id", None):
-                return JellyfinVideoSource(client, movies_lib=movies_lib, tv_lib=tv_lib)
-        except Exception:
-            logger.exception("video sources: Jellyfin connect failed")
-        return None
+        return _video_jellyfin_source(video_jellyfin_config(db), movies_lib, tv_lib)
 
     return None
 
