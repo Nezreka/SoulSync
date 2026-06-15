@@ -198,7 +198,45 @@
             }).join('');
         }
         renderRatings(d);
+        renderCrewLine(d);
+        renderNextEpisode(d);
         renderCast(d);
+    }
+
+    // "Directed by …" (movie) / "Created by …" (show) surfaced in the hero.
+    function renderCrewLine(d) {
+        var el = q('[data-vd-crew-line]');
+        if (!el) return;
+        var key = d.kind === 'movie' ? 'Director' : 'Creator';
+        var names = (d.crew || []).filter(function (c) { return c.job === key; })
+            .map(function (c) { return c.name; });
+        if (!names.length) { el.hidden = true; el.innerHTML = ''; return; }
+        var label = (d.kind === 'movie' ? 'Director' : 'Creator') + (names.length > 1 ? 's' : '');
+        el.innerHTML = '<span class="vd-crew-line-k">' + label + '</span> ' +
+            names.slice(0, 3).map(esc).join(', ');
+        el.hidden = false;
+    }
+
+    function fmtDate(s) {
+        if (!s) return '';
+        var p = String(s).split('-');
+        if (p.length < 3) return s;
+        var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return (months[parseInt(p[1], 10) - 1] || '') + ' ' + parseInt(p[2], 10) + ', ' + p[0];
+    }
+
+    // "Next episode" banner for continuing shows (data.next_episode arrives w/ extras).
+    function renderNextEpisode(d) {
+        var el = q('[data-vd-next-ep]');
+        if (!el) return;
+        var ne = d.next_episode;
+        if (d.kind !== 'show' || !ne || !ne.air_date) { el.hidden = true; el.innerHTML = ''; return; }
+        var code = 'S' + ne.season_number + ' · E' + ne.episode_number;
+        el.innerHTML = '<span class="vd-next-ep-badge">▸ Next Episode</span>' +
+            '<span class="vd-next-ep-code">' + esc(code) + '</span>' +
+            (ne.name ? '<span class="vd-next-ep-name">' + esc(ne.name) + '</span>' : '') +
+            '<span class="vd-next-ep-when">' + esc(fmtDate(ne.air_date)) + '</span>';
+        el.hidden = false;
     }
 
     function renderRatings(d) {
@@ -263,6 +301,14 @@
         if (!a) return;
         var watching = !!d.monitored;
         var html = '';
+        // Primary CTA: play it on your media server (owned items; arrives with extras).
+        if (d.server && d.server.url) {
+            var sv = esc(d.server.server || 'Server');
+            var slogo = SERVER_LOGOS[d.server.server];
+            html += '<a class="vd-play-btn" href="' + esc(d.server.url) + '" target="_blank" rel="noopener">' +
+                (slogo ? '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="">' : '<span class="vd-play-ic">▶</span>') +
+                '<span>Play on ' + sv + '</span></a>';
+        }
         if (d.trailer && d.trailer.key) {
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
                 '<span class="vd-trailer-ic">▶</span> Trailer</button>';
@@ -303,7 +349,8 @@
 
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
     function resetExtras() {
-        ['[data-vd-providers-section]', '[data-vd-similar-section]'].forEach(function (s) {
+        ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
+         '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
     }
@@ -313,10 +360,31 @@
             .then(function (ex) { if (ex) renderExtras(kind, id, ex); })
             .catch(function () { /* best-effort */ });
     }
+    function simCard(s) {
+        var poster = s.poster
+            ? '<img class="vd-sim-poster" src="' + esc(s.poster) + '" alt="" loading="lazy">'
+            : '<span class="vd-sim-poster vd-sim-poster--ph">🎬</span>';
+        var simKind = s.kind === 'movie' ? 'movie' : 'show';
+        var yr = s.year ? '<span class="vd-sim-year">' + esc(s.year) + '</span>' : '';
+        return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
+            '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' +
+            poster + '<span class="vd-sim-title">' + esc(s.title) + '</span>' + yr + '</a>';
+    }
+    function renderRow(sectionSel, hostSel, items) {
+        var sec = q(sectionSel), host = q(hostSel);
+        if (!sec || !host) return;
+        if (!items || !items.length) { sec.hidden = true; return; }
+        sec.hidden = false;
+        host.innerHTML = items.map(simCard).join('');
+    }
+
     function renderExtras(kind, id, ex) {
         if (!data || data.id !== id || currentKind !== kind) return;
         data.trailer = ex.trailer || null;
+        data.server = ex.server || null;
+        data.next_episode = ex.next_episode || null;
         renderActions(data);
+        renderNextEpisode(data);
 
         var ps = q('[data-vd-providers-section]'), ph = q('[data-vd-providers]');
         if (ps && ph) {
@@ -349,23 +417,20 @@
             ps.hidden = !html;
             ph.innerHTML = html;
         }
-        var ss = q('[data-vd-similar-section]'), sh = q('[data-vd-similar]');
-        if (ss && sh) {
-            if (ex.similar && ex.similar.length) {
-                ss.hidden = false;
-                sh.innerHTML = ex.similar.map(function (s) {
-                    var poster = s.poster
-                        ? '<img class="vd-sim-poster" src="' + esc(s.poster) + '" alt="" loading="lazy">'
-                        : '<span class="vd-sim-poster vd-sim-poster--ph">🎬</span>';
-                    // In-app: open the TMDB-backed detail (which redirects to the
-                    // library detail if we already own it). No external links.
-                    var simKind = s.kind === 'movie' ? 'movie' : 'show';
-                    return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
-                        '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' +
-                        poster + '<span class="vd-sim-title">' + esc(s.title) + '</span></a>';
-                }).join('');
-            } else { ss.hidden = true; }
+        // Franchise / collection (movies) — the other films in the set.
+        var cs = q('[data-vd-collection-section]'), ch = q('[data-vd-collection]'), ct = q('[data-vd-collection-title]');
+        var coll = ex.collection;
+        if (cs && ch) {
+            if (coll && coll.items && coll.items.length) {
+                cs.hidden = false;
+                if (ct) ct.textContent = coll.name || 'Collection';
+                ch.innerHTML = coll.items.map(simCard).join('');
+            } else { cs.hidden = true; }
         }
+
+        // "More Like This" — recommendations (better-curated), falling back to similar.
+        var more = (ex.recommendations && ex.recommendations.length) ? ex.recommendations : ex.similar;
+        renderRow('[data-vd-similar-section]', '[data-vd-similar]', more);
     }
 
     // ── trailer modal (YouTube embed) ─────────────────────────────────────────
@@ -483,7 +548,17 @@
             '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div></div>';
     }
 
+    function renderSeasonOverview() {
+        var el = q('[data-vd-season-overview]');
+        if (!el) return;
+        var s = seasonByNum(selectedSeason);
+        var ov = s && s.overview;
+        el.textContent = ov || '';
+        el.hidden = !ov;
+    }
+
     function renderEpisodes() {
+        renderSeasonOverview();
         var host = q('[data-vd-episodes]');
         if (!host) return;
         var season = seasonByNum(selectedSeason);
@@ -521,6 +596,7 @@
                 if (se && se.episodes) {
                     season.episodes = se.episodes;
                     season.episode_total = se.episodes.length;
+                    if (se.overview) season.overview = se.overview;
                 }
                 if (currentId === sid && selectedSeason === sn) { renderSeasonNav(); renderEpisodes(); }
             })
