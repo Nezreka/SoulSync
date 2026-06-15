@@ -511,7 +511,8 @@ class TMDBClient:
             return None
         import requests
         r = requests.get(self.BASE + "/person/" + str(tmdb_id), params={
-            "api_key": self.api_key, "append_to_response": "combined_credits,external_ids"}, timeout=15)
+            "api_key": self.api_key,
+            "append_to_response": "combined_credits,external_ids,images"}, timeout=15)
         r.raise_for_status()
         d = r.json() or {}
         if not d.get("id"):
@@ -542,6 +543,10 @@ class TMDBClient:
         for c in (cc.get("crew") or []):
             add(c, c.get("department") or "Crew", c.get("job") or None)
         credits.sort(key=lambda x: x["popularity"], reverse=True)
+        profiles = (d.get("images") or {}).get("profiles") or []
+        photos = [{"thumb": self.PROFILE + p["file_path"], "full": self.IMG + p["file_path"]}
+                  for p in profiles[:16] if p.get("file_path")]
+        akas = [a for a in (d.get("also_known_as") or []) if a][:6]
         return {
             "tmdb_id": d.get("id"), "name": d.get("name"),
             "biography": d.get("biography") or None,
@@ -549,7 +554,7 @@ class TMDBClient:
             "birthday": d.get("birthday") or None, "deathday": d.get("deathday") or None,
             "place_of_birth": d.get("place_of_birth") or None,
             "photo": (self.PROFILE + d["profile_path"]) if d.get("profile_path") else None,
-            "credits": credits}
+            "photos": photos, "also_known_as": akas, "credits": credits}
 
 
 class TVDBClient:
