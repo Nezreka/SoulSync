@@ -76,13 +76,15 @@
         if (kind === 'movie') meta.push(it.has_file ? 'Owned' : 'Wanted');
         else meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
 
-        // Both movies and shows drill into their detail page.
-        var hook = ' data-video-card-open="' + kind + '" data-video-card-id="' + it.id + '"';
-        return '<div class="library-artist-card video-card--clickable"' + hook + '>' + img + badge +
+        // A REAL link (like the music artist cards) so reload / new-tab / Back all
+        // work; the click handler intercepts plain left-clicks into SPA nav.
+        var href = '/video-detail/library/' + kind + '/' + it.id;
+        var hook = ' href="' + href + '" data-video-card-open="' + kind + '" data-video-card-id="' + it.id + '"';
+        return '<a class="library-artist-card video-card--clickable"' + hook + '>' + img + badge +
             '<div class="library-artist-info">' +
             '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
             '<div class="library-artist-stats"><span class="library-artist-stat">' +
-            esc(meta.join(' · ')) + '</span></div></div></div>';
+            esc(meta.join(' · ')) + '</span></div></div></a>';
     }
 
     function showLoading(on) {
@@ -144,11 +146,14 @@
         var grid = $('[data-video-lib-grid]');
         if (grid) {
             grid.addEventListener('click', function (e) {
+                // Let modified clicks (new tab / window) use the real href.
+                if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 var card = e.target.closest('[data-video-card-open]');
                 if (!card || !grid.contains(card)) return;
+                e.preventDefault();
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
                     detail: { kind: card.getAttribute('data-video-card-open'),
-                              id: parseInt(card.getAttribute('data-video-card-id'), 10) },
+                              id: parseInt(card.getAttribute('data-video-card-id'), 10), source: 'library' },
                 }));
             });
         }
