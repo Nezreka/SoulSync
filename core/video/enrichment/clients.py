@@ -436,22 +436,29 @@ class TMDBClient:
             return None
         cc = d.get("combined_credits") or {}
         seen, credits = set(), []
-        for c in (cc.get("cast") or []) + (cc.get("crew") or []):
+
+        def add(c, department, role):
             mt, tid = c.get("media_type"), c.get("id")
             if not tid or mt not in ("movie", "tv"):
-                continue
+                return
             kind = "movie" if mt == "movie" else "show"
             key = (kind, tid)
-            if key in seen:
-                continue
+            if key in seen:               # same title in two roles → keep the first
+                return
             seen.add(key)
             date = c.get("release_date") or c.get("first_air_date") or ""
             credits.append({
                 "kind": kind, "tmdb_id": tid, "title": c.get("title") or c.get("name"),
                 "year": (date or "")[:4] or None, "date": date or None,
-                "role": c.get("character") or c.get("job") or None,
+                "department": department, "role": role,
                 "popularity": c.get("popularity") or 0,
                 "poster": (self.POSTER_W + c["poster_path"]) if c.get("poster_path") else None})
+
+        # Cast first (so an actor-director title files under Acting), then crew.
+        for c in (cc.get("cast") or []):
+            add(c, "Acting", c.get("character") or None)
+        for c in (cc.get("crew") or []):
+            add(c, c.get("department") or "Crew", c.get("job") or None)
         credits.sort(key=lambda x: x["popularity"], reverse=True)
         return {
             "tmdb_id": d.get("id"), "name": d.get("name"),

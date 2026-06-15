@@ -1066,11 +1066,18 @@
                                 <div class="vp-known-rail" data-vp-known></div>
                             </div>
                             <div class="vp-credits-section">
-                                <div class="vp-credits-head"><h2 class="vp-credits-title">Filmography</h2>
-                                    <div class="vp-credit-filters">
-                                        <div class="vp-credit-tabs" data-vp-tabs></div>
-                                        <div class="vp-credit-tabs vp-own-tabs" data-vp-own></div>
-                                    </div>
+                                <div class="vp-credits-head">
+                                    <h2 class="vp-credits-title">Filmography</h2>
+                                    <select class="vp-sort" data-vp-sort aria-label="Sort filmography">
+                                        <option value="newest">Newest first</option>
+                                        <option value="oldest">Oldest first</option>
+                                        <option value="popularity">Most popular</option>
+                                    </select>
+                                </div>
+                                <div class="vp-credit-filters">
+                                    <div class="vp-credit-tabs vp-dept-tabs" data-vp-dept></div>
+                                    <div class="vp-credit-tabs" data-vp-tabs></div>
+                                    <div class="vp-credit-tabs vp-own-tabs" data-vp-own></div>
                                 </div>
                                 <div class="vsr-grid" data-vp-credits></div>
                                 <div class="vp-credits-empty" data-vp-credits-empty hidden></div>

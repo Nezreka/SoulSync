@@ -280,6 +280,20 @@ def test_tmdb_trending_parses(monkeypatch):
     assert res[0]["poster"] == "https://image.tmdb.org/t/p/w300/a.jpg"
 
 
+def test_tmdb_person_credits_carry_department(monkeypatch):
+    body = {"id": 5, "name": "X", "known_for_department": "Acting",
+            "combined_credits": {
+                "cast": [{"id": 1, "media_type": "movie", "title": "M", "character": "Hero",
+                          "release_date": "2020-01-01", "popularity": 9}],
+                "crew": [{"id": 2, "media_type": "movie", "title": "D", "job": "Director",
+                          "department": "Directing", "release_date": "2019-01-01", "popularity": 3}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    p = TMDBClient("KEY").person(5)
+    by = {c["title"]: c for c in p["credits"]}
+    assert by["M"]["department"] == "Acting" and by["M"]["role"] == "Hero"
+    assert by["D"]["department"] == "Directing" and by["D"]["role"] == "Director"
+
+
 def test_engine_person_detail_annotates_credits(db):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
 

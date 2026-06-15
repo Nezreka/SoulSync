@@ -1111,10 +1111,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 
 .vp-credits-section { position: relative; z-index: 2; }
 .vp-credits-head {
-    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 16px;
 }
 .vp-credits-title { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
-.vp-credit-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.vp-credit-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-bottom: 20px; }
 .vp-credit-tabs { display: flex; gap: 8px; }
 /* The ownership group sits after a faint divider so it reads as a second axis. */
 .vp-own-tabs { position: relative; padding-left: 14px; }
@@ -1129,6 +1129,17 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vp-credits-empty {
     padding: 44px 20px; text-align: center; font-size: 14px; color: rgba(255, 255, 255, 0.55);
 }
+.vp-dept-tabs [data-vp-dept].vp-tab--active {
+    background: rgba(var(--vd-accent-rgb, 99, 102, 241), 0.92); border-color: transparent; color: #fff;
+}
+.vp-dept-tabs:empty { display: none; }
+.vp-sort {
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.85); border-radius: 9px; padding: 8px 12px; font-size: 13px;
+    font-weight: 600; cursor: pointer; outline: none;
+}
+.vp-sort:hover { background: rgba(255, 255, 255, 0.1); }
+.vp-sort option { background: #16161c; color: #fff; }
 .vp-tab {
     background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
     color: rgba(255, 255, 255, 0.7); border-radius: 999px; padding: 7px 16px; cursor: pointer;
