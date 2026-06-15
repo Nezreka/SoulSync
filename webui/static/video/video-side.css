@@ -1174,15 +1174,18 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 
 /* ── billboard: Play CTA, crew line, next-episode, season overview ────────── */
+/* Matches .vd-trailer-btn exactly (consistent with the other hero buttons) —
+   just green to read as "owned / play". */
 .vd-play-btn {
-    display: inline-flex; align-items: center; gap: 9px; text-decoration: none;
-    padding: 11px 22px; border-radius: 10px; font-size: 15px; font-weight: 800;
-    background: #fff; color: #0b0b0f; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer; text-decoration: none;
+    color: #fff; background: #22c55e; border: 1px solid transparent;
+    box-shadow: 0 6px 18px rgba(34, 197, 94, 0.4); transition: all 0.2s ease;
 }
-.vd-play-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55); }
-.vd-play-logo { height: 17px; width: auto; }
-.vd-play-ic { font-size: 14px; }
+.vd-play-btn:hover { transform: translateY(-1px); filter: brightness(1.08);
+    box-shadow: 0 8px 22px rgba(34, 197, 94, 0.55); }
+.vd-play-logo { height: 14px; width: auto; }
+.vd-play-ic { font-size: 13px; }
 
 .vd-crew-line { font-size: 14px; color: rgba(255, 255, 255, 0.84); margin: 2px 0 14px;
     text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
@@ -1228,3 +1231,21 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     .vd-skel-content { left: 22px; right: 22px; width: auto; bottom: 60px; }
 }
 @media (prefers-reduced-motion: reduce) { .skel-shine { animation: none; } }
+
+/* clickable crew / director names → person page */
+.vd-person-link { color: inherit; text-decoration: none; border-bottom: 1px solid transparent; transition: color 0.18s ease, border-color 0.18s ease; }
+.vd-person-link:hover { color: rgb(var(--vd-accent-rgb)); border-bottom-color: rgba(var(--vd-accent-rgb), 0.5); }
+
+/* "fetching full episode list" banner (shown while the TMDB cascade runs) */
+.vd-ep-syncing {
+    display: flex; align-items: center; gap: 11px; margin: 0 0 18px; padding: 12px 16px;
+    border-radius: 10px; font-size: 13.5px; color: rgba(255, 255, 255, 0.78);
+    background: rgba(var(--vd-accent-rgb), 0.1); border: 1px solid rgba(var(--vd-accent-rgb), 0.26);
+}
+.vd-ep-syncing-spin {
+    flex: 0 0 auto; width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(var(--vd-accent-rgb), 0.3); border-top-color: rgb(var(--vd-accent-rgb));
+    animation: vd-ep-spin 0.8s linear infinite;
+}
+@keyframes vd-ep-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .vd-ep-syncing-spin { animation: none; } }

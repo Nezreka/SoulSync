@@ -433,6 +433,9 @@ def test_detail_keeps_preview_items_in_app():
     assert "renderCrewLine" in src and "renderNextEpisode" in src
     assert "data-vd-collection" in _INDEX and "renderSeasonOverview" in src
     assert "ex.recommendations" in src
+    # Director/crew names link to the person page; episode-sync has a banner.
+    assert "personName" in src and "data-vd-person" in src
+    assert "data-vd-ep-syncing" in _INDEX and "showEpSyncing" in src
     # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
     # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
     assert "www.themoviedb.org/' + (s.kind" not in src

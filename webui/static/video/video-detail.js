@@ -204,16 +204,23 @@
     }
 
     // "Directed by …" (movie) / "Created by …" (show) surfaced in the hero.
+    // A crew member's name, clickable → person page when we have a TMDB id.
+    function personName(c) {
+        return c.tmdb_id
+            ? '<a class="vd-person-link" href="/video-detail/tmdb/person/' + c.tmdb_id +
+              '" data-vd-person="' + c.tmdb_id + '">' + esc(c.name) + '</a>'
+            : esc(c.name);
+    }
+
     function renderCrewLine(d) {
         var el = q('[data-vd-crew-line]');
         if (!el) return;
         var key = d.kind === 'movie' ? 'Director' : 'Creator';
-        var names = (d.crew || []).filter(function (c) { return c.job === key; })
-            .map(function (c) { return c.name; });
-        if (!names.length) { el.hidden = true; el.innerHTML = ''; return; }
-        var label = (d.kind === 'movie' ? 'Director' : 'Creator') + (names.length > 1 ? 's' : '');
+        var people = (d.crew || []).filter(function (c) { return c.job === key; }).slice(0, 3);
+        if (!people.length) { el.hidden = true; el.innerHTML = ''; return; }
+        var label = (d.kind === 'movie' ? 'Director' : 'Creator') + (people.length > 1 ? 's' : '');
         el.innerHTML = '<span class="vd-crew-line-k">' + label + '</span> ' +
-            names.slice(0, 3).map(esc).join(', ');
+            people.map(personName).join(', ');
         el.hidden = false;
     }
 
@@ -270,12 +277,14 @@
 
         var crewHost = q('[data-vd-crew]');
         if (crewHost) {
-            // Group crew by job (Creator / Director / Writer …) → "Job: A, B".
+            // Group crew by job (Creator / Director / Writer …) → "Job: A, B" with
+            // each name clickable → person page.
             var byJob = {};
-            crew.forEach(function (c) { (byJob[c.job || 'Crew'] = byJob[c.job || 'Crew'] || []).push(c.name); });
+            crew.forEach(function (c) { (byJob[c.job || 'Crew'] = byJob[c.job || 'Crew'] || []).push(c); });
             crewHost.innerHTML = Object.keys(byJob).map(function (job) {
                 return '<span class="vd-crew-item"><span class="vd-crew-job">' + esc(job) +
-                    (byJob[job].length > 1 ? 's' : '') + '</span> ' + esc(byJob[job].join(', ')) + '</span>';
+                    (byJob[job].length > 1 ? 's' : '') + '</span> ' +
+                    byJob[job].map(personName).join(', ') + '</span>';
             }).join('');
         }
         var castHost = q('[data-vd-cast]');
@@ -402,10 +411,17 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers (JustWatch via TMDB) link to the where-to-watch page.
+            // Streaming providers (JustWatch via TMDB) link to the where-to-watch
+            // page. (TMDB only gives one aggregate link, so they share it.) Drop a
+            // provider that's the same service as your server tile (e.g. Plex), so
+            // it isn't listed twice.
             var link = ex.providers_link || '';
-            if (ex.providers && ex.providers.length) {
-                html += ex.providers.map(function (p) {
+            var srvName = (ex.server && ex.server.server || '').toLowerCase();
+            var provs = (ex.providers || []).filter(function (p) {
+                return (p.name || '').toLowerCase() !== srvName;
+            });
+            if (provs.length) {
+                html += provs.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
                     var inner = img + '<span class="vd-prov-name">' + esc(p.name) + '</span>';
@@ -692,6 +708,7 @@
         currentId = id;
         showLoading(true);
         resetExtras();
+        showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
         fetch(detailURL('show', id, currentSource), { headers: { 'Accept': 'application/json' } })
@@ -730,17 +747,29 @@
             || (data.imdb_id && !data.imdb_rating);
         if (!needs) return;
         artAttemptedFor = id;
+        // The full episode list (owned + missing) is being pulled from TMDB — this
+        // can take a while, so show the user it's happening instead of a silent gap.
+        if (!data.episodes_synced) showEpSyncing(true);
         fetch(DETAIL_URL + 'show/' + id + '/refresh-art',
             { method: 'POST', headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (res) { if (res && res.ok && currentId === id) reloadDetail(id); })
-            .catch(function () { /* best-effort */ });
+            .then(function (res) {
+                if (res && res.ok && currentId === id) reloadDetail(id);
+                else showEpSyncing(false);
+            })
+            .catch(function () { showEpSyncing(false); });
+    }
+
+    function showEpSyncing(on) {
+        var el = q('[data-vd-ep-syncing]');
+        if (el) el.hidden = !on;
     }
 
     function reloadDetail(id) {
         fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
+                showEpSyncing(false);
                 if (!d || d.error || currentId !== id) return;
                 data = d;
                 if (!seasonByNum(selectedSeason)) {
@@ -748,7 +777,7 @@
                 }
                 renderBillboard(d); renderSeasonNav(); renderEpisodes();
             })
-            .catch(function () { /* ignore */ });
+            .catch(function () { showEpSyncing(false); });
     }
 
     // ── events ────────────────────────────────────────────────────────────────
