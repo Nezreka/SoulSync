@@ -168,13 +168,27 @@ class TMDBClient:
         import requests
         path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
         r = requests.get(self.BASE + path, params={
-            "api_key": self.api_key, "append_to_response": "videos,watch/providers,similar"}, timeout=15)
+            "api_key": self.api_key,
+            "append_to_response": "videos,watch/providers,similar,recommendations"}, timeout=15)
         r.raise_for_status()
-        return self._parse_extras(kind, r.json() or {}, region)
+        out = self._parse_extras(kind, r.json() or {}, region)
+        self._fill_collection(out)
+        return out
+
+    def _fill_collection(self, out):
+        """Second call: pull the films of a movie collection (franchise)."""
+        coll = out.get("collection")
+        if coll and coll.get("id"):
+            try:
+                coll["items"] = self.collection(coll["id"])
+            except Exception:
+                logger.exception("TMDB collection fetch failed for %s", coll.get("id"))
 
     def _parse_extras(self, kind, d, region="US"):
-        """Pull trailer / where-to-watch / similar out of a TMDB detail body. Shared
-        by extras() and full_detail() so the search detail can render them too."""
+        """Pull trailer / where-to-watch / similar / recommendations / collection /
+        next-episode out of a TMDB detail body. Shared by extras() and full_detail()
+        so the search (preview) detail renders them too. (Collection PARTS need a
+        second call — see _fill_collection.)"""
         out = {}
 
         # Trailer — prefer a YouTube "Trailer", fall back to a teaser.
@@ -202,15 +216,62 @@ class TMDBClient:
             out["providers_link"] = wp.get("link")
             out["region"] = region
 
-        # More like this.
-        sim = []
-        for s in ((d.get("similar") or {}).get("results") or [])[:14]:
+        # More like this — recommendations (better-curated) with similar as backup.
+        out["recommendations"] = self._title_list((d.get("recommendations") or {}).get("results"), kind)
+        out["similar"] = self._title_list((d.get("similar") or {}).get("results"), kind)
+        if not out["recommendations"]:
+            out.pop("recommendations")
+        if not out["similar"]:
+            out.pop("similar")
+
+        if kind == "movie":
+            bc = d.get("belongs_to_collection")
+            if bc and bc.get("id"):
+                out["collection"] = {
+                    "id": bc["id"], "name": bc.get("name"),
+                    "poster": (self.POSTER_W + bc["poster_path"]) if bc.get("poster_path") else None,
+                    "items": []}            # parts filled by _fill_collection (2nd call)
+        else:
+            if d.get("next_episode_to_air"):
+                out["next_episode"] = self._episode_stub(d["next_episode_to_air"])
+            if d.get("last_episode_to_air"):
+                out["last_episode"] = self._episode_stub(d["last_episode_to_air"])
+        return out
+
+    def _title_list(self, results, kind):
+        out = []
+        for s in (results or [])[:14]:
             title = s.get("title") or s.get("name")
             if title and s.get("id"):
-                sim.append({"title": title, "tmdb_id": s["id"], "kind": kind,
+                mt = s.get("media_type")
+                k = "movie" if mt == "movie" else "show" if mt == "tv" else kind
+                out.append({"title": title, "tmdb_id": s["id"], "kind": k,
                             "poster": (self.POSTER_W + s["poster_path"]) if s.get("poster_path") else None})
-        if sim:
-            out["similar"] = sim
+        return out
+
+    @staticmethod
+    def _episode_stub(e):
+        return {"season_number": e.get("season_number"), "episode_number": e.get("episode_number"),
+                "name": e.get("name"), "air_date": e.get("air_date") or None,
+                "overview": e.get("overview") or None}
+
+    def collection(self, collection_id):
+        """The films of a movie collection (franchise), ordered by release date."""
+        if not self.api_key or collection_id is None:
+            return []
+        import requests
+        r = requests.get(self.BASE + "/collection/" + str(collection_id),
+                         params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for p in ((r.json() or {}).get("parts") or []):
+            if not p.get("id"):
+                continue
+            out.append({"kind": "movie", "tmdb_id": p["id"], "title": p.get("title"),
+                        "year": (p.get("release_date") or "")[:4] or None,
+                        "date": p.get("release_date") or "",
+                        "poster": (self.POSTER_W + p["poster_path"]) if p.get("poster_path") else None})
+        out.sort(key=lambda x: x["date"] or "zzzz")
         return out
 
     def season_episodes(self, tv_id, season_number):
@@ -307,7 +368,7 @@ class TMDBClient:
         path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
         r = requests.get(self.BASE + path, params={
             "api_key": self.api_key,
-            "append_to_response": "external_ids,credits,images,videos,watch/providers,similar",
+            "append_to_response": "external_ids,credits,images,videos,watch/providers,similar,recommendations",
             "include_image_language": "en,null"}, timeout=15)
         r.raise_for_status()
         dr = r.json() or {}
@@ -334,6 +395,7 @@ class TMDBClient:
                      for p in cmeta.get("crew") or []],
             "_extras": self._parse_extras(kind, dr),
         }
+        self._fill_collection(out["_extras"])
         if kind == "movie":
             out["year"] = (dr.get("release_date") or "")[:4] or None
             out["release_date"] = dr.get("release_date") or None
