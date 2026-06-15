@@ -28,9 +28,25 @@ class VideoEnrichmentEngine:
         # OMDb ratings (IMDb/RT/Metacritic) — not a matcher, so not a worker;
         # backfilled on the lazy detail refresh.
         self.ratings_client = ratings_client
+        # Short-TTL cache for live TMDB detail extras / preview payloads, so
+        # re-opening a title is instant instead of re-hitting TMDB.
+        self._tmdb_cache = {}
         # Restore each worker's persisted pause state (survives restart).
         for w in self.workers.values():
             w.restore_paused()
+
+    def _cache_get(self, key):
+        import time
+        hit = self._tmdb_cache.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        return None
+
+    def _cache_put(self, key, data, ttl=1800):
+        import time
+        if len(self._tmdb_cache) > 256:        # cheap bound — clear wholesale
+            self._tmdb_cache.clear()
+        self._tmdb_cache[key] = (time.monotonic() + ttl, data)
 
     def _backfill_ratings(self, kind, item_id):
         # The OMDb worker owns the ratings client (fallback to an injected one
@@ -159,10 +175,16 @@ class VideoEnrichmentEngine:
             info = (self.db.movie_match_info(item_id) if kind == "movie"
                     else self.db.show_match_info(item_id))
             if info and info.get("tmdb_id"):
-                try:
-                    out = w.client.extras(kind, info["tmdb_id"]) or {}
-                except Exception:
-                    logger.exception("item_extras failed for %s %s", kind, item_id)
+                key = ("extras", kind, info["tmdb_id"])
+                cached = self._cache_get(key)
+                if cached is None:
+                    try:
+                        cached = w.client.extras(kind, info["tmdb_id"]) or {}
+                        self._cache_put(key, cached)
+                    except Exception:
+                        logger.exception("item_extras failed for %s %s", kind, item_id)
+                        cached = {}
+                out = dict(cached)          # copy — the per-item server link isn't cached
         srv = self._server_watch_link(kind, item_id)
         if srv:
             out["server"] = srv
@@ -276,6 +298,9 @@ class VideoEnrichmentEngine:
         lib_id = self.db.library_id_for_tmdb(kind, tmdb_id)
         if lib_id:
             return {"redirect": {"source": "library", "kind": kind, "id": lib_id}}
+        cached = self._cache_get(("detail", kind, tmdb_id))
+        if cached is not None:
+            return dict(cached)
         try:
             d = w.client.full_detail(kind, tmdb_id)
         except Exception:
@@ -289,7 +314,10 @@ class VideoEnrichmentEngine:
         d.update({"trailer": ex.get("trailer"), "providers": ex.get("providers") or [],
                   "providers_link": ex.get("providers_link"), "similar": ex.get("similar") or [],
                   "recommendations": ex.get("recommendations") or [], "collection": ex.get("collection"),
-                  "next_episode": ex.get("next_episode"), "last_episode": ex.get("last_episode")})
+                  "next_episode": ex.get("next_episode"), "last_episode": ex.get("last_episode"),
+                  "gallery": ex.get("gallery"), "videos": ex.get("videos") or [],
+                  "keywords": ex.get("keywords") or [], "facts": ex.get("facts"),
+                  "cast_full": ex.get("cast_full") or []})
         if kind == "show":
             seasons = d.pop("_seasons", []) or []
             for s in seasons:
@@ -302,6 +330,7 @@ class VideoEnrichmentEngine:
             d["episode_total"] = sum(s["episode_total"] for s in seasons)
             d["episode_owned"] = 0
         self._fill_tmdb_ratings(d)
+        self._cache_put(("detail", kind, tmdb_id), d)
         return d
 
     def _fill_tmdb_ratings(self, d) -> None:

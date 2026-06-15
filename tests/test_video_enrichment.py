@@ -208,7 +208,8 @@ def test_tmdb_full_detail_movie(monkeypatch):
     assert d["cast"][0] == {"name": "Timothée", "character": "Paul",
                             "photo": "https://image.tmdb.org/t/p/w185/t.jpg", "tmdb_id": 11}
     assert d["imdb_id"] == "tt1160419" and d["logo"].endswith("/logo.png")
-    assert d["_extras"] == {}                                 # no videos/providers/similar here
+    assert "videos" not in d["_extras"] and "similar" not in d["_extras"]   # none in this body
+    assert d["_extras"]["cast_full"][0]["character"] == "Paul"              # full cast parsed
 
 
 def test_engine_tmdb_detail_redirects_when_owned(db):
@@ -571,6 +572,53 @@ def test_tmdb_extras_recommendations_and_collection(monkeypatch):
     assert ex["recommendations"][0]["tmdb_id"] == 7 and ex["recommendations"][0]["kind"] == "movie"
     assert ex["collection"]["name"] == "Saga Collection"
     assert [c["title"] for c in ex["collection"]["items"]] == ["First", "Second"]   # release order
+
+
+def test_tmdb_extras_gallery_videos_keywords_facts(monkeypatch):
+    detail = {
+        "budget": 63000000, "revenue": 463517383, "original_language": "en",
+        "production_countries": [{"name": "United States"}],
+        "images": {"backdrops": [{"file_path": "/b.jpg"}], "posters": [{"file_path": "/p.jpg"}]},
+        "videos": {"results": [
+            {"site": "YouTube", "type": "Featurette", "key": "f1", "name": "Making of"},
+            {"site": "YouTube", "type": "Trailer", "key": "t1", "name": "Trailer"}]},
+        "keywords": {"keywords": [{"name": "hacker"}, {"name": "dystopia"}]},
+        "credits": {"cast": [{"id": 1, "name": "Keanu", "character": "Neo", "profile_path": "/k.jpg"}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    ex = TMDBClient("KEY").extras("movie", 603)
+    assert ex["facts"]["budget"] == 63000000 and ex["facts"]["countries"] == ["United States"]
+    assert ex["gallery"]["backdrops"][0]["thumb"].endswith("/w780/b.jpg")
+    assert ex["gallery"]["backdrops"][0]["full"].endswith("/original/b.jpg")
+    assert [v["type"] for v in ex["videos"]] == ["Trailer", "Featurette"]   # trailer ordered first
+    assert ex["keywords"] == ["hacker", "dystopia"]
+    assert ex["cast_full"][0]["character"] == "Neo"
+
+
+def test_tmdb_extras_tv_full_cast_episode_counts(monkeypatch):
+    detail = {"aggregate_credits": {"cast": [
+        {"id": 1, "name": "Actor", "total_episode_count": 42, "roles": [{"character": "Lead"}]}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    ex = TMDBClient("KEY").extras("show", 1399)
+    c = ex["cast_full"][0]
+    assert c["character"] == "Lead" and c["episode_count"] == 42
+
+
+def test_item_extras_caches_tmdb_call(db, monkeypatch):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 603})
+    import config.settings as cs
+    class CM:
+        def get_plex_config(self): return {}
+        def get_jellyfin_config(self): return {}
+    monkeypatch.setattr(cs, "config_manager", CM())
+    calls = []
+    class Tmdb:
+        enabled = True
+        def extras(self, kind, tid): calls.append(tid); return {"keywords": ["x"]}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    a = eng.item_extras("movie", mid)
+    b = eng.item_extras("movie", mid)
+    assert a == b == {"keywords": ["x"]}
+    assert calls == [603]                     # second view served from cache
 
 
 def test_tmdb_extras_tv_next_episode(monkeypatch):
