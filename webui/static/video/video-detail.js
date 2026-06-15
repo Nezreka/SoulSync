@@ -724,6 +724,7 @@
 
     // ── billboard autoplay trailer (opt-in setting) ───────────────────────────
     var prefs = null, bbTrailerTimer = null, bbMuted = true;
+    var bbMsgHandler = null, bbRevealTimer = null;
     function loadPrefs(cb) {
         if (prefs) { cb(prefs); return; }
         fetch('/api/video/prefs', { headers: { 'Accept': 'application/json' } })
@@ -745,6 +746,7 @@
     function startBillboardTrailer(key) {
         var bb = q('.vd-billboard'); if (!bb || bb.querySelector('[data-vd-bb-trailer]')) return;
         bbMuted = true;
+        bb.classList.remove('vd-billboard--restoring');
         var wrap = document.createElement('div');
         wrap.className = 'vd-bb-trailer'; wrap.setAttribute('data-vd-bb-trailer', '');
         wrap.innerHTML = '<iframe allow="autoplay; encrypted-media" frameborder="0" ' +
@@ -753,14 +755,52 @@
             '<div class="vd-bb-tctrls"><button class="vd-bb-tbtn" type="button" data-vd-bb-mute aria-label="Unmute">🔇</button>' +
             '<button class="vd-bb-tbtn" type="button" data-vd-bb-stop aria-label="Stop">✕</button></div>';
         bb.appendChild(wrap);
+        var iframe = wrap.querySelector('iframe');
+        // Ask YouTube to report playback state, then reveal ONLY once it's truly
+        // PLAYING (state 1) — so the wipe doesn't fire over a black/buffering frame
+        // — and restore the backdrop when it ENDS (state 0).
+        function handshake() {
+            try {
+                iframe.contentWindow.postMessage(
+                    '{"event":"listening","id":"vd-bb","channel":"widget"}', '*');
+            } catch (e) { /* cross-origin not ready yet */ }
+        }
+        iframe.addEventListener('load', function () { handshake(); setTimeout(handshake, 500); });
+        bbMsgHandler = function (e) {
+            if (!iframe.contentWindow || e.source !== iframe.contentWindow) return;
+            var msg; try { msg = JSON.parse(e.data); } catch (x) { return; }
+            var st = null;
+            if (msg && msg.event === 'infoDelivery' && msg.info && typeof msg.info.playerState === 'number') st = msg.info.playerState;
+            else if (msg && msg.event === 'onStateChange' && typeof msg.info === 'number') st = msg.info;
+            if (st === 1) revealBillboardTrailer(bb);
+            else if (st === 0) restoreBillboard(bb);
+        };
+        window.addEventListener('message', bbMsgHandler);
+        // Safety net: if YouTube never reports PLAYING (blocked handshake), reveal
+        // anyway so a playing-but-hidden trailer doesn't sit behind the backdrop.
+        bbRevealTimer = setTimeout(function () { revealBillboardTrailer(bb); }, 4500);
+    }
+    function revealBillboardTrailer(bb) {
+        clearTimeout(bbRevealTimer); bbRevealTimer = null;
+        bb.classList.remove('vd-billboard--restoring');
         bb.classList.add('vd-billboard--trailer');
+    }
+    function restoreBillboard(bb) {
+        // Trailer finished → fade the original backdrop back in, then tear down.
+        bb.classList.remove('vd-billboard--trailer');
+        bb.classList.add('vd-billboard--restoring');
+        setTimeout(function () {
+            if (bb.classList.contains('vd-billboard--restoring')) stopBillboardTrailer();
+        }, 950);
     }
     function stopBillboardTrailer() {
         clearTimeout(bbTrailerTimer); bbTrailerTimer = null;
+        clearTimeout(bbRevealTimer); bbRevealTimer = null;
+        if (bbMsgHandler) { window.removeEventListener('message', bbMsgHandler); bbMsgHandler = null; }
         var ws = document.querySelectorAll('[data-vd-bb-trailer]');
         for (var i = 0; i < ws.length; i++) ws[i].remove();
-        var bbs = document.querySelectorAll('.vd-billboard--trailer');
-        for (var j = 0; j < bbs.length; j++) bbs[j].classList.remove('vd-billboard--trailer');
+        var bbs = document.querySelectorAll('.vd-billboard--trailer, .vd-billboard--restoring');
+        for (var j = 0; j < bbs.length; j++) bbs[j].classList.remove('vd-billboard--trailer', 'vd-billboard--restoring');
     }
     function toggleBillboardMute(btn) {
         bbMuted = !bbMuted;
