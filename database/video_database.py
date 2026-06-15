@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -76,6 +76,16 @@ _COLUMN_MIGRATIONS = [
     ("shows", "tmdb_last_attempted", "TEXT"),
     ("shows", "tvdb_match_status", "TEXT"),
     ("shows", "tvdb_last_attempted", "TEXT"),
+    # "capture everything" — richer metadata from the server.
+    ("movies", "tagline", "TEXT"),
+    ("movies", "rating", "REAL"),
+    ("movies", "rating_critic", "REAL"),
+    ("shows", "tagline", "TEXT"),
+    ("shows", "rating", "REAL"),
+    ("shows", "first_air_date", "TEXT"),
+    ("shows", "last_air_date", "TEXT"),
+    ("episodes", "still_url", "TEXT"),
+    ("episodes", "rating", "REAL"),
 ]
 
 
@@ -398,23 +408,40 @@ class VideoDatabase:
              file.get("runtime_seconds")),
         )
 
+    @staticmethod
+    def _set_genres(conn, link_table: str, owner_col: str, owner_id: int, names) -> None:
+        """Replace the genre links for one owner (normalised; dedup names in the
+        shared genres table). owner_col/link_table are internal, never user input."""
+        conn.execute(f"DELETE FROM {link_table} WHERE {owner_col}=?", (owner_id,))
+        for raw in (names or []):
+            name = (raw or "").strip()
+            if not name:
+                continue
+            conn.execute("INSERT OR IGNORE INTO genres (name) VALUES (?)", (name,))
+            gid = conn.execute("SELECT id FROM genres WHERE name=? COLLATE NOCASE", (name,)).fetchone()["id"]
+            conn.execute(f"INSERT OR IGNORE INTO {link_table} ({owner_col}, genre_id) VALUES (?, ?)",
+                         (owner_id, gid))
+
     def upsert_movie(self, server_source: str, item: dict) -> int:
         """Insert/update one movie (keyed on server id) and its file. Returns row id."""
         conn = self._get_connection()
         try:
             conn.execute(
                 "INSERT INTO movies (server_source, server_id, title, sort_title, year, overview, "
-                "runtime_minutes, content_rating, studio, poster_url, tmdb_id, imdb_id, has_file, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "runtime_minutes, content_rating, studio, tagline, rating, rating_critic, "
+                "poster_url, tmdb_id, imdb_id, has_file, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
                 "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
                 "overview=excluded.overview, runtime_minutes=excluded.runtime_minutes, "
                 "content_rating=excluded.content_rating, studio=excluded.studio, "
+                "tagline=excluded.tagline, rating=excluded.rating, rating_critic=excluded.rating_critic, "
                 "poster_url=excluded.poster_url, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, "
                 "has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
                 (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
                  item.get("year"), item.get("overview"), item.get("runtime_minutes"),
-                 item.get("content_rating"), item.get("studio"), item.get("poster_url"),
+                 item.get("content_rating"), item.get("studio"), item.get("tagline"),
+                 item.get("rating"), item.get("rating_critic"), item.get("poster_url"),
                  item.get("tmdb_id"), item.get("imdb_id"), 1 if item.get("file") else 0),
             )
             movie_id = conn.execute(
@@ -422,6 +449,7 @@ class VideoDatabase:
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
             self._set_media_file(conn, "movie_id", movie_id, item.get("file"))
+            self._set_genres(conn, "movie_genres", "movie_id", movie_id, item.get("genres"))
             conn.commit()
             return movie_id
         finally:
@@ -435,23 +463,28 @@ class VideoDatabase:
         try:
             conn.execute(
                 "INSERT INTO shows (server_source, server_id, title, sort_title, year, overview, status, "
-                "network, runtime_minutes, content_rating, poster_url, tvdb_id, tmdb_id, imdb_id, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "network, runtime_minutes, content_rating, tagline, rating, first_air_date, last_air_date, "
+                "poster_url, tvdb_id, tmdb_id, imdb_id, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(server_source, server_id) DO UPDATE SET "
                 "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
                 "overview=excluded.overview, status=excluded.status, network=excluded.network, "
                 "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
+                "tagline=excluded.tagline, rating=excluded.rating, first_air_date=excluded.first_air_date, "
+                "last_air_date=excluded.last_air_date, "
                 "poster_url=excluded.poster_url, tvdb_id=excluded.tvdb_id, tmdb_id=excluded.tmdb_id, "
                 "imdb_id=excluded.imdb_id, updated_at=CURRENT_TIMESTAMP",
                 (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
                  item.get("year"), item.get("overview"), item.get("status"), item.get("network"),
-                 item.get("runtime_minutes"), item.get("content_rating"), item.get("poster_url"),
-                 item.get("tvdb_id"), item.get("tmdb_id"), item.get("imdb_id")),
+                 item.get("runtime_minutes"), item.get("content_rating"), item.get("tagline"),
+                 item.get("rating"), item.get("first_air_date"), item.get("last_air_date"),
+                 item.get("poster_url"), item.get("tvdb_id"), item.get("tmdb_id"), item.get("imdb_id")),
             )
             show_id = conn.execute(
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
             ).fetchone()["id"]
+            self._set_genres(conn, "show_genres", "show_id", show_id, item.get("genres"))
 
             seen_seasons: set[int] = set()
             seen_eps: set[tuple[int, int]] = set()
@@ -479,17 +512,18 @@ class VideoDatabase:
                     conn.execute(
                         "INSERT INTO episodes (show_id, season_id, server_source, server_id, "
                         "season_number, episode_number, title, overview, air_date, "
-                        "runtime_minutes, tvdb_id, has_file) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        "runtime_minutes, still_url, rating, tvdb_id, has_file) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         "ON CONFLICT(show_id, season_number, episode_number) DO UPDATE SET "
                         "season_id=excluded.season_id, server_source=excluded.server_source, "
                         "server_id=excluded.server_id, title=excluded.title, "
                         "overview=excluded.overview, air_date=excluded.air_date, "
-                        "runtime_minutes=excluded.runtime_minutes, tvdb_id=excluded.tvdb_id, "
-                        "has_file=excluded.has_file",
+                        "runtime_minutes=excluded.runtime_minutes, still_url=excluded.still_url, "
+                        "rating=excluded.rating, tvdb_id=excluded.tvdb_id, has_file=excluded.has_file",
                         (show_id, season_id, server_source, ep.get("server_id"), snum, enum,
                          ep.get("title"), ep.get("overview"), ep.get("air_date"),
-                         ep.get("runtime_minutes"), ep.get("tvdb_id"), 1 if ep.get("file") else 0),
+                         ep.get("runtime_minutes"), ep.get("still_url"), ep.get("rating"),
+                         ep.get("tvdb_id"), 1 if ep.get("file") else 0),
                     )
                     ep_id = conn.execute(
                         "SELECT id FROM episodes WHERE show_id=? AND season_number=? AND episode_number=?",
@@ -617,6 +651,14 @@ class VideoDatabase:
                     "FROM seasons se JOIN shows sh ON sh.id = se.show_id WHERE se.id=?",
                     (item_id,)).fetchone()
                 return dict(row) if row else None
+            if kind == "episode":
+                if art != "poster":
+                    return None
+                # Episode still; episodes carry their own server_source + the still path.
+                row = conn.execute(
+                    "SELECT server_source, server_id, still_url AS poster_url "
+                    "FROM episodes WHERE id=?", (item_id,)).fetchone()
+                return dict(row) if row else None
             table = {"movie": "movies", "show": "shows"}.get(kind)
             col = {"poster": "poster_url", "backdrop": "backdrop_url"}.get(art)
             if not table or not col:
@@ -629,6 +671,13 @@ class VideoDatabase:
             conn.close()
 
     # ── detail payloads (drill-in pages) ──────────────────────────────────────
+    @staticmethod
+    def _genres_for(conn, link_table: str, owner_col: str, owner_id: int) -> list:
+        rows = conn.execute(
+            f"SELECT g.name FROM {link_table} lt JOIN genres g ON g.id = lt.genre_id "
+            f"WHERE lt.{owner_col}=? ORDER BY g.name", (owner_id,)).fetchall()
+        return [r["name"] for r in rows]
+
     def show_detail(self, show_id: int) -> dict | None:
         """Full TV-show detail: the show + its seasons → episodes tree, with
         owned/total roll-ups. Drives the (isolated) video show-detail page."""
@@ -637,13 +686,15 @@ class VideoDatabase:
             show = conn.execute("SELECT * FROM shows WHERE id=?", (show_id,)).fetchone()
             if not show:
                 return None
+            genres = self._genres_for(conn, "show_genres", "show_id", show_id)
             seasons = conn.execute(
                 "SELECT id, season_number, title, overview, "
                 "(poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
                 "FROM seasons WHERE show_id=? ORDER BY season_number", (show_id,)).fetchall()
             eps = conn.execute(
                 "SELECT id, season_number, episode_number, title, overview, air_date, "
-                "runtime_minutes, monitored, has_file FROM episodes WHERE show_id=? "
+                "runtime_minutes, rating, monitored, has_file, "
+                "(still_url IS NOT NULL AND still_url<>'') AS has_still FROM episodes WHERE show_id=? "
                 "ORDER BY season_number, episode_number", (show_id,)).fetchall()
         finally:
             conn.close()
@@ -653,7 +704,8 @@ class VideoDatabase:
             by_season.setdefault(e["season_number"], []).append({
                 "id": e["id"], "episode_number": e["episode_number"],
                 "title": e["title"], "overview": e["overview"], "air_date": e["air_date"],
-                "runtime_minutes": e["runtime_minutes"],
+                "runtime_minutes": e["runtime_minutes"], "rating": e["rating"],
+                "has_still": bool(e["has_still"]),
                 "monitored": bool(e["monitored"]), "owned": bool(e["has_file"]),
             })
 
@@ -686,6 +738,9 @@ class VideoDatabase:
             "kind": "show", "id": show["id"], "title": show["title"], "year": show["year"],
             "overview": show["overview"], "status": show["status"], "network": show["network"],
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
+            "tagline": show["tagline"], "rating": show["rating"],
+            "first_air_date": show["first_air_date"], "last_air_date": show["last_air_date"],
+            "genres": genres,
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
             "monitored": bool(show["monitored"]),
@@ -717,6 +772,7 @@ class VideoDatabase:
             m = conn.execute("SELECT * FROM movies WHERE id=?", (movie_id,)).fetchone()
             if not m:
                 return None
+            genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
             f = conn.execute(
                 "SELECT resolution, quality, video_codec, audio_codec, size_bytes "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC LIMIT 1",
@@ -727,7 +783,8 @@ class VideoDatabase:
             "kind": "movie", "id": m["id"], "title": m["title"], "year": m["year"],
             "overview": m["overview"], "status": m["status"], "studio": m["studio"],
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
-            "content_rating": m["content_rating"],
+            "content_rating": m["content_rating"], "tagline": m["tagline"],
+            "rating": m["rating"], "rating_critic": m["rating_critic"], "genres": genres,
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),

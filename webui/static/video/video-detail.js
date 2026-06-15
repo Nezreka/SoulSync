@@ -110,9 +110,13 @@
             poster.src = '/api/video/poster/show/' + d.id;
         }
 
+        var tl = q('[data-vd-tagline]');
+        if (tl) { tl.textContent = d.tagline || ''; tl.hidden = !d.tagline; }
+
         var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
         var meta = [];
         meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+        if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
         if (d.content_rating) meta.push('<span class="vd-meta-rating">' + esc(d.content_rating) + '</span>');
         meta.push('<span>' + d.season_count + ' Season' + (d.season_count === 1 ? '' : 's') + '</span>');
@@ -133,7 +137,12 @@
             if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
             l.innerHTML = badges.join('');
         }
-        var g = q('[data-vd-genres]'); if (g) g.innerHTML = '';
+        var g = q('[data-vd-genres]');
+        if (g) {
+            g.innerHTML = (d.genres || []).slice(0, 6).map(function (gn) {
+                return '<span class="vd-genre">' + esc(gn) + '</span>';
+            }).join('');
+        }
     }
 
     function renderActions(d) {
@@ -225,9 +234,12 @@
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
+        var still = ep.has_still
+            ? '<img class="vd-ep-still" src="/api/video/poster/episode/' + ep.id + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '';
         return '<div class="vd-ep ' + owned + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
-            '<div class="vd-ep-thumb"><span class="vd-ep-thumb-ic">▶</span></div>' +
+            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +

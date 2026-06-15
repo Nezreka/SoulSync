@@ -77,6 +77,9 @@ CREATE TABLE IF NOT EXISTS movies (
     digital_release_date TEXT,
     studio               TEXT,
     content_rating       TEXT,            -- e.g. PG-13
+    tagline              TEXT,
+    rating               REAL,            -- audience score (0-10)
+    rating_critic        REAL,            -- critic score (0-100) when offered
     poster_url           TEXT,
     backdrop_url         TEXT,
     monitored            INTEGER NOT NULL DEFAULT 1,   -- tracked for acquisition
@@ -114,6 +117,10 @@ CREATE TABLE IF NOT EXISTS shows (
     network            TEXT,
     runtime_minutes    INTEGER,
     content_rating     TEXT,
+    tagline            TEXT,
+    rating             REAL,             -- audience score (0-10)
+    first_air_date     TEXT,
+    last_air_date      TEXT,
     poster_url         TEXT,
     backdrop_url       TEXT,
     monitored          INTEGER NOT NULL DEFAULT 1,   -- "following" (watchlist)
@@ -152,6 +159,8 @@ CREATE TABLE IF NOT EXISTS episodes (
     overview        TEXT,
     air_date        TEXT,             -- ISO date — drives the Calendar
     runtime_minutes INTEGER,
+    still_url       TEXT,             -- per-episode thumbnail (server image path)
+    rating          REAL,             -- audience score (0-10)
     tvdb_id         INTEGER,
     monitored       INTEGER NOT NULL DEFAULT 1,
     has_file        INTEGER NOT NULL DEFAULT 0,
@@ -160,6 +169,24 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS idx_episodes_show     ON episodes(show_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_air      ON episodes(air_date);
 CREATE INDEX IF NOT EXISTS idx_episodes_wanted   ON episodes(monitored, has_file);
+
+-- ── Genres (normalised many-to-many; no comma-blob) ─────────────────────────
+CREATE TABLE IF NOT EXISTS genres (
+    id   INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE COLLATE NOCASE
+);
+CREATE TABLE IF NOT EXISTS movie_genres (
+    movie_id INTEGER NOT NULL REFERENCES movies(id) ON DELETE CASCADE,
+    genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+    PRIMARY KEY (movie_id, genre_id)
+);
+CREATE TABLE IF NOT EXISTS show_genres (
+    show_id  INTEGER NOT NULL REFERENCES shows(id)  ON DELETE CASCADE,
+    genre_id INTEGER NOT NULL REFERENCES genres(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, genre_id)
+);
+CREATE INDEX IF NOT EXISTS idx_movie_genres_genre ON movie_genres(genre_id);
+CREATE INDEX IF NOT EXISTS idx_show_genres_genre  ON show_genres(genre_id);
 
 -- ── Content: YouTube (channels → videos) ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS channels (
