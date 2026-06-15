@@ -63,6 +63,22 @@ def test_show_detail_endpoint(tmp_path):
         videoapi._video_db = None
 
 
+def test_monitor_toggle_endpoint(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        sid = videoapi._video_db.upsert_show_tree("plex", {"server_id": "s1", "title": "S"})
+        r = client.post("/api/video/monitor", json={"kind": "show", "id": sid, "monitored": False})
+        assert r.status_code == 200 and r.get_json()["monitored"] is False
+        assert videoapi._video_db.show_detail(sid)["monitored"] is False
+        r2 = client.post("/api/video/monitor", json={"kind": "show", "id": sid, "monitored": True})
+        assert r2.status_code == 200 and videoapi._video_db.show_detail(sid)["monitored"] is True
+        # bad inputs
+        assert client.post("/api/video/monitor", json={"kind": "bogus", "id": sid}).status_code == 400
+        assert client.post("/api/video/monitor", json={"kind": "show", "id": 999999, "monitored": True}).status_code == 404
+    finally:
+        videoapi._video_db = None
+
+
 def test_movie_detail_endpoint(tmp_path):
     client, videoapi = _make_client(tmp_path)
     try:
