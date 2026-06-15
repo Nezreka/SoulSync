@@ -36,6 +36,8 @@ class VideoEnrichmentWorker:
         self._stop = threading.Event()
         self.current_item = None
         self.stats = {"matched": 0, "not_found": 0, "errors": 0}
+        self.note = None                 # a human reason when auto-paused (e.g. bad key)
+        self._rating_errors = 0          # consecutive ratings failures (transient backoff)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self):
@@ -149,23 +151,45 @@ class VideoEnrichmentWorker:
     def _process_ratings_one(self) -> bool:
         """OMDb worker: fetch IMDb/RT/Metacritic for the next library item that has
         an imdb_id but no ratings yet."""
+        from .clients import OMDbAuthError
         item = self.db.ratings_next()
         if not item:
+            self._rating_errors = 0
             return False
         self.current_item = {"type": item["kind"], "name": item["title"]}
         try:
             r = self.client.ratings(item["imdb_id"])
-            if r:
-                self.db.apply_ratings(item["kind"], item["id"], r)   # marks synced
-                self.stats["matched"] += 1
-                logger.info("Rated %s '%s' -> IMDb %s", item["kind"], item["title"], item["imdb_id"])
-            else:
-                self.db.mark_ratings_synced(item["kind"], item["id"])
-                self.stats["not_found"] += 1
-        except Exception:
-            logger.exception("OMDb ratings fetch failed for '%s'", item["title"])
+        except OMDbAuthError as e:
+            # Bad/expired key affects EVERY item — pause instead of churning the
+            # whole library + flooding the log. Transient pause (not persisted) so
+            # fixing the key (which rebuilds the engine) resumes automatically. The
+            # item is NOT marked synced, so it'll be tried again once the key works.
+            if not self.paused:
+                logger.warning("OMDb rejected the API key — pausing ratings until it's fixed (%s)", e)
+            self.note = "OMDb API key rejected"
+            self.pause(persist=False)
+            return False
+        except Exception as e:
+            # Transient (network / rate-limit / 5xx) — don't burn the item to
+            # 'synced'; back off, and pause after a few in a row so we don't spin.
             self.stats["errors"] += 1
-            self.db.mark_ratings_synced(item["kind"], item["id"])    # move on (no loop)
+            self._rating_errors = getattr(self, "_rating_errors", 0) + 1
+            logger.warning("OMDb ratings fetch failed for '%s': %s", item["title"], e)
+            if self._rating_errors >= 3:
+                logger.warning("OMDb: pausing ratings after repeated errors")
+                self.note = "OMDb temporarily unavailable"
+                self.pause(persist=False)
+                self._rating_errors = 0
+            return False
+        self._rating_errors = 0
+        self.note = None
+        if r:
+            self.db.apply_ratings(item["kind"], item["id"], r)       # marks synced
+            self.stats["matched"] += 1
+            logger.info("Rated %s '%s' -> IMDb %s", item["kind"], item["title"], item["imdb_id"])
+        else:
+            self.db.mark_ratings_synced(item["kind"], item["id"])    # genuine no-data
+            self.stats["not_found"] += 1
         return True
 
     def _sync_episodes_once(self) -> bool:
@@ -248,6 +272,7 @@ class VideoEnrichmentWorker:
             "paused": self.paused,
             "idle": idle,
             "current_item": self.current_item,
+            "note": self.note,
             "stats": {**self.stats, "pending": pending},
             "progress": progress,
             "breakdown": breakdown,

@@ -83,6 +83,18 @@ def test_tmdb_detail_endpoint(tmp_path, monkeypatch):
     assert client.get("/api/video/tmdb/bogus/1").status_code == 400
 
 
+def test_omdb_key_change_retries_unrated(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    db = videoapi._video_db
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
+    db.apply_ratings("movie", mid, {})              # burned: synced, but no rating
+    assert db.ratings_next() is None                # not pending
+    monkeypatch.setattr("core.video.enrichment.engine.rebuild_video_enrichment_engine", lambda: None)
+    resp = client.post("/api/video/enrichment/config", json={"omdb_api_key": "NEWKEY"})
+    assert resp.status_code == 200
+    assert db.ratings_next() is not None            # new key → re-queued for rating
+
+
 def test_show_detail_endpoint(tmp_path):
     client, videoapi = _make_client(tmp_path)
     try:

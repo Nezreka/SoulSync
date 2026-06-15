@@ -481,6 +481,12 @@ class TVDBClient:
         return {"id": tvdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
 
+class OMDbAuthError(Exception):
+    """OMDb rejected the API key (HTTP 401 / 'Invalid API key!'). Distinct from a
+    transient error or a genuine 'no rating' so the worker can pause instead of
+    churning the whole library on a bad key."""
+
+
 class OMDBClient:
     """Ratings provider — IMDb / Rotten Tomatoes / Metacritic by imdb_id. Not a
     matcher (we already have the id), so it's used as a ratings backfill, not a
@@ -515,10 +521,16 @@ class OMDBClient:
             return None
         import requests
         r = requests.get(self.BASE, params={"apikey": self.api_key, "i": imdb_id}, timeout=12)
+        # A bad/expired key is a 401 (sometimes a 200 with "Invalid API key!") — a
+        # config problem that affects EVERY item, so flag it distinctly.
+        if r.status_code == 401:
+            raise OMDbAuthError("OMDb rejected the API key (HTTP 401)")
         r.raise_for_status()
         d = r.json() or {}
         if d.get("Response") != "True":
-            return None
+            if "invalid api key" in (d.get("Error") or "").lower():
+                raise OMDbAuthError(d.get("Error") or "Invalid OMDb API key")
+            return None        # genuine "no data for this title"
         out = {}
         ir = d.get("imdbRating")
         if ir and ir != "N/A":
