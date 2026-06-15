@@ -21,6 +21,41 @@
     var VIDEO_SUBTITLE = 'Movies, TV & YouTube';
     var DEFAULT_VIDEO_PAGE = 'video-dashboard';
 
+    // ── URL routing — REAL links, mirroring music's /artist-detail/<source>/<id>.
+    // A drill-in is a genuine <a href="/video-detail/<source>/<kind>/<id>"> so
+    // reload / Back / Forward / open-in-new-tab all work. ``source`` is 'library'
+    // (a video.db id) today; 'tmdb' (a search result not yet in the library) later.
+    var DETAIL_BASE = '/video-detail/';
+    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1 };
+
+    function buildDetailPath(source, kind, id) {
+        return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + id;
+    }
+    function parseDetailPath(pathname) {
+        if (!pathname || pathname.indexOf(DETAIL_BASE) !== 0) return null;
+        var p = pathname.slice(DETAIL_BASE.length).split('/').filter(Boolean);
+        if (p.length < 3) return null;
+        var kind = p[1], id = parseInt(p[2], 10);
+        if ((kind !== 'movie' && kind !== 'show') || isNaN(id)) return null;
+        return { source: decodeURIComponent(p[0]), kind: kind, id: id };
+    }
+    // Restore a detail from the URL (popstate / initial load) WITHOUT re-pushing.
+    function restoreDetail(r) {
+        if (readSide() !== 'video') { persistSide('video'); applySide('video'); }
+        document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+            { detail: { kind: r.kind, id: r.id, source: r.source, _restore: true } }));
+    }
+    function onPopState() {
+        var r = parseDetailPath(window.location.pathname);
+        if (r) { restoreDetail(r); return; }
+        // Left the detail URL — if we're still on the video side showing a detail,
+        // fall back to the library (Back out of the detail).
+        if (document.body.getAttribute('data-side') === 'video' &&
+            DETAIL_PAGES[document.body.getAttribute('data-video-page')]) {
+            navigate('video-library');
+        }
+    }
+
     // The video sidebar pages. Pages flagged shared: true are "same as music"
     // (Import / Issues / Help) — wired to reuse the music pages in a later step;
     // for now every page renders the placeholder.
@@ -129,6 +164,11 @@
     function navigate(pageId) {
         setActiveNav(pageId);
         showPage(pageId);
+        // Moving off a detail via the sidebar/nav drops the detail URL so a reload
+        // doesn't re-open it (detail pages keep their own URL via pushState).
+        if (!DETAIL_PAGES[pageId] && parseDetailPath(window.location.pathname)) {
+            try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
+        }
     }
 
     function applySide(side) {
@@ -150,9 +190,15 @@
         if (side !== 'music' && side !== 'video') return;
         persistSide(side);
         applySide(side);
+        if (side === 'music' && parseDetailPath(window.location.pathname)) {
+            try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
+        }
     }
 
     function init() {
+        // Capture a deep-linked detail path BEFORE applySide can clear it.
+        var bootDetail = parseDetailPath(window.location.pathname);
+
         var toggleButtons = document.querySelectorAll('.side-toggle-btn');
         for (var i = 0; i < toggleButtons.length; i++) {
             (function (btn) {
@@ -184,20 +230,50 @@
             })(gotos[k]);
         }
 
-        // Drill-in: a card fires soulsync:video-open-detail {kind, id}. We just
-        // navigate to the matching detail subpage; video-detail.js (listening to
-        // the same event) loads the data. Keeps the two concerns decoupled.
+        // Drill-in: a card fires soulsync:video-open-detail {kind, id, source}. We
+        // navigate to the matching detail subpage (video-detail.js loads the data)
+        // and push a real URL — unless we're restoring from the URL (_restore).
         document.addEventListener('soulsync:video-open-detail', function (e) {
-            var kind = e && e.detail && e.detail.kind;
-            if (kind === 'movie') navigate('video-movie-detail');
-            else if (kind === 'show') navigate('video-show-detail');
+            var d = e && e.detail; if (!d) return;
+            if (d.kind === 'movie') navigate('video-movie-detail');
+            else if (d.kind === 'show') navigate('video-show-detail');
+            else return;
+            if (!d._restore) {
+                var path = buildDetailPath(d.source, d.kind, d.id);
+                if (window.location.pathname !== path) {
+                    history.pushState({ videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library' } },
+                        '', path);
+                }
+            }
         });
+
+        // The detail "← Library" back button is real Back (returns to wherever you
+        // drilled in from); falls back to the library if there's no in-app history.
+        document.addEventListener('click', function (e) {
+            var back = e.target.closest('[data-video-detail-back]');
+            if (!back) return;
+            e.preventDefault();
+            if (history.state && history.state.videoDetail) history.back();
+            else navigate('video-library');
+        });
+
+        window.addEventListener('popstate', onPopState);
 
         var defaultNav = document.querySelector(
             '.video-nav .nav-button[data-video-page="' + DEFAULT_VIDEO_PAGE + '"]');
         if (defaultNav) defaultNav.classList.add('active');
 
-        applySide(readSide());
+        applySide(bootDetail ? 'video' : readSide());
+
+        // Deep link / reload straight to a detail URL → restore it (applySide above
+        // may have cleared the URL, so re-assert it first).
+        if (bootDetail) {
+            var path = buildDetailPath(bootDetail.source, bootDetail.kind, bootDetail.id);
+            try {
+                history.replaceState({ videoDetail: bootDetail }, '', path);
+            } catch (e) { /* ignore */ }
+            restoreDetail(bootDetail);
+        }
     }
 
     if (document.readyState === 'loading') {

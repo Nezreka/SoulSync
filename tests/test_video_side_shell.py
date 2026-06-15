@@ -341,8 +341,8 @@ def test_show_detail_subpage_present():
                  'data-vd-season-nav', 'data-vd-episodes', 'data-vd-cast', 'data-vd-crew',
                  'data-vd-logo', 'data-vd-providers', 'data-vd-similar'):
         assert hook in block, hook
-    # Back button reuses the shared data-video-goto nav (no inline handler).
-    assert 'data-video-goto="video-library"' in block
+    # Back button is real browser Back (history), not a hardcoded nav.
+    assert 'data-video-detail-back' in block
     assert "onclick" not in block
 
 
@@ -352,13 +352,27 @@ def test_movie_detail_subpage_present():
     assert 'data-video-detail="movie"' in block
     for hook in ('data-vd-backdrop', 'data-vd-title', 'data-vd-details', 'data-vd-cast'):
         assert hook in block, hook
-    assert 'data-video-goto="video-library"' in block and "onclick" not in block
+    assert 'data-video-detail-back' in block and "onclick" not in block
 
 
-def test_library_movie_cards_are_clickable():
-    # Both kinds drill in now (no show-only gate).
+def test_library_cards_are_real_detail_links():
+    # Cards are genuine <a href="/video-detail/library/<kind>/<id>"> (parity with
+    # the music artist cards) so reload / new-tab / Back work.
     assert 'data-video-card-open="' in _LIB_JS
+    assert "/video-detail/library/" in _LIB_JS
     assert "kind === 'show' ?" not in _LIB_JS      # the old show-only gate is gone
+    # Modifier-clicks fall through to the real href (open in new tab).
+    assert "metaKey" in _LIB_JS and "ctrlKey" in _LIB_JS
+
+
+def test_video_side_has_real_url_routing():
+    # Mirrors music: real /video-detail/<source>/<kind>/<id> URLs with pushState +
+    # popstate so Back/Forward/reload restore the same item.
+    assert "/video-detail/" in _JS
+    assert "history.pushState" in _JS and "popstate" in _JS
+    assert "parseDetailPath" in _JS and "buildDetailPath" in _JS
+    # Source segment for library-vs-search (search lands later).
+    assert "'library'" in _JS
 
 
 def test_video_detail_module_referenced_and_isolated():
