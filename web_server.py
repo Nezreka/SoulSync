@@ -11788,34 +11788,43 @@ def _resolve_library_file_path(file_path):
     except Exception as e:
         logger.debug("library music paths read failed: %s", e)
 
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    # Try progressively shorter path suffixes against each candidate directory
-    # (skip index 0 to avoid drive letter issues). find_on_disk matches each
-    # component exactly when present, else folds typographic confusables (#833:
-    # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
-    # matches always win, so paths that already resolved are unaffected.
-    from core.library.path_resolve import find_on_disk
-    # Config often stores RELATIVE paths ("./Transfer") that don't match the
-    # actual absolute Docker mount ("/Transfer"). Also search the CWD-absolute
-    # and root-absolute forms so a relative config still resolves.
-    base_dirs = [transfer_dir, download_dir] + list(library_dirs)
-    for b in [transfer_dir, download_dir]:
-        if b and not os.path.isabs(b):
-            base_dirs.append(os.path.abspath(b))
-            base_dirs.append('/' + b.replace('./', '', 1).lstrip('/'))
-    seen_bases = set()
-    for base_dir in base_dirs:
-        if not base_dir or base_dir in seen_bases or not os.path.isdir(base_dir):
+    # Build the set of candidate base directories (absolute forms only, so
+    # os.path.join produces unambiguous paths). Config often stores RELATIVE
+    # paths ("./Transfer") — take os.path.abspath() so they resolve from the
+    # current working directory of the server process.
+    library_dir_list = list(library_dirs)
+    raw_bases = [transfer_dir, download_dir] + library_dir_list
+    abs_bases = []
+    seen_abs = set()
+    for b in raw_bases:
+        if not b:
             continue
-        seen_bases.add(base_dir)
-        # Start at index 0 so a clean relative path ("Artist/Album/Track.flac")
-        # is tried in FULL first — the library scanner stores exactly that, and
-        # skipping index 0 dropped the artist folder so it never matched. A
-        # Windows drive-letter part 0 ("E:") simply fails this attempt and falls
-        # through to the shorter suffixes below, so this is safe for both.
+        for form in [os.path.abspath(b), b, '/' + b.replace('./', '', 1).lstrip('/')]:
+            a = os.path.abspath(form) if not os.path.isabs(form) else form
+            if a and a not in seen_abs and os.path.isdir(a):
+                seen_abs.add(a)
+                abs_bases.append(a)
+
+    # --- Fast path: direct join ---
+    # When the DB stores a clean relative path ("Artist/Album/Track.flac") this
+    # is all that's needed. No component-by-component descent, no confusable
+    # folding. This handles the common Docker case where CWD is /app, config
+    # says ./Transfer, and files live at /app/Transfer/Artist/Album/Track.flac.
+    clean_rel = file_path.replace('\\', '/')
+    for abs_base in abs_bases:
+        candidate = os.path.join(abs_base, clean_rel)
+        if os.path.exists(candidate):
+            logger.debug("[PathResolve] direct join: %r → %r", file_path, candidate)
+            return candidate
+
+    # --- Slow path: confusable-tolerant suffix scan ---
+    # Handles paths with typographic apostrophes/dashes that differ between the
+    # DB metadata and the actual on-disk filename (#833).
+    path_parts = clean_rel.split('/')
+    from core.library.path_resolve import find_on_disk
+    for abs_base in abs_bases:
         for i in range(0, len(path_parts)):
-            found = find_on_disk(base_dir, path_parts[i:])
+            found = find_on_disk(abs_base, path_parts[i:])
             if found:
                 return found
 
@@ -11826,10 +11835,10 @@ def _resolve_library_file_path(file_path):
     if not _resolve_library_diag_logged:
         _resolve_library_diag_logged = True
         logger.warning(
-            "[PathResolve] Could not resolve %r under any base dir — searched %r (cwd=%r). "
+            "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
             "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
             "the dir under Settings > Library music paths.",
-            file_path, [b for b in base_dirs if b and os.path.isdir(b)], os.getcwd(),
+            file_path, abs_bases, os.getcwd(),
         )
     return None
 
