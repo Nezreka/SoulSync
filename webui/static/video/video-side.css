@@ -1177,15 +1177,17 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 /* Matches .vd-trailer-btn exactly (consistent with the other hero buttons) —
    just green to read as "owned / play". */
 .vd-play-btn {
-    display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 8px;
+    display: inline-flex; align-items: center; gap: 7px; padding: 7px 18px; border-radius: 8px;
     font-size: 12.5px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer; text-decoration: none;
-    color: #fff; background: #22c55e; border: 1px solid transparent;
+    color: #fff; border: 1px solid transparent;
+    /* deeper green so the light Plex/Jellyfin wordmark reads clearly on it */
+    background: linear-gradient(135deg, #1fae54, #15803d);
     box-shadow: 0 6px 18px rgba(34, 197, 94, 0.4); transition: all 0.2s ease;
 }
-.vd-play-btn:hover { transform: translateY(-1px); filter: brightness(1.08);
+.vd-play-btn:hover { transform: translateY(-1px); filter: brightness(1.1);
     box-shadow: 0 8px 22px rgba(34, 197, 94, 0.55); }
-.vd-play-logo { height: 14px; width: auto; }
-.vd-play-ic { font-size: 13px; }
+.vd-play-logo { height: 15px; width: auto; position: relative; top: 0.5px; }
+.vd-play-ic { font-size: 12px; }
 
 .vd-crew-line { font-size: 14px; color: rgba(255, 255, 255, 0.84); margin: 2px 0 14px;
     text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6); }
