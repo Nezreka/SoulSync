@@ -34,6 +34,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/scan/stop" in rules
     assert "/api/video/library" in rules
     assert "/api/video/libraries" in rules
+    assert "/api/video/server" in rules
     assert any(r.startswith("/api/video/poster/") for r in rules)
     assert "/api/video/enrichment/services" in rules
     assert "/api/video/enrichment/<service>/status" in rules

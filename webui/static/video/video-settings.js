@@ -13,6 +13,46 @@
     var PAGE_ID = 'video-settings';
     var URL = '/api/video/libraries';
     var CONFIG_URL = '/api/video/enrichment/config';
+    var SERVER_URL = '/api/video/server';
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    // ── Video Source (which Plex/Jellyfin the video side uses) ──────────────
+    function loadServer() {
+        var host = document.querySelector('[data-video-source-panel]');
+        if (!host) return;
+        fetch(SERVER_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { renderServer(host, d || {}); })
+            .catch(function () { renderServer(host, {}); });
+    }
+    function srvBtn(id, label, active) {
+        return '<button class="vid-source-btn' + (id === active ? ' active' : '') +
+            '" type="button" data-video-server-pick="' + id + '">' + label + '</button>';
+    }
+    function renderServer(host, d) {
+        var plex = !!d.plex, jelly = !!d.jellyfin;
+        if (!plex && !jelly) {
+            host.innerHTML = '<div class="vid-source-none">No video server connected. ' +
+                'Connect <strong>Plex</strong> or <strong>Jellyfin</strong> under <em>Server Connections</em> ' +
+                'below to scan and browse your video library. <em>(Navidrome and Standalone are music-only.)</em></div>';
+        } else if (plex && jelly) {
+            host.innerHTML = '<div class="vid-source-pick">' +
+                srvBtn('plex', 'Plex', d.server) + srvBtn('jellyfin', 'Jellyfin', d.server) + '</div>' +
+                '<div class="callback-help">Both are connected — pick which one the video side uses.</div>';
+        } else {
+            host.innerHTML = '<div class="vid-source-using"><span class="vid-source-check">✓</span> ' +
+                'Video uses <strong>' + (plex ? 'Plex' : 'Jellyfin') + '</strong></div>';
+        }
+    }
+    function pickServer(id) {
+        fetch(SERVER_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ server: id })
+        }).then(function () { loadServer(); load(); }).catch(function () { /* ignore */ });
+    }
 
     function status(text) {
         var n = document.querySelector('[data-video-lib-status]');
@@ -129,6 +169,7 @@
 
     function onPageShown(e) {
         if (e && e.detail !== PAGE_ID) return;
+        loadServer();
         load();
         loadKeys();
     }
@@ -149,6 +190,11 @@
         if (autoplay) autoplay.addEventListener('change', savePrefs);
         var region = document.getElementById('video-watch-region');
         if (region) region.addEventListener('change', savePrefs);
+        // Video source picker (delegated — the panel is rendered async).
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-video-server-pick]');
+            if (btn) pickServer(btn.getAttribute('data-video-server-pick'));
+        });
         // Per-connection Test buttons (same behaviour as music's testConnection).
         var testBtns = document.querySelectorAll('[data-video-test-service]');
         for (var k = 0; k < testBtns.length; k++) {

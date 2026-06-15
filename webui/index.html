@@ -5133,6 +5133,13 @@
                             <!-- Video API Configuration (placeholders; shown only on the video
                                  side in place of the music API services). Same structure as the
                                  music service frames above. -->
+                            <!-- Video Source (which Plex/Jellyfin the video side uses) -->
+                            <div class="settings-group" data-video-only>
+                                <h3>Video Source</h3>
+                                <div class="vid-source-panel" data-video-source-panel>
+                                    <div class="callback-help">Checking…</div>
+                                </div>
+                            </div>
                             <div class="settings-group" data-stg="connections" data-video-only>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
                                 <div class="api-service-frame stg-service" data-video-service="tmdb">
@@ -5191,6 +5198,10 @@
                                         <button class="test-button" type="button" data-video-test-service="omdb">Test OMDb</button>
                                     </div>
                                 </div>
+                            </div>
+                            <!-- Video Preferences (video-side only) -->
+                            <div class="settings-group" data-video-only>
+                                <h3>Video Preferences</h3>
                                 <div class="api-service-frame stg-service" data-video-service="prefs">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #38bdf8;"></span>
