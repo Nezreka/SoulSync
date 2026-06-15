@@ -158,6 +158,7 @@ class TMDBClient:
             meta["crew"] = crew
 
     POSTER_W = "https://image.tmdb.org/t/p/w300"
+    BACKDROP_W = "https://image.tmdb.org/t/p/w780"
     PROVIDER = "https://image.tmdb.org/t/p/original"
 
     def extras(self, kind, tmdb_id, region="US"):
@@ -167,9 +168,13 @@ class TMDBClient:
             return {}
         import requests
         path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
+        # TV uses aggregate_credits (it carries per-actor episode counts); movies
+        # use credits. One call (append_to_response) fetches everything.
+        creds = "aggregate_credits" if kind == "show" else "credits"
         r = requests.get(self.BASE + path, params={
-            "api_key": self.api_key,
-            "append_to_response": "videos,watch/providers,similar,recommendations"}, timeout=15)
+            "api_key": self.api_key, "include_image_language": "en,null",
+            "append_to_response": "videos,watch/providers,similar,recommendations,images,keywords," + creds},
+            timeout=15)
         r.raise_for_status()
         out = self._parse_extras(kind, r.json() or {}, region)
         self._fill_collection(out)
@@ -236,7 +241,82 @@ class TMDBClient:
                 out["next_episode"] = self._episode_stub(d["next_episode_to_air"])
             if d.get("last_episode_to_air"):
                 out["last_episode"] = self._episode_stub(d["last_episode_to_air"])
+
+        # Photos gallery (backdrops + posters) — thumb for the grid, full for the
+        # lightbox.
+        imgs = d.get("images") or {}
+        gallery = {}
+        backs = [{"thumb": self.BACKDROP_W + b["file_path"], "full": self.IMG + b["file_path"]}
+                 for b in (imgs.get("backdrops") or [])[:14] if b.get("file_path")]
+        posts = [{"thumb": self.POSTER_W + p["file_path"], "full": self.IMG + p["file_path"]}
+                 for p in (imgs.get("posters") or [])[:14] if p.get("file_path")]
+        if backs:
+            gallery["backdrops"] = backs
+        if posts:
+            gallery["posters"] = posts
+        if gallery:
+            out["gallery"] = gallery
+
+        # All videos (YouTube) — trailers / teasers / featurettes / clips / BTS.
+        vids = []
+        for v in (d.get("videos") or {}).get("results") or []:
+            if v.get("site") == "YouTube" and v.get("key") and v.get("type"):
+                vids.append({"key": v["key"], "name": v.get("name"), "type": v.get("type")})
+        if vids:
+            out["videos"] = self._order_videos(vids)
+
+        # Keywords / tags.
+        kw = d.get("keywords") or {}
+        kwlist = kw.get("keywords") or kw.get("results") or []
+        keywords = [k.get("name") for k in kwlist if k.get("name")][:14]
+        if keywords:
+            out["keywords"] = keywords
+
+        # Facts / box office.
+        facts = {}
+        if kind == "movie":
+            if d.get("budget"):
+                facts["budget"] = d["budget"]
+            if d.get("revenue"):
+                facts["revenue"] = d["revenue"]
+        if d.get("original_language"):
+            facts["original_language"] = d["original_language"]
+        countries = [c.get("name") for c in (d.get("production_countries") or []) if c.get("name")]
+        if not countries and d.get("origin_country"):
+            countries = list(d.get("origin_country") or [])
+        if countries:
+            facts["countries"] = countries[:3]
+        if facts:
+            out["facts"] = facts
+
+        # Full cast (for the "view all" expansion) — tv carries episode counts.
+        out["cast_full"] = self._full_cast(d, kind)
+        if not out["cast_full"]:
+            out.pop("cast_full")
         return out
+
+    _VIDEO_ORDER = {"Trailer": 0, "Teaser": 1, "Clip": 2, "Featurette": 3, "Behind the Scenes": 4}
+
+    def _order_videos(self, vids):
+        return sorted(vids, key=lambda v: self._VIDEO_ORDER.get(v.get("type"), 9))[:18]
+
+    def _full_cast(self, d, kind):
+        if kind == "show":
+            src = (d.get("aggregate_credits") or {}).get("cast") \
+                or (d.get("credits") or {}).get("cast") or []
+        else:
+            src = (d.get("credits") or {}).get("cast") or []
+        out = []
+        for c in src:
+            if not c.get("name"):
+                continue
+            char = c.get("character")
+            if not char and c.get("roles"):
+                char = (c["roles"][0] or {}).get("character")
+            out.append({"name": c["name"], "character": char or None, "tmdb_id": c.get("id"),
+                        "photo": (self.PROFILE + c["profile_path"]) if c.get("profile_path") else None,
+                        "episode_count": c.get("total_episode_count")})
+        return out[:80]
 
     def _title_list(self, results, kind):
         out = []
@@ -366,9 +446,11 @@ class TMDBClient:
             return None
         import requests
         path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
+        agg = ",aggregate_credits" if kind == "show" else ""
         r = requests.get(self.BASE + path, params={
             "api_key": self.api_key,
-            "append_to_response": "external_ids,credits,images,videos,watch/providers,similar,recommendations",
+            "append_to_response": "external_ids,credits,images,videos,watch/providers,similar,"
+                                  "recommendations,keywords" + agg,
             "include_image_language": "en,null"}, timeout=15)
         r.raise_for_status()
         dr = r.json() or {}
