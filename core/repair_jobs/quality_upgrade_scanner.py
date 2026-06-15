@@ -51,9 +51,12 @@ class QualityUpgradeScannerJob(RepairJob):
     icon = 'repair-icon-lossless'
     default_enabled = False
     default_interval_hours = 168
-    # library_tracks_only: only check files that match a library DB track. OFF
-    # would also flag loose files in transfer/downloads (pre-import leftovers).
-    default_settings = {'library_tracks_only': True}
+    # library_tracks_only: when ON, only check files that match a library DB
+    # track (skips loose/orphan files). Default OFF — the scan checks EVERY
+    # audio file in the Music Library output folder, which is what users expect
+    # ("check my library folder"). DB matching after a reset is unreliable and
+    # would wrongly skip everything. Turn ON to ignore non-DB files.
+    default_settings = {'library_tracks_only': False}
     setting_options = {'library_tracks_only': [True, False]}
     auto_fix = False  # User chooses fix action per finding
 
