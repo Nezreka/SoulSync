@@ -98,6 +98,45 @@ def test_tmdb_pulls_full_metadata(monkeypatch):
     assert m["genres"] == ["Sci-Fi", "Drama"] and m["status"] == "Released" and m["imdb_id"] == "tt1"
 
 
+def test_refresh_show_art_backfills_seasons_even_when_already_matched(db):
+    # The exact failing case: a MATCHED show (won't re-run via the queue) still
+    # has no season posters. Lazy refresh fetches + caches them anyway.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396,
+                                       "seasons": [{"season_number": 1, "episodes": [{"episode_number": 1}]}]})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1396)   # already matched
+    assert db.show_detail(sid)["seasons"][0]["has_poster"] is False
+
+    class C:
+        enabled = True
+        def match(self, kind, title, year, known_id=None):
+            assert known_id == 1396
+            return {"id": 1396, "metadata": {"seasons": [
+                {"season_number": 1, "poster_url": "https://img/s1.jpg"}]}}
+        def season_episodes(self, tv, sn): return None
+
+    eng = VideoEnrichmentEngine(db, {"tmdb": C()})
+    assert eng.refresh_show_art(sid)["ok"] is True
+    assert db.show_detail(sid)["seasons"][0]["has_poster"] is True
+
+
+def test_refresh_show_art_needs_tmdb_configured(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+
+    class Off:
+        enabled = False
+        def match(self, *a, **k): return None
+
+    res = VideoEnrichmentEngine(db, {"tmdb": Off()}).refresh_show_art(sid)
+    assert res["ok"] is False and res["reason"] == "tmdb_not_configured"
+
+
+def test_show_match_info(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "year": 2019,
+                                       "tmdb_id": 1396, "seasons": []})
+    assert db.show_match_info(sid) == {"title": "S", "year": 2019, "tmdb_id": 1396}
+    assert db.show_match_info(999999) is None
+
+
 def test_enrichment_next_priority_pins_kind_first(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
     db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
