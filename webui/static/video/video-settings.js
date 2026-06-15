@@ -75,8 +75,18 @@
                 if (t && d.tmdb_api_key != null) t.value = d.tmdb_api_key;
                 if (v && d.tvdb_api_key != null) v.value = d.tvdb_api_key;
                 if (o && d.omdb_api_key != null) o.value = d.omdb_api_key;
+                var ap = document.getElementById('video-billboard-autoplay');
+                if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
             })
             .catch(function () { /* ignore */ });
+    }
+
+    function saveAutoplay() {
+        var ap = document.getElementById('video-billboard-autoplay');
+        fetch(CONFIG_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ billboard_autoplay: ap ? ap.checked : true })
+        }).catch(function () { /* ignore */ });
     }
 
     function saveKeys() {
@@ -129,6 +139,8 @@
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', saveKeys);
         });
+        var autoplay = document.getElementById('video-billboard-autoplay');
+        if (autoplay) autoplay.addEventListener('change', saveAutoplay);
         // Per-connection Test buttons (same behaviour as music's testConnection).
         var testBtns = document.querySelectorAll('[data-video-test-service]');
         for (var k = 0; k < testBtns.length; k++) {

@@ -375,6 +375,7 @@
             var n = q(s); if (n) n.hidden = true;
         });
         galleryImages = [];
+        stopBillboardTrailer();
     }
     function loadExtras(kind, id) {
         fetch(DETAIL_URL + kind + '/' + id + '/extras', { headers: { 'Accept': 'application/json' } })
@@ -471,6 +472,7 @@
         renderVideos(ex.videos);
         renderGallery(ex.gallery);
         renderReview(ex.review);
+        maybeAutoplayBillboard();
     }
 
     function renderReview(review) {
@@ -641,6 +643,7 @@
     // ── trailer modal (YouTube embed) ─────────────────────────────────────────
     function openTrailer(key) {
         if (!key) return;
+        stopBillboardTrailer();             // don't double up audio with the billboard
         var ov = document.getElementById('vd-trailer-overlay');
         if (!ov) {
             ov = document.createElement('div');
@@ -660,6 +663,56 @@
     function closeTrailer() {
         var ov = document.getElementById('vd-trailer-overlay');
         if (ov) { ov.classList.remove('vd-trailer-overlay--open'); ov.innerHTML = ''; }
+    }
+
+    // ── billboard autoplay trailer (opt-in setting) ───────────────────────────
+    var prefs = null, bbTrailerTimer = null, bbMuted = true;
+    function loadPrefs(cb) {
+        if (prefs) { cb(prefs); return; }
+        fetch('/api/video/prefs', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { prefs = d || {}; cb(prefs); })
+            .catch(function () { prefs = {}; cb(prefs); });
+    }
+    function maybeAutoplayBillboard() {
+        stopBillboardTrailer();
+        if (!data || !data.trailer || !data.trailer.key) return;
+        var key = data.trailer.key, id = currentId, kind = currentKind;
+        loadPrefs(function (p) {
+            if (!p || !p.billboard_autoplay || currentId !== id || currentKind !== kind) return;
+            bbTrailerTimer = setTimeout(function () {
+                if (currentId === id && currentKind === kind) startBillboardTrailer(key);
+            }, 2600);
+        });
+    }
+    function startBillboardTrailer(key) {
+        var bb = q('.vd-billboard'); if (!bb || bb.querySelector('[data-vd-bb-trailer]')) return;
+        bbMuted = true;
+        var wrap = document.createElement('div');
+        wrap.className = 'vd-bb-trailer'; wrap.setAttribute('data-vd-bb-trailer', '');
+        wrap.innerHTML = '<iframe allow="autoplay; encrypted-media" frameborder="0" ' +
+            'src="https://www.youtube.com/embed/' + encodeURIComponent(key) +
+            '?autoplay=1&mute=1&controls=0&modestbranding=1&rel=0&playsinline=1&enablejsapi=1"></iframe>' +
+            '<div class="vd-bb-tctrls"><button class="vd-bb-tbtn" type="button" data-vd-bb-mute aria-label="Unmute">🔇</button>' +
+            '<button class="vd-bb-tbtn" type="button" data-vd-bb-stop aria-label="Stop">✕</button></div>';
+        bb.appendChild(wrap);
+        bb.classList.add('vd-billboard--trailer');
+    }
+    function stopBillboardTrailer() {
+        clearTimeout(bbTrailerTimer); bbTrailerTimer = null;
+        var ws = document.querySelectorAll('[data-vd-bb-trailer]');
+        for (var i = 0; i < ws.length; i++) ws[i].remove();
+        var bbs = document.querySelectorAll('.vd-billboard--trailer');
+        for (var j = 0; j < bbs.length; j++) bbs[j].classList.remove('vd-billboard--trailer');
+    }
+    function toggleBillboardMute(btn) {
+        bbMuted = !bbMuted;
+        var iframe = document.querySelector('[data-vd-bb-trailer] iframe');
+        if (iframe && iframe.contentWindow) {
+            iframe.contentWindow.postMessage(JSON.stringify(
+                { event: 'command', func: bbMuted ? 'mute' : 'unMute', args: [] }), '*');
+        }
+        btn.textContent = bbMuted ? '🔇' : '🔊';
     }
 
     // ── season selector (4 views) ─────────────────────────────────────────────
@@ -990,6 +1043,10 @@
     }
 
     function onClick(e) {
+        var muteBtn = e.target.closest('[data-vd-bb-mute]');
+        if (muteBtn) { toggleBillboardMute(muteBtn); return; }
+        var stopBtn = e.target.closest('[data-vd-bb-stop]');
+        if (stopBtn) { stopBillboardTrailer(); return; }
         var r = root(); if (!r) return;
         // In-app drill-ins (real <a> links → modified clicks open new tabs).
         var sim = e.target.closest('[data-vd-sim]');
@@ -1051,6 +1108,10 @@
     function init() {
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
+        // Kill the billboard trailer (audio!) when navigating to a non-detail page.
+        document.addEventListener('soulsync:video-page-shown', function (e) {
+            if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') stopBillboardTrailer();
+        });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }
             else if (lightboxOpen()) {

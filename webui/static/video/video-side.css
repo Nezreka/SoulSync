@@ -1395,3 +1395,21 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     background: none; border: 0; color: rgb(var(--vd-accent-rgb)); font-weight: 700; font-size: 13.5px;
     cursor: pointer; padding: 8px 0 0;
 }
+
+/* ── billboard autoplay trailer ──────────────────────────────────────────── */
+.vd-bb-trailer { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: #000; animation: vd-fade 0.6s ease; }
+.vd-bb-trailer iframe {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 100vw; height: 56.25vw; min-height: 100%; min-width: 177.78vh; border: 0; pointer-events: none;
+}
+.vd-billboard--trailer .vd-bb-bg { opacity: 0; transition: opacity 0.6s ease; }
+.vd-bb-tctrls { position: absolute; bottom: 20px; right: 24px; z-index: 4; display: flex; gap: 8px; }
+.vd-bb-tbtn {
+    width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); cursor: pointer;
+    background: rgba(0, 0, 0, 0.5); color: #fff; font-size: 15px; backdrop-filter: blur(8px); transition: all 0.2s ease;
+}
+.vd-bb-tbtn:hover { background: rgba(0, 0, 0, 0.78); transform: translateY(-1px); }
+
+/* settings: detail-pages preference toggle */
+.vid-pref-row { display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px; color: var(--text-primary, #fff); }
+.vid-pref-row input { width: 16px; height: 16px; cursor: pointer; accent-color: #38bdf8; }

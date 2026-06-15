@@ -46,7 +46,15 @@ def register_routes(bp):
             "tmdb_api_key": db.get_setting("tmdb_api_key") or "",
             "tvdb_api_key": db.get_setting("tvdb_api_key") or "",
             "omdb_api_key": db.get_setting("omdb_api_key") or "",
+            "billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1",
         })
+
+    @bp.route("/prefs", methods=["GET"])
+    def video_prefs():
+        # Lightweight UI prefs for the detail page (no API keys).
+        from . import get_video_db
+        db = get_video_db()
+        return jsonify({"billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1"})
 
     @bp.route("/enrichment/config", methods=["POST"])
     def video_enrichment_config_save():
@@ -57,6 +65,8 @@ def register_routes(bp):
             db.set_setting("tmdb_api_key", body.get("tmdb_api_key") or "")
         if "tvdb_api_key" in body:
             db.set_setting("tvdb_api_key", body.get("tvdb_api_key") or "")
+        if "billboard_autoplay" in body:
+            db.set_setting("billboard_autoplay", "1" if body.get("billboard_autoplay") else "0")
         if "omdb_api_key" in body:
             new_key = body.get("omdb_api_key") or ""
             changed = new_key != (db.get_setting("omdb_api_key") or "")

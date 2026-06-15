@@ -5191,6 +5191,22 @@
                                         <button class="test-button" type="button" data-video-test-service="omdb">Test OMDb</button>
                                     </div>
                                 </div>
+                                <div class="api-service-frame stg-service" data-video-service="prefs">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #38bdf8;"></span>
+                                        <h4 class="service-title">Detail Pages</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <label class="vid-pref-row">
+                                            <input type="checkbox" id="video-billboard-autoplay" data-video-pref="billboard_autoplay">
+                                            <span>Autoplay trailers in the billboard</span>
+                                        </label>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Plays a muted trailer behind the hero after a moment (uses more bandwidth).</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
 
                             <!-- Server Connections -->
