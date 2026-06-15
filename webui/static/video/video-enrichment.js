@@ -12,7 +12,7 @@
 (function () {
     'use strict';
 
-    var SERVICES = ['tmdb', 'tvdb'];
+    var SERVICES = ['tmdb', 'tvdb', 'omdb'];
 
     function onVideoSide() {
         return document.body.getAttribute('data-side') === 'video';

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS movies (
     imdb_rating          REAL,            -- IMDb (0-10, via OMDb)
     rt_rating            INTEGER,         -- Rotten Tomatoes (0-100)
     metacritic           INTEGER,         -- Metacritic (0-100)
+    ratings_synced       INTEGER NOT NULL DEFAULT 0,   -- OMDb ratings fetched?
     poster_url           TEXT,
     backdrop_url         TEXT,
     logo_url             TEXT,            -- transparent title logo (clearlogo)
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS shows (
     imdb_rating        REAL,             -- IMDb (0-10, via OMDb)
     rt_rating          INTEGER,          -- Rotten Tomatoes (0-100)
     metacritic         INTEGER,          -- Metacritic (0-100)
+    ratings_synced     INTEGER NOT NULL DEFAULT 0,   -- OMDb ratings fetched?
     first_air_date     TEXT,
     last_air_date      TEXT,
     poster_url         TEXT,

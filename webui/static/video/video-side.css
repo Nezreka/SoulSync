@@ -795,3 +795,12 @@ body[data-side="video"] .dashboard-header-sweep {
 .vd-rt--mc-good .vd-rt-tag { background: #6c3; color: #000; }
 .vd-rt--mc-mid .vd-rt-tag { background: #fc3; color: #000; }
 .vd-rt--mc-bad .vd-rt-tag { background: #f00; color: #fff; }
+
+/* ── OMDb worker uses a ★ glyph (no clean brand logo) ─────────────────────── */
+.video-enrich-glyph {
+    position: relative; z-index: 1; font-size: 22px; line-height: 1;
+    color: rgb(var(--ve-accent, 245, 197, 24));
+    filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.4)); transition: transform 0.3s ease;
+}
+.video-enrich-button:hover .video-enrich-glyph { transform: scale(1.1); }
+#vem-overlay .vem-glyph { font-size: 20px; line-height: 1; }

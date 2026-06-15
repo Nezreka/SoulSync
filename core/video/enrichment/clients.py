@@ -377,8 +377,10 @@ class OMDBClient:
 
 
 def build_clients(db) -> dict:
-    """Construct the source clients from the saved API keys (in video_settings)."""
+    """Construct the source clients from the saved API keys (in video_settings).
+    OMDb is included as a worker (a ratings filler) alongside the matchers."""
     return {
         "tmdb": TMDBClient(db.get_setting("tmdb_api_key")),
         "tvdb": TVDBClient(db.get_setting("tvdb_api_key")),
+        "omdb": OMDBClient(db.get_setting("omdb_api_key")),
     }

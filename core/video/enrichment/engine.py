@@ -15,7 +15,7 @@ from .worker import VideoEnrichmentWorker
 
 logger = get_logger("video_enrichment.engine")
 
-_DISPLAY = {"tmdb": "TMDB", "tvdb": "TVDB"}
+_DISPLAY = {"tmdb": "TMDB", "tvdb": "TVDB", "omdb": "OMDb"}
 
 
 class VideoEnrichmentEngine:
@@ -33,7 +33,10 @@ class VideoEnrichmentEngine:
             w.restore_paused()
 
     def _backfill_ratings(self, kind, item_id):
-        rc = self.ratings_client
+        # The OMDb worker owns the ratings client (fallback to an injected one
+        # for tests that don't build a worker).
+        w = self.workers.get("omdb")
+        rc = w.client if w else self.ratings_client
         if not rc or not getattr(rc, "enabled", False):
             return
         info = (self.db.movie_match_info(item_id) if kind == "movie"
