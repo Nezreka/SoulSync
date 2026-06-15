@@ -338,6 +338,27 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def episode_sync_next(self) -> dict | None:
+        """A matched show (has tmdb_id) whose FULL episode list hasn't been pulled
+        yet — for the TMDB worker's background episode-sync pass, so library cards
+        show real owned/total without the user opening each one."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT id, title, year, tmdb_id FROM shows "
+                "WHERE tmdb_id IS NOT NULL AND episodes_synced=0 ORDER BY id LIMIT 1").fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def episode_sync_pending_count(self) -> int:
+        conn = self._get_connection()
+        try:
+            return conn.execute(
+                "SELECT COUNT(*) FROM shows WHERE tmdb_id IS NOT NULL AND episodes_synced=0").fetchone()[0]
+        finally:
+            conn.close()
+
     def show_season_numbers(self, show_id: int) -> list:
         conn = self._get_connection()
         try:
