@@ -281,7 +281,33 @@
     function switchKind(kind) {
         state.kind = kind; state.page = 0;
         renderCards();
-        loadUnmatched().then(function () { renderControls(); renderList(); });
+        // Like the music worker manager: clicking a coverage group also "pins" it
+        // and RE-QUEUES its previously-failed items (not_found/error -> pending) so
+        // the worker sweeps ALL unmatched, not just never-tried ones — otherwise
+        // failed items sit forever (in the retry cooldown) and the worker reports
+        // "all matched". (Episodes are a sync cascade, not a match queue.)
+        if (kind === 'movie' || kind === 'show') {
+            setPriority(kind);
+            requeueFailed(kind);
+        } else {
+            loadUnmatched().then(function () { renderControls(); renderList(); });
+        }
+    }
+    function requeueFailed(kind) {
+        fetch('/api/video/enrichment/' + state.selected + '/retry', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ kind: kind, scope: 'failed' }),
+        }).then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var n = (d && d.reset) || 0;
+                if (n && typeof showToast === 'function') {
+                    showToast('Re-queued ' + n + ' previously-failed ' +
+                        (KIND_LABEL[kind] || kind).toLowerCase(), 'success');
+                }
+                return Promise.all([loadBreakdown(state.selected), loadUnmatched()]);
+            })
+            .then(function () { renderCards(); renderControls(); renderList(); })
+            .catch(function () { loadUnmatched().then(function () { renderControls(); renderList(); }); });
     }
     function togglePause() {
         var s = state.statuses[state.selected] || {};
