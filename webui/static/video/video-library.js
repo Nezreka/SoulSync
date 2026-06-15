@@ -192,8 +192,41 @@
 
     function onScanDone() { if (state.loaded) load(); }
 
+    // Gate the library/scan when no video server (Plex/Jellyfin) is connected —
+    // nothing breaks, the user is just told what to do.
+    function ensureServerBanner() {
+        var content = document.querySelector('#video-library-page .library-content');
+        if (!content) return null;
+        var b = content.querySelector('[data-video-noserver]');
+        if (!b) {
+            b = document.createElement('div');
+            b.setAttribute('data-video-noserver', '');
+            b.className = 'video-noserver hidden';
+            b.innerHTML = 'No video server connected. Go to <strong>Settings &rarr; Video Source</strong> ' +
+                'and connect Plex or Jellyfin to scan and browse your video library.';
+            content.insertBefore(b, content.firstChild);
+        }
+        return b;
+    }
+    function checkServer() {
+        fetch('/api/video/server', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var ok = !!(d && d.server), banner = ensureServerBanner();
+                if (banner) banner.classList.toggle('hidden', ok);
+                var scan = document.querySelector('[data-video-scan-mode]');
+                if (scan) {
+                    scan.disabled = !ok;
+                    scan.style.opacity = ok ? '' : '0.45';
+                    scan.title = ok ? 'Scan the media server' : 'Connect Plex or Jellyfin in Settings first';
+                }
+            })
+            .catch(function () { /* ignore */ });
+    }
+
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
+        checkServer();
         if (!state.loaded) load();
     }
 

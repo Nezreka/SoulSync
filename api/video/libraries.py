@@ -30,6 +30,32 @@ def register_routes(bp):
             logger.exception("Failed to list video libraries")
             return jsonify({"error": "Failed to list video libraries"}), 500
 
+    @bp.route("/server", methods=["GET"])
+    def video_server_status():
+        """Which server the video side uses + which of Plex/Jellyfin are configured
+        (so the UI can show a picker, or a 'connect a server' message)."""
+        try:
+            from core.video.sources import resolve_video_server
+            from config.settings import config_manager
+            plex = bool((config_manager.get_plex_config() or {}).get("base_url"))
+            jelly = bool((config_manager.get_jellyfin_config() or {}).get("base_url"))
+            return jsonify({"server": resolve_video_server(), "plex": plex, "jellyfin": jelly})
+        except Exception:
+            logger.exception("video server status failed")
+            return jsonify({"server": None, "plex": False, "jellyfin": False})
+
+    @bp.route("/server", methods=["POST"])
+    def video_server_set():
+        """Set the explicit video-side server pick (only meaningful when both Plex
+        and Jellyfin are configured)."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        choice = body.get("server")
+        if choice not in ("plex", "jellyfin"):
+            return jsonify({"error": "bad server"}), 400
+        get_video_db().set_setting("video_server", choice)
+        return jsonify({"status": "saved", "server": choice})
+
     @bp.route("/libraries", methods=["POST"])
     def save_video_libraries():
         from . import get_video_db
