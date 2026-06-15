@@ -310,13 +310,17 @@
         if (!a) return;
         var watching = !!d.monitored;
         var html = '';
-        // Primary CTA: play it on your media server (owned items; arrives with extras).
+        // Primary CTA: play it on your media server (owned items; arrives with
+        // extras). The logo IS the brand name — "Play on <logo>" (no redundant word).
         if (d.server && d.server.url) {
             var sv = esc(d.server.server || 'Server');
             var slogo = SERVER_LOGOS[d.server.server];
-            html += '<a class="vd-play-btn" href="' + esc(d.server.url) + '" target="_blank" rel="noopener">' +
-                (slogo ? '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="">' : '<span class="vd-play-ic">▶</span>') +
-                '<span>Play on ' + sv + '</span></a>';
+            var inner = slogo
+                ? '<span class="vd-play-ic">▶</span><span>Play on</span>' +
+                  '<img class="vd-play-logo" src="' + esc(slogo) + '" alt="' + sv + '">'
+                : '<span class="vd-play-ic">▶</span><span>Play on ' + sv + '</span>';
+            html += '<a class="vd-play-btn" href="' + esc(d.server.url) +
+                '" target="_blank" rel="noopener" title="Play on ' + sv + '">' + inner + '</a>';
         }
         if (d.trailer && d.trailer.key) {
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
