@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -256,6 +256,14 @@ class VideoDatabase:
                 has = conn.execute(f"SELECT 1 FROM {lt} WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
                 if not has:
                     self._set_genres(conn, lt, oc, item_id, genres)
+            # Cast/crew backfill — only when the item has none yet (gap-fill).
+            cast = (metadata or {}).get("cast")
+            crew = (metadata or {}).get("crew")
+            if matched and (cast or crew) and tbl in ("movies", "shows"):
+                oc = "movie_id" if tbl == "movies" else "show_id"
+                has = conn.execute(f"SELECT 1 FROM credits WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
+                if not has:
+                    self._set_credits(conn, oc, item_id, cast or [], crew or [])
             # Per-season poster backfill (TMDB) — fills only seasons the server
             # left without art.
             seasons_meta = (metadata or {}).get("seasons")
@@ -566,6 +574,53 @@ class VideoDatabase:
             conn.rollback()                 # legacy UNIQUE on an id — keep the row, drop the id
             run(False)
 
+    @staticmethod
+    def _set_credits(conn, owner_col: str, owner_id: int, cast, crew) -> None:
+        """Replace the cast+crew for one owner (deduped people in the shared
+        people table). owner_col is internal ('movie_id'|'show_id')."""
+        conn.execute(f"DELETE FROM credits WHERE {owner_col}=?", (owner_id,))
+
+        def person_id(p):
+            tid = p.get("tmdb_id")
+            if tid is not None:
+                conn.execute("INSERT OR IGNORE INTO people (name, tmdb_id, photo_url) VALUES (?, ?, ?)",
+                             (p["name"], tid, p.get("photo_url")))
+                row = conn.execute("SELECT id FROM people WHERE tmdb_id=?", (tid,)).fetchone()
+            else:
+                conn.execute("INSERT INTO people (name, photo_url) VALUES (?, ?)",
+                             (p["name"], p.get("photo_url")))
+                row = conn.execute("SELECT last_insert_rowid() AS id").fetchone()
+            pid = row["id"] if row else None
+            if pid and p.get("photo_url"):
+                conn.execute("UPDATE people SET photo_url=COALESCE(NULLIF(photo_url, ''), ?) WHERE id=?",
+                             (p["photo_url"], pid))
+            return pid
+
+        def add(group, department, job_default):
+            for i, c in enumerate(group or []):
+                if not c.get("name"):
+                    continue
+                pid = person_id(c)
+                if not pid:
+                    continue
+                conn.execute(
+                    f"INSERT INTO credits (person_id, {owner_col}, department, job, character, sort_order) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (pid, owner_id, department, c.get("job") or job_default, c.get("character"), i))
+        add(cast, "cast", "Actor")
+        add(crew, "crew", None)
+
+    @staticmethod
+    def _credits_for(conn, owner_col: str, owner_id: int, cast_limit: int = 18) -> dict:
+        rows = conn.execute(
+            "SELECT p.name, p.photo_url, c.department, c.job, c.character "
+            f"FROM credits c JOIN people p ON p.id = c.person_id WHERE c.{owner_col}=? "
+            "ORDER BY c.department, c.sort_order", (owner_id,)).fetchall()
+        cast = [{"name": r["name"], "character": r["character"], "photo": r["photo_url"]}
+                for r in rows if r["department"] == "cast"][:cast_limit]
+        crew = [{"name": r["name"], "job": r["job"]} for r in rows if r["department"] == "crew"]
+        return {"cast": cast, "crew": crew}
+
     def upsert_movie(self, server_source: str, item: dict) -> int:
         """Insert/update one movie (keyed on server id) and its file. Returns row id."""
         conn = self._get_connection()
@@ -813,6 +868,7 @@ class VideoDatabase:
             if not show:
                 return None
             genres = self._genres_for(conn, "show_genres", "show_id", show_id)
+            credits = self._credits_for(conn, "show_id", show_id)
             seasons = conn.execute(
                 "SELECT id, season_number, title, overview, "
                 "(poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
@@ -867,7 +923,7 @@ class VideoDatabase:
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tagline": show["tagline"], "rating": show["rating"],
             "first_air_date": show["first_air_date"], "last_air_date": show["last_air_date"],
-            "genres": genres,
+            "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
             "monitored": bool(show["monitored"]),
@@ -900,6 +956,7 @@ class VideoDatabase:
             if not m:
                 return None
             genres = self._genres_for(conn, "movie_genres", "movie_id", movie_id)
+            credits = self._credits_for(conn, "movie_id", movie_id)
             f = conn.execute(
                 "SELECT resolution, quality, video_codec, audio_codec, size_bytes "
                 "FROM media_files WHERE movie_id=? ORDER BY size_bytes DESC LIMIT 1",
@@ -912,6 +969,7 @@ class VideoDatabase:
             "release_date": m["release_date"], "runtime_minutes": m["runtime_minutes"],
             "content_rating": m["content_rating"], "tagline": m["tagline"],
             "rating": m["rating"], "rating_critic": m["rating_critic"], "genres": genres,
+            "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),

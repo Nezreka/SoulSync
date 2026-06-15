@@ -22,7 +22,7 @@ EXPECTED_TABLES = {
     "meta", "root_folders", "quality_profiles", "video_settings",
     "movies", "shows", "seasons", "episodes", "channels", "channel_videos",
     "media_files", "downloads", "activity",
-    "genres", "movie_genres", "show_genres",
+    "genres", "movie_genres", "show_genres", "people", "credits",
 }
 EXPECTED_VIEWS = {"v_watchlist", "v_wishlist", "v_calendar"}
 
@@ -541,6 +541,35 @@ def test_enrichment_backfills_genres_when_item_has_none(db):
     db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=1,
                         metadata={"genres": ["Drama", "Comedy"]})
     assert db.movie_detail(mid)["genres"] == ["Comedy", "Drama"]
+
+
+def test_enrichment_backfills_cast_and_crew(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1, metadata={
+        "cast": [
+            {"name": "Aidan Gillen", "tmdb_id": 39388, "character": "James Cole",
+             "photo_url": "https://img/ag.jpg"},
+            {"name": "Amanda Schull", "tmdb_id": 84223, "character": "Cassie"}],
+        "crew": [{"name": "Terry Matalas", "tmdb_id": 1, "job": "Creator"}]})
+    d = db.show_detail(sid)
+    assert [c["name"] for c in d["cast"]] == ["Aidan Gillen", "Amanda Schull"]   # billing order
+    assert d["cast"][0]["character"] == "James Cole" and d["cast"][0]["photo"] == "https://img/ag.jpg"
+    assert d["crew"] == [{"name": "Terry Matalas", "job": "Creator"}]
+    # People are deduped across titles by tmdb_id.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=2,
+                        metadata={"cast": [{"name": "Aidan Gillen", "tmdb_id": 39388, "character": "X"}]})
+    with db.connect() as c:
+        assert c.execute("SELECT COUNT(*) FROM people WHERE tmdb_id=39388").fetchone()[0] == 1
+
+
+def test_enrichment_does_not_clobber_existing_credits(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1,
+                        metadata={"cast": [{"name": "First", "tmdb_id": 1}]})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1,
+                        metadata={"cast": [{"name": "Second", "tmdb_id": 2}]})
+    assert [c["name"] for c in db.show_detail(sid)["cast"]] == ["First"]   # kept, not replaced
 
 
 def test_enrichment_backfills_season_posters_only_when_missing(db):

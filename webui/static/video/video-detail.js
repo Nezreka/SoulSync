@@ -145,6 +145,38 @@
                 return '<span class="vd-genre">' + esc(gn) + '</span>';
             }).join('');
         }
+        renderCast(d);
+    }
+
+    function renderCast(d) {
+        var section = q('[data-vd-cast-section]');
+        if (!section) return;
+        var cast = d.cast || [], crew = d.crew || [];
+        if (!cast.length && !crew.length) { section.hidden = true; return; }
+        section.hidden = false;
+
+        var crewHost = q('[data-vd-crew]');
+        if (crewHost) {
+            // Group crew by job (Creator / Director / Writer …) → "Job: A, B".
+            var byJob = {};
+            crew.forEach(function (c) { (byJob[c.job || 'Crew'] = byJob[c.job || 'Crew'] || []).push(c.name); });
+            crewHost.innerHTML = Object.keys(byJob).map(function (job) {
+                return '<span class="vd-crew-item"><span class="vd-crew-job">' + esc(job) +
+                    (byJob[job].length > 1 ? 's' : '') + '</span> ' + esc(byJob[job].join(', ')) + '</span>';
+            }).join('');
+        }
+        var castHost = q('[data-vd-cast]');
+        if (castHost) {
+            castHost.innerHTML = cast.map(function (p) {
+                var img = p.photo
+                    ? '<img class="vd-cast-photo" src="' + esc(p.photo) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+                    : '<span class="vd-cast-photo vd-cast-photo--ph">' + esc((p.name || '?').charAt(0)) + '</span>';
+                return '<div class="vd-cast-card">' + img +
+                    '<span class="vd-cast-name">' + esc(p.name) + '</span>' +
+                    (p.character ? '<span class="vd-cast-char">' + esc(p.character) + '</span>' : '') +
+                    '</div>';
+            }).join('');
+        }
     }
 
     function renderActions(d) {

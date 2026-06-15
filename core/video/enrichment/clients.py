@@ -76,7 +76,8 @@ class TMDBClient:
         try:
             detail_path = "/movie/" if kind == "movie" else "/tv/"
             dr = requests.get(self.BASE + detail_path + str(tmdb_id),
-                              params={"api_key": self.api_key, "append_to_response": "external_ids"},
+                              params={"api_key": self.api_key,
+                                      "append_to_response": "external_ids,credits"},
                               timeout=15).json() or {}
             meta["overview"] = dr.get("overview") or meta.get("overview")
             if dr.get("backdrop_path"):
@@ -111,9 +112,31 @@ class TMDBClient:
                         seasons.append({"season_number": sn, "poster_url": self.IMG + pp})
                 if seasons:
                     meta["seasons"] = seasons
+            self._add_credits(meta, dr.get("credits") or {}, dr.get("created_by") or [])
         except Exception:
             logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
         return {"id": tmdb_id, "metadata": {k: v for k, v in meta.items() if v}}
+
+    PROFILE = "https://image.tmdb.org/t/p/w185"
+
+    def _person(self, c, job=None, character=None):
+        return {"name": c["name"], "tmdb_id": c.get("id"), "job": job, "character": character,
+                "photo_url": (self.PROFILE + c["profile_path"]) if c.get("profile_path") else None}
+
+    def _add_credits(self, meta, credits, created_by):
+        """Parse TMDB cast/crew into meta['cast'] / meta['crew']."""
+        cast = [self._person(c, character=c.get("character"))
+                for c in (credits.get("cast") or [])[:20] if c.get("name")]
+        if cast:
+            meta["cast"] = cast
+        # Crew: headline jobs only (directors / writers); plus TV creators, which
+        # live in the top-level created_by, not the crew list.
+        wanted = {"Director", "Writer", "Screenplay"}
+        crew = [self._person(c, job=c.get("job")) for c in (credits.get("crew") or [])
+                if c.get("name") and c.get("job") in wanted]
+        crew += [self._person(c, job="Creator") for c in created_by if c.get("name")]
+        if crew:
+            meta["crew"] = crew
 
     def season_episodes(self, tv_id, season_number):
         """Episode-level data for one season (still/overview/rating) — the show

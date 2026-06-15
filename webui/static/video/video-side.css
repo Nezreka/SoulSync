@@ -681,3 +681,29 @@ body[data-side="video"] .dashboard-header-sweep {
 #vem-overlay .em-card--current {
     box-shadow: 0 0 18px rgba(var(--em-accent-rgb), 0.28);
 }
+
+/* ── Cast & crew section (detail page) ───────────────────────────────────── */
+.vd-cast-section { margin-top: 46px; }
+.vd-section-h { font-size: 22px; font-weight: 800; color: #fff; margin: 0 0 16px; }
+.vd-crew { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 24px;
+    color: rgba(255, 255, 255, 0.72); font-size: 14px; }
+.vd-crew-job { color: rgba(255, 255, 255, 0.45); font-weight: 600; }
+.vd-cast { display: flex; gap: 18px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x proximity; }
+.vd-cast::-webkit-scrollbar { height: 8px; }
+.vd-cast::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+.vd-cast-card { flex: 0 0 116px; width: 116px; scroll-snap-align: start; text-align: center; }
+.vd-cast-photo {
+    width: 116px; height: 116px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto 10px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); border: 2px solid rgba(255, 255, 255, 0.08);
+    transition: transform 0.25s ease, border-color 0.25s ease;
+}
+.vd-cast-photo--ph {
+    display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: 800;
+    color: rgba(255, 255, 255, 0.55);
+    background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.32), rgba(var(--vd-accent-rgb), 0.1));
+}
+.vd-cast-card:hover .vd-cast-photo { transform: translateY(-3px); border-color: rgba(var(--vd-accent-rgb), 0.6); }
+.vd-cast-name { display: block; font-size: 13.5px; font-weight: 700; color: #fff; line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vd-cast-char { display: block; font-size: 12px; color: rgba(255, 255, 255, 0.55); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

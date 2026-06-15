@@ -188,6 +188,33 @@ CREATE TABLE IF NOT EXISTS show_genres (
 CREATE INDEX IF NOT EXISTS idx_movie_genres_genre ON movie_genres(genre_id);
 CREATE INDEX IF NOT EXISTS idx_show_genres_genre  ON show_genres(genre_id);
 
+-- ── People + credits (cast & crew; normalised, no blob) ─────────────────────
+-- A person appears in many titles; deduped by their provider id. Each credit
+-- belongs to exactly one movie OR show (separate nullable FKs + CHECK, no
+-- polymorphic id), mirroring the media_files/downloads pattern.
+CREATE TABLE IF NOT EXISTS people (
+    id        INTEGER PRIMARY KEY,
+    name      TEXT NOT NULL,
+    tmdb_id   INTEGER UNIQUE,
+    photo_url TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_people_name ON people(name);
+
+CREATE TABLE IF NOT EXISTS credits (
+    id         INTEGER PRIMARY KEY,
+    person_id  INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    movie_id   INTEGER REFERENCES movies(id) ON DELETE CASCADE,
+    show_id    INTEGER REFERENCES shows(id)  ON DELETE CASCADE,
+    department TEXT NOT NULL,        -- 'cast' | 'crew'
+    job        TEXT,                 -- Director | Writer | Creator (crew); 'Actor' (cast)
+    character  TEXT,                 -- the role played (cast)
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    CHECK ((movie_id IS NOT NULL) + (show_id IS NOT NULL) = 1)
+);
+CREATE INDEX IF NOT EXISTS idx_credits_movie  ON credits(movie_id);
+CREATE INDEX IF NOT EXISTS idx_credits_show   ON credits(show_id);
+CREATE INDEX IF NOT EXISTS idx_credits_person ON credits(person_id);
+
 -- ── Content: YouTube (channels → videos) ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS channels (
     id                 INTEGER PRIMARY KEY,

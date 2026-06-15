@@ -199,6 +199,26 @@ def test_tmdb_season_episodes_parses(monkeypatch):
     assert "still_url" not in res["episodes"][1]      # no still_path → omitted
 
 
+def test_tmdb_parses_cast_and_crew(monkeypatch):
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    detail = {"overview": "O", "external_ids": {}, "created_by": [{"id": 9, "name": "The Creator"}],
+              "credits": {
+                  "cast": [{"id": 1, "name": "Lead", "character": "Hero", "profile_path": "/p.jpg"},
+                           {"id": 2, "name": "Support", "character": "Sidekick"}],
+                  "crew": [{"id": 3, "name": "Dir", "job": "Director"},
+                           {"id": 4, "name": "Edit", "job": "Editor"}]}}   # Editor filtered out
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    m = TMDBClient("KEY").match("show", "S", 2020, known_id=1396)["metadata"]
+    assert [c["name"] for c in m["cast"]] == ["Lead", "Support"]
+    assert m["cast"][0]["photo_url"] == "https://image.tmdb.org/t/p/w185/p.jpg"
+    jobs = {(c["name"], c["job"]) for c in m["crew"]}
+    assert ("Dir", "Director") in jobs and ("The Creator", "Creator") in jobs
+    assert not any(c["name"] == "Edit" for c in m["crew"])   # non-headline job dropped
+
+
 def test_tmdb_show_returns_season_posters(monkeypatch):
     class _Resp:
         def __init__(self, b): self._b = b
