@@ -317,7 +317,7 @@ class VideoEnrichmentEngine:
                   "next_episode": ex.get("next_episode"), "last_episode": ex.get("last_episode"),
                   "gallery": ex.get("gallery"), "videos": ex.get("videos") or [],
                   "keywords": ex.get("keywords") or [], "facts": ex.get("facts"),
-                  "cast_full": ex.get("cast_full") or []})
+                  "cast_full": ex.get("cast_full") or [], "review": ex.get("review")})
         if kind == "show":
             seasons = d.pop("_seasons", []) or []
             for s in seasons:

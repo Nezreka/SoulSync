@@ -371,7 +371,7 @@
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
          '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
          '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
-         '[data-vd-cast-all]'].forEach(function (s) {
+         '[data-vd-review-section]', '[data-vd-cast-all]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
         galleryImages = [];
@@ -470,6 +470,21 @@
         renderFacts(ex.facts, ex.keywords);
         renderVideos(ex.videos);
         renderGallery(ex.gallery);
+        renderReview(ex.review);
+    }
+
+    function renderReview(review) {
+        var sec = q('[data-vd-review-section]'), host = q('[data-vd-review]');
+        if (!sec || !host) return;
+        if (!review || !review.content) { sec.hidden = true; return; }
+        sec.hidden = false;
+        var rating = review.rating ? '<span class="vd-review-rating">★ ' + review.rating + '/10</span>' : '';
+        var date = review.created ? '<span class="vd-review-date">' + esc(review.created) + '</span>' : '';
+        var long = review.content.length > 420;
+        host.innerHTML = '<div class="vd-review-head">' +
+            '<span class="vd-review-author">' + esc(review.author) + '</span>' + rating + date + '</div>' +
+            '<p class="vd-review-body" data-vd-review-body>' + esc(review.content) + '</p>' +
+            (long ? '<button class="vd-review-more" type="button" data-vd-review-more>Read more</button>' : '');
     }
 
     // ── facts / keywords ──────────────────────────────────────────────────────
@@ -1001,6 +1016,12 @@
         if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
         var castAll = e.target.closest('[data-vd-cast-all]');
         if (castAll && r.contains(castAll)) { openCastModal(); return; }
+        var revMore = e.target.closest('[data-vd-review-more]');
+        if (revMore && r.contains(revMore)) {
+            var body = q('[data-vd-review-body]');
+            if (body) { var open = body.classList.toggle('vd-review-body--open'); revMore.textContent = open ? 'Read less' : 'Read more'; }
+            return;
+        }
         var seasonBtn = e.target.closest('[data-vd-season]');
         if (seasonBtn && r.contains(seasonBtn)) { selectSeason(parseInt(seasonBtn.getAttribute('data-vd-season'), 10)); return; }
         var viewBtn = e.target.closest('[data-vd-view]');
