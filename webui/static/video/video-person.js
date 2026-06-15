@@ -17,6 +17,10 @@
     var data = null;
     var currentId = null;
     var tab = 'all';            // all | movie | show
+    var ROLE_NOUNS = {
+        Acting: 'Actor', Directing: 'Director', Writing: 'Writer', Production: 'Producer',
+        Sound: 'Composer', Camera: 'Cinematographer', Editing: 'Editor', Creator: 'Creator',
+    };
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -106,10 +110,19 @@
         if (amb) amb.style.setProperty('--vp-bg', d.photo ? "url('" + d.photo + "')" : 'none');
 
         setText('[data-vp-name]', d.name);
+
+        // Role tagline (a friendlier noun than the raw department).
+        var role = q('[data-vp-role]');
+        if (role) {
+            var noun = ROLE_NOUNS[d.known_for] || d.known_for || '';
+            role.textContent = noun; role.hidden = !noun;
+        }
+
         var meta = [];
-        if (d.known_for) meta.push(d.known_for);
         var ls = lifespan(d); if (ls) meta.push(ls);
         if (d.place_of_birth) meta.push(d.place_of_birth);
+        var n = (d.credits || []).length;
+        if (n) meta.push(n + (n === 1 ? ' credit' : ' credits'));
         var m = q('[data-vp-meta]');
         if (m) m.innerHTML = meta.map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
 

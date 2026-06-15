@@ -410,6 +410,9 @@ def test_person_subpage_and_module_isolated():
     assert "themoviedb.org" not in src and "imdb.com" not in src
     # The person page is a registered detail route (reload / back / new-tab work).
     assert "video-person-detail" in _JS
+    # Cinematic hero bits: ambient backdrop, rotating accent ring, role tagline.
+    assert "data-vp-ambient" in _INDEX and "vp-photo-ring" in _INDEX
+    assert "data-vp-role" in _INDEX
 
 
 def test_detail_keeps_preview_items_in_app():
