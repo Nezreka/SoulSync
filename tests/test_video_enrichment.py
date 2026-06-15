@@ -354,6 +354,22 @@ def test_omdb_worker_keeps_item_on_transient_error(db):
     assert w.stats["errors"] == 1 and w.paused is False   # one blip doesn't pause
 
 
+def test_omdb_test_surfaces_real_error(monkeypatch):
+    # The Test button should show OMDb's actual reason, not just "HTTP 401".
+    class _R:
+        status_code = 401
+        def json(self): return {"Response": "False", "Error": "Request limit reached!"}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _R()))
+    ok, msg = OMDBClient("KEY").test()
+    assert ok is False and "Request limit reached!" in msg
+
+    class _R2(_R):
+        def json(self): return {"Response": "False", "Error": "Invalid API key!"}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _R2()))
+    ok2, msg2 = OMDBClient("KEY").test()
+    assert ok2 is False and "activation" in msg2.lower()   # nudges toward the email link
+
+
 def test_omdb_ratings_raises_on_invalid_key(monkeypatch):
     from core.video.enrichment.clients import OMDbAuthError
 

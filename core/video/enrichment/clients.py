@@ -506,11 +506,20 @@ class OMDBClient:
         import requests
         try:
             r = requests.get(self.BASE, params={"apikey": self.api_key, "i": "tt0111161"}, timeout=12)
-            d = r.json() if r.status_code == 200 else {}
+            # OMDb returns a JSON body even on 401 — surface its actual Error so the
+            # user sees WHY ("Invalid API key!" = not activated/wrong key;
+            # "Request limit reached!" = free-tier daily quota, resets at midnight).
+            try:
+                d = r.json() or {}
+            except Exception:
+                d = {}
             if d.get("Response") == "True":
                 return True, "OMDb connection OK"
-            if "invalid api key" in (d.get("Error") or "").lower():
-                return False, "Invalid OMDb API key"
+            err = (d.get("Error") or "").strip()
+            if "invalid api key" in err.lower():
+                return False, "Invalid OMDb API key — did you click the activation link OMDb emailed you?"
+            if err:
+                return False, "OMDb: " + err
             return False, "OMDb returned HTTP " + str(r.status_code)
         except Exception:
             logger.exception("OMDb test failed")
@@ -524,7 +533,12 @@ class OMDBClient:
         # A bad/expired key is a 401 (sometimes a 200 with "Invalid API key!") — a
         # config problem that affects EVERY item, so flag it distinctly.
         if r.status_code == 401:
-            raise OMDbAuthError("OMDb rejected the API key (HTTP 401)")
+            err = ""
+            try:
+                err = ((r.json() or {}).get("Error") or "").strip()
+            except Exception:
+                pass
+            raise OMDbAuthError(err or "OMDb rejected the API key (HTTP 401)")
         r.raise_for_status()
         d = r.json() or {}
         if d.get("Response") != "True":
