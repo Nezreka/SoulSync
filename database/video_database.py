@@ -435,28 +435,43 @@ class VideoDatabase:
             conn.execute(f"INSERT OR IGNORE INTO {link_table} ({owner_col}, genre_id) VALUES (?, ?)",
                          (owner_id, gid))
 
+    @staticmethod
+    def _resilient_upsert(conn, table: str, base: dict, id_cols: dict) -> None:
+        """INSERT…ON CONFLICT(server_source, server_id) for a movie/show row.
+
+        Resilient to a LEGACY UNIQUE on tmdb_id/tvdb_id/imdb_id (old DBs created
+        before those were made non-unique — SQLite can't drop an inline UNIQUE):
+        on IntegrityError we retry WITHOUT the id columns, so the row is still
+        stored (same film in >1 library) instead of being dropped by the scan.
+        ``base`` holds the always-written cols; ``id_cols`` the droppable ids."""
+        def run(include_ids):
+            cols = list(base.keys()) + (list(id_cols.keys()) if include_ids else [])
+            vals = list(base.values()) + (list(id_cols.values()) if include_ids else [])
+            updates = [c for c in cols if c not in ("server_source", "server_id")]
+            set_clause = ", ".join(f"{c}=excluded.{c}" for c in updates) + ", updated_at=CURRENT_TIMESTAMP"
+            sql = (f"INSERT INTO {table} ({', '.join(cols)}, updated_at) "
+                   f"VALUES ({', '.join(['?'] * len(cols))}, CURRENT_TIMESTAMP) "
+                   f"ON CONFLICT(server_source, server_id) DO UPDATE SET {set_clause}")
+            conn.execute(sql, vals)
+        try:
+            run(True)
+        except sqlite3.IntegrityError:
+            conn.rollback()                 # legacy UNIQUE on an id — keep the row, drop the id
+            run(False)
+
     def upsert_movie(self, server_source: str, item: dict) -> int:
         """Insert/update one movie (keyed on server id) and its file. Returns row id."""
         conn = self._get_connection()
         try:
-            conn.execute(
-                "INSERT INTO movies (server_source, server_id, title, sort_title, year, overview, "
-                "runtime_minutes, content_rating, studio, tagline, rating, rating_critic, "
-                "poster_url, tmdb_id, imdb_id, has_file, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(server_source, server_id) DO UPDATE SET "
-                "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
-                "overview=excluded.overview, runtime_minutes=excluded.runtime_minutes, "
-                "content_rating=excluded.content_rating, studio=excluded.studio, "
-                "tagline=excluded.tagline, rating=excluded.rating, rating_critic=excluded.rating_critic, "
-                "poster_url=excluded.poster_url, tmdb_id=excluded.tmdb_id, imdb_id=excluded.imdb_id, "
-                "has_file=excluded.has_file, updated_at=CURRENT_TIMESTAMP",
-                (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
-                 item.get("year"), item.get("overview"), item.get("runtime_minutes"),
-                 item.get("content_rating"), item.get("studio"), item.get("tagline"),
-                 item.get("rating"), item.get("rating_critic"), item.get("poster_url"),
-                 item.get("tmdb_id"), item.get("imdb_id"), 1 if item.get("file") else 0),
-            )
+            self._resilient_upsert(conn, "movies", {
+                "server_source": server_source, "server_id": item["server_id"],
+                "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
+                "year": item.get("year"), "overview": item.get("overview"),
+                "runtime_minutes": item.get("runtime_minutes"), "content_rating": item.get("content_rating"),
+                "studio": item.get("studio"), "tagline": item.get("tagline"),
+                "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
+                "poster_url": item.get("poster_url"), "has_file": 1 if item.get("file") else 0,
+            }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")})
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
@@ -474,25 +489,16 @@ class VideoDatabase:
         show are pruned. Returns the show row id."""
         conn = self._get_connection()
         try:
-            conn.execute(
-                "INSERT INTO shows (server_source, server_id, title, sort_title, year, overview, status, "
-                "network, runtime_minutes, content_rating, tagline, rating, first_air_date, last_air_date, "
-                "poster_url, tvdb_id, tmdb_id, imdb_id, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(server_source, server_id) DO UPDATE SET "
-                "title=excluded.title, sort_title=excluded.sort_title, year=excluded.year, "
-                "overview=excluded.overview, status=excluded.status, network=excluded.network, "
-                "runtime_minutes=excluded.runtime_minutes, content_rating=excluded.content_rating, "
-                "tagline=excluded.tagline, rating=excluded.rating, first_air_date=excluded.first_air_date, "
-                "last_air_date=excluded.last_air_date, "
-                "poster_url=excluded.poster_url, tvdb_id=excluded.tvdb_id, tmdb_id=excluded.tmdb_id, "
-                "imdb_id=excluded.imdb_id, updated_at=CURRENT_TIMESTAMP",
-                (server_source, item["server_id"], item.get("title"), _sort_title(item.get("title")),
-                 item.get("year"), item.get("overview"), item.get("status"), item.get("network"),
-                 item.get("runtime_minutes"), item.get("content_rating"), item.get("tagline"),
-                 item.get("rating"), item.get("first_air_date"), item.get("last_air_date"),
-                 item.get("poster_url"), item.get("tvdb_id"), item.get("tmdb_id"), item.get("imdb_id")),
-            )
+            self._resilient_upsert(conn, "shows", {
+                "server_source": server_source, "server_id": item["server_id"],
+                "title": item.get("title"), "sort_title": _sort_title(item.get("title")),
+                "year": item.get("year"), "overview": item.get("overview"),
+                "status": item.get("status"), "network": item.get("network"),
+                "runtime_minutes": item.get("runtime_minutes"), "content_rating": item.get("content_rating"),
+                "tagline": item.get("tagline"), "rating": item.get("rating"),
+                "first_air_date": item.get("first_air_date"), "last_air_date": item.get("last_air_date"),
+                "poster_url": item.get("poster_url"),
+            }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")})
             show_id = conn.execute(
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),

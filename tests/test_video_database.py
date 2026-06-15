@@ -480,6 +480,35 @@ def test_enrichment_apply_survives_legacy_unique(db):
     assert rb["tvdb_id"] is None and rb["tvdb_match_status"] == "matched" and rb["overview"] == "OB"
 
 
+def test_upsert_movie_survives_legacy_unique_tmdb(db):
+    # Old DBs created movies.tmdb_id UNIQUE; the new model allows the same film in
+    # >1 library. The scan must STORE the second movie (dropping the colliding id),
+    # not skip it with an IntegrityError.
+    with db.connect() as c:
+        c.execute("CREATE UNIQUE INDEX ux_legacy_movies_tmdb ON movies(tmdb_id)")
+        c.commit()
+    a = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 548522})
+    b = db.upsert_movie("plex", {"server_id": "m2", "title": "B", "tmdb_id": 548522})
+    assert a != b                                    # both rows exist (not skipped)
+    with db.connect() as c:
+        ra = c.execute("SELECT tmdb_id FROM movies WHERE id=?", (a,)).fetchone()
+        rb = c.execute("SELECT title, tmdb_id FROM movies WHERE id=?", (b,)).fetchone()
+    assert ra["tmdb_id"] == 548522
+    assert rb["title"] == "B" and rb["tmdb_id"] is None   # kept the row, dropped the dup id
+
+
+def test_upsert_show_survives_legacy_unique_tvdb(db):
+    with db.connect() as c:
+        c.execute("CREATE UNIQUE INDEX ux_legacy_shows_tvdb2 ON shows(tvdb_id)")
+        c.commit()
+    a = db.upsert_show_tree("plex", {"server_id": "s1", "title": "A", "tvdb_id": 9000, "seasons": []})
+    b = db.upsert_show_tree("plex", {"server_id": "s2", "title": "B", "tvdb_id": 9000, "seasons": []})
+    assert a != b
+    with db.connect() as c:
+        rb = c.execute("SELECT title, tvdb_id FROM shows WHERE id=?", (b,)).fetchone()
+    assert rb["title"] == "B" and rb["tvdb_id"] is None
+
+
 def test_enrichment_breakdown_unmatched_retry(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
     b = db.upsert_movie("plex", {"server_id": "m2", "title": "B"})
