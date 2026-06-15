@@ -195,6 +195,23 @@ class PlexVideoSource:
         except Exception:
             return None
 
+    @staticmethod
+    def _tags(seq) -> list:
+        """Tag names from a Plex tag list (genres/etc.)."""
+        out = []
+        for t in (seq or []):
+            tag = getattr(t, "tag", None)
+            if tag:
+                out.append(tag)
+        return out
+
+    @staticmethod
+    def _date(val):
+        try:
+            return val.date().isoformat() if val else None
+        except Exception:
+            return None
+
     def _movie(self, m) -> dict:
         dur = getattr(m, "duration", None)
         d = {
@@ -205,6 +222,10 @@ class PlexVideoSource:
             "poster_url": getattr(m, "thumb", None),
             "content_rating": getattr(m, "contentRating", None),
             "studio": getattr(m, "studio", None),
+            "tagline": getattr(m, "tagline", None),
+            "rating": getattr(m, "audienceRating", None),
+            "rating_critic": getattr(m, "rating", None),
+            "genres": self._tags(getattr(m, "genres", None)),
             "runtime_minutes": int(dur / 60000) if dur else None,
             "file": self._part_file(m),
         }
@@ -222,6 +243,8 @@ class PlexVideoSource:
             "overview": getattr(ep, "summary", None),
             "air_date": aired.date().isoformat() if aired else None,
             "runtime_minutes": int(dur / 60000) if dur else None,
+            "still_url": getattr(ep, "thumb", None),
+            "rating": getattr(ep, "audienceRating", None),
             "tvdb_id": _parse_plex_guids(ep).get("tvdb_id"),
             "file": self._part_file(ep),
         }
@@ -271,6 +294,11 @@ class PlexVideoSource:
             "status": None,
             "network": getattr(sh, "network", None),
             "content_rating": getattr(sh, "contentRating", None),
+            "tagline": getattr(sh, "tagline", None),
+            "rating": getattr(sh, "audienceRating", None),
+            "first_air_date": self._date(getattr(sh, "originallyAvailableAt", None)),
+            "last_air_date": None,
+            "genres": self._tags(getattr(sh, "genres", None)),
             "seasons": seasons,
         }
         d.update(_parse_plex_guids(sh))
@@ -278,8 +306,12 @@ class PlexVideoSource:
 
 
 # ── Jellyfin ────────────────────────────────────────────────────────────────
-_JF_MOVIE_FIELDS = "Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,ProviderIds"
-_JF_EP_FIELDS = "Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,ProviderIds"
+_JF_MOVIE_FIELDS = ("Overview,Path,MediaSources,ProductionYear,OfficialRating,RunTimeTicks,Studios,"
+                    "ProviderIds,Genres,Taglines,CommunityRating,CriticRating")
+_JF_EP_FIELDS = ("Overview,Path,MediaSources,PremiereDate,RunTimeTicks,IndexNumber,ParentIndexNumber,"
+                 "ProviderIds,CommunityRating")
+_JF_SHOW_FIELDS = ("Overview,ProductionYear,OfficialRating,ProviderIds,Genres,Taglines,CommunityRating,"
+                   "PremiereDate,EndDate")
 
 
 class JellyfinVideoSource:
@@ -374,6 +406,11 @@ class JellyfinVideoSource:
                 except Exception:
                     logger.exception("Jellyfin: skipping movie %s", it.get("Name", "?"))
 
+    @staticmethod
+    def _first(seq):
+        seq = seq or []
+        return seq[0] if seq else None
+
     def _movie(self, it) -> dict:
         studios = it.get("Studios") or []
         ticks = it.get("RunTimeTicks")
@@ -385,6 +422,10 @@ class JellyfinVideoSource:
             "poster_url": (it.get("ImageTags") or {}).get("Primary"),
             "content_rating": it.get("OfficialRating"),
             "studio": studios[0].get("Name") if studios else None,
+            "tagline": self._first(it.get("Taglines")),
+            "rating": it.get("CommunityRating"),
+            "rating_critic": it.get("CriticRating"),
+            "genres": it.get("Genres") or [],
             "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
             "file": self._file(it),
         }
@@ -395,7 +436,7 @@ class JellyfinVideoSource:
         path = f"/Users/{self.uid}/Items"
         for view in self._views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
-                      "Recursive": "true", "Fields": "Overview,ProductionYear,OfficialRating,ProviderIds"}
+                      "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
             if incremental:
                 params.update({"SortBy": "DateCreated", "SortOrder": "Descending", "Limit": "50"})
                 items = (self._req(path, params) or {}).get("Items", [])
@@ -429,6 +470,8 @@ class JellyfinVideoSource:
                     "overview": ep.get("Overview"),
                     "air_date": aired[:10] if aired else None,
                     "runtime_minutes": int(ticks / 600_000_000) if ticks else None,
+                    "still_url": (ep.get("ImageTags") or {}).get("Primary"),
+                    "rating": ep.get("CommunityRating"),
                     "tvdb_id": _parse_jf_providers(ep).get("tvdb_id"),
                     "file": self._file(ep),
                 })
@@ -456,6 +499,8 @@ class JellyfinVideoSource:
                                 "poster_url": meta.get("poster_url"), "episodes": eps})
         except Exception:
             logger.exception("Jellyfin: failed reading episodes for %s", it.get("Name", "?"))
+        premiere = it.get("PremiereDate")
+        end = it.get("EndDate")
         d = {
             "server_id": series_id,
             "title": it.get("Name"),
@@ -465,6 +510,11 @@ class JellyfinVideoSource:
             "status": None,
             "network": None,
             "content_rating": it.get("OfficialRating"),
+            "tagline": self._first(it.get("Taglines")),
+            "rating": it.get("CommunityRating"),
+            "first_air_date": premiere[:10] if premiere else None,
+            "last_air_date": end[:10] if end else None,
+            "genres": it.get("Genres") or [],
             "seasons": seasons,
         }
         d.update(_parse_jf_providers(it))

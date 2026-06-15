@@ -22,6 +22,7 @@ EXPECTED_TABLES = {
     "meta", "root_folders", "quality_profiles", "video_settings",
     "movies", "shows", "seasons", "episodes", "channels", "channel_videos",
     "media_files", "downloads", "activity",
+    "genres", "movie_genres", "show_genres",
 }
 EXPECTED_VIEWS = {"v_watchlist", "v_wishlist", "v_calendar"}
 
@@ -270,6 +271,36 @@ def test_show_detail_builds_season_episode_tree_with_rollups(db):
 
 def test_show_detail_returns_none_for_missing(db):
     assert db.show_detail(999999) is None
+
+
+def test_capture_everything_movie(db):
+    mid = db.upsert_movie("plex", {
+        "server_id": "m1", "title": "Dune", "tagline": "Fear is the mind-killer",
+        "rating": 8.4, "rating_critic": 83, "genres": ["Sci-Fi", "Adventure", "Sci-Fi"]})
+    d = db.movie_detail(mid)
+    assert d["tagline"] == "Fear is the mind-killer" and d["rating"] == 8.4 and d["rating_critic"] == 83
+    assert d["genres"] == ["Adventure", "Sci-Fi"]          # deduped + sorted
+    # Re-upsert with different genres replaces the links (no stale rows).
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "genres": ["Drama"]})
+    assert db.movie_detail(mid)["genres"] == ["Drama"]
+
+
+def test_capture_everything_show_and_episode_still(db):
+    sid = db.upsert_show_tree("plex", {
+        "server_id": "s1", "title": "Show", "tagline": "Tick tock", "rating": 9.1,
+        "first_air_date": "2015-01-16", "genres": ["Drama", "Mystery"], "seasons": [
+            {"season_number": 1, "episodes": [
+                {"episode_number": 1, "title": "Pilot", "still_url": "/ep1.jpg", "rating": 8.0}]}]})
+    d = db.show_detail(sid)
+    assert d["tagline"] == "Tick tock" and d["rating"] == 9.1 and d["first_air_date"] == "2015-01-16"
+    assert d["genres"] == ["Drama", "Mystery"]
+    ep = d["seasons"][0]["episodes"][0]
+    assert ep["has_still"] is True and ep["rating"] == 8.0
+    # Episode still resolves through the image proxy ref (server source from the episode row).
+    with db.connect() as c:
+        eid = c.execute("SELECT id FROM episodes WHERE title='Pilot'").fetchone()["id"]
+    ref = db.get_art_ref("episode", eid, "poster")
+    assert ref["poster_url"] == "/ep1.jpg" and ref["server_source"] == "plex"
 
 
 def test_movie_detail_includes_owned_and_file(db):
