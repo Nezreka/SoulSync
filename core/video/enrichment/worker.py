@@ -123,18 +123,41 @@ class VideoEnrichmentWorker:
             logger.info("Matched %s '%s' -> %s ID: %s%s", item["kind"], item["title"],
                         self.display_name, result["id"],
                         " (by server id)" if item.get("known_id") else "")
+            # Cascade: a matched show backfills its episodes' art/overview/rating
+            # from the same provider (one call per season), so episodes ride along
+            # with their show instead of being a separate (huge) queue.
+            if item["kind"] == "show" and hasattr(self.client, "season_episodes"):
+                self._cascade_episodes(item["id"], result["id"])
         else:
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False)
             self.stats["not_found"] += 1
             logger.info("No %s match for %s '%s'", self.display_name, item["kind"], item["title"])
         return True
 
+    def _cascade_episodes(self, show_id, tv_id) -> None:
+        """Backfill a show's episodes from the provider (one call per season).
+        Best-effort: a season failure never aborts the show's enrichment."""
+        try:
+            seasons = self.db.show_season_numbers(show_id)
+        except Exception:
+            logger.exception("episode backfill: season list failed for show %s", show_id)
+            return
+        for snum in seasons:
+            try:
+                data = self.client.season_episodes(tv_id, snum)
+                if data and data.get("episodes"):
+                    self.db.backfill_episodes(show_id, snum, data["episodes"], data.get("overview"))
+            except Exception:
+                logger.exception("episode backfill failed: show %s season %s", show_id, snum)
+
     # ── status (same shape the music enrichment API returns) ──────────────────
     def get_stats(self) -> dict:
         breakdown = self.db.enrichment_breakdown(self.service)
         # Errored items are outstanding (retried later), so they count as pending
-        # work — the worker isn't "Complete" while any remain.
-        pending = sum(b["pending"] + b.get("errors", 0) for b in breakdown.values())
+        # work — the worker isn't "Complete" while any remain. Episode art is a
+        # coverage-only cascade (no queue), so it's excluded from idle/pending.
+        pending = sum(b["pending"] + b.get("errors", 0)
+                      for b in breakdown.values() if not b.get("coverage_only"))
         running = self.running and not self.paused and self.enabled
         idle = running and pending == 0 and self.current_item is None
         progress = {}

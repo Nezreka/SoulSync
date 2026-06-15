@@ -115,6 +115,29 @@ class TMDBClient:
             logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
         return {"id": tmdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
+    def season_episodes(self, tv_id, season_number):
+        """Episode-level data for one season (still/overview/rating) — the show
+        worker cascades over a show's seasons to backfill episodes the media
+        server lacked. Returns {'overview', 'episodes': [...]} or None."""
+        if not self.api_key or tv_id is None or season_number is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/tv/" + str(tv_id) + "/season/" + str(season_number),
+                         params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        data = r.json() or {}
+        out = []
+        for e in (data.get("episodes") or []):
+            en = e.get("episode_number")
+            if en is None:
+                continue
+            ep = {"episode_number": en, "overview": e.get("overview"),
+                  "rating": e.get("vote_average") or None}
+            if e.get("still_path"):
+                ep["still_url"] = self.IMG + e["still_path"]
+            out.append(ep)
+        return {"overview": data.get("overview"), "episodes": out}
+
 
 class TVDBClient:
     BASE = "https://api4.thetvdb.com/v4"

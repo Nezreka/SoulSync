@@ -277,12 +277,67 @@ class VideoDatabase:
                     "errors": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc}='error'").fetchone()[0],
                     "pending": conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {sc} IS NULL").fetchone()[0],
                 }
+            # TMDB also cascades episode art (still) backfill from the show worker,
+            # so the manager sees episode coverage. Not a queue (matched = has a
+            # still; the rest are "pending" art) — kept out of the idle/pending
+            # calc by the worker so it never blocks "Complete".
+            if service == "tmdb":
+                total = conn.execute("SELECT COUNT(*) FROM episodes").fetchone()[0]
+                with_still = conn.execute(
+                    "SELECT COUNT(*) FROM episodes WHERE still_url IS NOT NULL AND still_url<>''").fetchone()[0]
+                out["episode"] = {"matched": with_still, "not_found": 0, "errors": 0,
+                                  "pending": total - with_still, "coverage_only": True}
             return out
+        finally:
+            conn.close()
+
+    def show_season_numbers(self, show_id: int) -> list:
+        conn = self._get_connection()
+        try:
+            return [r["season_number"] for r in conn.execute(
+                "SELECT season_number FROM seasons WHERE show_id=? ORDER BY season_number",
+                (show_id,)).fetchall()]
+        finally:
+            conn.close()
+
+    def backfill_episodes(self, show_id: int, season_number: int, episodes: list,
+                          season_overview: str | None = None) -> int:
+        """Gap-only backfill of episode still/overview/rating (and the season's
+        overview) from enrichment — never clobbers what the server provided.
+        Returns the number of episode rows touched."""
+        conn = self._get_connection()
+        touched = 0
+        try:
+            for e in (episodes or []):
+                en = e.get("episode_number")
+                if en is None:
+                    continue
+                sets, params = [], []
+                for col in ("still_url", "overview", "rating"):
+                    val = e.get(col)
+                    if val is None:
+                        continue
+                    sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
+                    params.append(val)
+                if not sets:
+                    continue
+                params += [show_id, season_number, en]
+                cur = conn.execute(
+                    f"UPDATE episodes SET {', '.join(sets)} "
+                    "WHERE show_id=? AND season_number=? AND episode_number=?", params)
+                touched += cur.rowcount
+            if season_overview:
+                conn.execute("UPDATE seasons SET overview=COALESCE(NULLIF(overview, ''), ?) "
+                             "WHERE show_id=? AND season_number=?", (season_overview, show_id, season_number))
+            conn.commit()
+            return touched
         finally:
             conn.close()
 
     def enrichment_unmatched(self, service: str, kind: str, status: str = "not_found",
                              search=None, limit: int = 50, offset: int = 0) -> dict:
+        if kind == "episode" and service == "tmdb":
+            return self._episodes_missing_art(search, limit, offset)
         spec = _ENRICH.get(service, {}).get(kind)
         if not spec:
             return {"items": [], "total": 0}
@@ -312,6 +367,31 @@ class VideoDatabase:
                 d["has_poster"] = bool(d.get("has_poster"))
                 items.append(d)
             return {"items": items, "total": total}
+        finally:
+            conn.close()
+
+    def _episodes_missing_art(self, search, limit, offset) -> dict:
+        """Episodes still lacking a still image (for the manager's Episodes view).
+        Read-only: episode art is backfilled as a cascade, not a retry queue."""
+        where = ["(e.still_url IS NULL OR e.still_url='')"]
+        params: list = []
+        if search:
+            where.append("(e.title LIKE ? COLLATE NOCASE OR sh.title LIKE ? COLLATE NOCASE)")
+            params += ["%" + search + "%", "%" + search + "%"]
+        where_sql = " WHERE " + " AND ".join(where)
+        conn = self._get_connection()
+        try:
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM episodes e JOIN shows sh ON sh.id=e.show_id{where_sql}",
+                params).fetchone()[0]
+            rows = conn.execute(
+                "SELECT e.id, sh.title || ' · S' || e.season_number || 'E' || e.episode_number "
+                "|| COALESCE(' · ' || e.title, '') AS title, e.air_date AS year, "
+                "0 AS has_poster, NULL AS last_attempted "
+                f"FROM episodes e JOIN shows sh ON sh.id=e.show_id{where_sql} "
+                "ORDER BY sh.sort_title, e.season_number, e.episode_number LIMIT ? OFFSET ?",
+                params + [limit, offset]).fetchall()
+            return {"items": [dict(r) | {"has_poster": False} for r in rows], "total": total}
         finally:
             conn.close()
 

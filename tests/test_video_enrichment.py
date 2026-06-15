@@ -98,6 +98,51 @@ def test_tmdb_pulls_full_metadata(monkeypatch):
     assert m["genres"] == ["Sci-Fi", "Drama"] and m["status"] == "Released" and m["imdb_id"] == "tt1"
 
 
+def test_show_worker_cascades_episode_backfill(db):
+    # A matched show backfills its episodes' art via the client's season_episodes
+    # cascade (episodes ride along with their show — no separate queue).
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1}, {"episode_number": 2}]}]})
+
+    class CascadeClient:
+        enabled = True
+        def match(self, kind, title, year, known_id=None):
+            return {"id": 1396, "metadata": {}}
+        def season_episodes(self, tv_id, snum):
+            assert tv_id == 1396
+            return {"overview": "S%d" % snum, "episodes": [
+                {"episode_number": 1, "still_url": "/e1.jpg", "overview": "O1", "rating": 8.0}]}
+
+    w = VideoEnrichmentWorker(db, "tmdb", CascadeClient())
+    assert w.process_one() is True
+    eps = {e["episode_number"]: e for e in db.show_detail(sid)["seasons"][0]["episodes"]}
+    assert eps[1]["has_still"] is True and eps[2]["has_still"] is False   # cascade filled E1
+
+
+def test_get_stats_excludes_episode_coverage_from_pending(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1}]}]})   # episode has no still
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1)   # show done
+    stats = VideoEnrichmentWorker(db, "tmdb", FakeClient(None)).get_stats()
+    assert "episode" in stats["breakdown"]            # manager sees episode coverage
+    assert stats["stats"]["pending"] == 0             # but it doesn't block "Complete"
+
+
+def test_tmdb_season_episodes_parses(monkeypatch):
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    body = {"overview": "Season 1", "episodes": [
+        {"episode_number": 1, "still_path": "/a.jpg", "overview": "O", "vote_average": 8.1},
+        {"episode_number": 2, "still_path": None, "overview": "P", "vote_average": 0}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    res = TMDBClient("KEY").season_episodes(1396, 1)
+    assert res["overview"] == "Season 1" and len(res["episodes"]) == 2
+    assert res["episodes"][0]["still_url"] == "https://image.tmdb.org/t/p/original/a.jpg"
+    assert "still_url" not in res["episodes"][1]      # no still_path → omitted
+
+
 def test_tmdb_show_returns_season_posters(monkeypatch):
     class _Resp:
         def __init__(self, b): self._b = b

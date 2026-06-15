@@ -558,6 +558,43 @@ def test_enrichment_backfills_season_posters_only_when_missing(db):
     assert db.show_detail(sid)["seasons"][0]["has_poster"] is True
 
 
+def test_backfill_episodes_gap_only_and_season_overview(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [
+            {"episode_number": 1, "overview": "server overview"},   # has overview already
+            {"episode_number": 2}]}]})                              # bare
+    n = db.backfill_episodes(sid, 1, [
+        {"episode_number": 1, "still_url": "/e1.jpg", "overview": "tmdb overview", "rating": 8.0},
+        {"episode_number": 2, "still_url": "/e2.jpg", "overview": "tmdb e2", "rating": 7.0},
+    ], season_overview="Season one")
+    assert n == 2
+    eps = {e["episode_number"]: e for e in db.show_detail(sid)["seasons"][0]["episodes"]}
+    assert eps[1]["has_still"] is True and eps[1]["overview"] == "server overview"  # overview kept
+    assert eps[2]["has_still"] is True and eps[2]["overview"] == "tmdb e2"          # gap filled
+    with db.connect() as c:
+        assert c.execute("SELECT overview FROM seasons WHERE show_id=? AND season_number=1",
+                         (sid,)).fetchone()["overview"] == "Season one"
+
+
+def test_breakdown_reports_episode_art_coverage_for_tmdb(db):
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "still_url": "/e1.jpg"},
+                                          {"episode_number": 2}]}]})
+    bd = db.enrichment_breakdown("tmdb")
+    assert bd["episode"]["matched"] == 1 and bd["episode"]["pending"] == 1
+    assert bd["episode"].get("coverage_only") is True
+    # TVDB doesn't cascade episodes → no episode coverage entry.
+    assert "episode" not in db.enrichment_breakdown("tvdb")
+
+
+def test_unmatched_lists_episodes_missing_art(db):
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "title": "Has", "still_url": "/e1.jpg"},
+                                          {"episode_number": 2, "title": "Missing"}]}]})
+    res = db.enrichment_unmatched("tmdb", "episode", status="unmatched")
+    assert res["total"] == 1 and "Missing" in res["items"][0]["title"]
+
+
 def test_error_status_is_distinct_and_retryable_in_ui(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
     db.enrichment_apply("tmdb", "movie", a, matched=False, error=True)
