@@ -164,6 +164,113 @@ class VideoEnrichmentEngine:
             logger.exception("item_extras failed for %s %s", kind, item_id)
             return {}
 
+    # ── in-app search + TMDB-backed (un-owned) detail ─────────────────────────
+    def search(self, query) -> list:
+        """Multi-search via TMDB, each movie/show annotated with the library row id
+        if it's already owned (so the UI links to the owned detail, not the tmdb
+        view)."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        try:
+            results = w.client.search(query) or []
+        except Exception:
+            logger.exception("video search failed for %r", query)
+            return []
+        for r in results:
+            if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
+                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
+        return results
+
+    def tmdb_detail(self, kind, tmdb_id) -> dict | None:
+        """Full detail for a TMDB title not in the library — same shape as the
+        library detail (source='tmdb', direct image URLs, nothing owned). If it IS
+        in the library, returns a redirect to the owned detail instead."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return None
+        lib_id = self.db.library_id_for_tmdb(kind, tmdb_id)
+        if lib_id:
+            return {"redirect": {"source": "library", "kind": kind, "id": lib_id}}
+        try:
+            d = w.client.full_detail(kind, tmdb_id)
+        except Exception:
+            logger.exception("tmdb_detail failed for %s %s", kind, tmdb_id)
+            return None
+        if not d:
+            return None
+        d.update({"source": "tmdb", "id": tmdb_id, "owned": False, "monitored": False,
+                  "has_poster": bool(d.get("poster_url")), "has_backdrop": bool(d.get("backdrop_url"))})
+        ex = d.pop("_extras", {}) or {}
+        d.update({"trailer": ex.get("trailer"), "providers": ex.get("providers") or [],
+                  "providers_link": ex.get("providers_link"), "similar": ex.get("similar") or []})
+        if kind == "show":
+            seasons = d.pop("_seasons", []) or []
+            for s in seasons:
+                s["has_poster"] = bool(s.get("poster_url"))
+                s["episode_total"] = s.pop("episode_count", 0) or 0
+                s["episode_owned"] = 0
+                s["episodes"] = []           # loaded lazily per season (tmdb_season)
+            d["seasons"] = seasons
+            d["season_count"] = len(seasons)
+            d["episode_total"] = sum(s["episode_total"] for s in seasons)
+            d["episode_owned"] = 0
+        self._fill_tmdb_ratings(d)
+        return d
+
+    def _fill_tmdb_ratings(self, d) -> None:
+        imdb_id = d.get("imdb_id")
+        ow = self.workers.get("omdb")
+        if not imdb_id or not ow or not getattr(ow.client, "enabled", False):
+            return
+        try:
+            r = ow.client.ratings(imdb_id) or {}
+            for k in ("imdb_rating", "rt_rating", "metacritic"):
+                if r.get(k) is not None:
+                    d[k] = r[k]
+        except Exception:
+            logger.exception("tmdb_detail ratings failed for %s", imdb_id)
+
+    def tmdb_season(self, tv_id, season_number) -> dict | None:
+        """One season's episodes for a TMDB (un-owned) show — lazy-loaded when the
+        season is selected on the search detail page. Nothing is owned."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return None
+        try:
+            se = w.client.season_episodes(tv_id, season_number)
+        except Exception:
+            logger.exception("tmdb_season failed for %s S%s", tv_id, season_number)
+            return None
+        if not se:
+            return None
+        eps = [{"episode_number": e.get("episode_number"), "title": e.get("title"),
+                "overview": e.get("overview"), "air_date": e.get("air_date"),
+                "runtime_minutes": e.get("runtime_minutes"), "rating": e.get("rating"),
+                "still_url": e.get("still_url"), "has_still": bool(e.get("still_url")),
+                "owned": False}
+               for e in (se.get("episodes") or []) if e.get("episode_number") is not None]
+        return {"season_number": season_number, "overview": se.get("overview"),
+                "poster_url": se.get("poster_url"), "episodes": eps}
+
+    def person_detail(self, tmdb_id) -> dict | None:
+        """A person (actor/director) page — bio + filmography, each credit
+        annotated with the library id if owned. Keeps cast clicks in-app."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return None
+        try:
+            p = w.client.person(tmdb_id)
+        except Exception:
+            logger.exception("person_detail failed for %s", tmdb_id)
+            return None
+        if not p:
+            return None
+        for c in p.get("credits") or []:
+            if c.get("tmdb_id"):
+                c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"])
+        return p
+
     def worker(self, service):
         return self.workers.get(service)
 

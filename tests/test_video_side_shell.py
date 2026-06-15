@@ -386,6 +386,41 @@ def test_video_detail_module_referenced_and_isolated():
     assert "soulsync:video-open-detail" in src          # opened via the shared event
 
 
+def test_search_subpage_and_module():
+    assert 'data-video-subpage="video-search"' in _INDEX
+    assert "data-video-search-input" in _INDEX and "data-video-search-results" in _INDEX
+    assert "video/video-search.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-search.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src                          # no globals
+    assert "/api/video/search" in src
+    assert "soulsync:video-open-detail" in src           # results drill in via the shared event
+    assert "themoviedb.org" not in src and "imdb.com" not in src   # stays in-app
+
+
+def test_person_subpage_and_module_isolated():
+    assert 'data-video-subpage="video-person-detail"' in _INDEX
+    assert "data-video-person" in _INDEX
+    assert "video/video-person.js" in _INDEX
+    src = (_ROOT / "webui" / "static" / "video" / "video-person.js").read_text(encoding="utf-8")
+    assert "(function" in src and "})();" in src
+    assert "window." not in src
+    assert "/api/video/person/" in src
+    assert "themoviedb.org" not in src and "imdb.com" not in src
+    # The person page is a registered detail route (reload / back / new-tab work).
+    assert "video-person-detail" in _JS
+
+
+def test_detail_keeps_preview_items_in_app():
+    src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
+    # 'More like this' and cast now drill in via the shared event, not external links.
+    assert "data-vd-sim" in src and "data-vd-person" in src
+    assert "/video-detail/tmdb/" in src                  # similar/cast link in-app
+    # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
+    # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
+    assert "www.themoviedb.org/' + (s.kind" not in src
+
+
 def test_library_cards_open_detail():
     src = _LIB_JS
     assert "soulsync:video-open-detail" in src          # show cards drill in

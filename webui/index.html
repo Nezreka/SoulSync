@@ -828,6 +828,45 @@
                         </div>
                     </div>
                 </section>
+                <!-- Search (in-app): movies / shows / people from TMDB, each result
+                     linking to the owned library detail or the TMDB-backed detail.
+                     Reuses the library card classes. Built by video/video-search.js. -->
+                <section class="video-subpage" data-video-subpage="video-search" hidden>
+                    <div class="library-page-embed">
+                        <div class="library-container">
+                            <div class="library-header">
+                                <div class="library-header-content">
+                                    <h2 class="library-title"><span class="vsr-title-ic" aria-hidden="true">&#128269;</span><span>Search</span></h2>
+                                    <p class="library-subtitle">Find any movie, show or person &mdash; owned or not, everything stays in-app</p>
+                                </div>
+                            </div>
+                            <div class="library-controls">
+                                <div class="library-search-container vsr-search-box">
+                                    <input type="text" class="library-search-input" data-video-search-input
+                                           placeholder="Search movies, shows, people&hellip;" autocomplete="off" spellcheck="false">
+                                    <div class="library-search-icon">&#128269;</div>
+                                </div>
+                            </div>
+                            <div class="library-content">
+                                <div class="library-loading hidden" data-video-search-loading>
+                                    <div class="loading-spinner"></div>
+                                    <div class="loading-text">Searching&hellip;</div>
+                                </div>
+                                <div class="vsr-results" data-video-search-results></div>
+                                <div class="library-empty" data-video-search-hint>
+                                    <div class="empty-icon">&#127902;</div>
+                                    <div class="empty-title">Search SoulSync</div>
+                                    <div class="empty-subtitle">Movies, TV shows and people. Owned titles open your library detail; the rest open a live preview &mdash; no external links.</div>
+                                </div>
+                                <div class="library-empty hidden" data-video-search-empty>
+                                    <div class="empty-icon">&#129300;</div>
+                                    <div class="empty-title">No results</div>
+                                    <div class="empty-subtitle">Try another title or name.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <!-- TV-show detail (drill-in from a show card; not a nav page).
                      Isolated: built by video/video-detail.js, styled by .vd-* in
                      video-side.css. Inspired by the music artist-detail vibe. -->
@@ -983,6 +1022,33 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </section>
+                <!-- Person detail (drill-in from a cast/crew member; not a nav page).
+                     Bio + filmography, every credit links back into SoulSync. Built
+                     by video/video-person.js, styled by .vp-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-person-detail" hidden>
+                    <div class="vp-page" data-video-person>
+                        <button class="vd-back" type="button" data-video-detail-back>
+                            <span aria-hidden="true">&larr;</span> Back
+                        </button>
+                        <div class="vd-loading" data-vp-loading hidden>
+                            <div class="loading-spinner"></div><div class="loading-text">Loading&hellip;</div>
+                        </div>
+                        <div class="vp-hero">
+                            <div class="vp-photo-wrap"><img class="vp-photo" data-vp-photo alt="" hidden>
+                                <span class="vp-photo-ph" data-vp-photo-ph aria-hidden="true">&#128100;</span></div>
+                            <div class="vp-hero-info">
+                                <h1 class="vp-name" data-vp-name></h1>
+                                <div class="vp-meta" data-vp-meta></div>
+                                <p class="vp-bio" data-vp-bio></p>
+                            </div>
+                        </div>
+                        <div class="vp-credits-section">
+                            <div class="vd-section-head"><h2 class="vd-section-title">Filmography</h2>
+                                <div class="vp-credit-tabs" data-vp-tabs></div></div>
+                            <div class="vsr-grid" data-vp-credits></div>
                         </div>
                     </div>
                 </section>
@@ -9206,6 +9272,10 @@
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
+    <!-- Video search (isolated; in-app multi-search → library/tmdb detail) -->
+    <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
+    <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
+    <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
