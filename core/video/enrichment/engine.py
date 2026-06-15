@@ -278,15 +278,19 @@ class VideoEnrichmentEngine:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
-        try:
-            results = w.client.trending() or []
-        except Exception:
-            logger.exception("video trending failed")
-            return []
-        for r in results:
+        cached = self._cache_get(("trending",))
+        if cached is None:
+            try:
+                cached = w.client.trending() or []
+                self._cache_put(("trending",), cached, ttl=3600)
+            except Exception:
+                logger.exception("video trending failed")
+                return []
+        # Re-annotate ownership fresh each call (cheap) so it tracks the library.
+        for r in cached:
             if r.get("tmdb_id"):
                 r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
-        return results
+        return cached
 
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
         """Full detail for a TMDB title not in the library — same shape as the
@@ -352,6 +356,10 @@ class VideoEnrichmentEngine:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return None
+        key = ("season", tv_id, season_number)
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
         try:
             se = w.client.season_episodes(tv_id, season_number)
         except Exception:
@@ -365,8 +373,10 @@ class VideoEnrichmentEngine:
                 "still_url": e.get("still_url"), "has_still": bool(e.get("still_url")),
                 "owned": False}
                for e in (se.get("episodes") or []) if e.get("episode_number") is not None]
-        return {"season_number": season_number, "overview": se.get("overview"),
-                "poster_url": se.get("poster_url"), "episodes": eps}
+        out = {"season_number": season_number, "overview": se.get("overview"),
+               "poster_url": se.get("poster_url"), "episodes": eps}
+        self._cache_put(key, out)
+        return out
 
     def person_detail(self, tmdb_id) -> dict | None:
         """A person (actor/director) page — bio + filmography, each credit
@@ -374,13 +384,17 @@ class VideoEnrichmentEngine:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return None
-        try:
-            p = w.client.person(tmdb_id)
-        except Exception:
-            logger.exception("person_detail failed for %s", tmdb_id)
-            return None
-        if not p:
-            return None
+        p = self._cache_get(("person", tmdb_id))
+        if p is None:
+            try:
+                p = w.client.person(tmdb_id)
+            except Exception:
+                logger.exception("person_detail failed for %s", tmdb_id)
+                return None
+            if not p:
+                return None
+            self._cache_put(("person", tmdb_id), p)
+        # Re-annotate ownership fresh each call (cheap) so it tracks the library.
         for c in p.get("credits") or []:
             if c.get("tmdb_id"):
                 c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"])

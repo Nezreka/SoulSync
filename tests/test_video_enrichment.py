@@ -257,6 +257,26 @@ def test_engine_search_annotates_library(db):
     assert "library_id" not in res[2]                         # people aren't library-matched
 
 
+def test_person_detail_caches_tmdb_call(db):
+    calls = []
+    class Tmdb:
+        enabled = True
+        def person(self, tid): calls.append(tid); return {"tmdb_id": tid, "name": "P", "credits": []}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    eng.person_detail(7); eng.person_detail(7)
+    assert calls == [7]                           # second view served from cache
+
+
+def test_tmdb_season_caches_tmdb_call(db):
+    calls = []
+    class Tmdb:
+        enabled = True
+        def season_episodes(self, tv, sn): calls.append((tv, sn)); return {"overview": "S", "episodes": []}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    eng.tmdb_season(9, 1); eng.tmdb_season(9, 1)
+    assert calls == [(9, 1)]
+
+
 def test_engine_trending_annotates_library(db):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
 
