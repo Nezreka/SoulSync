@@ -208,7 +208,12 @@
         var a = q('[data-vd-actions]');
         if (!a) return;
         var watching = !!d.monitored;
-        var html =
+        var html = '';
+        if (d.trailer && d.trailer.key) {
+            html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
+                '<span class="vd-trailer-ic">▶</span> Trailer</button>';
+        }
+        html +=
             '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
             '" type="button" data-vd-act="watchlist">' +
             '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
@@ -237,6 +242,75 @@
                     '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
             }).join('') + '</div>'
             : '';
+    }
+
+    // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
+    function resetExtras() {
+        ['[data-vd-providers-section]', '[data-vd-similar-section]'].forEach(function (s) {
+            var n = q(s); if (n) n.hidden = true;
+        });
+    }
+    function loadExtras(kind, id) {
+        fetch(DETAIL_URL + kind + '/' + id + '/extras', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (ex) { if (ex) renderExtras(kind, id, ex); })
+            .catch(function () { /* best-effort */ });
+    }
+    function renderExtras(kind, id, ex) {
+        if (!data || data.id !== id || currentKind !== kind) return;
+        data.trailer = ex.trailer || null;
+        renderActions(data);
+
+        var ps = q('[data-vd-providers-section]'), ph = q('[data-vd-providers]');
+        if (ps && ph) {
+            if (ex.providers && ex.providers.length) {
+                ps.hidden = false;
+                ph.innerHTML = ex.providers.map(function (p) {
+                    var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
+                        : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
+                    return '<div class="vd-prov" title="' + esc(p.name) + '">' + img +
+                        '<span class="vd-prov-name">' + esc(p.name) + '</span></div>';
+                }).join('');
+            } else { ps.hidden = true; }
+        }
+        var ss = q('[data-vd-similar-section]'), sh = q('[data-vd-similar]');
+        if (ss && sh) {
+            if (ex.similar && ex.similar.length) {
+                ss.hidden = false;
+                sh.innerHTML = ex.similar.map(function (s) {
+                    var poster = s.poster
+                        ? '<img class="vd-sim-poster" src="' + esc(s.poster) + '" alt="" loading="lazy">'
+                        : '<span class="vd-sim-poster vd-sim-poster--ph">🎬</span>';
+                    var url = 'https://www.themoviedb.org/' + (s.kind === 'movie' ? 'movie' : 'tv') + '/' + s.tmdb_id;
+                    return '<a class="vd-sim-card" href="' + url + '" target="_blank" rel="noopener">' +
+                        poster + '<span class="vd-sim-title">' + esc(s.title) + '</span></a>';
+                }).join('');
+            } else { ss.hidden = true; }
+        }
+    }
+
+    // ── trailer modal (YouTube embed) ─────────────────────────────────────────
+    function openTrailer(key) {
+        if (!key) return;
+        var ov = document.getElementById('vd-trailer-overlay');
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.id = 'vd-trailer-overlay';
+            ov.className = 'vd-trailer-overlay';
+            ov.addEventListener('click', function (e) {
+                if (e.target === ov || e.target.closest('[data-vd-trailer-close]')) closeTrailer();
+            });
+            document.body.appendChild(ov);
+        }
+        ov.innerHTML = '<div class="vd-trailer-box">' +
+            '<button class="vd-trailer-close" type="button" data-vd-trailer-close aria-label="Close">&times;</button>' +
+            '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(key) +
+            '?autoplay=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe></div>';
+        ov.classList.add('vd-trailer-overlay--open');
+    }
+    function closeTrailer() {
+        var ov = document.getElementById('vd-trailer-overlay');
+        if (ov) { ov.classList.remove('vd-trailer-overlay--open'); ov.innerHTML = ''; }
     }
 
     // ── season selector (4 views) ─────────────────────────────────────────────
@@ -371,6 +445,7 @@
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
         showLoading(true);
+        resetExtras();
         var dh = q('[data-vd-details]'); if (dh) dh.innerHTML = '';
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
         fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
@@ -384,6 +459,7 @@
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-movie-detail"]');
                 if (sub) sub.scrollTop = 0;
                 maybeRefreshMovie(id);
+                loadExtras('movie', id);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load movie'); });
     }
@@ -415,6 +491,7 @@
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
         showLoading(true);
+        resetExtras();
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
         fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
@@ -431,6 +508,7 @@
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
                 maybeRefreshArt(id);
+                loadExtras('show', id);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });
     }
@@ -483,6 +561,7 @@
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'missing') toggleMissing();
+            else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
             return;
         }
         var mt = e.target.closest('[data-vd-missing-toggle]');
@@ -500,6 +579,9 @@
     function init() {
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') closeTrailer();
+        });
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

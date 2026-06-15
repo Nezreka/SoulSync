@@ -338,7 +338,8 @@ def test_show_detail_subpage_present():
     # Netflix billboard + episodes containers the renderer fills.
     for hook in ('data-vd-backdrop', 'data-vd-poster', 'data-vd-title', 'data-vd-meta',
                  'data-vd-overview', 'data-vd-actions', 'data-vd-view-toggle',
-                 'data-vd-season-nav', 'data-vd-episodes', 'data-vd-cast', 'data-vd-crew'):
+                 'data-vd-season-nav', 'data-vd-episodes', 'data-vd-cast', 'data-vd-crew',
+                 'data-vd-logo', 'data-vd-providers', 'data-vd-similar'):
         assert hook in block, hook
     # Back button reuses the shared data-video-goto nav (no inline handler).
     assert 'data-video-goto="video-library"' in block

@@ -154,6 +154,58 @@ class TMDBClient:
         if crew:
             meta["crew"] = crew
 
+    POSTER_W = "https://image.tmdb.org/t/p/w300"
+    PROVIDER = "https://image.tmdb.org/t/p/original"
+
+    def extras(self, kind, tmdb_id, region="US"):
+        """Live detail extras (not cached — providers change): a trailer, the
+        'where to watch' providers for a region, and similar titles."""
+        if not self.api_key or tmdb_id is None:
+            return {}
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
+        r = requests.get(self.BASE + path, params={
+            "api_key": self.api_key, "append_to_response": "videos,watch/providers,similar"}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        out = {}
+
+        # Trailer — prefer a YouTube "Trailer", fall back to a teaser.
+        trailer = None
+        for v in (d.get("videos") or {}).get("results") or []:
+            if v.get("site") == "YouTube" and v.get("type") in ("Trailer", "Teaser") and v.get("key"):
+                trailer = {"key": v["key"], "name": v.get("name")}
+                if v.get("type") == "Trailer":
+                    break
+        if trailer:
+            out["trailer"] = trailer
+
+        # Where to watch (one region; JustWatch-powered).
+        wp = ((d.get("watch/providers") or {}).get("results") or {}).get(region) or {}
+        provs, seen = [], set()
+        for grp in ("flatrate", "free", "ads", "rent", "buy"):
+            for p in (wp.get(grp) or []):
+                name = p.get("provider_name")
+                if name and name not in seen:
+                    seen.add(name)
+                    provs.append({"name": name,
+                                  "logo": (self.PROVIDER + p["logo_path"]) if p.get("logo_path") else None})
+        if provs:
+            out["providers"] = provs[:8]
+            out["providers_link"] = wp.get("link")
+            out["region"] = region
+
+        # More like this.
+        sim = []
+        for s in ((d.get("similar") or {}).get("results") or [])[:14]:
+            title = s.get("title") or s.get("name")
+            if title and s.get("id"):
+                sim.append({"title": title, "tmdb_id": s["id"], "kind": kind,
+                            "poster": (self.POSTER_W + s["poster_path"]) if s.get("poster_path") else None})
+        if sim:
+            out["similar"] = sim
+        return out
+
     def season_episodes(self, tv_id, season_number):
         """Episode-level data for one season (still/overview/rating) — the show
         worker cascades over a show's seasons to backfill episodes the media
