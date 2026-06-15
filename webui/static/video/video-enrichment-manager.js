@@ -37,7 +37,7 @@
     var state = {
         open: false, selected: 'tmdb', statuses: {}, breakdown: null,
         unmatched: null, kind: 'movie', page: 0, pageSize: 50,
-        statusFilter: 'unmatched', pollTimer: null,
+        statusFilter: 'unmatched', search: '', priority: '', pollTimer: null, searchTimer: null,
     };
 
     function esc(s) {
@@ -94,8 +94,15 @@
             kind: state.kind, status: state.statusFilter,
             limit: String(state.pageSize), offset: String(state.page * state.pageSize),
         });
+        if (state.search) params.set('q', state.search);
         return getJSON('/api/video/enrichment/' + id + '/unmatched?' + params).then(function (d) {
             state.unmatched = d || { total: 0, items: [] };
+        });
+    }
+    function loadPriority() {
+        return getJSON('/api/video/enrichment/priority').then(function (d) {
+            state.priority = (d && d.priority) || '';
+            renderGlobalTabs();
         });
     }
 
@@ -199,13 +206,37 @@
         }
     }
 
+    function renderGlobalTabs() {
+        var host = byId('vem-global-tabs');
+        if (!host) return;
+        var btns = host.querySelectorAll('[data-em-priority]');
+        for (var i = 0; i < btns.length; i++) {
+            btns[i].classList.toggle('active', btns[i].getAttribute('data-em-priority') === state.priority);
+        }
+    }
+
     function renderControls() {
         var host = byId('vem-unmatched-controls');
         if (!host) return;
+        var total = state.unmatched ? state.unmatched.total : null;
+        var opt = function (v, label) {
+            return '<option value="' + v + '"' + (state.statusFilter === v ? ' selected' : '') + '>' + label + '</option>';
+        };
+        var isEpisode = state.kind === 'episode';
         host.innerHTML =
-            '<span class="em-section-sub">' + (KIND_LABEL[state.kind] || state.kind) +
-            ' not yet matched</span>' +
-            '<button class="em-retry-all-btn" data-em-retry-all>Retry failed</button>';
+            '<div class="em-unmatched-bar">' +
+            '<div class="em-section-label em-section-label--inline">' +
+            (KIND_LABEL[state.kind] || state.kind) + ' not yet matched' +
+            (total != null ? '<span class="em-count">' + total.toLocaleString() + '</span>' : '') +
+            (isEpisode ? '' : '<button class="em-btn em-btn--sm em-btn--ghost em-retry-all-btn" data-em-retry-all>↻ Retry all failed</button>') +
+            '</div>' +
+            '<div class="em-filter-row">' +
+            (isEpisode ? '' :
+                '<select class="em-select" data-em-status>' + opt('unmatched', 'All unmatched') +
+                opt('not_found', 'Not found') + opt('pending', 'Pending') + '</select>') +
+            '<div class="em-search-wrap"><span class="em-search-ico">⌕</span>' +
+            '<input class="em-search" type="text" placeholder="Search…" value="' + esc(state.search) + '" data-em-search></div>' +
+            '</div></div>';
     }
 
     function renderList() {
@@ -239,7 +270,7 @@
     // ── selection / actions ────────────────────────────────────────────────────
     function selectWorker(id) {
         state.selected = id; state.breakdown = null; state.unmatched = null;
-        state.kind = defaultKind(id); state.page = 0;
+        state.kind = defaultKind(id); state.page = 0; state.search = '';
         renderRail(); renderPanel();
         Promise.all([loadBreakdown(id), loadUnmatched()]).then(function () { renderPanel(); });
     }
@@ -265,6 +296,29 @@
             return Promise.all([loadBreakdown(state.selected), loadUnmatched()]);
         }).then(function () { renderCards(); renderList(); });
     }
+    function setPriority(kind) {
+        state.priority = kind;
+        renderGlobalTabs();
+        fetch('/api/video/enrichment/priority', {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ priority: kind }),
+        }).catch(function () { /* ignore */ });
+    }
+    function onSearchInput(value) {
+        state.search = value; state.page = 0;
+        if (state.searchTimer) clearTimeout(state.searchTimer);
+        state.searchTimer = setTimeout(function () {
+            loadUnmatched().then(function () { renderControls(); renderList(); restoreSearchFocus(); });
+        }, 300);
+    }
+    function restoreSearchFocus() {
+        var inp = document.querySelector('#vem-overlay [data-em-search]');
+        if (inp) { inp.focus(); var v = inp.value; inp.value = ''; inp.value = v; }
+    }
+    function setStatusFilter(value) {
+        state.statusFilter = value; state.page = 0;
+        loadUnmatched().then(function () { renderControls(); renderList(); });
+    }
 
     // ── open/close + delegation ────────────────────────────────────────────────
     function ensureOverlay() {
@@ -278,10 +332,21 @@
             '<div class="em-topbar"><div class="em-topbar-icon"><img src="/static/trans2.png" alt="" class="em-topbar-logo"></div>' +
             '<div class="em-topbar-titles"><h3 class="em-topbar-title">Video Enrichment Workers</h3>' +
             '<div class="em-topbar-sub">Match your library to TMDB &amp; TVDB</div></div>' +
+            '<div class="em-global"><span class="em-global-label">Process first<br><span>everywhere</span></span>' +
+            '<div class="em-global-tabs" id="vem-global-tabs">' +
+            '<button data-em-priority="movie">Movies</button>' +
+            '<button data-em-priority="show">Shows</button>' +
+            '<button data-em-priority="" class="em-global-auto">Auto</button></div></div>' +
             '<div class="em-topbar-actions"><button class="em-icon-btn" data-em-refresh title="Refresh">⟳</button>' +
             '<button class="em-icon-btn em-icon-btn--close" data-em-close title="Close">&times;</button></div></div>' +
             '<div class="em-body"><div class="em-rail" id="vem-rail"></div><div class="em-panel" id="vem-panel"></div></div></div>';
         overlay.addEventListener('click', onOverlayClick);
+        overlay.addEventListener('input', function (e) {
+            if (e.target.hasAttribute('data-em-search')) onSearchInput(e.target.value);
+        });
+        overlay.addEventListener('change', function (e) {
+            if (e.target.hasAttribute('data-em-status')) setStatusFilter(e.target.value);
+        });
         document.body.appendChild(overlay);
         return overlay;
     }
@@ -290,9 +355,10 @@
         var overlay = byId('vem-overlay');
         if (e.target === overlay) { close(); return; }
         var t = e.target.closest('[data-em-select],[data-em-pause],[data-em-kind],[data-em-retry-all],' +
-            '[data-em-retry-item],[data-em-page],[data-em-refresh],[data-em-close]');
+            '[data-em-retry-item],[data-em-page],[data-em-refresh],[data-em-close],[data-em-priority]');
         if (!t) return;
         if (t.hasAttribute('data-em-close')) close();
+        else if (t.hasAttribute('data-em-priority')) setPriority(t.getAttribute('data-em-priority'));
         else if (t.hasAttribute('data-em-refresh')) { refreshAll().then(renderRail); selectWorker(state.selected); }
         else if (t.hasAttribute('data-em-select')) selectWorker(t.getAttribute('data-em-select'));
         else if (t.hasAttribute('data-em-pause')) togglePause();
@@ -313,6 +379,7 @@
         state.open = true;
         refreshAll().then(function () {
             renderRail();
+            loadPriority();
             selectWorker(state.selected);
         });
         if (state.pollTimer) clearInterval(state.pollTimer);

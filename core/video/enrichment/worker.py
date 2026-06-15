@@ -98,7 +98,12 @@ class VideoEnrichmentWorker:
 
     def process_one(self) -> bool:
         """Process a single item. Returns True if one was processed."""
-        item = self.db.enrichment_next(self.service, self.retry_days)
+        priority = None
+        try:
+            priority = self.db.get_setting("enrichment_priority") or None
+        except Exception:
+            pass
+        item = self.db.enrichment_next(self.service, self.retry_days, priority=priority)
         if not item:
             return False
         self.current_item = {"type": item["kind"], "name": item["title"]}

@@ -98,6 +98,23 @@ def test_tmdb_pulls_full_metadata(monkeypatch):
     assert m["genres"] == ["Sci-Fi", "Drama"] and m["status"] == "Released" and m["imdb_id"] == "tt1"
 
 
+def test_enrichment_next_priority_pins_kind_first(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    assert db.enrichment_next("tmdb")["kind"] == "movie"                 # default: movie first
+    assert db.enrichment_next("tmdb", priority="show")["kind"] == "show"  # pinned
+    assert db.enrichment_next("tmdb", priority="movie")["kind"] == "movie"
+
+
+def test_worker_respects_global_priority_setting(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    db.set_setting("enrichment_priority", "show")
+    client = FakeClient({"id": 1, "metadata": {}})
+    VideoEnrichmentWorker(db, "tmdb", client).process_one()
+    assert client.calls[0][0] == "show"                                  # processed shows first
+
+
 def test_show_worker_cascades_episode_backfill(db):
     # A matched show backfills its episodes' art via the client's season_episodes
     # cascade (episodes ride along with their show — no separate queue).
