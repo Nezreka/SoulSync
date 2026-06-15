@@ -173,7 +173,7 @@ class TMDBClient:
         creds = "aggregate_credits" if kind == "show" else "credits"
         r = requests.get(self.BASE + path, params={
             "api_key": self.api_key, "include_image_language": "en,null",
-            "append_to_response": "videos,watch/providers,similar,recommendations,images,keywords," + creds},
+            "append_to_response": "videos,watch/providers,similar,recommendations,images,keywords,reviews," + creds},
             timeout=15)
         r.raise_for_status()
         out = self._parse_extras(kind, r.json() or {}, region)
@@ -293,6 +293,16 @@ class TMDBClient:
         out["cast_full"] = self._full_cast(d, kind)
         if not out["cast_full"]:
             out.pop("cast_full")
+
+        # A featured review (the first/top TMDB review).
+        revs = (d.get("reviews") or {}).get("results") or []
+        for rv in revs:
+            if rv.get("content"):
+                ad = rv.get("author_details") or {}
+                out["review"] = {"author": rv.get("author") or ad.get("username") or "Anonymous",
+                                 "content": rv["content"], "rating": ad.get("rating"),
+                                 "created": (rv.get("created_at") or "")[:10] or None}
+                break
         return out
 
     _VIDEO_ORDER = {"Trailer": 0, "Teaser": 1, "Clip": 2, "Featurette": 3, "Behind the Scenes": 4}
@@ -450,7 +460,7 @@ class TMDBClient:
         r = requests.get(self.BASE + path, params={
             "api_key": self.api_key,
             "append_to_response": "external_ids,credits,images,videos,watch/providers,similar,"
-                                  "recommendations,keywords" + agg,
+                                  "recommendations,keywords,reviews" + agg,
             "include_image_language": "en,null"}, timeout=15)
         r.raise_for_status()
         dr = r.json() or {}

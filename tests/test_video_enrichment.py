@@ -594,6 +594,16 @@ def test_tmdb_extras_gallery_videos_keywords_facts(monkeypatch):
     assert ex["cast_full"][0]["character"] == "Neo"
 
 
+def test_tmdb_extras_featured_review(monkeypatch):
+    detail = {"reviews": {"results": [
+        {"author": "Roger", "content": "A masterpiece.", "author_details": {"rating": 9},
+         "created_at": "2021-10-22T00:00:00.000Z"}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    ex = TMDBClient("KEY").extras("movie", 1)
+    assert ex["review"] == {"author": "Roger", "content": "A masterpiece.",
+                            "rating": 9, "created": "2021-10-22"}
+
+
 def test_tmdb_extras_tv_full_cast_episode_counts(monkeypatch):
     detail = {"aggregate_credits": {"cast": [
         {"id": 1, "name": "Actor", "total_episode_count": 42, "roles": [{"character": "Lead"}]}]}}
