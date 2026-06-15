@@ -1472,22 +1472,9 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
 }
 .vid-pref-row--select select option { background: #16161c; color: #fff; }
 
-/* ── settings: Video Source panel ────────────────────────────────────────── */
-.vid-source-using { font-size: 14px; color: var(--text-primary, #fff); display: flex; align-items: center; gap: 8px; }
-.vid-source-check { color: #22c55e; font-weight: 800; }
-.vid-source-none { font-size: 13.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.72); }
-.vid-source-none strong { color: #fff; }
-.vid-source-pick { display: flex; gap: 10px; margin-bottom: 10px; }
-.vid-source-btn {
-    padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 700;
-    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.8);
-    transition: all 0.18s ease;
-}
-.vid-source-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
-.vid-source-btn.active { background: rgba(56, 189, 248, 0.9); border-color: transparent; color: #fff; }
-.vid-source-btn--off { opacity: 0.45; cursor: not-allowed; }
-.vid-source-btn--off:hover { background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.8); }
-.vid-source-off { font-size: 11px; opacity: 0.85; }
+/* Server Connection mirrors the music server picker (.server-toggle-container /
+   .server-config-container) — no video-specific styling needed beyond those
+   shared classes. */
 
 /* library: no-server gate banner */
 .video-noserver {

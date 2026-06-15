@@ -6,8 +6,10 @@
  * pause/resume. The Manage Workers button fires 'soulsync:video-open-workers'
  * for the (isolated) video enrichment modal. Music code is never touched.
  *
- * Self-contained IIFE, no globals, no inline handlers. Only polls on the video
- * side so the video engine isn't spun up while the user is on the music side.
+ * Status arrives over the SAME WebSocket music uses (server emits 'enrichment:tmdb'
+ * /'enrichment:tvdb'/'enrichment:omdb' every 2s) — so the browser does NOT poll.
+ * A single fetch on first load fills the buttons instantly; the socket drives the
+ * rest. Self-contained IIFE, no globals, no inline handlers. Music is never touched.
  */
 (function () {
     'use strict';
@@ -68,8 +70,27 @@
             .catch(function () { /* ignore */ });
     }
 
-    function poll() {
+    // One-time fetch so the buttons aren't blank until the first socket push.
+    function primeOnce() {
         if (onVideoSide() && !document.hidden) SERVICES.forEach(pollOne);
+    }
+
+    // Listen on the shared socket (set up by core.js) for the server-pushed
+    // status — mirrors how the music workers report. Retries until the socket
+    // global exists, then binds once.
+    var _bound = false;
+    function bindSocket() {
+        if (_bound) return;
+        if (typeof socket === 'undefined' || !socket || !socket.on) {
+            setTimeout(bindSocket, 600);
+            return;
+        }
+        _bound = true;
+        SERVICES.forEach(function (svc) {
+            socket.on('enrichment:' + svc, function (d) {
+                if (onVideoSide() && d && !d.error) reflect(svc, d);
+            });
+        });
     }
 
     function toggle(svc) {
@@ -93,8 +114,13 @@
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-workers'));
             });
         }
-        poll();
-        setInterval(poll, 2500);
+        primeOnce();   // instant initial state
+        bindSocket();  // then the socket pushes updates — no polling
+        // Re-prime when the user returns to the tab (socket kept pushing, but a
+        // quick fetch snaps the buttons current immediately).
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) primeOnce();
+        });
     }
 
     if (document.readyState === 'loading') {

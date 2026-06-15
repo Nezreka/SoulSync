@@ -5133,24 +5133,6 @@
                             <!-- Video API Configuration (placeholders; shown only on the video
                                  side in place of the music API services). Same structure as the
                                  music service frames above. -->
-                            <!-- Video Source — the video side's OWN server pick + library
-                                 mapping, independent of the music server (it just reuses
-                                 the shared Plex/Jellyfin credentials). -->
-                            <div class="settings-group" data-stg="connections" data-video-only>
-                                <h3>Video Source</h3>
-                                <div class="vid-source-panel" data-video-source-panel>
-                                    <div class="callback-help">Checking…</div>
-                                </div>
-                                <div class="form-group video-library-selectors" style="margin-top: 16px;">
-                                    <label>Movies Library:</label>
-                                    <select data-video-lib-select="movies"><option value="">Loading...</option></select>
-                                    <label style="margin-top: 12px;">TV Shows Library:</label>
-                                    <select data-video-lib-select="tv"><option value="">Loading...</option></select>
-                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
-                                        Which libraries the video side scans. <span data-video-lib-status></span>
-                                    </small>
-                                </div>
-                            </div>
                             <div class="settings-group" data-stg="connections" data-video-only>
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
                                 <div class="api-service-frame stg-service" data-video-service="tmdb">
@@ -5208,6 +5190,75 @@
                                         </div>
                                         <button class="test-button" type="button" data-video-test-service="omdb">Test OMDb</button>
                                     </div>
+                                </div>
+                            </div>
+                            <!-- Server Connection — mirrors the music server picker, scoped
+                                 to Plex/Jellyfin. The toggle BOTH selects the active video
+                                 server AND reveals its credentials. Creds are pre-filled from
+                                 the music settings but stored separately (video.db), so the
+                                 two sides stay fully independent. Sits at the bottom of the
+                                 Connections tab. -->
+                            <div class="settings-group" data-stg="connections" data-video-only>
+                                <h3>Server Connection</h3>
+                                <p class="callback-help" style="margin: -4px 0 14px;">Pick the server the video side uses. Fields are pre-filled from your Music settings — edit them to point video at a different server without touching Music.</p>
+
+                                <div class="server-toggle-container">
+                                    <button class="server-toggle-btn" type="button" data-video-server-toggle="plex">
+                                        <img src="https://www.plex.tv/wp-content/themes/plex/assets/img/plex-logo.svg" alt="Plex" class="server-logo">
+                                    </button>
+                                    <button class="server-toggle-btn" type="button" data-video-server-toggle="jellyfin">
+                                        <img src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/png/jellyfin.png" alt="Jellyfin" class="server-logo">
+                                    </button>
+                                </div>
+
+                                <!-- Plex -->
+                                <div class="server-config-container hidden" data-video-server-config="plex">
+                                    <div class="form-group">
+                                        <label>Plex Server URL:</label>
+                                        <input type="text" data-video-conn="plex-url" placeholder="http://localhost:32400">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Plex Token:</label>
+                                        <input type="password" data-video-conn="plex-token" placeholder="X-Plex-Token">
+                                    </div>
+                                    <div class="callback-help" data-video-conn-note="plex"></div>
+                                    <div class="form-actions">
+                                        <button class="test-button" type="button" data-video-conn-test="plex">Test Connection</button>
+                                    </div>
+                                </div>
+
+                                <!-- Jellyfin -->
+                                <div class="server-config-container hidden" data-video-server-config="jellyfin">
+                                    <div class="form-group">
+                                        <label>Jellyfin Server URL:</label>
+                                        <input type="text" data-video-conn="jellyfin-url" placeholder="http://localhost:8096">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" data-video-conn="jellyfin-key" placeholder="Jellyfin API Key">
+                                    </div>
+                                    <div class="callback-help" data-video-conn-note="jellyfin"></div>
+                                    <div class="form-actions">
+                                        <button class="test-button" type="button" data-video-conn-test="jellyfin">Test Connection</button>
+                                    </div>
+                                    <div class="form-group" data-video-jellyfin-user-wrap style="display:none; margin-top:14px;">
+                                        <label>Jellyfin User</label>
+                                        <select data-video-jellyfin-user><option value="">Select User</option></select>
+                                        <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                            Which user's libraries to scan. The Movies/TV lists below reflect this user — pick an admin to see everything.
+                                        </small>
+                                    </div>
+                                </div>
+
+                                <!-- Which libraries on the chosen server the video side scans. -->
+                                <div class="form-group video-library-selectors" style="margin-top: 20px;">
+                                    <label>Movies Library:</label>
+                                    <select data-video-lib-select="movies"><option value="">Loading...</option></select>
+                                    <label style="margin-top: 12px;">TV Shows Library:</label>
+                                    <select data-video-lib-select="tv"><option value="">Loading...</option></select>
+                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                        Which libraries the video side scans. <span data-video-lib-status></span>
+                                    </small>
                                 </div>
                             </div>
                             <!-- Video Preferences — lives on the Library settings tab -->

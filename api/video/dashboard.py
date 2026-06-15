@@ -20,8 +20,8 @@ def register_routes(bp):
         try:
             stats = get_video_db().dashboard_stats()
             try:
-                from config.settings import config_manager
-                stats["server"] = config_manager.get_active_media_server()
+                from core.video.sources import resolve_video_server
+                stats["server"] = resolve_video_server()  # the VIDEO server, not music's active
             except Exception:
                 stats["server"] = None
             return jsonify(stats)

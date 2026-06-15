@@ -34,16 +34,19 @@ def register_routes(bp):
                                 content_type=upstream.headers.get("Content-Type", "image/jpeg"))
                 resp.headers["Cache-Control"] = "public, max-age=86400"
                 return resp
+            # Art is served from the VIDEO side's effective connection (its own
+            # creds, or inherited from music) — that's where the item was scanned.
+            from core.video.sources import video_plex_config, video_jellyfin_config
             source = ref.get("server_source")
             if source == "plex":
-                cfg = config_manager.get_plex_config() or {}
+                cfg = video_plex_config()
                 base, token = cfg.get("base_url"), cfg.get("token")
                 if not base or not token:
                     abort(404)
                 url = base.rstrip("/") + ref["poster_url"]
                 params = {"X-Plex-Token": token}
             elif source == "jellyfin":
-                cfg = config_manager.get_jellyfin_config() or {}
+                cfg = video_jellyfin_config()
                 base, key = cfg.get("base_url"), cfg.get("api_key")
                 if not base:
                     abort(404)

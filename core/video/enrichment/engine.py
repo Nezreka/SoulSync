@@ -209,9 +209,11 @@ class VideoEnrichmentEngine:
         if not source or not sid:
             return None                      # not on a server (e.g. a wishlist row)
         try:
-            from config.settings import config_manager
+            # Use the VIDEO side's effective connection (its own creds, or inherited
+            # from music) — the item lives on the server the video side scanned.
+            from core.video.sources import video_plex_config, video_jellyfin_config
             if source == "plex":
-                cfg = config_manager.get_plex_config() or {}
+                cfg = video_plex_config(self.db)
                 base, token = cfg.get("base_url"), cfg.get("token")
                 if not base or not token:
                     return None
@@ -223,7 +225,7 @@ class VideoEnrichmentEngine:
                 return {"server": "Plex",
                         "url": "https://app.plex.tv/desktop/#!/server/%s/details?key=%s" % (mid, key)}
             if source == "jellyfin":
-                cfg = config_manager.get_jellyfin_config() or {}
+                cfg = video_jellyfin_config(self.db)
                 base = cfg.get("base_url")
                 if not base:
                     return None
@@ -453,6 +455,13 @@ def get_video_enrichment_engine():
                                             ratings_client=OMDBClient(db.get_setting("omdb_api_key")))
                 eng.start_all()
                 _engine = eng
+    return _engine
+
+
+def peek_video_enrichment_engine():
+    """The engine ONLY if it's already running — never creates or starts it. Lets
+    the socket status emitter push updates without spinning up the video engine on
+    the music side (it stays None until something actually uses video)."""
     return _engine
 
 
