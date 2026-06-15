@@ -10,6 +10,7 @@ video.db helpers; no music code.
 from __future__ import annotations
 
 import threading
+import time
 
 from utils.logging_config import get_logger
 
@@ -38,6 +39,7 @@ class VideoEnrichmentWorker:
         self.stats = {"matched": 0, "not_found": 0, "errors": 0}
         self.note = None                 # a human reason when auto-paused (e.g. bad key)
         self._rating_errors = 0          # consecutive ratings failures (transient backoff)
+        self._cooldown_until = 0.0       # monotonic time to idle until (daily-limit backoff)
 
     # ── lifecycle ─────────────────────────────────────────────────────────────
     def start(self):
@@ -88,6 +90,12 @@ class VideoEnrichmentWorker:
         while not self.should_stop:
             if self.paused or not self.enabled:
                 self._stop.wait(1.0)
+                continue
+            # Daily-limit cooldown: idle until the quota resets, then auto-resume
+            # (re-checks periodically so we pick back up shortly after midnight UTC).
+            if self._cooldown_until > time.monotonic():
+                self.current_item = None
+                self._stop.wait(15.0)
                 continue
             try:
                 did = self.process_one()
@@ -160,12 +168,24 @@ class VideoEnrichmentWorker:
         try:
             r = self.client.ratings(item["imdb_id"])
         except OMDbAuthError as e:
-            # Bad/expired key affects EVERY item — pause instead of churning the
-            # whole library + flooding the log. Transient pause (not persisted) so
-            # fixing the key (which rebuilds the engine) resumes automatically. The
-            # item is NOT marked synced, so it'll be tried again once the key works.
+            msg = str(e)
+            if "limit" in msg.lower():
+                # Free-tier daily quota (1,000/req) — resets at midnight UTC. Cool
+                # down and AUTO-RESUME (so a big library just spreads across days)
+                # rather than pausing for good. Item not marked synced → retried.
+                if self._cooldown_until <= time.monotonic():
+                    logger.warning("OMDb daily request limit reached — idling ratings ~30 min; "
+                                   "auto-resumes after the daily reset")
+                self._cooldown_until = time.monotonic() + 1800
+                self.note = "OMDb daily limit reached — resumes after reset"
+                return False
+            # Bad/expired/unactivated key affects EVERY item — pause instead of
+            # churning the whole library + flooding the log. Transient pause (not
+            # persisted) so fixing the key (which rebuilds the engine) resumes
+            # automatically. The item is NOT marked synced, so it retries once
+            # the key works.
             if not self.paused:
-                logger.warning("OMDb rejected the API key — pausing ratings until it's fixed (%s)", e)
+                logger.warning("OMDb rejected the API key — pausing ratings until it's fixed (%s)", msg)
             self.note = "OMDb API key rejected"
             self.pause(persist=False)
             return False
@@ -182,6 +202,7 @@ class VideoEnrichmentWorker:
                 self._rating_errors = 0
             return False
         self._rating_errors = 0
+        self._cooldown_until = 0.0
         self.note = None
         if r:
             self.db.apply_ratings(item["kind"], item["id"], r)       # marks synced
@@ -258,7 +279,8 @@ class VideoEnrichmentWorker:
                 pending += self.db.episode_sync_pending_count()
             except Exception:
                 pass
-        running = self.running and not self.paused and self.enabled
+        cooling = self._cooldown_until > time.monotonic()
+        running = self.running and not self.paused and self.enabled and not cooling
         idle = running and pending == 0 and self.current_item is None
         progress = {}
         for kind, b in breakdown.items():
@@ -269,10 +291,11 @@ class VideoEnrichmentWorker:
         return {
             "enabled": self.enabled,
             "running": running,
-            "paused": self.paused,
+            "paused": self.paused or cooling,    # cooldown reads as paused in the UI
             "idle": idle,
             "current_item": self.current_item,
             "note": self.note,
+            "cooldown": cooling,
             "stats": {**self.stats, "pending": pending},
             "progress": progress,
             "breakdown": breakdown,
