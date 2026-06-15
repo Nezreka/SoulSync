@@ -83,8 +83,14 @@
         return d.has_backdrop ? '/api/video/backdrop' + art : (d.has_poster ? '/api/video/poster' + art : '');
     }
     function bbPoster(d) {
-        if (d.source === 'tmdb') return d.poster_url || '';
+        // The offscreen poster is canvas-sampled for the accent — must be
+        // same-origin, so tmdb (preview) posters go through our image proxy.
+        if (d.source === 'tmdb') return d.poster_url ? proxied(d.poster_url) : '';
         return d.has_poster ? '/api/video/poster/' + d.kind + '/' + d.id : '';
+    }
+    function proxied(url) {
+        return /^https:\/\/image\.tmdb\.org\//.test(url || '')
+            ? '/api/video/img?u=' + encodeURIComponent(url) : (url || '');
     }
     function pct(s) { return s.episode_total ? Math.round(s.episode_owned / s.episode_total * 100) : 0; }
 

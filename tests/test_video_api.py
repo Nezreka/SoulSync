@@ -51,6 +51,13 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/tmdb/show/<int:tv_id>/season/<int:season_number>" in rules
     assert "/api/video/person/<int:tmdb_id>" in rules
     assert any(r.startswith("/api/video/backdrop/") for r in rules)
+    assert "/api/video/img" in rules
+
+
+def test_img_proxy_rejects_non_tmdb(tmp_path):
+    client, _ = _make_client(tmp_path)
+    assert client.get("/api/video/img?u=https://evil.example.com/x.jpg").status_code == 404
+    assert client.get("/api/video/img").status_code == 404
 
 
 def test_search_endpoint_empty_query(tmp_path):

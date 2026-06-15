@@ -161,6 +161,35 @@
         return dy ? (by + ' – ' + dy) : (by ? 'Born ' + by : '');
     }
 
+    // Per-person accent: sample the portrait's dominant vibrant colour (via the
+    // same-origin image proxy, so the cross-origin canvas isn't tainted).
+    function applyAccent(photoUrl) {
+        var page = root();
+        if (!page || !photoUrl) return;
+        var img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = function () {
+            try {
+                var w = 24, h = 24, c = document.createElement('canvas'); c.width = w; c.height = h;
+                var ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, w, h);
+                var px = ctx.getImageData(0, 0, w, h).data;
+                var best = null, bestScore = -1, fr = 0, fg = 0, fb = 0, n = 0;
+                for (var i = 0; i < px.length; i += 4) {
+                    var r = px[i], g = px[i + 1], b = px[i + 2], a = px[i + 3];
+                    if (a < 128) continue;
+                    var mx = Math.max(r, g, b), mn = Math.min(r, g, b), light = (mx + mn) / 2;
+                    fr += r; fg += g; fb += b; n++;
+                    if (light < 35 || light > 225) continue;
+                    var sat = mx === 0 ? 0 : (mx - mn) / mx, score = sat * (mx / 255);
+                    if (score > bestScore) { bestScore = score; best = [r, g, b]; }
+                }
+                if (!best && n) best = [Math.round(fr / n), Math.round(fg / n), Math.round(fb / n)];
+                if (best && root()) root().style.setProperty('--vd-accent-rgb', best[0] + ', ' + best[1] + ', ' + best[2]);
+            } catch (e) { /* tainted / no image — keep theme accent */ }
+        };
+        img.src = '/api/video/img?u=' + encodeURIComponent(photoUrl);
+    }
+
     function computeAge(birthday, deathday) {
         if (!birthday) return null;
         var b = new Date(birthday), end = deathday ? new Date(deathday) : new Date();
@@ -185,6 +214,7 @@
         var page = root(), amb = q('[data-vp-ambient]');
         if (page) page.setAttribute('data-has-bg', d.photo ? '1' : '0');
         if (amb) amb.style.setProperty('--vp-bg', d.photo ? "url('" + d.photo + "')" : 'none');
+        applyAccent(d.photo);
 
         setText('[data-vp-name]', d.name);
 
@@ -223,6 +253,7 @@
     function load(id) {
         if (!root()) return;
         currentId = id;
+        var pg = root(); if (pg) pg.style.removeProperty('--vd-accent-rgb');   // reset per-person accent
         showLoading(true);
         setText('[data-vp-name]', '');
         var m = q('[data-vp-meta]'); if (m) m.innerHTML = '';

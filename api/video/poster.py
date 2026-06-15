@@ -71,3 +71,26 @@ def register_routes(bp):
     @bp.route("/backdrop/<kind>/<int:item_id>", methods=["GET"])
     def video_backdrop(kind, item_id):
         return _stream_art(kind, item_id, "backdrop")
+
+    @bp.route("/img", methods=["GET"])
+    def video_img_proxy():
+        """Same-origin proxy for TMDB images (image.tmdb.org ONLY — SSRF-safe).
+        Lets the detail/person pages canvas-sample a poster/portrait for the
+        per-title accent colour, which a direct cross-origin image taints."""
+        from flask import request
+        url = request.args.get("u", "")
+        if not url.startswith("https://image.tmdb.org/"):
+            abort(404)
+        try:
+            import requests
+            upstream = requests.get(url, timeout=15, stream=True)
+            if upstream.status_code != 200:
+                abort(404)
+            resp = Response(upstream.iter_content(8192),
+                            content_type=upstream.headers.get("Content-Type", "image/jpeg"))
+            resp.headers["Cache-Control"] = "public, max-age=604800"
+            resp.headers["Access-Control-Allow-Origin"] = "*"
+            return resp
+        except Exception:
+            logger.exception("video image proxy failed for %s", url)
+            abort(404)
