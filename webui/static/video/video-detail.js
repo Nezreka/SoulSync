@@ -847,14 +847,65 @@
         var still = stillSrc
             ? '<img class="vd-ep-still" src="' + stillSrc + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
             : '';
-        return '<div class="vd-ep ' + owned + '">' +
+        if (ep.rating) meta.push('★ ' + (Math.round(ep.rating * 10) / 10));
+        var key = selectedSeason + '_' + ep.episode_number;
+        // Row + a sibling expand panel (guest stars etc. load lazily on open).
+        return '<div class="vd-ep ' + owned + '" data-vd-ep-key="' + key + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
             '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Episode ' + ep.episode_number) + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div></div>';
+            '<div class="vd-ep-badge">' + (ep.owned ? 'Owned' : 'Missing') + '</div>' +
+            '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
+            '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
+    }
+
+    function toggleEpisode(row) {
+        var key = row.getAttribute('data-vd-ep-key');
+        var panel = q('[data-vd-ep-panel="' + key + '"]');
+        if (!panel) return;
+        panel.hidden = !panel.hidden;
+        row.classList.toggle('vd-ep--open', !panel.hidden);
+        if (!panel.hidden && !panel.getAttribute('data-loaded')) {
+            panel.setAttribute('data-loaded', '1');
+            loadEpisodeExtra(key, panel);
+        }
+    }
+    function loadEpisodeExtra(key, panel) {
+        var tmdb = data && data.tmdb_id;
+        var parts = key.split('_');
+        if (!tmdb) { panel.innerHTML = '<div class="vd-ep-extra-empty">No extra info.</div>'; return; }
+        panel.innerHTML = '<div class="vd-ep-extra-empty">Loading…</div>';
+        fetch('/api/video/episode/' + tmdb + '/' + parts[0] + '/' + parts[1],
+            { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (ex) { renderEpisodeExtra(panel, ex && !ex.error ? ex : {}); })
+            .catch(function () { panel.innerHTML = ''; });
+    }
+    function renderEpisodeExtra(panel, ex) {
+        var html = '';
+        if (ex.still_url) {
+            html += '<img class="vd-ep-extra-still" src="' + esc(ex.still_url) + '" alt="" loading="lazy">';
+        }
+        html += '<div class="vd-ep-extra-body">';
+        if (ex.overview) html += '<p class="vd-ep-extra-ov">' + esc(ex.overview) + '</p>';
+        if (ex.guest_stars && ex.guest_stars.length) {
+            html += '<div class="vd-ep-extra-gh">Guest stars</div><div class="vd-ep-guests">' +
+                ex.guest_stars.map(function (g) {
+                    var img = g.photo
+                        ? '<img class="vd-guest-photo" src="' + esc(g.photo) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+                        : '<span class="vd-guest-photo vd-guest-photo--ph">' + esc((g.name || '?').charAt(0)) + '</span>';
+                    var inner = img + '<span class="vd-guest-name">' + esc(g.name) + '</span>' +
+                        (g.character ? '<span class="vd-guest-char">' + esc(g.character) + '</span>' : '');
+                    return g.tmdb_id
+                        ? '<a class="vd-guest" href="/video-detail/tmdb/person/' + g.tmdb_id + '" data-vd-person="' + g.tmdb_id + '">' + inner + '</a>'
+                        : '<div class="vd-guest">' + inner + '</div>';
+                }).join('') + '</div>';
+        }
+        html += '</div>';
+        panel.innerHTML = html || '<div class="vd-ep-extra-empty">No extra info.</div>';
     }
 
     function renderSeasonOverview() {
@@ -1140,6 +1191,8 @@
             if (body) { var open = body.classList.toggle('vd-review-body--open'); revMore.textContent = open ? 'Read less' : 'Read more'; }
             return;
         }
+        var epRow = e.target.closest('[data-vd-ep-key]');
+        if (epRow && r.contains(epRow)) { toggleEpisode(epRow); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
         if (seasonBtn && r.contains(seasonBtn)) { selectSeason(parseInt(seasonBtn.getAttribute('data-vd-season'), 10)); return; }
         var viewBtn = e.target.closest('[data-vd-view]');

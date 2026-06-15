@@ -96,6 +96,19 @@ def register_routes(bp):
             return jsonify({"error": "not found"}), 404
         return jsonify(d)
 
+    @bp.route("/episode/<int:tmdb_id>/<int:season>/<int:episode>", methods=["GET"])
+    def video_episode_extra(tmdb_id, season, episode):
+        """Episode expand: guest stars + bigger still (by the SHOW's tmdb id)."""
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            d = get_video_enrichment_engine().episode_extra(tmdb_id, season, episode)
+        except Exception:
+            logger.exception("episode extra failed for %s S%sE%s", tmdb_id, season, episode)
+            d = None
+        if not d:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(d)
+
     @bp.route("/person/<int:tmdb_id>", methods=["GET"])
     def video_person_detail(tmdb_id):
         """In-app person page: bio + filmography (each credit annotated owned/not)."""

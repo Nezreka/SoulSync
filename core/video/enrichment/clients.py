@@ -390,6 +390,24 @@ class TMDBClient:
                 "poster_url": (self.IMG + data["poster_path"]) if data.get("poster_path") else None,
                 "episodes": out}
 
+    def episode_detail(self, tv_id, season_number, episode_number):
+        """One episode's deeper detail (guest stars + a bigger still) for the
+        episode expand. Returns {guest_stars, still_url, rating, overview, ...}."""
+        if not self.api_key or tv_id is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/tv/%s/season/%s/episode/%s" % (tv_id, season_number, episode_number),
+                         params={"api_key": self.api_key, "append_to_response": "credits"}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        guests = [{"name": g["name"], "character": g.get("character"), "tmdb_id": g.get("id"),
+                   "photo": (self.PROFILE + g["profile_path"]) if g.get("profile_path") else None}
+                  for g in (d.get("guest_stars") or [])[:20] if g.get("name")]
+        return {"guest_stars": guests,
+                "still_url": (self.IMG + d["still_path"]) if d.get("still_path") else None,
+                "rating": d.get("vote_average") or None, "overview": d.get("overview") or None,
+                "runtime_minutes": d.get("runtime"), "air_date": d.get("air_date") or None}
+
     def search(self, query):
         """Multi-search (movies / TV / people) for the in-app search page. Returns
         a flat list of {kind, tmdb_id, title, year, poster, ...} — no external IDs,

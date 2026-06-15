@@ -380,6 +380,25 @@ class VideoEnrichmentEngine:
         self._cache_put(key, out)
         return out
 
+    def episode_extra(self, tmdb_id, season_number, episode_number) -> dict | None:
+        """Deeper episode detail (guest stars + still) for the episode expand,
+        annotated owned/not + cached."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not tmdb_id:
+            return None
+        key = ("episode", tmdb_id, season_number, episode_number)
+        cached = self._cache_get(key)
+        if cached is None:
+            try:
+                cached = w.client.episode_detail(tmdb_id, season_number, episode_number)
+            except Exception:
+                logger.exception("episode_extra failed for %s S%sE%s", tmdb_id, season_number, episode_number)
+                return None
+            if cached is None:
+                return None
+            self._cache_put(key, cached)
+        return cached
+
     def person_detail(self, tmdb_id) -> dict | None:
         """A person (actor/director) page — bio + filmography, each credit
         annotated with the library id if owned. Keeps cast clicks in-app."""

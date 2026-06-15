@@ -717,6 +717,20 @@ def test_item_extras_no_server_link_when_unowned(db, monkeypatch):
     assert "server" not in VideoEnrichmentEngine(db, {}).item_extras("movie", rid)
 
 
+def test_tmdb_episode_detail_parses_guests(monkeypatch):
+    body = {"still_path": "/s.jpg", "vote_average": 8.4, "overview": "O", "runtime": 52,
+            "air_date": "2024-01-01",
+            "credits": {}, "guest_stars": [
+                {"id": 5, "name": "Guest", "character": "Villain", "profile_path": "/g.jpg"},
+                {"id": 6, "name": "NoPic"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    d = TMDBClient("KEY").episode_detail(1399, 1, 1)
+    assert d["still_url"] == "https://image.tmdb.org/t/p/original/s.jpg" and d["rating"] == 8.4
+    assert d["guest_stars"][0] == {"name": "Guest", "character": "Villain", "tmdb_id": 5,
+                                   "photo": "https://image.tmdb.org/t/p/w185/g.jpg"}
+    assert d["guest_stars"][1]["photo"] is None
+
+
 def test_tmdb_season_episodes_parses(monkeypatch):
     class _Resp:
         def __init__(self, b): self._b = b

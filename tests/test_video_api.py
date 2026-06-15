@@ -50,6 +50,7 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/tmdb/<kind>/<int:tmdb_id>" in rules
     assert "/api/video/tmdb/show/<int:tv_id>/season/<int:season_number>" in rules
     assert "/api/video/person/<int:tmdb_id>" in rules
+    assert "/api/video/episode/<int:tmdb_id>/<int:season>/<int:episode>" in rules
     assert any(r.startswith("/api/video/backdrop/") for r in rules)
     assert "/api/video/img" in rules
 
