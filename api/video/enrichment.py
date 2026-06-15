@@ -45,6 +45,7 @@ def register_routes(bp):
         return jsonify({
             "tmdb_api_key": db.get_setting("tmdb_api_key") or "",
             "tvdb_api_key": db.get_setting("tvdb_api_key") or "",
+            "omdb_api_key": db.get_setting("omdb_api_key") or "",
         })
 
     @bp.route("/enrichment/config", methods=["POST"])
@@ -56,6 +57,8 @@ def register_routes(bp):
             db.set_setting("tmdb_api_key", body.get("tmdb_api_key") or "")
         if "tvdb_api_key" in body:
             db.set_setting("tvdb_api_key", body.get("tvdb_api_key") or "")
+        if "omdb_api_key" in body:
+            db.set_setting("omdb_api_key", body.get("omdb_api_key") or "")
         try:
             from core.video.enrichment.engine import rebuild_video_enrichment_engine
             rebuild_video_enrichment_engine()
@@ -101,11 +104,15 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
-        w = engine().worker(service)
-        if not w:
+        # OMDb is a ratings provider, not a worker.
+        client = engine().ratings_client if service == "omdb" else None
+        if client is None:
+            w = engine().worker(service)
+            client = w.client if w else None
+        if client is None:
             return jsonify({"success": False, "error": "unknown service"}), 404
         try:
-            ok, msg = w.client.test()
+            ok, msg = client.test()
             return jsonify({"success": bool(ok), "message": msg, "error": None if ok else msg})
         except Exception:
             logger.exception("video enrichment test failed for %s", service)

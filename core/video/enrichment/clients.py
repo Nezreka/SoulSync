@@ -316,6 +316,66 @@ class TVDBClient:
         return {"id": tvdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
 
+class OMDBClient:
+    """Ratings provider — IMDb / Rotten Tomatoes / Metacritic by imdb_id. Not a
+    matcher (we already have the id), so it's used as a ratings backfill, not a
+    worker."""
+    BASE = "https://www.omdbapi.com/"
+
+    def __init__(self, api_key):
+        self.api_key = api_key or None
+
+    @property
+    def enabled(self):
+        return bool(self.api_key)
+
+    def test(self):
+        if not self.api_key:
+            return False, "No OMDb API key set"
+        import requests
+        try:
+            r = requests.get(self.BASE, params={"apikey": self.api_key, "i": "tt0111161"}, timeout=12)
+            d = r.json() if r.status_code == 200 else {}
+            if d.get("Response") == "True":
+                return True, "OMDb connection OK"
+            if "invalid api key" in (d.get("Error") or "").lower():
+                return False, "Invalid OMDb API key"
+            return False, "OMDb returned HTTP " + str(r.status_code)
+        except Exception:
+            logger.exception("OMDb test failed")
+            return False, "Could not reach OMDb"
+
+    def ratings(self, imdb_id):
+        if not self.api_key or not imdb_id:
+            return None
+        import requests
+        r = requests.get(self.BASE, params={"apikey": self.api_key, "i": imdb_id}, timeout=12)
+        r.raise_for_status()
+        d = r.json() or {}
+        if d.get("Response") != "True":
+            return None
+        out = {}
+        ir = d.get("imdbRating")
+        if ir and ir != "N/A":
+            try:
+                out["imdb_rating"] = float(ir)
+            except (TypeError, ValueError):
+                pass
+        for rt in (d.get("Ratings") or []):
+            if rt.get("Source") == "Rotten Tomatoes":
+                try:
+                    out["rt_rating"] = int((rt.get("Value") or "").rstrip("%"))
+                except (TypeError, ValueError):
+                    pass
+        ms = d.get("Metascore")
+        if ms and ms != "N/A":
+            try:
+                out["metacritic"] = int(ms)
+            except (TypeError, ValueError):
+                pass
+        return out
+
+
 def build_clients(db) -> dict:
     """Construct the source clients from the saved API keys (in video_settings)."""
     return {

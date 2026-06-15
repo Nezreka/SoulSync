@@ -834,6 +834,7 @@
                                 <div class="vd-meta" data-vd-meta></div>
                                 <!-- External-source links reuse the artist-hero-badge style. -->
                                 <div class="artist-hero-badges vd-links" data-vd-links></div>
+                                <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
                                 <!-- Action buttons reuse the exact artist-detail button styles. -->
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
@@ -888,6 +889,7 @@
                                 <div class="vd-tagline" data-vd-tagline hidden></div>
                                 <div class="vd-meta" data-vd-meta></div>
                                 <div class="artist-hero-badges vd-links" data-vd-links></div>
+                                <div class="vd-ratings" data-vd-ratings hidden></div>
                                 <p class="vd-overview" data-vd-overview></p>
                                 <div class="vd-actions artist-hero-actions" data-vd-actions></div>
                                 <div class="vd-genres" data-vd-genres></div>
@@ -4989,6 +4991,24 @@
                                             <div class="callback-help">TV series metadata source.</div>
                                         </div>
                                         <button class="test-button" type="button" data-video-test-service="tvdb">Test TVDB</button>
+                                    </div>
+                                </div>
+                                <div class="api-service-frame stg-service" data-video-service="omdb">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #f5c518;"></span>
+                                        <h4 class="service-title">OMDb (Ratings)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="omdb-api-key" placeholder="OMDb API Key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get a free key from <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" style="color: #f5c518;">OMDb API</a></div>
+                                            <div class="callback-help">IMDb / Rotten Tomatoes / Metacritic ratings.</div>
+                                        </div>
+                                        <button class="test-button" type="button" data-video-test-service="omdb">Test OMDb</button>
                                     </div>
                                 </div>
                             </div>

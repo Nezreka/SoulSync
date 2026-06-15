@@ -170,7 +170,30 @@
                 return '<span class="vd-genre">' + esc(gn) + '</span>';
             }).join('');
         }
+        renderRatings(d);
         renderCast(d);
+    }
+
+    function renderRatings(d) {
+        var host = q('[data-vd-ratings]');
+        if (!host) return;
+        var items = [];
+        if (d.imdb_rating) {
+            items.push('<span class="vd-rt vd-rt--imdb"><span class="vd-rt-tag">IMDb</span>' +
+                (Math.round(d.imdb_rating * 10) / 10) + '</span>');
+        }
+        if (d.rt_rating != null) {
+            var fresh = d.rt_rating >= 60;
+            items.push('<span class="vd-rt vd-rt--rt"><span class="vd-rt-ic">' +
+                (fresh ? '🍅' : '🤢') + '</span>' + d.rt_rating + '%</span>');
+        }
+        if (d.metacritic != null) {
+            var cls = d.metacritic >= 61 ? 'good' : d.metacritic >= 40 ? 'mid' : 'bad';
+            items.push('<span class="vd-rt vd-rt--mc vd-rt--mc-' + cls + '">' +
+                '<span class="vd-rt-tag">MC</span>' + d.metacritic + '</span>');
+        }
+        host.innerHTML = items.join('');
+        host.hidden = !items.length;
     }
 
     function renderCast(d) {
@@ -468,7 +491,7 @@
     function maybeRefreshMovie(id) {
         if (artAttemptedFor === id || !data || data.id !== id) return;
         var needs = !(data.cast && data.cast.length) || !(data.genres && data.genres.length)
-            || !data.has_backdrop || !data.logo;
+            || !data.has_backdrop || !data.logo || (data.imdb_id && !data.imdb_rating);
         if (!needs) return;
         artAttemptedFor = id;
         fetch(DETAIL_URL + 'movie/' + id + '/refresh-art',
@@ -520,7 +543,8 @@
         // Trigger if the full episode list hasn't been pulled yet (so missing
         // episodes show up), or any art is still missing.
         var needs = !data.episodes_synced || !data.logo
-            || (data.seasons || []).some(function (s) { return !s.has_poster; });
+            || (data.seasons || []).some(function (s) { return !s.has_poster; })
+            || (data.imdb_id && !data.imdb_rating);
         if (!needs) return;
         artAttemptedFor = id;
         fetch(DETAIL_URL + 'show/' + id + '/refresh-art',
