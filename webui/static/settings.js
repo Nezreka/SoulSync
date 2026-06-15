@@ -1299,6 +1299,8 @@ async function loadSettingsData() {
         }
 
         // Populate Import settings
+        const _qualFilterEl = document.getElementById('import-quality-filter-enabled');
+        if (_qualFilterEl) _qualFilterEl.checked = settings.import?.quality_filter_enabled !== false;  // default ON
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
@@ -3071,6 +3073,7 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
+            quality_filter_enabled: document.getElementById('import-quality-filter-enabled')?.checked !== false,
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'

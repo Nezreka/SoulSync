@@ -700,6 +700,12 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
+                # Master toggle for quality-filtering on import. On by default:
+                # downloaded files that don't meet the quality profile are
+                # quarantined instead of imported (same gate the download
+                # pipeline uses). Off → import everything regardless of quality;
+                # the library Quality Upgrade Scanner still flags them.
+                "quality_filter_enabled": True,
                 "replace_lower_quality": False,
                 # Use the top Staging folder as the artist (Artist/Album layouts,
                 # mixtapes). On by default to preserve the long-standing import

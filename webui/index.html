@@ -6261,9 +6261,31 @@
                                 </div>
                             </div>
 
-                            <!-- Import Quality Settings -->
+                            <!-- Import Settings (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Import</h3>
+                                <span class="settings-section-hint">Quality filter, replace rules, folder-artist</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+
                             <div class="settings-group" data-stg="library">
                                 <h3>📥 Import Settings</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-quality-filter-enabled" checked>
+                                        Only import tracks that meet your quality profile
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    On by default. SoulSync always probes each downloaded file's real audio quality; this
+                                    toggle decides what to do with the result. <strong>On</strong> — files that don't meet your
+                                    quality profile are quarantined instead of imported (the same gate the download pipeline
+                                    uses; fallback/downsample settings still apply). <strong>Off</strong> — everything is
+                                    imported regardless of quality. Either way, the library <em>Quality Upgrade Scanner</em>
+                                    still flags below-profile tracks so you can act on them later.
+                                </div>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
@@ -6293,6 +6315,8 @@
                                     metadata-identified artist is always kept.
                                 </div>
                             </div>
+
+                            </div><!-- end Import body -->
 
 
                             <!-- M3U Export Settings -->

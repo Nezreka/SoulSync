@@ -35,9 +35,18 @@ _WANT_FLAC24 = {
 def _patch(monkeypatch, aq, profile):
     monkeypatch.setattr(file_ops, "probe_audio_quality", lambda fp: aq)
     monkeypatch.setattr(guards, "MusicDatabase", lambda: _FakeDB(profile))
+
+    # Key-aware config stub: the import quality filter is ON (its default), so
+    # the guard runs; everything else (downsample, etc.) is OFF. A blanket False
+    # would wrongly disable the filter itself via import.quality_filter_enabled.
+    def _cfg_get(key, default=None):
+        if key == "import.quality_filter_enabled":
+            return True
+        return False
+
     monkeypatch.setattr(
         guards, "_get_config_manager",
-        lambda: SimpleNamespace(get=lambda _key, default=None: False),
+        lambda: SimpleNamespace(get=_cfg_get),
     )
 
 
