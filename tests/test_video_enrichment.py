@@ -325,6 +325,48 @@ def test_omdb_worker_processes_ratings_queue(db):
     assert w.process_one() is False
 
 
+def test_omdb_worker_pauses_on_bad_key_without_burning_items(db):
+    # A rejected key affects every title — the worker must pause (not churn the
+    # whole library) and must NOT mark items synced, so they retry once fixed.
+    from core.video.enrichment.clients import OMDbAuthError
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
+
+    class Omdb:
+        enabled = True
+        def ratings(self, imdb_id): raise OMDbAuthError("401")
+
+    w = VideoEnrichmentWorker(db, "omdb", Omdb())
+    assert w.process_one() is False               # backed off, didn't process
+    assert w.paused is True and w.note            # paused itself with a reason
+    assert db.ratings_next() is not None          # item NOT burned to 'synced'
+
+
+def test_omdb_worker_keeps_item_on_transient_error(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
+
+    class Omdb:
+        enabled = True
+        def ratings(self, imdb_id): raise RuntimeError("network blip")
+
+    w = VideoEnrichmentWorker(db, "omdb", Omdb())
+    assert w.process_one() is False
+    assert db.ratings_next() is not None          # not marked synced → retried later
+    assert w.stats["errors"] == 1 and w.paused is False   # one blip doesn't pause
+
+
+def test_omdb_ratings_raises_on_invalid_key(monkeypatch):
+    from core.video.enrichment.clients import OMDbAuthError
+
+    class _R:
+        status_code = 401
+        text = ""
+        def raise_for_status(self): raise AssertionError("should short-circuit on 401")
+        def json(self): return {}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _R()))
+    with pytest.raises(OMDbAuthError):
+        OMDBClient("BADKEY").ratings("tt0111161")
+
+
 def test_omdb_breakdown_is_ratings_coverage(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})   # pending
     db.upsert_movie("plex", {"server_id": "m2", "title": "B", "imdb_id": "tt2"})

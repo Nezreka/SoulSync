@@ -58,7 +58,17 @@ def register_routes(bp):
         if "tvdb_api_key" in body:
             db.set_setting("tvdb_api_key", body.get("tvdb_api_key") or "")
         if "omdb_api_key" in body:
-            db.set_setting("omdb_api_key", body.get("omdb_api_key") or "")
+            new_key = body.get("omdb_api_key") or ""
+            changed = new_key != (db.get_setting("omdb_api_key") or "")
+            db.set_setting("omdb_api_key", new_key)
+            # A new/changed OMDb key → re-try every title that still has no rating
+            # (covers items wrongly marked 'synced' during a prior bad-key run).
+            if new_key and changed:
+                try:
+                    for kind in ("movie", "show"):
+                        db.enrichment_retry("omdb", kind, scope="failed")
+                except Exception:
+                    logger.exception("video enrichment: omdb re-try reset failed")
         try:
             from core.video.enrichment.engine import rebuild_video_enrichment_engine
             rebuild_video_enrichment_engine()
