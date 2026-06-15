@@ -1409,12 +1409,37 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 }
 
 /* ── billboard autoplay trailer ──────────────────────────────────────────── */
-.vd-bb-trailer { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: #000; animation: vd-fade 0.6s ease; }
+.vd-bb-trailer { position: absolute; inset: 0; z-index: 0; overflow: hidden; background: #000; opacity: 0; }
 .vd-bb-trailer iframe {
     position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
     width: 100vw; height: 56.25vw; min-height: 100%; min-width: 177.78vh; border: 0; pointer-events: none;
 }
-.vd-billboard--trailer .vd-bb-bg { opacity: 0; transition: opacity 0.6s ease; }
+/* Reveal — only once the trailer is actually PLAYING (gated in video-detail.js).
+   The trailer wipes in left→right behind a soft feathered edge while it
+   crossfades, so the backdrop appears to roll away from the left AND fade —
+   "both a rollover and a fade." @property animates the mask gradient smoothly;
+   browsers without it still get the opacity crossfade. */
+@property --vd-wipe { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+.vd-billboard--trailer .vd-bb-trailer {
+    -webkit-mask-image: linear-gradient(100deg, #000 var(--vd-wipe), transparent calc(var(--vd-wipe) + 16%));
+            mask-image: linear-gradient(100deg, #000 var(--vd-wipe), transparent calc(var(--vd-wipe) + 16%));
+    animation: vdTrailerWipeIn 1.15s cubic-bezier(0.62, 0.04, 0.18, 1) forwards;
+}
+@keyframes vdTrailerWipeIn { from { --vd-wipe: -16%; opacity: 0; } to { --vd-wipe: 116%; opacity: 1; } }
+.vd-billboard--trailer .vd-bb-bg { animation: vdBgFadeOut 1.15s ease forwards; }
+@keyframes vdBgFadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+/* Restore — when the trailer ends, fade the original backdrop back in and the
+   trailer out, then it's torn down. */
+.vd-billboard--restoring .vd-bb-bg { animation: vdBgFadeIn 0.9s ease forwards; }
+@keyframes vdBgFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.vd-billboard--restoring .vd-bb-trailer { animation: vdTrailerFadeOut 0.7s ease forwards; }
+@keyframes vdTrailerFadeOut { from { opacity: 1; } to { opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .vd-billboard--trailer .vd-bb-trailer { -webkit-mask-image: none; mask-image: none; animation: vd-fade 0.4s ease forwards; }
+    .vd-billboard--trailer .vd-bb-bg { animation: vdBgFadeOut 0.4s ease forwards; }
+}
 .vd-bb-tctrls { position: absolute; bottom: 20px; right: 24px; z-index: 4; display: flex; gap: 8px; }
 .vd-bb-tbtn {
     width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.25); cursor: pointer;
