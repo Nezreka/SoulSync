@@ -47,6 +47,15 @@ def test_independent_of_music_active(monkeypatch, vdb):
 
 def test_both_configured_default_then_explicit_pick(monkeypatch, vdb):
     _set_cm(monkeypatch, True, True, "plex")
-    assert resolve_video_server(vdb) == "plex"           # falls back to the active one
+    assert resolve_video_server(vdb) == "plex"           # both → Plex default
     vdb.set_setting("video_server", "jellyfin")
     assert resolve_video_server(vdb) == "jellyfin"       # explicit video pick wins
+
+
+def test_does_not_follow_music_active_server(monkeypatch, vdb):
+    # Both configured + music set to Jellyfin, but NO explicit video pick → video
+    # stays on Plex. Changing the music server must never change video.
+    _set_cm(monkeypatch, True, True, "jellyfin")
+    assert resolve_video_server(vdb) == "plex"
+    vdb.set_setting("video_server", "jellyfin")          # only an explicit pick switches video
+    assert resolve_video_server(vdb) == "jellyfin"

@@ -92,12 +92,10 @@ def resolve_video_server(db=None):
         return "plex"
     if pref == "jellyfin" and jelly_ok:
         return "jellyfin"
-
-    active = config_manager.get_active_media_server()
-    if active == "plex" and plex_ok:
-        return "plex"
-    if active == "jellyfin" and jelly_ok:
-        return "jellyfin"
+    # Fully INDEPENDENT of the music 'active server' — only an explicit video pick
+    # or the configured server(s) decide, so changing the music server NEVER
+    # changes video (and vice-versa). Auto-pick the single configured one; default
+    # to Plex when both are set (the user picks Jellyfin via the Video Source panel).
     if plex_ok and not jelly_ok:
         return "plex"
     if jelly_ok and not plex_ok:
