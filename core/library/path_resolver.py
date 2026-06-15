@@ -138,10 +138,25 @@ def _collect_base_dirs(
         except Exception as e:
             logger.debug("music paths read failed: %s", e)
 
+    # Normalize to absolute forms so resolution does NOT depend on the calling
+    # thread's CWD. A relative config like "./Transfer" otherwise only resolves
+    # when os.path.isdir("./Transfer") happens to be true from the current CWD —
+    # which fails in background workers whose CWD isn't the app root, leaving
+    # base_dirs empty and every track "unresolved". For each candidate we try
+    # the raw form first (cheap, preserves an already-absolute path), then its
+    # os.path.abspath() form so "./Transfer" → "/app/Transfer".
+    expanded: list[str] = []
+    for c in candidates:
+        if not c:
+            continue
+        expanded.append(c)
+        if not os.path.isabs(c):
+            expanded.append(os.path.abspath(c))
+
     # De-duplicate while preserving order, drop empties / non-existent dirs.
     seen: set[str] = set()
     out: list[str] = []
-    for c in candidates:
+    for c in expanded:
         if not c or c in seen:
             continue
         seen.add(c)
