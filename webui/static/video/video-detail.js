@@ -517,7 +517,10 @@
     // it (once per show), then re-render. Sidesteps "already matched, never re-runs".
     function maybeRefreshArt(id) {
         if (artAttemptedFor === id || !data || data.id !== id) return;
-        var needs = !data.logo || (data.seasons || []).some(function (s) { return !s.has_poster; });
+        // Trigger if the full episode list hasn't been pulled yet (so missing
+        // episodes show up), or any art is still missing.
+        var needs = !data.episodes_synced || !data.logo
+            || (data.seasons || []).some(function (s) { return !s.has_poster; });
         if (!needs) return;
         artAttemptedFor = id;
         fetch(DETAIL_URL + 'show/' + id + '/refresh-art',

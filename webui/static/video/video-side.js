@@ -16,6 +16,11 @@
 (function () {
     'use strict';
 
+    // Captured at SCRIPT-EVAL time — before music's router boots (on
+    // DOMContentLoaded) and may rewrite an unknown /video-detail/... URL to
+    // /dashboard. This is the real path the user reloaded/deep-linked.
+    var BOOT_PATH = window.location.pathname;
+
     var SIDE_KEY = 'soulsync_side';
     var MUSIC_SUBTITLE = 'Music Sync & Manager';
     var VIDEO_SUBTITLE = 'Movies, TV & YouTube';
@@ -196,8 +201,9 @@
     }
 
     function init() {
-        // Capture a deep-linked detail path BEFORE applySide can clear it.
-        var bootDetail = parseDetailPath(window.location.pathname);
+        // Deep-linked detail path captured at eval time (music may already have
+        // rewritten window.location to /dashboard by now).
+        var bootDetail = parseDetailPath(BOOT_PATH);
 
         var toggleButtons = document.querySelectorAll('.side-toggle-btn');
         for (var i = 0; i < toggleButtons.length; i++) {
@@ -265,14 +271,19 @@
 
         applySide(bootDetail ? 'video' : readSide());
 
-        // Deep link / reload straight to a detail URL → restore it (applySide above
-        // may have cleared the URL, so re-assert it first).
+        // Deep link / reload straight to a detail URL → restore it. Deferred to a
+        // macrotask so EVERY script's DOMContentLoaded handler has registered
+        // first (video-detail.js loads after us and must be listening for the
+        // open-detail event), and so it lands AFTER music's initial routing — then
+        // we re-assert the real URL it clobbered.
         if (bootDetail) {
-            var path = buildDetailPath(bootDetail.source, bootDetail.kind, bootDetail.id);
-            try {
-                history.replaceState({ videoDetail: bootDetail }, '', path);
-            } catch (e) { /* ignore */ }
-            restoreDetail(bootDetail);
+            setTimeout(function () {
+                var path = buildDetailPath(bootDetail.source, bootDetail.kind, bootDetail.id);
+                try {
+                    history.replaceState({ videoDetail: bootDetail }, '', path);
+                } catch (e) { /* ignore */ }
+                restoreDetail(bootDetail);
+            }, 0);
         }
     }
 
