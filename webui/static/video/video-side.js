@@ -277,12 +277,20 @@
         // open-detail event), and so it lands AFTER music's initial routing — then
         // we re-assert the real URL it clobbered.
         if (bootDetail) {
+            var bootPath = buildDetailPath(bootDetail.source, bootDetail.kind, bootDetail.id);
+            var reassert = function () {
+                // Re-assert the URL only while we're still showing this detail (so a
+                // late async music redirect can't strand us on /dashboard) — never
+                // fights real navigation away.
+                if (DETAIL_PAGES[document.body.getAttribute('data-video-page')] &&
+                    window.location.pathname !== bootPath) {
+                    try { history.replaceState({ videoDetail: bootDetail }, '', bootPath); } catch (e) { /* ignore */ }
+                }
+            };
             setTimeout(function () {
-                var path = buildDetailPath(bootDetail.source, bootDetail.kind, bootDetail.id);
-                try {
-                    history.replaceState({ videoDetail: bootDetail }, '', path);
-                } catch (e) { /* ignore */ }
+                reassert();
                 restoreDetail(bootDetail);
+                [120, 350, 700].forEach(function (ms) { setTimeout(reassert, ms); });
             }, 0);
         }
     }
