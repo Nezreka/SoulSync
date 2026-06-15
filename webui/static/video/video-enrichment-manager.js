@@ -31,8 +31,8 @@
         tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
         tvdb: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg',
     };
-    var GLYPH = { movie: '🎬', show: '📺' };
-    var KIND_LABEL = { movie: 'Movies', show: 'Shows' };
+    var GLYPH = { movie: '🎬', show: '📺', episode: '🎞️' };
+    var KIND_LABEL = { movie: 'Movies', show: 'Shows', episode: 'Episodes' };
 
     var state = {
         open: false, selected: 'tmdb', statuses: {}, breakdown: null,
