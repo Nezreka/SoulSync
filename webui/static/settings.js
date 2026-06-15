@@ -45,6 +45,12 @@ function debouncedAutoSaveSettings() {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // ISOLATION: the video side reuses this shared settings page, so editing a
+    // VIDEO field (TMDB key, region, autoplay…) would otherwise fire this MUSIC
+    // auto-save — which reads the server toggle from the DOM and would persist
+    // active_media_server, letting the video side change the music server. Video
+    // settings save themselves via /api/video/*; never auto-save music here.
+    if (document.body.getAttribute('data-side') === 'video') return;
     // #827: the Logs tab has no savable settings — its live-viewer controls
     // (source picker, filters, auto-scroll) were tripping the auto-save and
     // flooding app.log with "Settings saved" lines, drowning out the logs the
