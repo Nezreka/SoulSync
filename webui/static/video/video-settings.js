@@ -28,24 +28,27 @@
             .then(function (d) { renderServer(host, d || {}); })
             .catch(function () { renderServer(host, {}); });
     }
-    function srvBtn(id, label, active) {
-        return '<button class="vid-source-btn' + (id === active ? ' active' : '') +
+    function srvOpt(id, label, configured, selected) {
+        if (!configured) {
+            return '<button class="vid-source-btn vid-source-btn--off" type="button" disabled ' +
+                'title="Not connected — set it up in Music settings">' + label +
+                ' <span class="vid-source-off">(not connected)</span></button>';
+        }
+        return '<button class="vid-source-btn' + (id === selected ? ' active' : '') +
             '" type="button" data-video-server-pick="' + id + '">' + label + '</button>';
     }
     function renderServer(host, d) {
         var plex = !!d.plex, jelly = !!d.jellyfin;
+        var html = '<div class="vid-source-pick">' +
+            srvOpt('plex', 'Plex', plex, d.server) + srvOpt('jellyfin', 'Jellyfin', jelly, d.server) + '</div>';
         if (!plex && !jelly) {
-            host.innerHTML = '<div class="vid-source-none">No video server connected. ' +
-                'Connect <strong>Plex</strong> or <strong>Jellyfin</strong> under <em>Server Connections</em> ' +
-                'below to scan and browse your video library. <em>(Navidrome and Standalone are music-only.)</em></div>';
-        } else if (plex && jelly) {
-            host.innerHTML = '<div class="vid-source-pick">' +
-                srvBtn('plex', 'Plex', d.server) + srvBtn('jellyfin', 'Jellyfin', d.server) + '</div>' +
-                '<div class="callback-help">Both are connected — pick which one the video side uses.</div>';
+            html += '<div class="callback-help">Neither is connected yet. Set up Plex or Jellyfin in ' +
+                '<strong>Music &rarr; Settings &rarr; Server Connections</strong> — the video side reuses those credentials.</div>';
         } else {
-            host.innerHTML = '<div class="vid-source-using"><span class="vid-source-check">✓</span> ' +
-                'Video uses <strong>' + (plex ? 'Plex' : 'Jellyfin') + '</strong></div>';
+            html += '<div class="callback-help">The video side uses this server, independent of Music. ' +
+                'Greyed-out options aren\'t connected — set them up in Music settings.</div>';
         }
+        host.innerHTML = html;
     }
     function pickServer(id) {
         fetch(SERVER_URL, {

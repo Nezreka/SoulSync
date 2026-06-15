@@ -5133,11 +5133,22 @@
                             <!-- Video API Configuration (placeholders; shown only on the video
                                  side in place of the music API services). Same structure as the
                                  music service frames above. -->
-                            <!-- Video Source (which Plex/Jellyfin the video side uses) -->
+                            <!-- Video Source — the video side's OWN server pick + library
+                                 mapping, independent of the music server (it just reuses
+                                 the shared Plex/Jellyfin credentials). -->
                             <div class="settings-group" data-stg="connections" data-video-only>
                                 <h3>Video Source</h3>
                                 <div class="vid-source-panel" data-video-source-panel>
                                     <div class="callback-help">Checking…</div>
+                                </div>
+                                <div class="form-group video-library-selectors" style="margin-top: 16px;">
+                                    <label>Movies Library:</label>
+                                    <select data-video-lib-select="movies"><option value="">Loading...</option></select>
+                                    <label style="margin-top: 12px;">TV Shows Library:</label>
+                                    <select data-video-lib-select="tv"><option value="">Loading...</option></select>
+                                    <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
+                                        Which libraries the video side scans. <span data-video-lib-status></span>
+                                    </small>
                                 </div>
                             </div>
                             <div class="settings-group" data-stg="connections" data-video-only>
@@ -5298,21 +5309,6 @@
                                             </select>
                                             <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
                                                 Select which music library to use (doesn't affect config file)
-                                            </small>
-                                        </div>
-                                        <!-- Video side: which libraries are Movies / TV (shown only on the
-                                             video side; populated + saved by video/video-settings.js). -->
-                                        <div class="form-group video-library-selectors" data-video-only>
-                                            <label>Movies Library:</label>
-                                            <select data-video-lib-select="movies">
-                                                <option value="">Loading...</option>
-                                            </select>
-                                            <label style="margin-top: 12px;">TV Shows Library:</label>
-                                            <select data-video-lib-select="tv">
-                                                <option value="">Loading...</option>
-                                            </select>
-                                            <small style="color: #999; font-size: 0.9em; display: block; margin-top: 5px;">
-                                                Which libraries the video side scans. <span data-video-lib-status></span>
                                             </small>
                                         </div>
                                         <div class="form-actions">
