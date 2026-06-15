@@ -863,6 +863,38 @@
                         </div>
                     </div>
                 </section>
+                <!-- Movie detail (flat Netflix layout; shares the .vd-* hooks with the
+                     show page — the renderer targets the active page by kind). -->
+                <section class="video-subpage" data-video-subpage="video-movie-detail" hidden>
+                    <div class="vd-page" data-video-detail="movie">
+                        <button class="vd-back" type="button" data-video-goto="video-library">
+                            <span aria-hidden="true">&larr;</span> Library
+                        </button>
+                        <div class="vd-billboard">
+                            <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
+                            <div class="vd-bb-fade" aria-hidden="true"></div>
+                            <div class="vd-bb-content">
+                                <h1 class="vd-title" data-vd-title>—</h1>
+                                <div class="vd-tagline" data-vd-tagline hidden></div>
+                                <div class="vd-meta" data-vd-meta></div>
+                                <div class="artist-hero-badges vd-links" data-vd-links></div>
+                                <p class="vd-overview" data-vd-overview></p>
+                                <div class="vd-actions artist-hero-actions" data-vd-actions></div>
+                                <div class="vd-genres" data-vd-genres></div>
+                            </div>
+                            <img data-vd-poster crossorigin="anonymous" alt="" style="display:none" />
+                        </div>
+                        <div class="vd-loading" data-vd-loading hidden>Loading…</div>
+                        <div class="vd-body">
+                            <div class="vd-details" data-vd-details></div>
+                            <div class="vd-cast-section" data-vd-cast-section hidden>
+                                <h2 class="vd-section-h">Cast &amp; Crew</h2>
+                                <div class="vd-crew" data-vd-crew></div>
+                                <div class="vd-cast" data-vd-cast></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <section class="video-subpage" data-video-subpage="video-tools" hidden>
                     <div class="page-shell tools-page-container">
                         <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>

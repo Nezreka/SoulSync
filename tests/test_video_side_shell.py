@@ -345,6 +345,21 @@ def test_show_detail_subpage_present():
     assert "onclick" not in block
 
 
+def test_movie_detail_subpage_present():
+    block = _block(
+        _INDEX, r'<section class="video-subpage" data-video-subpage="video-movie-detail"', "</section>")
+    assert 'data-video-detail="movie"' in block
+    for hook in ('data-vd-backdrop', 'data-vd-title', 'data-vd-details', 'data-vd-cast'):
+        assert hook in block, hook
+    assert 'data-video-goto="video-library"' in block and "onclick" not in block
+
+
+def test_library_movie_cards_are_clickable():
+    # Both kinds drill in now (no show-only gate).
+    assert 'data-video-card-open="' in _LIB_JS
+    assert "kind === 'show' ?" not in _LIB_JS      # the old show-only gate is gone
+
+
 def test_video_detail_module_referenced_and_isolated():
     assert "video/video-detail.js" in _INDEX
     src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")

@@ -55,3 +55,14 @@ def register_routes(bp):
             logger.exception("refresh-art failed for show %s", show_id)
             res = {"ok": False, "reason": "error"}
         return jsonify(res)
+
+    @bp.route("/detail/movie/<int:movie_id>/refresh-art", methods=["POST"])
+    def video_movie_refresh_art(movie_id):
+        """Lazy on-view backfill for a movie (cast / genres / backdrop / ratings)."""
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            res = get_video_enrichment_engine().refresh_movie_art(movie_id)
+        except Exception:
+            logger.exception("refresh-art failed for movie %s", movie_id)
+            res = {"ok": False, "reason": "error"}
+        return jsonify(res)

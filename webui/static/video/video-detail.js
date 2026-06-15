@@ -31,7 +31,8 @@
     var menuOpen = false;
     var missingOnly = false;
     var currentId = null;
-    var artAttemptedFor = null;     // lazy art refresh runs once per show view
+    var currentKind = 'show';
+    var artAttemptedFor = null;     // lazy art refresh runs once per detail view
 
     try { var sv = localStorage.getItem(VIEW_KEY); if (sv) seasonView = sv; } catch (e) { /* ignore */ }
 
@@ -40,7 +41,7 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
-    function root() { return document.querySelector('[data-video-detail="show"]'); }
+    function root() { return document.querySelector('[data-video-detail="' + currentKind + '"]'); }
     function q(sel) { var r = root(); return r ? r.querySelector(sel) : null; }
     function setText(sel, t) { var n = q(sel); if (n) n.textContent = t || ''; }
     function runtimeLabel(m) {
@@ -98,10 +99,11 @@
         setText('[data-vd-title]', d.title);
         setText('[data-vd-overview]', d.overview);
 
+        var art = '/' + d.kind + '/' + d.id;
         var bg = q('[data-vd-backdrop]');
         if (bg) {
-            var url = d.has_backdrop ? '/api/video/backdrop/show/' + d.id
-                : (d.has_poster ? '/api/video/poster/show/' + d.id : '');
+            var url = d.has_backdrop ? '/api/video/backdrop' + art
+                : (d.has_poster ? '/api/video/poster' + art : '');
             bg.style.backgroundImage = url ? "url('" + url + "')" : '';
             bg.classList.toggle('vd-bb-bg--poster', !d.has_backdrop && !!d.has_poster);
             bg.classList.toggle('vd-bb-bg--empty', !d.has_backdrop && !d.has_poster);
@@ -109,24 +111,32 @@
         var poster = q('[data-vd-poster]');
         if (poster && d.has_poster) {
             poster.onload = function () { applyAccent(poster); };
-            poster.src = '/api/video/poster/show/' + d.id;
+            poster.src = '/api/video/poster' + art;
         }
 
         var tl = q('[data-vd-tagline]');
         if (tl) { tl.textContent = d.tagline || ''; tl.hidden = !d.tagline; }
 
-        var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
         var meta = [];
-        meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+        if (d.kind === 'show') {
+            var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
+            meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
+        } else {
+            meta.push(d.owned ? '<span class="vd-match">In library</span>'
+                : '<span class="vd-status">Wanted</span>');
+        }
         if (d.rating) meta.push('<span class="vd-score">★ ' + (Math.round(d.rating * 10) / 10) + '</span>');
         if (d.year) meta.push('<span>' + esc(d.year) + '</span>');
         if (d.content_rating) meta.push('<span class="vd-meta-rating">' + esc(d.content_rating) + '</span>');
-        meta.push('<span>' + d.season_count + ' Season' + (d.season_count === 1 ? '' : 's') + '</span>');
-        meta.push('<span>' + d.episode_total + ' Episodes</span>');
+        if (d.kind === 'show') {
+            meta.push('<span>' + d.season_count + ' Season' + (d.season_count === 1 ? '' : 's') + '</span>');
+            meta.push('<span>' + d.episode_total + ' Episodes</span>');
+        }
         var rt = runtimeLabel(d.runtime_minutes);
         if (rt) meta.push('<span>' + esc(rt) + '</span>');
-        if (d.status) meta.push('<span class="vd-status">' + esc(statusLabel(d.status)) + '</span>');
+        if (d.kind === 'show' && d.status) meta.push('<span class="vd-status">' + esc(statusLabel(d.status)) + '</span>');
         if (d.network) meta.push('<span>' + esc(d.network) + '</span>');
+        if (d.kind === 'movie' && d.studio) meta.push('<span>' + esc(d.studio) + '</span>');
         var m = q('[data-vd-meta]'); if (m) m.innerHTML = meta.join('');
 
         renderActions(d);
@@ -135,7 +145,8 @@
         if (l) {
             var badges = [];
             if (d.imdb_id) badges.push(badge('', 'IMDb', 'IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/'));
-            if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB', 'https://www.themoviedb.org/tv/' + d.tmdb_id));
+            if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
+                'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id));
             if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
             l.innerHTML = badges.join('');
         }
@@ -183,14 +194,35 @@
         var a = q('[data-vd-actions]');
         if (!a) return;
         var watching = !!d.monitored;
-        a.innerHTML =
+        var html =
             '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
             '" type="button" data-vd-act="watchlist">' +
             '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
-            '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>' +
-            '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
-            '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
-            '<span class="discog-btn-shimmer"></span></button>';
+            '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
+        if (d.kind === 'show') {     // "Get Missing" filters the episode list (show-only)
+            html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
+                '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
+                '<span class="discog-btn-shimmer"></span></button>';
+        }
+        a.innerHTML = html;
+    }
+
+    function renderDetails(d) {
+        var host = q('[data-vd-details]');
+        if (!host) return;
+        var rows = [];
+        if (d.release_date) rows.push(['Released', d.release_date]);
+        if (d.runtime_minutes) rows.push(['Runtime', runtimeLabel(d.runtime_minutes)]);
+        if (d.studio) rows.push(['Studio', d.studio]);
+        if (d.status) rows.push(['Status', statusLabel(d.status)]);
+        if (d.rating_critic) rows.push(['Critic score', Math.round(d.rating_critic) + '%']);
+        if (d.file && d.file.resolution) rows.push(['Quality', String(d.file.resolution).toUpperCase()]);
+        host.innerHTML = rows.length
+            ? '<div class="vd-detail-grid">' + rows.map(function (r) {
+                return '<div class="vd-detail-row"><span class="vd-detail-k">' + esc(r[0]) +
+                    '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
+            }).join('') + '</div>'
+            : '';
     }
 
     // ── season selector (4 views) ─────────────────────────────────────────────
@@ -311,14 +343,59 @@
         var next = data.monitored ? 0 : 1;
         fetch('/api/video/monitor', {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ kind: 'show', id: data.id, monitored: next }),
+            body: JSON.stringify({ kind: data.kind, id: data.id, monitored: next }),
         }).then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) {
                 if (res && !res.error) { data.monitored = !!next; renderActions(data); }
             }).catch(function () { /* ignore */ });
     }
 
+    // ── movie detail (flat) ───────────────────────────────────────────────────
+    function loadMovie(id) {
+        currentKind = 'movie';
+        if (!root()) return;
+        if (currentId !== id) artAttemptedFor = null;
+        currentId = id;
+        showLoading(true);
+        var dh = q('[data-vd-details]'); if (dh) dh.innerHTML = '';
+        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                showLoading(false);
+                if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
+                data = d;
+                renderBillboard(d);
+                renderDetails(d);
+                var sub = document.querySelector('.video-subpage[data-video-subpage="video-movie-detail"]');
+                if (sub) sub.scrollTop = 0;
+                maybeRefreshMovie(id);
+            })
+            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load movie'); });
+    }
+
+    // Lazy: backfill a movie's cast/genres/art from TMDB on view if missing.
+    function maybeRefreshMovie(id) {
+        if (artAttemptedFor === id || !data || data.id !== id) return;
+        var needs = !(data.cast && data.cast.length) || !(data.genres && data.genres.length) || !data.has_backdrop;
+        if (!needs) return;
+        artAttemptedFor = id;
+        fetch(DETAIL_URL + 'movie/' + id + '/refresh-art',
+            { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (res && res.ok && currentId === id && currentKind === 'movie') {
+                    fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (d) {
+                            if (d && !d.error && currentId === id) { data = d; renderBillboard(d); renderDetails(d); }
+                        });
+                }
+            }).catch(function () { /* best-effort */ });
+    }
+
     function loadShow(id) {
+        currentKind = 'show';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
@@ -371,7 +448,11 @@
     }
 
     // ── events ────────────────────────────────────────────────────────────────
-    function onOpen(e) { if (e && e.detail && e.detail.kind === 'show') loadShow(e.detail.id); }
+    function onOpen(e) {
+        if (!e || !e.detail) return;
+        if (e.detail.kind === 'movie') loadMovie(e.detail.id);
+        else if (e.detail.kind === 'show') loadShow(e.detail.id);
+    }
 
     function onClick(e) {
         var r = root(); if (!r) return;
