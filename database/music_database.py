@@ -642,6 +642,7 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_verification_status ON library_history (verification_status)")
 
             # Migration: add download_source column
             cursor.execute("PRAGMA table_info(library_history)")
@@ -13268,6 +13269,26 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error querying library history: {e}")
             return [], 0
+
+    def get_library_history_unverified(self) -> list[dict]:
+        """Return every library_history row that still needs human confirmation.
+
+        Fetches all rows where verification_status is 'unverified' or
+        'force_imported', ordered newest-first. No row limit — the full
+        set must always be visible on the Downloads → Unverified tab.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM library_history
+                WHERE verification_status IN ('unverified', 'force_imported')
+                ORDER BY created_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error querying unverified library history: %s", e)
+            return []
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""

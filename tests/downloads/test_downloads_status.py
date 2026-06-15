@@ -792,6 +792,68 @@ def test_unified_response_caps_persistent_history_tail():
     assert out['total'] == 50
 
 
+def test_unverified_history_always_loaded_even_when_at_limit():
+    """Unverified entries must appear even during a large batch that fills the limit."""
+    for i in range(200):
+        download_tasks[f'live-{i}'] = {
+            'track_index': i,
+            'status': 'completed',
+            'track_info': {'name': f'Track {i}', 'artist': f'Artist {i}', 'album': 'Album'},
+            'verification_status': 'verified',
+        }
+
+    deps, _ = _build_deps(
+        persistent_history=lambda limit: [],
+    )
+    deps.get_unverified_download_history = lambda: [
+        {
+            'id': 999,
+            'title': 'Old Unverified',
+            'artist_name': 'Forgotten Artist',
+            'album_name': 'Old Album',
+            'created_at': '2026-01-01 00:00:00',
+            'verification_status': 'unverified',
+        }
+    ]
+
+    out = st.build_unified_downloads_response(200, deps)
+
+    titles = {d['title'] for d in out['downloads']}
+    assert 'Old Unverified' in titles, "historical unverified entry must appear regardless of limit"
+
+    unverified = [d for d in out['downloads'] if d.get('verification_status') == 'unverified']
+    assert len(unverified) == 1
+    assert unverified[0]['task_id'] == 'history-999'
+    assert unverified[0]['is_persistent_history'] is True
+
+
+def test_unverified_history_deduped_against_live_task():
+    """A live task that's still unverified must not appear twice."""
+    download_tasks['live-unv'] = {
+        'track_index': 0,
+        'status': 'completed',
+        'track_info': {'name': 'Live Unverified', 'artist': 'Artsy', 'album': 'Alb'},
+        'verification_status': 'unverified',
+    }
+
+    deps, _ = _build_deps()
+    deps.get_unverified_download_history = lambda: [
+        {
+            'id': 77,
+            'title': 'Live Unverified',
+            'artist_name': 'Artsy',
+            'album_name': 'Alb',
+            'created_at': '2026-06-15 10:00:00',
+            'verification_status': 'unverified',
+        }
+    ]
+
+    out = st.build_unified_downloads_response(200, deps)
+    matches = [d for d in out['downloads'] if d['title'] == 'Live Unverified']
+    assert len(matches) == 1, "same track must not be duplicated"
+    assert matches[0]['is_persistent_history'] is False
+
+
 # ---------------------------------------------------------------------------
 # #836 — a rejected slskd transfer must not hang the task at 'downloading'
 # forever. The monitor normally retries; when it can't make progress, a backstop

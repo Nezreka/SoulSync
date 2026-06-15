@@ -18608,6 +18608,7 @@ def _build_status_deps():
             page=1,
             limit=limit,
         )[0],
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
     )
 
 
