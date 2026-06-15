@@ -58,7 +58,7 @@
         return null;
     }
     function seasonArt(s) {
-        return s.has_poster ? '/api/video/poster/season/' + s.id
+        return (s.has_poster && s.id != null) ? '/api/video/poster/season/' + s.id
             : (data && data.has_poster ? '/api/video/poster/show/' + data.id : '');
     }
     function pct(s) { return s.episode_total ? Math.round(s.episode_owned / s.episode_total * 100) : 0; }

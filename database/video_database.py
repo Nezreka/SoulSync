@@ -848,6 +848,7 @@ class VideoDatabase:
             owned = sum(1 for e in ep_list if e["owned"])
             meta = season_meta.get(num)
             out_seasons.append({
+                "id": meta["id"] if meta else None,    # needed for the season poster proxy
                 "season_number": num,
                 "title": (meta["title"] if meta else None) or (
                     "Specials" if num == 0 else "Season %d" % num),
