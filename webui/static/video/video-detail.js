@@ -363,9 +363,12 @@
     // ── live TMDB extras (trailer / where-to-watch / similar) ─────────────────
     function resetExtras() {
         ['[data-vd-providers-section]', '[data-vd-similar-section]', '[data-vd-collection-section]',
-         '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]'].forEach(function (s) {
+         '[data-vd-next-ep]', '[data-vd-crew-line]', '[data-vd-season-overview]',
+         '[data-vd-facts-section]', '[data-vd-videos-section]', '[data-vd-gallery-section]',
+         '[data-vd-cast-all]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
+        galleryImages = [];
     }
     function loadExtras(kind, id) {
         fetch(DETAIL_URL + kind + '/' + id + '/extras', { headers: { 'Accept': 'application/json' } })
@@ -455,6 +458,163 @@
         // "More Like This" — recommendations (better-curated), falling back to similar.
         var more = (ex.recommendations && ex.recommendations.length) ? ex.recommendations : ex.similar;
         renderRow('[data-vd-similar-section]', '[data-vd-similar]', more);
+
+        data.cast_full = ex.cast_full || null;
+        renderCastAll(data);
+        renderFacts(ex.facts, ex.keywords);
+        renderVideos(ex.videos);
+        renderGallery(ex.gallery);
+    }
+
+    // ── facts / keywords ──────────────────────────────────────────────────────
+    var LANGS = { en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+        ja: 'Japanese', ko: 'Korean', zh: 'Chinese', hi: 'Hindi', ru: 'Russian', pt: 'Portuguese',
+        sv: 'Swedish', da: 'Danish', nl: 'Dutch', no: 'Norwegian', fi: 'Finnish', pl: 'Polish',
+        tr: 'Turkish', ar: 'Arabic', he: 'Hebrew', th: 'Thai', cs: 'Czech' };
+    function langName(c) { return LANGS[c] || String(c || '').toUpperCase(); }
+    function fmtMoney(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+        return String(n);
+    }
+    function renderFacts(facts, keywords) {
+        var sec = q('[data-vd-facts-section]'), host = q('[data-vd-facts]'), kwh = q('[data-vd-keywords]');
+        facts = facts || {}; keywords = keywords || [];
+        var rows = [];
+        if (facts.budget) rows.push(['Budget', '$' + fmtMoney(facts.budget)]);
+        if (facts.revenue) rows.push(['Box office', '$' + fmtMoney(facts.revenue)]);
+        if (facts.original_language) rows.push(['Language', langName(facts.original_language)]);
+        if (facts.countries && facts.countries.length) rows.push(['Country', facts.countries.join(', ')]);
+        if (host) {
+            host.innerHTML = rows.length ? '<div class="vd-detail-grid">' + rows.map(function (r) {
+                return '<div class="vd-detail-row"><span class="vd-detail-k">' + esc(r[0]) +
+                    '</span><span class="vd-detail-v">' + esc(r[1]) + '</span></div>';
+            }).join('') + '</div>' : '';
+        }
+        if (kwh) {
+            kwh.innerHTML = keywords.map(function (k) { return '<span class="vd-kw">' + esc(k) + '</span>'; }).join('');
+        }
+        if (sec) sec.hidden = !(rows.length || keywords.length);
+    }
+
+    // ── videos (all trailers/teasers/clips) ───────────────────────────────────
+    function renderVideos(videos) {
+        var sec = q('[data-vd-videos-section]'), host = q('[data-vd-videos]');
+        if (!sec || !host) return;
+        videos = videos || [];
+        if (!videos.length) { sec.hidden = true; return; }
+        sec.hidden = false;
+        host.innerHTML = videos.map(function (v) {
+            var thumb = 'https://img.youtube.com/vi/' + encodeURIComponent(v.key) + '/mqdefault.jpg';
+            return '<button class="vd-video-card" type="button" data-vd-video="' + esc(v.key) + '">' +
+                '<span class="vd-video-thumb"><img src="' + thumb + '" alt="" loading="lazy">' +
+                '<span class="vd-video-play">▶</span></span>' +
+                '<span class="vd-video-name">' + esc(v.name || v.type) + '</span>' +
+                '<span class="vd-video-type">' + esc(v.type) + '</span></button>';
+        }).join('');
+    }
+
+    // ── photos gallery + lightbox ─────────────────────────────────────────────
+    var galleryImages = [], lightboxIdx = 0;
+    function renderGallery(gallery) {
+        var sec = q('[data-vd-gallery-section]'), host = q('[data-vd-gallery]');
+        if (!sec || !host) return;
+        var imgs = (gallery && gallery.backdrops) ? gallery.backdrops : [];
+        galleryImages = imgs.map(function (g) { return g.full; });
+        if (!imgs.length) { sec.hidden = true; return; }
+        sec.hidden = false;
+        host.innerHTML = imgs.map(function (g, i) {
+            return '<button class="vd-shot" type="button" data-vd-shot="' + i + '">' +
+                '<img src="' + esc(g.thumb) + '" alt="" loading="lazy"></button>';
+        }).join('');
+    }
+    function openLightbox(idx) {
+        if (!galleryImages.length) return;
+        lightboxIdx = idx;
+        var ov = document.getElementById('vd-lightbox');
+        if (!ov) {
+            ov = document.createElement('div'); ov.id = 'vd-lightbox'; ov.className = 'vd-lightbox';
+            ov.addEventListener('click', function (e) {
+                if (e.target.closest('[data-vd-lb-prev]')) lightboxStep(-1);
+                else if (e.target.closest('[data-vd-lb-next]')) lightboxStep(1);
+                else if (e.target === ov || e.target.closest('[data-vd-lb-close]')) closeLightbox();
+            });
+            document.body.appendChild(ov);
+        }
+        renderLightbox();
+        ov.classList.add('vd-lightbox--open');
+    }
+    function renderLightbox() {
+        var ov = document.getElementById('vd-lightbox'); if (!ov) return;
+        ov.innerHTML = '<button class="vd-lb-close" type="button" data-vd-lb-close aria-label="Close">&times;</button>' +
+            '<button class="vd-lb-nav vd-lb-prev" type="button" data-vd-lb-prev aria-label="Previous">&lsaquo;</button>' +
+            '<img class="vd-lb-img" src="' + esc(galleryImages[lightboxIdx]) + '" alt="">' +
+            '<button class="vd-lb-nav vd-lb-next" type="button" data-vd-lb-next aria-label="Next">&rsaquo;</button>' +
+            '<div class="vd-lb-count">' + (lightboxIdx + 1) + ' / ' + galleryImages.length + '</div>';
+    }
+    function lightboxStep(dir) {
+        if (!galleryImages.length) return;
+        lightboxIdx = (lightboxIdx + dir + galleryImages.length) % galleryImages.length;
+        renderLightbox();
+    }
+    function closeLightbox() {
+        var ov = document.getElementById('vd-lightbox');
+        if (ov) { ov.classList.remove('vd-lightbox--open'); ov.innerHTML = ''; }
+    }
+    function lightboxOpen() {
+        var ov = document.getElementById('vd-lightbox');
+        return ov && ov.classList.contains('vd-lightbox--open');
+    }
+
+    // ── full cast modal ───────────────────────────────────────────────────────
+    function renderCastAll(d) {
+        var btn = q('[data-vd-cast-all]');
+        if (!btn) return;
+        var n = (d.cast_full || []).length;
+        btn.hidden = n === 0;
+        if (n) btn.textContent = 'View all ' + n;
+    }
+    function castModalCard(p) {
+        var img = p.photo
+            ? '<img class="vd-cm-photo" src="' + esc(p.photo) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            : '<span class="vd-cm-photo vd-cm-photo--ph">' + esc((p.name || '?').charAt(0)) + '</span>';
+        var eps = p.episode_count ? '<span class="vd-cm-eps">' + p.episode_count + ' eps</span>' : '';
+        var inner = img + '<span class="vd-cm-name">' + esc(p.name) + '</span>' +
+            (p.character ? '<span class="vd-cm-char">' + esc(p.character) + '</span>' : '') + eps;
+        return p.tmdb_id
+            ? '<a class="vd-cm-card" href="/video-detail/tmdb/person/' + p.tmdb_id + '" data-vd-person="' + p.tmdb_id + '">' + inner + '</a>'
+            : '<div class="vd-cm-card">' + inner + '</div>';
+    }
+    function openCastModal() {
+        var cast = (data && data.cast_full) || [];
+        if (!cast.length) return;
+        var ov = document.getElementById('vd-cast-modal');
+        if (!ov) {
+            ov = document.createElement('div'); ov.id = 'vd-cast-modal'; ov.className = 'vd-cast-modal';
+            ov.addEventListener('click', function (e) {
+                var card = e.target.closest('[data-vd-person]');
+                if (card) {
+                    if (modified(e)) return;
+                    e.preventDefault();
+                    var pid = parseInt(card.getAttribute('data-vd-person'), 10);
+                    closeCastModal();
+                    if (!isNaN(pid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                        { detail: { kind: 'person', id: pid, source: 'tmdb' } }));
+                    return;
+                }
+                if (e.target === ov || e.target.closest('[data-vd-cm-close]')) closeCastModal();
+            });
+            document.body.appendChild(ov);
+        }
+        ov.innerHTML = '<div class="vd-cm-box"><div class="vd-cm-head"><h3>Cast</h3>' +
+            '<button class="vd-cm-close" type="button" data-vd-cm-close aria-label="Close">&times;</button></div>' +
+            '<div class="vd-cm-grid">' + cast.map(castModalCard).join('') + '</div></div>';
+        ov.classList.add('vd-cast-modal--open');
+    }
+    function closeCastModal() {
+        var ov = document.getElementById('vd-cast-modal');
+        if (ov) { ov.classList.remove('vd-cast-modal--open'); ov.innerHTML = ''; }
     }
 
     // ── trailer modal (YouTube embed) ─────────────────────────────────────────
@@ -829,6 +989,12 @@
                 { detail: { kind: 'person', id: pid, source: 'tmdb' } }));
             return;
         }
+        var shot = e.target.closest('[data-vd-shot]');
+        if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vd-shot'), 10) || 0); return; }
+        var vid = e.target.closest('[data-vd-video]');
+        if (vid && r.contains(vid)) { openTrailer(vid.getAttribute('data-vd-video')); return; }
+        var castAll = e.target.closest('[data-vd-cast-all]');
+        if (castAll && r.contains(castAll)) { openCastModal(); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
         if (seasonBtn && r.contains(seasonBtn)) { selectSeason(parseInt(seasonBtn.getAttribute('data-vd-season'), 10)); return; }
         var viewBtn = e.target.closest('[data-vd-view]');
@@ -859,7 +1025,11 @@
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape') closeTrailer();
+            if (e.key === 'Escape') { closeTrailer(); closeLightbox(); closeCastModal(); }
+            else if (lightboxOpen()) {
+                if (e.key === 'ArrowLeft') lightboxStep(-1);
+                else if (e.key === 'ArrowRight') lightboxStep(1);
+            }
         });
     }
 

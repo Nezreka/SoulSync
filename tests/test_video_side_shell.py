@@ -436,6 +436,10 @@ def test_detail_keeps_preview_items_in_app():
     # Director/crew names link to the person page; episode-sync has a banner.
     assert "personName" in src and "data-vd-person" in src
     assert "data-vd-ep-syncing" in _INDEX and "showEpSyncing" in src
+    # Media gallery + lightbox, all videos, facts/keywords, full-cast modal.
+    assert "data-vd-gallery" in _INDEX and "data-vd-videos" in _INDEX
+    assert "data-vd-facts" in _INDEX and "data-vd-cast-all" in _INDEX
+    assert "openLightbox" in src and "renderVideos" in src and "openCastModal" in src
     # The old external 'similar' link (themoviedb.org/<kind>/<id>) is gone — the
     # only remaining themoviedb.org ref is the TMDB badge logo asset for owned items.
     assert "www.themoviedb.org/' + (s.kind" not in src
