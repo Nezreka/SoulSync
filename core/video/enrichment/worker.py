@@ -159,6 +159,10 @@ class VideoEnrichmentWorker:
                                               data.get("overview"), data.get("poster_url"))
             except Exception:
                 logger.exception("episode backfill failed: show %s season %s", show_id, snum)
+        try:
+            self.db.mark_episodes_synced(show_id)
+        except Exception:
+            logger.exception("episode backfill: could not mark synced for show %s", show_id)
 
     # ── status (same shape the music enrichment API returns) ──────────────────
     def get_stats(self) -> dict:

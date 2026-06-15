@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -90,6 +90,7 @@ _COLUMN_MIGRATIONS = [
     ("episodes", "rating", "REAL"),
     ("movies", "logo_url", "TEXT"),
     ("shows", "logo_url", "TEXT"),
+    ("shows", "episodes_synced", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -324,6 +325,16 @@ class VideoDatabase:
             row = conn.execute("SELECT title, year, tmdb_id FROM movies WHERE id=?",
                                (movie_id,)).fetchone()
             return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def mark_episodes_synced(self, show_id: int) -> None:
+        """Flag that the show's FULL episode list has been pulled from metadata
+        (so the lazy on-view refresh doesn't re-cascade every visit)."""
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE shows SET episodes_synced=1 WHERE id=?", (show_id,))
+            conn.commit()
         finally:
             conn.close()
 
@@ -958,6 +969,7 @@ class VideoDatabase:
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
             "logo": show["logo_url"],
+            "episodes_synced": bool(show["episodes_synced"]),
             "monitored": bool(show["monitored"]),
             "season_count": len(out_seasons),
             "episode_total": total, "episode_owned": owned_total,

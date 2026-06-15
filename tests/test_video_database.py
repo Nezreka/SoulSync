@@ -626,6 +626,13 @@ def test_backfill_inserts_missing_episodes_as_unowned(db):
     assert by[2]["title"] == "Two" and by[2]["air_date"] == "2020-01-08"
 
 
+def test_episodes_synced_flag_drives_lazy_refresh(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})
+    assert db.show_detail(sid)["episodes_synced"] is False    # → lazy refresh will run
+    db.mark_episodes_synced(sid)
+    assert db.show_detail(sid)["episodes_synced"] is True      # → won't re-cascade
+
+
 def test_backfill_creates_fully_missing_season(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
         {"season_number": 1, "episodes": [{"episode_number": 1}]}]})

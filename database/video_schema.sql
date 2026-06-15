@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS shows (
     poster_url         TEXT,
     backdrop_url       TEXT,
     logo_url           TEXT,             -- transparent title logo (clearlogo)
+    episodes_synced    INTEGER NOT NULL DEFAULT 0,   -- full episode list pulled from metadata?
     monitored          INTEGER NOT NULL DEFAULT 1,   -- "following" (watchlist)
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
     root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,
