@@ -341,6 +341,24 @@ def test_omdb_worker_pauses_on_bad_key_without_burning_items(db):
     assert db.ratings_next() is not None          # item NOT burned to 'synced'
 
 
+def test_omdb_worker_cools_down_on_daily_limit_not_hard_pause(db):
+    # 'Request limit reached!' is the free-tier daily quota — cool down + auto
+    # resume (don't hard-pause), so a big library spreads across days.
+    from core.video.enrichment.clients import OMDbAuthError
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
+
+    class Omdb:
+        enabled = True
+        def ratings(self, imdb_id): raise OMDbAuthError("Request limit reached!")
+
+    w = VideoEnrichmentWorker(db, "omdb", Omdb())
+    assert w.process_one() is False
+    assert w.paused is False                       # NOT a hard pause (auto-resumes)
+    assert w._cooldown_until > 0                    # cooling down instead
+    assert w.get_stats()["cooldown"] is True and w.get_stats()["paused"] is True
+    assert db.ratings_next() is not None           # item not burned to synced
+
+
 def test_omdb_worker_keeps_item_on_transient_error(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
 
