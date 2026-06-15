@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS movies (
     rating_critic        REAL,            -- critic score (0-100) when offered
     poster_url           TEXT,
     backdrop_url         TEXT,
+    logo_url             TEXT,            -- transparent title logo (clearlogo)
     monitored            INTEGER NOT NULL DEFAULT 1,   -- tracked for acquisition
     has_file             INTEGER NOT NULL DEFAULT 0,   -- owned? (denormalized)
     quality_profile_id   INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
@@ -123,6 +124,7 @@ CREATE TABLE IF NOT EXISTS shows (
     last_air_date      TEXT,
     poster_url         TEXT,
     backdrop_url       TEXT,
+    logo_url           TEXT,             -- transparent title logo (clearlogo)
     monitored          INTEGER NOT NULL DEFAULT 1,   -- "following" (watchlist)
     quality_profile_id INTEGER REFERENCES quality_profiles(id) ON DELETE SET NULL,
     root_folder_id     INTEGER REFERENCES root_folders(id)     ON DELETE SET NULL,

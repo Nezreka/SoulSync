@@ -240,6 +240,19 @@ def test_tmdb_parses_cast_and_crew(monkeypatch):
     assert not any(c["name"] == "Edit" for c in m["crew"])   # non-headline job dropped
 
 
+def test_tmdb_picks_english_clearlogo(monkeypatch):
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    detail = {"overview": "O", "external_ids": {}, "images": {"logos": [
+        {"iso_639_1": "de", "file_path": "/de.png"},
+        {"iso_639_1": "en", "file_path": "/en.png"}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    m = TMDBClient("KEY").match("movie", "M", 2020, known_id=1)["metadata"]
+    assert m["logo_url"] == "https://image.tmdb.org/t/p/w500/en.png"   # English preferred
+
+
 def test_tmdb_show_returns_season_posters(monkeypatch):
     class _Resp:
         def __init__(self, b): self._b = b

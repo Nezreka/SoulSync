@@ -77,7 +77,8 @@ class TMDBClient:
             detail_path = "/movie/" if kind == "movie" else "/tv/"
             dr = requests.get(self.BASE + detail_path + str(tmdb_id),
                               params={"api_key": self.api_key,
-                                      "append_to_response": "external_ids,credits"},
+                                      "append_to_response": "external_ids,credits,images",
+                                      "include_image_language": "en,null"},
                               timeout=15).json() or {}
             meta["overview"] = dr.get("overview") or meta.get("overview")
             if dr.get("backdrop_path"):
@@ -113,11 +114,26 @@ class TMDBClient:
                 if seasons:
                     meta["seasons"] = seasons
             self._add_credits(meta, dr.get("credits") or {}, dr.get("created_by") or [])
+            logo = self._pick_logo((dr.get("images") or {}).get("logos") or [])
+            if logo:
+                meta["logo_url"] = self.LOGO + logo
         except Exception:
             logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
         return {"id": tmdb_id, "metadata": {k: v for k, v in meta.items() if v}}
 
     PROFILE = "https://image.tmdb.org/t/p/w185"
+    LOGO = "https://image.tmdb.org/t/p/w500"
+
+    @staticmethod
+    def _pick_logo(logos):
+        """Prefer an English title logo, then a language-neutral one, then any."""
+        if not logos:
+            return None
+        for lang in ("en", None):
+            for lg in logos:
+                if lg.get("iso_639_1") == lang and lg.get("file_path"):
+                    return lg["file_path"]
+        return logos[0].get("file_path")
 
     def _person(self, c, job=None, character=None):
         return {"name": c["name"], "tmdb_id": c.get("id"), "job": job, "character": character,

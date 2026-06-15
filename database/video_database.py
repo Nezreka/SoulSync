@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -62,10 +62,10 @@ _ENRICH = {
 # Whitelist of metadata columns enrichment may write per table (guards against
 # arbitrary keys; backfill semantics applied by the caller).
 _ENRICH_META_COLS = {
-    "movies": {"overview", "backdrop_url", "release_date", "status", "content_rating",
+    "movies": {"overview", "backdrop_url", "logo_url", "release_date", "status", "content_rating",
                "runtime_minutes", "studio", "tagline", "rating", "rating_critic",
                "imdb_id", "tmdb_id"},
-    "shows": {"overview", "backdrop_url", "status", "network", "content_rating",
+    "shows": {"overview", "backdrop_url", "logo_url", "status", "network", "content_rating",
               "tagline", "rating", "first_air_date", "last_air_date",
               "imdb_id", "tmdb_id", "tvdb_id"},
 }
@@ -88,6 +88,8 @@ _COLUMN_MIGRATIONS = [
     ("shows", "last_air_date", "TEXT"),
     ("episodes", "still_url", "TEXT"),
     ("episodes", "rating", "REAL"),
+    ("movies", "logo_url", "TEXT"),
+    ("shows", "logo_url", "TEXT"),
 ]
 
 
@@ -936,6 +938,7 @@ class VideoDatabase:
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
+            "logo": show["logo_url"],
             "monitored": bool(show["monitored"]),
             "season_count": len(out_seasons),
             "episode_total": total, "episode_owned": owned_total,
@@ -982,6 +985,7 @@ class VideoDatabase:
             "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
+            "logo": m["logo_url"],
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),
             "file": (dict(f) if f else None),
         }
