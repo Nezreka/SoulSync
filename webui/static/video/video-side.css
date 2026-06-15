@@ -775,6 +775,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     border: 0; border-radius: 0; box-shadow: none;
 }
 .vd-prov--server .vd-prov-name { color: #6ee7a0; font-weight: 700; }
+/* streaming providers are informational badges (no per-provider link exists) */
+.vd-prov--badge { cursor: default; }
+/* the single real "where to watch" link (JustWatch/TMDB aggregate page) */
+.vd-prov--more .vd-prov-more-ic {
+    display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800;
+    color: rgb(var(--vd-accent-rgb)); background: rgba(var(--vd-accent-rgb), 0.16);
+    border-color: rgba(var(--vd-accent-rgb), 0.4);
+}
+.vd-prov--more .vd-prov-name { color: rgb(var(--vd-accent-rgb)); font-weight: 700; }
 
 .vd-similar { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x proximity; }
 .vd-similar::-webkit-scrollbar { height: 8px; }

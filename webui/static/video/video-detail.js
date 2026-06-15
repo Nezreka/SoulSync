@@ -415,10 +415,10 @@
                     '" target="_blank" rel="noopener" title="Play on ' + sv + '">' +
                     sicon + '<span class="vd-prov-name">Play on ' + sv + '</span></a>';
             }
-            // Streaming providers (JustWatch via TMDB) link to the where-to-watch
-            // page. (TMDB only gives one aggregate link, so they share it.) Drop a
-            // provider that's the same service as your server tile (e.g. Plex), so
-            // it isn't listed twice.
+            // Streaming providers: TMDB only gives ONE aggregate 'where to watch'
+            // link (not per-provider), so showing N identical links is misleading.
+            // Render the logos as availability BADGES, then a single link to the
+            // watch page. (Drop a provider matching your server tile, e.g. Plex.)
             var link = ex.providers_link || '';
             var srvName = (ex.server && ex.server.server || '').toLowerCase();
             var provs = (ex.providers || []).filter(function (p) {
@@ -428,11 +428,15 @@
                 html += provs.map(function (p) {
                     var img = p.logo ? '<img src="' + esc(p.logo) + '" alt="' + esc(p.name) + '" loading="lazy">'
                         : '<span class="vd-prov-ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                    var inner = img + '<span class="vd-prov-name">' + esc(p.name) + '</span>';
-                    return link
-                        ? '<a class="vd-prov" href="' + esc(link) + '" target="_blank" rel="noopener" title="Where to watch — ' + esc(p.name) + '">' + inner + '</a>'
-                        : '<div class="vd-prov" title="' + esc(p.name) + '">' + inner + '</div>';
+                    return '<div class="vd-prov vd-prov--badge" title="' + esc(p.name) + '">' + img +
+                        '<span class="vd-prov-name">' + esc(p.name) + '</span></div>';
                 }).join('');
+                if (link) {
+                    html += '<a class="vd-prov vd-prov--more" href="' + esc(link) +
+                        '" target="_blank" rel="noopener" title="See where to watch (JustWatch)">' +
+                        '<span class="vd-prov-ph vd-prov-more-ic">↗</span>' +
+                        '<span class="vd-prov-name">Where to watch</span></a>';
+                }
             }
             ps.hidden = !html;
             ph.innerHTML = html;
