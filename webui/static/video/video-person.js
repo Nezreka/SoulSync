@@ -190,6 +190,53 @@
         img.src = '/api/video/img?u=' + encodeURIComponent(photoUrl);
     }
 
+    // ── photos gallery + lightbox (reuses the shared .vd-lightbox styles) ──────
+    var photoFulls = [], lbIdx = 0;
+    function renderPhotos(photos) {
+        var sec = q('[data-vp-photos-section]'), host = q('[data-vp-photos]');
+        photos = photos || [];
+        photoFulls = photos.map(function (p) { return p.full; });
+        if (!sec || !host) return;
+        if (!photos.length) { sec.hidden = true; return; }
+        sec.hidden = false;
+        host.innerHTML = photos.map(function (p, i) {
+            return '<button class="vp-photo-thumb" type="button" data-vp-shot="' + i + '">' +
+                '<img src="' + esc(p.thumb) + '" alt="" loading="lazy"></button>';
+        }).join('');
+    }
+    function openLightbox(idx) {
+        if (!photoFulls.length) return;
+        lbIdx = idx;
+        var ov = document.getElementById('vp-lightbox');
+        if (!ov) {
+            ov = document.createElement('div'); ov.id = 'vp-lightbox'; ov.className = 'vd-lightbox';
+            ov.addEventListener('click', function (e) {
+                if (e.target.closest('[data-vp-lb-prev]')) lbStep(-1);
+                else if (e.target.closest('[data-vp-lb-next]')) lbStep(1);
+                else if (e.target === ov || e.target.closest('[data-vp-lb-close]')) closeLightbox();
+            });
+            document.body.appendChild(ov);
+        }
+        renderLb(); ov.classList.add('vd-lightbox--open');
+    }
+    function renderLb() {
+        var ov = document.getElementById('vp-lightbox'); if (!ov) return;
+        ov.innerHTML = '<button class="vd-lb-close" type="button" data-vp-lb-close aria-label="Close">&times;</button>' +
+            '<button class="vd-lb-nav vd-lb-prev" type="button" data-vp-lb-prev aria-label="Previous">&lsaquo;</button>' +
+            '<img class="vd-lb-img" src="' + esc(photoFulls[lbIdx]) + '" alt="">' +
+            '<button class="vd-lb-nav vd-lb-next" type="button" data-vp-lb-next aria-label="Next">&rsaquo;</button>' +
+            '<div class="vd-lb-count">' + (lbIdx + 1) + ' / ' + photoFulls.length + '</div>';
+    }
+    function lbStep(dir) { lbIdx = (lbIdx + dir + photoFulls.length) % photoFulls.length; renderLb(); }
+    function closeLightbox() {
+        var ov = document.getElementById('vp-lightbox');
+        if (ov) { ov.classList.remove('vd-lightbox--open'); ov.innerHTML = ''; }
+    }
+    function lbOpen() {
+        var ov = document.getElementById('vp-lightbox');
+        return ov && ov.classList.contains('vd-lightbox--open');
+    }
+
     function computeAge(birthday, deathday) {
         if (!birthday) return null;
         var b = new Date(birthday), end = deathday ? new Date(deathday) : new Date();
@@ -241,9 +288,16 @@
         var m = q('[data-vp-meta]');
         if (m) m.innerHTML = meta.map(function (x) { return '<span>' + esc(x) + '</span>'; }).join('');
 
+        var aka = q('[data-vp-aka]');
+        if (aka) {
+            var names = d.also_known_as || [];
+            aka.textContent = names.length ? 'Also known as: ' + names.join(' · ') : '';
+            aka.hidden = !names.length;
+        }
         var bio = q('[data-vp-bio]'), more = q('[data-vp-bio-more]');
         if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; bio.classList.remove('vp-bio--open'); }
         if (more) { more.hidden = !((d.biography || '').length > 320); more.textContent = 'Read more'; }
+        renderPhotos(d.photos);
 
         applyFilters();
         var sub = document.querySelector('.video-subpage[data-video-subpage="video-person-detail"]');
@@ -264,6 +318,10 @@
         var ce = q('[data-vp-credits-empty]'); if (ce) ce.hidden = true;
         var ks = q('[data-vp-known-section]'); if (ks) ks.hidden = true;
         var k = q('[data-vp-known]'); if (k) k.innerHTML = '';
+        var psec = q('[data-vp-photos-section]'); if (psec) psec.hidden = true;
+        var pho = q('[data-vp-photos]'); if (pho) pho.innerHTML = '';
+        var ak = q('[data-vp-aka]'); if (ak) ak.hidden = true;
+        photoFulls = [];
         fetch(PERSON_URL + id, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -294,6 +352,8 @@
         if (deptBtn && r.contains(deptBtn)) {
             dept = deptBtn.getAttribute('data-vp-dept'); applyFilters(); return;
         }
+        var shot = e.target.closest('[data-vp-shot]');
+        if (shot && r.contains(shot)) { openLightbox(parseInt(shot.getAttribute('data-vp-shot'), 10) || 0); return; }
         var moreBtn = e.target.closest('[data-vp-bio-more]');
         if (moreBtn && r.contains(moreBtn)) {
             var bio = q('[data-vp-bio]');
@@ -319,6 +379,12 @@
     function init() {
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
+        document.addEventListener('keydown', function (e) {
+            if (!lbOpen()) return;
+            if (e.key === 'Escape') closeLightbox();
+            else if (e.key === 'ArrowLeft') lbStep(-1);
+            else if (e.key === 'ArrowRight') lbStep(1);
+        });
         var sortSel = document.querySelector('[data-vp-sort]');
         if (sortSel) sortSel.addEventListener('change', function () {
             sortBy = sortSel.value; renderCredits();
