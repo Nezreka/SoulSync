@@ -20,10 +20,9 @@ def register_routes(bp):
     def video_libraries():
         from . import get_video_db
         try:
-            from core.video.sources import list_video_libraries
-            from config.settings import config_manager
+            from core.video.sources import list_video_libraries, resolve_video_server
             libs = list_video_libraries() or {"server": None, "movies": [], "tv": []}
-            server = libs.get("server") or config_manager.get_active_media_server()
+            server = libs.get("server") or resolve_video_server()
             libs["selected"] = (get_video_db().get_library_selection(server)
                                 if server else {"movies": None, "tv": None})
             return jsonify(libs)
@@ -35,9 +34,11 @@ def register_routes(bp):
     def save_video_libraries():
         from . import get_video_db
         try:
-            from config.settings import config_manager
+            from core.video.sources import resolve_video_server
             body = request.get_json(silent=True) or {}
-            server = config_manager.get_active_media_server()
+            server = resolve_video_server()
+            if not server:
+                return jsonify({"error": "no video server"}), 400
             get_video_db().set_library_selection(server, body.get("movies"), body.get("tv"))
             return jsonify({"status": "saved", "server": server})
         except Exception:

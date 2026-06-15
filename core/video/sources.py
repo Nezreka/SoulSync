@@ -63,17 +63,61 @@ def _parse_jf_providers(item) -> dict:
     }
 
 
+def resolve_video_server(db=None):
+    """The server the VIDEO side uses — a configured Plex/Jellyfin, resolved
+    INDEPENDENTLY of the music 'active server' pointer (so e.g. Navidrome-for-music
+    + Plex-for-video works, and music-only servers never apply here). Returns
+    'plex' | 'jellyfin' | None. Order: explicit video pick → the music-active one if
+    it's video-capable → the single configured one → Plex if both → None."""
+    try:
+        from config.settings import config_manager
+    except Exception:
+        return None
+    plex_ok = bool((config_manager.get_plex_config() or {}).get("base_url"))
+    jelly_ok = bool((config_manager.get_jellyfin_config() or {}).get("base_url"))
+
+    pref = None
+    if db is None:
+        try:
+            from database.video_database import VideoDatabase
+            db = VideoDatabase()
+        except Exception:
+            db = None
+    if db is not None:
+        try:
+            pref = db.get_setting("video_server")
+        except Exception:
+            pref = None
+    if pref == "plex" and plex_ok:
+        return "plex"
+    if pref == "jellyfin" and jelly_ok:
+        return "jellyfin"
+
+    active = config_manager.get_active_media_server()
+    if active == "plex" and plex_ok:
+        return "plex"
+    if active == "jellyfin" and jelly_ok:
+        return "jellyfin"
+    if plex_ok and not jelly_ok:
+        return "plex"
+    if jelly_ok and not plex_ok:
+        return "jellyfin"
+    if plex_ok and jelly_ok:
+        return "plex"
+    return None
+
+
 def _build_source(movies_lib=None, tv_lib=None):
-    """Build a media source for the active server, restricted to the named
-    Movies/TV libraries when given. Reuses the SHARED connection config — but
-    Plex gets a dedicated long-timeout connection for the bulk scan."""
+    """Build a media source for the VIDEO server (see resolve_video_server),
+    restricted to the named Movies/TV libraries when given. Reuses the SHARED
+    connection config — but Plex gets a dedicated long-timeout connection."""
     try:
         from config.settings import config_manager
     except Exception:
         logger.exception("video sources: config unavailable")
         return None
 
-    server = config_manager.get_active_media_server()
+    server = resolve_video_server()
 
     if server == "plex":
         cfg = config_manager.get_plex_config() or {}
@@ -103,11 +147,12 @@ def _build_source(movies_lib=None, tv_lib=None):
 
 
 def _load_selection():
-    """The user's Movies/TV library choice for the active server (or {})."""
+    """The user's Movies/TV library choice for the VIDEO server (or {})."""
     try:
-        from config.settings import config_manager
         from database.video_database import VideoDatabase
-        server = config_manager.get_active_media_server()
+        server = resolve_video_server()
+        if not server:
+            return {}
         return VideoDatabase().get_library_selection(server)
     except Exception:
         logger.exception("video sources: could not load library selection")
