@@ -727,3 +727,55 @@ body[data-side="video"] .dashboard-header-sweep {
     position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
     overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* ── Detail extras: trailer button, providers, More Like This, trailer modal ── */
+.vd-trailer-btn {
+    display: inline-flex; align-items: center; gap: 8px; padding: 7px 18px; border-radius: 8px;
+    font-size: 12.5px; font-weight: 800; letter-spacing: 0.02em; cursor: pointer;
+    color: #fff; background: rgb(var(--vd-accent-rgb)); border: 1px solid transparent;
+    box-shadow: 0 6px 18px rgba(var(--vd-accent-rgb), 0.4); transition: all 0.2s ease;
+}
+.vd-trailer-btn:hover { transform: translateY(-1px); filter: brightness(1.08);
+    box-shadow: 0 8px 22px rgba(var(--vd-accent-rgb), 0.55); }
+.vd-trailer-ic { font-size: 12px; }
+
+.vd-providers-section, .vd-similar-section { margin-top: 40px; }
+.vd-providers { display: flex; flex-wrap: wrap; gap: 14px; }
+.vd-prov { display: flex; flex-direction: column; align-items: center; gap: 7px; width: 78px; text-align: center; }
+.vd-prov img, .vd-prov-ph {
+    width: 56px; height: 56px; border-radius: 14px; object-fit: cover;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1);
+}
+.vd-prov-ph { display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800;
+    color: #fff; background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.4), rgba(var(--vd-accent-rgb), 0.1)); }
+.vd-prov-name { font-size: 11.5px; color: rgba(255, 255, 255, 0.7); line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; }
+
+.vd-similar { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x proximity; }
+.vd-similar::-webkit-scrollbar { height: 8px; }
+.vd-similar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+.vd-sim-card { flex: 0 0 130px; width: 130px; scroll-snap-align: start; text-decoration: none; color: inherit;
+    transition: transform 0.25s ease; }
+.vd-sim-card:hover { transform: translateY(-4px); }
+.vd-sim-poster { width: 130px; aspect-ratio: 2/3; border-radius: 10px; object-fit: cover; display: block; margin-bottom: 8px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); }
+.vd-sim-poster--ph { display: flex; align-items: center; justify-content: center; font-size: 34px;
+    background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.28), rgba(0, 0, 0, 0.5)); }
+.vd-sim-title { display: block; font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.85); line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.vd-trailer-overlay {
+    position: fixed; inset: 0; z-index: 9000; display: none; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(6px);
+}
+.vd-trailer-overlay--open { display: flex; animation: vdFade 0.2s ease both; }
+@keyframes vdFade { from { opacity: 0; } to { opacity: 1; } }
+.vd-trailer-box { position: relative; width: min(1100px, 92vw); aspect-ratio: 16/9;
+    border-radius: 12px; overflow: hidden; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.7); }
+.vd-trailer-box iframe { width: 100%; height: 100%; border: 0; display: block; }
+.vd-trailer-close {
+    position: absolute; top: -44px; right: 0; width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff;
+    font-size: 22px; line-height: 1; cursor: pointer; transition: background 0.2s ease;
+}
+.vd-trailer-close:hover { background: rgba(255, 255, 255, 0.25); }

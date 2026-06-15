@@ -66,3 +66,15 @@ def register_routes(bp):
             logger.exception("refresh-art failed for movie %s", movie_id)
             res = {"ok": False, "reason": "error"}
         return jsonify(res)
+
+    @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])
+    def video_detail_extras(kind, item_id):
+        """Live TMDB extras (trailer / where-to-watch / similar) for the detail page."""
+        if kind not in ("movie", "show"):
+            return jsonify({}), 400
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            return jsonify(get_video_enrichment_engine().item_extras(kind, item_id))
+        except Exception:
+            logger.exception("extras failed for %s %s", kind, item_id)
+            return jsonify({})

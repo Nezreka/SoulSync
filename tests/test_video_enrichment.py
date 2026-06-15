@@ -205,6 +205,39 @@ def test_get_stats_excludes_episode_coverage_from_pending(db):
     assert stats["stats"]["pending"] == 0             # but it doesn't block "Complete"
 
 
+def test_tmdb_extras_parse(monkeypatch):
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    detail = {
+        "videos": {"results": [
+            {"site": "YouTube", "type": "Teaser", "key": "tease"},
+            {"site": "YouTube", "type": "Trailer", "key": "trail"}]},
+        "watch/providers": {"results": {"US": {"link": "http://w", "flatrate": [
+            {"provider_name": "Netflix", "logo_path": "/n.jpg"}]}}},
+        "similar": {"results": [{"id": 5, "title": "Other", "poster_path": "/o.jpg"}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    ex = TMDBClient("KEY").extras("movie", 438631)
+    assert ex["trailer"]["key"] == "trail"                           # Trailer beats Teaser
+    assert ex["providers"][0] == {"name": "Netflix", "logo": "https://image.tmdb.org/t/p/original/n.jpg"}
+    assert ex["providers_link"] == "http://w"
+    assert ex["similar"][0]["title"] == "Other" and ex["similar"][0]["kind"] == "movie"
+
+
+def test_item_extras_needs_tmdb_and_id(db):
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})   # no tmdb_id
+
+    class C:
+        enabled = True
+        def extras(self, kind, tid, region="US"): return {"trailer": {"key": "x"}}
+
+    eng = VideoEnrichmentEngine(db, {"tmdb": C()})
+    assert eng.item_extras("show", sid) == {}                        # no tmdb_id → no call
+    sid2 = db.upsert_show_tree("plex", {"server_id": "s2", "title": "T", "tmdb_id": 1, "seasons": []})
+    assert eng.item_extras("show", sid2) == {"trailer": {"key": "x"}}
+
+
 def test_tmdb_season_episodes_parses(monkeypatch):
     class _Resp:
         def __init__(self, b): self._b = b

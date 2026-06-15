@@ -115,6 +115,22 @@ class VideoEnrichmentEngine:
                                  external_id=result["id"], metadata=result.get("metadata"))
         return {"ok": True}
 
+    def item_extras(self, kind, item_id) -> dict:
+        """Live TMDB extras (trailer / where-to-watch / similar) for the detail
+        page. Not cached — fetched per view so providers stay current."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return {}
+        info = (self.db.movie_match_info(item_id) if kind == "movie"
+                else self.db.show_match_info(item_id))
+        if not info or not info.get("tmdb_id"):
+            return {}
+        try:
+            return w.client.extras(kind, info["tmdb_id"]) or {}
+        except Exception:
+            logger.exception("item_extras failed for %s %s", kind, item_id)
+            return {}
+
     def worker(self, service):
         return self.workers.get(service)
 
