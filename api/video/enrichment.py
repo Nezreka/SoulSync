@@ -86,6 +86,19 @@ def register_routes(bp):
         w.resume()
         return jsonify({"status": "running"})
 
+    @bp.route("/enrichment/priority", methods=["GET", "POST"])
+    def video_enrichment_priority():
+        from . import get_video_db
+        db = get_video_db()
+        if request.method == "POST":
+            body = request.get_json(silent=True) or {}
+            kind = body.get("priority") or ""
+            if kind not in ("", "movie", "show"):
+                return jsonify({"error": "bad priority"}), 400
+            db.set_setting("enrichment_priority", kind)
+            return jsonify({"success": True, "priority": kind})
+        return jsonify({"priority": db.get_setting("enrichment_priority") or ""})
+
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
         w = engine().worker(service)

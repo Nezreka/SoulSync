@@ -656,3 +656,28 @@ body[data-side="video"] .dashboard-header-sweep {
 }
 
 .video-card--clickable { cursor: pointer; }
+
+/* ── Manage-Workers modal: live status + glow (scoped to #vem-overlay; the
+   music modal's shared .em-* styles are never touched). ───────────────────── */
+#vem-overlay .em-dot--running { animation: vemDotPulse 1.5s ease-in-out infinite; }
+@keyframes vemDotPulse {
+    0%, 100% { box-shadow: 0 0 8px #1db954; }
+    50% { box-shadow: 0 0 16px 3px #1db954; }
+}
+/* The selected worker's rail row carries a live accent glow. */
+#vem-overlay .em-worker-row.active {
+    box-shadow: inset 0 0 0 1px rgba(var(--row-accent), 0.45),
+        0 0 22px rgba(var(--row-accent), 0.20);
+}
+/* "Now processing" chip pulses in the worker's accent — clear live signal. */
+#vem-overlay .em-ph-current {
+    color: rgb(var(--em-accent-rgb));
+    text-shadow: 0 0 12px rgba(var(--em-accent-rgb), 0.55);
+    animation: vemNowPulse 1.8s ease-in-out infinite;
+}
+@keyframes vemNowPulse { 0%, 100% { opacity: 0.78; } 50% { opacity: 1; } }
+/* Active "Process first" / kind selection glow in the worker accent. */
+#vem-overlay .em-global-tabs button.active,
+#vem-overlay .em-card--current {
+    box-shadow: 0 0 18px rgba(var(--em-accent-rgb), 0.28);
+}

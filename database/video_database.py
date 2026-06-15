@@ -158,15 +158,21 @@ class VideoDatabase:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
 
     # ── enrichment plumbing (per-source match status, like music) ─────────────
-    def enrichment_next(self, service: str, retry_days: int = 30) -> dict | None:
+    def enrichment_next(self, service: str, retry_days: int = 30, priority=None) -> dict | None:
         """Next item that needs enrichment for a service: pending (never tried)
         first, then a not_found item older than retry_days. Returns
         {kind, id, title, year, known_id} or None. ``known_id`` is the provider
         id the media server already supplied (e.g. tmdb_id/tvdb_id) so the worker
-        can enrich BY ID instead of re-searching by title."""
+        can enrich BY ID instead of re-searching by title.
+
+        ``priority`` ('movie'/'show') pins a kind to be processed first across the
+        queue — drives the modal's 'Process first everywhere' control."""
         kinds = _ENRICH.get(service)
         if not kinds:
             return None
+        items = list(kinds.items())
+        if priority in kinds:
+            items.sort(key=lambda kv: 0 if kv[0] == priority else 1)
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retry_days)).strftime("%Y-%m-%d %H:%M:%S")
         conn = self._get_connection()
 
@@ -175,12 +181,12 @@ class VideoDatabase:
                     "year": row["year"], "known_id": row[idc]}
 
         try:
-            for kind, (tbl, idc, sc, _ac) in kinds.items():
+            for kind, (tbl, idc, sc, _ac) in items:
                 row = conn.execute(
                     f"SELECT id, title, year, {idc} FROM {tbl} WHERE {sc} IS NULL ORDER BY id LIMIT 1").fetchone()
                 if row:
                     return _row(row, kind, idc)
-            for kind, (tbl, idc, sc, ac) in kinds.items():
+            for kind, (tbl, idc, sc, ac) in items:
                 row = conn.execute(
                     f"SELECT id, title, year, {idc} FROM {tbl} "
                     f"WHERE {sc} IN ('not_found','error') "

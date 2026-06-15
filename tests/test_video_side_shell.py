@@ -285,6 +285,11 @@ def test_video_enrichment_manager_isolated():
     assert "enrichment-manager-modal" in src and "em-rail" in src
     # Its own overlay id (not music's) so the two never collide.
     assert "vem-overlay" in src and "enrichment-manager-overlay" not in src
+    # Feature parity with the music modal: "Process first everywhere", search,
+    # and the status filter (reusing em-global / em-search / em-select).
+    assert "em-global" in src and "data-em-priority" in src
+    assert "/api/video/enrichment/priority" in src
+    assert "data-em-search" in src and "data-em-status" in src
     # TVDB is shows-only: each worker declares its kinds and the panel defaults
     # to the worker's first kind — never a hardcoded 'movie' (which would show a
     # bogus empty Movies view for TVDB).

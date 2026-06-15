@@ -63,6 +63,18 @@ def test_show_detail_endpoint(tmp_path):
         videoapi._video_db = None
 
 
+def test_enrichment_priority_endpoint(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    try:
+        assert client.get("/api/video/enrichment/priority").get_json()["priority"] == ""
+        r = client.post("/api/video/enrichment/priority", json={"priority": "show"})
+        assert r.status_code == 200 and r.get_json()["priority"] == "show"
+        assert client.get("/api/video/enrichment/priority").get_json()["priority"] == "show"
+        assert client.post("/api/video/enrichment/priority", json={"priority": "bogus"}).status_code == 400
+    finally:
+        videoapi._video_db = None
+
+
 def test_monitor_toggle_endpoint(tmp_path):
     client, videoapi = _make_client(tmp_path)
     try:
