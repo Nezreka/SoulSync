@@ -105,7 +105,7 @@ class VideoEnrichmentWorker:
             pass
         item = self.db.enrichment_next(self.service, self.retry_days, priority=priority)
         if not item:
-            return False
+            return self._sync_episodes_once()
         self.current_item = {"type": item["kind"], "name": item["title"]}
         try:
             # Prefer the provider id the server already gave us (enrich BY ID, no
@@ -140,6 +140,33 @@ class VideoEnrichmentWorker:
             logger.info("No %s match for %s '%s'", self.display_name, item["kind"], item["title"])
         return True
 
+    def _sync_episodes_once(self) -> bool:
+        """Background episode-sync: pull the FULL season/episode list for one
+        already-matched show that hasn't been synced, so library cards show real
+        owned/total. TMDB-only (it owns season_episodes). Returns True if it did
+        work (so the loop rate-limits between shows)."""
+        if not hasattr(self.client, "season_episodes"):
+            return False
+        show = self.db.episode_sync_next()
+        if not show:
+            return False
+        self.current_item = {"type": "episodes", "name": show["title"]}
+        try:
+            result = self.client.match("show", show["title"], show.get("year"),
+                                       known_id=show.get("tmdb_id"))
+            if result and result.get("id"):
+                self.db.enrichment_apply("tmdb", "show", show["id"], matched=True,
+                                         external_id=result["id"], metadata=result.get("metadata"))
+                nums = [s["season_number"] for s in (result.get("metadata") or {}).get("seasons") or []]
+                self._cascade_episodes(show["id"], result["id"], nums)   # marks synced
+                logger.info("Synced full episode list for show '%s'", show["title"])
+            else:
+                self.db.mark_episodes_synced(show["id"])     # no match → don't re-pick
+        except Exception:
+            logger.exception("episode sync failed for show '%s'", show["title"])
+            self.db.mark_episodes_synced(show["id"])         # move on (never loop on one show)
+        return True
+
     def _cascade_episodes(self, show_id, tv_id, season_numbers=None) -> None:
         """Backfill a show's FULL episode list from the provider (one call per
         season) — owned + missing. Best-effort: a season failure never aborts the
@@ -172,6 +199,13 @@ class VideoEnrichmentWorker:
         # coverage-only cascade (no queue), so it's excluded from idle/pending.
         pending = sum(b["pending"] + b.get("errors", 0)
                       for b in breakdown.values() if not b.get("coverage_only"))
+        # Shows still needing their full episode list pulled count as outstanding
+        # work for the TMDB worker (so it isn't "Complete" while syncing).
+        if hasattr(self.client, "season_episodes"):
+            try:
+                pending += self.db.episode_sync_pending_count()
+            except Exception:
+                pass
         running = self.running and not self.paused and self.enabled
         idle = running and pending == 0 and self.current_item is None
         progress = {}

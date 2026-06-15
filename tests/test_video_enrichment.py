@@ -130,6 +130,36 @@ def test_refresh_show_art_needs_tmdb_configured(db):
     assert res["ok"] is False and res["reason"] == "tmdb_not_configured"
 
 
+def test_episode_sync_next_only_matched_unsynced(db):
+    a = db.upsert_show_tree("plex", {"server_id": "s1", "title": "A", "tmdb_id": 1, "seasons": []})
+    db.upsert_show_tree("plex", {"server_id": "s2", "title": "B", "seasons": []})   # no tmdb_id
+    assert db.episode_sync_next()["id"] == a            # a is matched + unsynced; b skipped
+    db.mark_episodes_synced(a)
+    assert db.episode_sync_next() is None and db.episode_sync_pending_count() == 0
+
+
+def test_worker_background_episode_sync_pulls_full_list(db):
+    # A show matched BEFORE the cascade feature: tmdb_id set, only owned episodes,
+    # episodes_synced still 0. With the match queue clear, the worker syncs it.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396, "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1, "file": {"relative_path": "e1.mkv"}}]}]})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1396)
+    assert db.episode_sync_pending_count() == 1
+
+    class C:
+        enabled = True
+        def match(self, kind, title, year, known_id=None):
+            return {"id": 1396, "metadata": {"seasons": [{"season_number": 1, "poster_url": None}]}}
+        def season_episodes(self, tv, sn):
+            return {"episodes": [{"episode_number": 1}, {"episode_number": 2}, {"episode_number": 3}]}
+
+    w = VideoEnrichmentWorker(db, "tmdb", C())
+    assert w.process_one() is True                       # no match pending → episode sync runs
+    s1 = db.show_detail(sid)["seasons"][0]
+    assert (s1["episode_total"], s1["episode_owned"]) == (3, 1)   # full list now
+    assert db.episode_sync_pending_count() == 0
+
+
 def test_show_match_info(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "year": 2019,
                                        "tmdb_id": 1396, "seasons": []})
