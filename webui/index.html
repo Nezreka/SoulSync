@@ -844,8 +844,14 @@
                         <div class="vd-body">
                             <div class="vd-ep-toolbar">
                                 <h2 class="vd-ep-heading">Episodes</h2>
-                                <div class="vd-season-select" data-vd-season-select></div>
+                                <div class="vd-toolbar-right">
+                                    <button class="vd-missing-toggle" type="button" data-vd-missing-toggle hidden>Missing only</button>
+                                    <div class="vd-view-toggle" data-vd-view-toggle></div>
+                                </div>
                             </div>
+                            <!-- Season selector — view mode (rail/timeline/pills/dropdown)
+                                 chosen by the toggle above; all drive the same selection. -->
+                            <div class="vd-season-nav" data-vd-season-nav></div>
                             <div class="vd-episodes" data-vd-episodes></div>
                         </div>
                     </div>

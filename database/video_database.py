@@ -688,10 +688,26 @@ class VideoDatabase:
             "content_rating": show["content_rating"], "runtime_minutes": show["runtime_minutes"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
+            "monitored": bool(show["monitored"]),
             "season_count": len(out_seasons),
             "episode_total": total, "episode_owned": owned_total,
             "seasons": out_seasons,
         }
+
+    def set_monitored(self, kind: str, item_id: int, monitored: bool) -> bool:
+        """Toggle the 'follow/watchlist' flag on a movie or show. Returns True if a
+        row was updated."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(f"UPDATE {table} SET monitored=? WHERE id=?",
+                               (1 if monitored else 0, item_id))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
 
     def movie_detail(self, movie_id: int) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)
