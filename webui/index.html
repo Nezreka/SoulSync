@@ -871,7 +871,7 @@
                          at load for a per-show glow. Built by video/video-detail.js. -->
                     <div class="vd-page" data-video-detail="show">
                         <button class="vd-back" type="button" data-video-detail-back>
-                            <span aria-hidden="true">&larr;</span> Library
+                            <span aria-hidden="true">&larr;</span> <span data-vd-back-label>Back</span>
                         </button>
                         <!-- Billboard: full-bleed backdrop, content anchored bottom-left. -->
                         <div class="vd-billboard">
@@ -928,7 +928,7 @@
                 <section class="video-subpage" data-video-subpage="video-movie-detail" hidden>
                     <div class="vd-page" data-video-detail="movie">
                         <button class="vd-back" type="button" data-video-detail-back>
-                            <span aria-hidden="true">&larr;</span> Library
+                            <span aria-hidden="true">&larr;</span> <span data-vd-back-label>Back</span>
                         </button>
                         <div class="vd-billboard">
                             <div class="vd-bb-bg" data-vd-backdrop aria-hidden="true"></div>
@@ -1027,7 +1027,7 @@
                     <div class="vp-page" data-video-person data-has-bg="0">
                         <div class="vp-ambient" data-vp-ambient aria-hidden="true"></div>
                         <button class="vd-back" type="button" data-video-detail-back>
-                            <span aria-hidden="true">&larr;</span> Back
+                            <span aria-hidden="true">&larr;</span> <span data-vd-back-label>Back</span>
                         </button>
                         <div class="vd-loading" data-vp-loading hidden>
                             <div class="loading-spinner"></div><div class="loading-text">Loading&hellip;</div>
@@ -1043,6 +1043,10 @@
                         <div class="vp-body">
                             <p class="vp-bio" data-vp-bio></p>
                             <button class="vp-bio-more" type="button" data-vp-bio-more hidden>Read more</button>
+                            <div class="vp-known-section" data-vp-known-section hidden>
+                                <h2 class="vp-credits-title vp-known-title">Known For</h2>
+                                <div class="vp-known-rail" data-vp-known></div>
+                            </div>
                             <div class="vp-credits-section">
                                 <div class="vp-credits-head"><h2 class="vp-credits-title">Filmography</h2>
                                     <div class="vp-credit-tabs" data-vp-tabs></div></div>

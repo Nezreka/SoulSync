@@ -50,14 +50,68 @@
         document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
             { detail: { kind: r.kind, id: r.id, source: r.source, _restore: true } }));
     }
+
+    // ── Smart back button (mirrors music's artist-detail) ─────────────────────
+    // Browser history does the real (multi-layer) navigation; this stack only
+    // tracks WHERE EACH detail layer was opened FROM, so the button can label
+    // itself ("← Back to Search" / "← Back to The Bear") and so backing out of
+    // the first layer returns to the right page — not always the library. Each
+    // entry: {type:'page', pageId} or {type:'detail', label}. The pushed history
+    // state carries its layer depth so browser Back stays in sync too.
+    var _backStack = [];
+
+    function detailTitleOf(pageId) {
+        if (pageId === 'video-person-detail') {
+            var n = document.querySelector('[data-video-person] [data-vp-name]');
+            return n ? (n.textContent || '').trim() : '';
+        }
+        var host = pageId === 'video-movie-detail' ? '[data-video-detail="movie"]' : '[data-video-detail="show"]';
+        var t = document.querySelector(host + ' [data-vd-title]');
+        return t ? (t.textContent || '').trim() : '';
+    }
+    function currentOrigin() {
+        var page = document.body.getAttribute('data-video-page');
+        if (DETAIL_PAGES[page]) return { type: 'detail', label: detailTitleOf(page) };
+        return { type: 'page', pageId: page };
+    }
+    function backLabelText() {
+        var top = _backStack[_backStack.length - 1];
+        if (!top) return 'Back';
+        if (top.type === 'detail') return top.label ? ('Back to ' + top.label) : 'Back';
+        return 'Back to ' + pageMeta(top.pageId).label;
+    }
+    function updateBackLabels() {
+        var text = backLabelText();
+        var labels = document.querySelectorAll('[data-vd-back-label]');
+        for (var i = 0; i < labels.length; i++) labels[i].textContent = text;
+    }
+    function backFallback() {
+        // No browser history to pop (deep link) — go to the recorded first origin.
+        var dest = (_backStack[0] && _backStack[0].type === 'page') ? _backStack[0].pageId : 'video-library';
+        _backStack = [];
+        navigate(dest);
+        updateBackLabels();
+    }
+
     function onPopState() {
         var r = parseDetailPath(window.location.pathname);
-        if (r) { restoreDetail(r); return; }
-        // Left the detail URL — if we're still on the video side showing a detail,
-        // fall back to the library (Back out of the detail).
+        if (r) {
+            // Synced to the layer depth stamped on the history entry (handles both
+            // our back button and the browser's Back).
+            var st = window.history.state;
+            var layer = (st && st.videoDetail && st.videoDetail.layer) || _backStack.length;
+            if (_backStack.length > layer) _backStack.length = layer;
+            restoreDetail(r);
+            updateBackLabels();
+            return;
+        }
+        // Left the detail URL — return to where the chain started, not always library.
         if (document.body.getAttribute('data-side') === 'video' &&
             DETAIL_PAGES[document.body.getAttribute('data-video-page')]) {
-            navigate('video-library');
+            var dest = (_backStack[0] && _backStack[0].type === 'page') ? _backStack[0].pageId : 'video-library';
+            _backStack = [];
+            navigate(dest);
+            updateBackLabels();
         }
     }
 
@@ -220,6 +274,7 @@
             (function (btn) {
                 btn.addEventListener('click', function (e) {
                     e.preventDefault();
+                    _backStack = [];                 // sidebar nav is a fresh entry point
                     navigate(btn.getAttribute('data-video-page'));
                 });
             })(navButtons[j]);
@@ -232,6 +287,7 @@
             (function (el) {
                 el.addEventListener('click', function (e) {
                     e.preventDefault();
+                    _backStack = [];                 // in-page jump is a fresh entry point
                     navigate(el.getAttribute('data-video-goto'));
                 });
             })(gotos[k]);
@@ -242,27 +298,35 @@
         // and push a real URL — unless we're restoring from the URL (_restore).
         document.addEventListener('soulsync:video-open-detail', function (e) {
             var d = e && e.detail; if (!d) return;
+            // Capture the origin BEFORE navigating away from the current page.
+            var origin = d._restore ? null : currentOrigin();
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
             else return;
             if (!d._restore) {
+                _backStack.push(origin);
+                var state = { videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library',
+                                             layer: _backStack.length } };
                 var path = buildDetailPath(d.source, d.kind, d.id);
-                if (window.location.pathname !== path) {
-                    history.pushState({ videoDetail: { kind: d.kind, id: d.id, source: d.source || 'library' } },
-                        '', path);
-                }
+                if (window.location.pathname !== path) history.pushState(state, '', path);
+                else history.replaceState(state, '', path);
             }
+            updateBackLabels();
         });
 
-        // The detail "← Library" back button is real Back (returns to wherever you
-        // drilled in from); falls back to the library if there's no in-app history.
+        // The detail back button is real browser Back (so it unwinds the whole
+        // drill-in chain, layer by layer); only when there's no in-app history to
+        // pop does it fall back to the recorded first origin.
         document.addEventListener('click', function (e) {
             var back = e.target.closest('[data-video-detail-back]');
             if (!back) return;
             e.preventDefault();
-            if (history.state && history.state.videoDetail) history.back();
-            else navigate('video-library');
+            if (window.history.length > 1 && window.history.state && window.history.state.videoDetail) {
+                window.history.back();
+            } else {
+                backFallback();
+            }
         });
 
         window.addEventListener('popstate', onPopState);

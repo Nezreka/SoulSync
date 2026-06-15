@@ -31,3 +31,13 @@ def register_routes(bp):
             logger.exception("video search failed for %r", q)
             results = []
         return jsonify({"results": results, "query": q})
+
+    @bp.route("/trending", methods=["GET"])
+    def video_trending():
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            results = get_video_enrichment_engine().trending()
+        except Exception:
+            logger.exception("video trending failed")
+            results = []
+        return jsonify({"results": results})

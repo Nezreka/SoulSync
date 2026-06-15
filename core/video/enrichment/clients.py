@@ -272,6 +272,31 @@ class TMDBClient:
                             "poster": (self.PROFILE + it["profile_path"]) if it.get("profile_path") else None})
         return out
 
+    def trending(self, window="week"):
+        """Trending movies + shows this week — fills the search page when idle."""
+        if not self.api_key:
+            return []
+        import requests
+        r = requests.get(self.BASE + "/trending/all/" + window,
+                         params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for it in ((r.json() or {}).get("results") or []):
+            mt, tid = it.get("media_type"), it.get("id")
+            if not tid or mt not in ("movie", "tv"):
+                continue
+            if mt == "movie":
+                out.append({"kind": "movie", "tmdb_id": tid, "title": it.get("title"),
+                            "year": (it.get("release_date") or "")[:4] or None,
+                            "rating": it.get("vote_average") or None,
+                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
+            else:
+                out.append({"kind": "show", "tmdb_id": tid, "title": it.get("name"),
+                            "year": (it.get("first_air_date") or "")[:4] or None,
+                            "rating": it.get("vote_average") or None,
+                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
+        return out[:20]
+
     def full_detail(self, kind, tmdb_id):
         """Complete detail for a TMDB title NOT in the library — shaped like the
         library detail payload but with direct image URLs (so the same detail UI

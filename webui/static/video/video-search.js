@@ -24,6 +24,7 @@
     var reqSeq = 0;            // guards against out-of-order responses
     var timer = null;
     var wired = false;
+    var trendingCache = null;  // null = not fetched; [] = fetched/empty
 
     function $(sel) { return document.querySelector(sel); }
     function esc(s) {
@@ -94,6 +95,34 @@
         host.innerHTML = html;
     }
 
+    // Idle state: a "Trending this week" rail so the page isn't a blank box.
+    function renderTrending() {
+        var host = $('[data-video-search-results]');
+        if (!host || !trendingCache || !trendingCache.length) return;
+        show('[data-video-search-hint]', false);
+        show('[data-video-search-empty]', false);
+        host.innerHTML = '<div class="vsr-group"><h2 class="vsr-group-title">' +
+            '<span class="vsr-group-ic" aria-hidden="true">🔥</span>Trending this week</h2>' +
+            '<div class="vsr-grid">' + trendingCache.map(titleCard).join('') + '</div></div>';
+    }
+    function loadTrending() {
+        if (trendingCache !== null) { if (!lastQuery) renderTrending(); return; }
+        fetch('/api/video/trending', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                trendingCache = (d && d.results) ? d.results : [];
+                if (!lastQuery) renderTrending();
+            })
+            .catch(function () { trendingCache = []; });
+    }
+    function showIdle() {
+        if (trendingCache && trendingCache.length) { renderTrending(); return; }
+        show('[data-video-search-empty]', false);
+        show('[data-video-search-hint]', true);
+        var host = $('[data-video-search-results]'); if (host) host.innerHTML = '';
+        loadTrending();
+    }
+
     function runSearch(q) {
         var seq = ++reqSeq;
         show('[data-video-search-loading]', true);
@@ -118,9 +147,7 @@
         if (!q) {
             reqSeq++;                                 // cancel any in-flight render
             show('[data-video-search-loading]', false);
-            show('[data-video-search-empty]', false);
-            show('[data-video-search-hint]', true);
-            var host = $('[data-video-search-results]'); if (host) host.innerHTML = '';
+            showIdle();                               // back to the trending rail
             return;
         }
         timer = setTimeout(function () { runSearch(q); }, 320);
@@ -162,6 +189,7 @@
         wire();
         var input = $('[data-video-search-input]');
         if (input) { try { input.focus(); } catch (err) { /* ignore */ } }
+        if (!lastQuery) loadTrending();               // fill the idle page
     }
 
     function init() {

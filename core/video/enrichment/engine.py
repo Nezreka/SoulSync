@@ -182,6 +182,21 @@ class VideoEnrichmentEngine:
                 r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
         return results
 
+    def trending(self) -> list:
+        """Trending titles for the idle search page, annotated owned/not."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        try:
+            results = w.client.trending() or []
+        except Exception:
+            logger.exception("video trending failed")
+            return []
+        for r in results:
+            if r.get("tmdb_id"):
+                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
+        return results
+
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
         """Full detail for a TMDB title not in the library — same shape as the
         library detail (source='tmdb', direct image URLs, nothing owned). If it IS
