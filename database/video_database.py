@@ -336,6 +336,27 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def library_id_for_tmdb(self, kind: str, tmdb_id) -> int | None:
+        """The library row id for a TMDB id if it's already owned, else None. Lets
+        the search → detail flow link owned titles to their real library detail
+        (instead of the live TMDB view)."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table or tmdb_id is None:
+            return None
+        try:
+            tmdb_id = int(tmdb_id)
+        except (TypeError, ValueError):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT id FROM {table} WHERE tmdb_id=? LIMIT 1", (tmdb_id,)).fetchone()
+            return row["id"] if row else None
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+
     def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
         """Store IMDb / RT / Metacritic scores (from OMDb) + mark ratings_synced.
         Ratings are dynamic, so these overwrite (unlike gap-only metadata)."""
@@ -782,12 +803,14 @@ class VideoDatabase:
     @staticmethod
     def _credits_for(conn, owner_col: str, owner_id: int, cast_limit: int = 18) -> dict:
         rows = conn.execute(
-            "SELECT p.name, p.photo_url, c.department, c.job, c.character "
+            "SELECT p.name, p.photo_url, p.tmdb_id, c.department, c.job, c.character "
             f"FROM credits c JOIN people p ON p.id = c.person_id WHERE c.{owner_col}=? "
             "ORDER BY c.department, c.sort_order", (owner_id,)).fetchall()
-        cast = [{"name": r["name"], "character": r["character"], "photo": r["photo_url"]}
+        cast = [{"name": r["name"], "character": r["character"], "photo": r["photo_url"],
+                 "tmdb_id": r["tmdb_id"]}
                 for r in rows if r["department"] == "cast"][:cast_limit]
-        crew = [{"name": r["name"], "job": r["job"]} for r in rows if r["department"] == "crew"]
+        crew = [{"name": r["name"], "job": r["job"], "tmdb_id": r["tmdb_id"]}
+                for r in rows if r["department"] == "crew"]
         return {"cast": cast, "crew": crew}
 
     def upsert_movie(self, server_source: str, item: dict) -> int:

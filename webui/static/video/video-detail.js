@@ -32,7 +32,13 @@
     var missingOnly = false;
     var currentId = null;
     var currentKind = 'show';
+    var currentSource = 'library';  // 'library' (video.db) or 'tmdb' (live preview)
     var artAttemptedFor = null;     // lazy art refresh runs once per detail view
+
+    var TMDB_URL = '/api/video/tmdb/';
+    function detailURL(kind, id, source) {
+        return source === 'tmdb' ? TMDB_URL + kind + '/' + id : DETAIL_URL + kind + '/' + id;
+    }
 
     try { var sv = localStorage.getItem(VIEW_KEY); if (sv) seasonView = sv; } catch (e) { /* ignore */ }
 
@@ -59,8 +65,20 @@
         return null;
     }
     function seasonArt(s) {
+        if (data && data.source === 'tmdb') return s.poster_url || data.poster_url || '';
         return (s.has_poster && s.id != null) ? '/api/video/poster/season/' + s.id
             : (data && data.has_poster ? '/api/video/poster/show/' + data.id : '');
+    }
+    // Source-aware billboard art: library items proxy through /api/video; tmdb
+    // (preview) items use the direct image URLs in the payload.
+    function bbBackdrop(d) {
+        if (d.source === 'tmdb') return d.backdrop_url || d.poster_url || '';
+        var art = '/' + d.kind + '/' + d.id;
+        return d.has_backdrop ? '/api/video/backdrop' + art : (d.has_poster ? '/api/video/poster' + art : '');
+    }
+    function bbPoster(d) {
+        if (d.source === 'tmdb') return d.poster_url || '';
+        return d.has_poster ? '/api/video/poster/' + d.kind + '/' + d.id : '';
     }
     function pct(s) { return s.episode_total ? Math.round(s.episode_owned / s.episode_total * 100) : 0; }
 
@@ -113,26 +131,27 @@
             }
         }
 
-        var art = '/' + d.kind + '/' + d.id;
         var bg = q('[data-vd-backdrop]');
         if (bg) {
-            var url = d.has_backdrop ? '/api/video/backdrop' + art
-                : (d.has_poster ? '/api/video/poster' + art : '');
+            var url = bbBackdrop(d);
             bg.style.backgroundImage = url ? "url('" + url + "')" : '';
             bg.classList.toggle('vd-bb-bg--poster', !d.has_backdrop && !!d.has_poster);
             bg.classList.toggle('vd-bb-bg--empty', !d.has_backdrop && !d.has_poster);
         }
         var poster = q('[data-vd-poster]');
-        if (poster && d.has_poster) {
+        var posterUrl = bbPoster(d);
+        if (poster && posterUrl) {
             poster.onload = function () { applyAccent(poster); };
-            poster.src = '/api/video/poster' + art;
+            poster.src = posterUrl;
         }
 
         var tl = q('[data-vd-tagline]');
         if (tl) { tl.textContent = d.tagline || ''; tl.hidden = !d.tagline; }
 
         var meta = [];
-        if (d.kind === 'show') {
+        if (d.source === 'tmdb') {
+            meta.push('<span class="vd-status vd-status--preview">Preview</span>');
+        } else if (d.kind === 'show') {
             var ownedPct = d.episode_total ? Math.round(d.episode_owned / d.episode_total * 100) : 0;
             meta.push('<span class="vd-match">' + ownedPct + '% in library</span>');
         } else {
@@ -156,7 +175,9 @@
         renderActions(d);
 
         var l = q('[data-vd-links]');
-        if (l) {
+        if (l && d.source === 'tmdb') {
+            l.innerHTML = '';                     // preview items keep everything in-app
+        } else if (l) {
             var badges = [];
             if (d.imdb_id) badges.push(badge('', 'IMDb', 'IMDb', 'https://www.imdb.com/title/' + d.imdb_id + '/'));
             if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
@@ -219,10 +240,14 @@
                 var img = p.photo
                     ? '<img class="vd-cast-photo" src="' + esc(p.photo) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
                     : '<span class="vd-cast-photo vd-cast-photo--ph">' + esc((p.name || '?').charAt(0)) + '</span>';
-                return '<div class="vd-cast-card">' + img +
+                var inner = img +
                     '<span class="vd-cast-name">' + esc(p.name) + '</span>' +
-                    (p.character ? '<span class="vd-cast-char">' + esc(p.character) + '</span>' : '') +
-                    '</div>';
+                    (p.character ? '<span class="vd-cast-char">' + esc(p.character) + '</span>' : '');
+                // Clickable → in-app person page when we have a TMDB person id.
+                return p.tmdb_id
+                    ? '<a class="vd-cast-card vd-cast-card--link" href="/video-detail/tmdb/person/' + p.tmdb_id +
+                      '" data-vd-person="' + p.tmdb_id + '">' + inner + '</a>'
+                    : '<div class="vd-cast-card">' + inner + '</div>';
             }).join('');
         }
     }
@@ -236,6 +261,9 @@
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
                 '<span class="vd-trailer-ic">▶</span> Trailer</button>';
         }
+        // Preview (tmdb, un-owned) items have no library row to monitor — acquisition
+        // (add-to-watchlist / get-missing) lands with the downloads phase.
+        if (d.source === 'tmdb') { a.innerHTML = html; return; }
         html +=
             '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
             '" type="button" data-vd-act="watchlist">' +
@@ -304,8 +332,11 @@
                     var poster = s.poster
                         ? '<img class="vd-sim-poster" src="' + esc(s.poster) + '" alt="" loading="lazy">'
                         : '<span class="vd-sim-poster vd-sim-poster--ph">🎬</span>';
-                    var url = 'https://www.themoviedb.org/' + (s.kind === 'movie' ? 'movie' : 'tv') + '/' + s.tmdb_id;
-                    return '<a class="vd-sim-card" href="' + url + '" target="_blank" rel="noopener">' +
+                    // In-app: open the TMDB-backed detail (which redirects to the
+                    // library detail if we already own it). No external links.
+                    var simKind = s.kind === 'movie' ? 'movie' : 'show';
+                    return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
+                        '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' +
                         poster + '<span class="vd-sim-title">' + esc(s.title) + '</span></a>';
                 }).join('');
             } else { ss.hidden = true; }
@@ -411,8 +442,11 @@
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
         if (ep.air_date) meta.push(ep.air_date);
-        var still = ep.has_still
-            ? '<img class="vd-ep-still" src="/api/video/poster/episode/' + ep.id + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+        var stillSrc = (data && data.source === 'tmdb')
+            ? (ep.still_url || '')
+            : (ep.has_still ? '/api/video/poster/episode/' + ep.id : '');
+        var still = stillSrc
+            ? '<img class="vd-ep-still" src="' + stillSrc + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
             : '';
         return '<div class="vd-ep ' + owned + '">' +
             '<div class="vd-ep-index">' + (ep.episode_number != null ? ep.episode_number : '') + '</div>' +
@@ -438,7 +472,37 @@
 
     function selectSeason(n) {
         selectedSeason = n; menuOpen = false;
-        renderSeasonNav(); renderEpisodes();
+        renderSeasonNav(); ensureSeasonEpisodes();
+    }
+
+    // tmdb (preview) shows carry season counts but load episodes lazily per season.
+    function ensureSeasonEpisodes() {
+        var season = seasonByNum(selectedSeason);
+        if (data && data.source === 'tmdb' && season && !season._loaded &&
+            !(season.episodes && season.episodes.length)) {
+            loadTmdbSeason(season);
+        } else {
+            renderEpisodes();
+        }
+    }
+    function loadTmdbSeason(season) {
+        var host = q('[data-vd-episodes]');
+        if (host) host.innerHTML = '<div class="vd-ep-empty">Loading episodes…</div>';
+        var sid = data.id, sn = season.season_number;
+        fetch(TMDB_URL + 'show/' + sid + '/season/' + sn, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (se) {
+                season._loaded = true;
+                if (se && se.episodes) {
+                    season.episodes = se.episodes;
+                    season.episode_total = se.episodes.length;
+                }
+                if (currentId === sid && selectedSeason === sn) { renderSeasonNav(); renderEpisodes(); }
+            })
+            .catch(function () {
+                season._loaded = true;
+                if (currentId === sid && selectedSeason === sn) renderEpisodes();
+            });
     }
     function setView(v) {
         seasonView = v; menuOpen = false;
@@ -462,8 +526,8 @@
     }
 
     // ── movie detail (flat) ───────────────────────────────────────────────────
-    function loadMovie(id) {
-        currentKind = 'movie';
+    function loadMovie(id, source) {
+        currentKind = 'movie'; currentSource = source || 'library';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
@@ -471,20 +535,32 @@
         resetExtras();
         var dh = q('[data-vd-details]'); if (dh) dh.innerHTML = '';
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
-        fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
+        fetch(detailURL('movie', id, currentSource), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 showLoading(false);
+                if (d && d.redirect) { reopen(d.redirect); return; }
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
+                if (currentId !== id || currentKind !== 'movie') return;
                 data = d;
                 renderBillboard(d);
                 renderDetails(d);
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-movie-detail"]');
                 if (sub) sub.scrollTop = 0;
-                maybeRefreshMovie(id);
-                loadExtras('movie', id);
+                if (currentSource === 'tmdb') {
+                    renderExtras('movie', id, d);     // extras ship inside the tmdb payload
+                } else {
+                    maybeRefreshMovie(id);
+                    loadExtras('movie', id);
+                }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load movie'); });
+    }
+
+    // An owned title reached via a tmdb URL → bounce to the real library detail.
+    function reopen(rd) {
+        document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+            { detail: { kind: rd.kind, id: rd.id, source: rd.source || 'library' } }));
     }
 
     // Lazy: backfill a movie's cast/genres/art from TMDB on view if missing.
@@ -508,8 +584,8 @@
             }).catch(function () { /* best-effort */ });
     }
 
-    function loadShow(id) {
-        currentKind = 'show';
+    function loadShow(id, source) {
+        currentKind = 'show'; currentSource = source || 'library';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
@@ -517,21 +593,27 @@
         resetExtras();
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
-        fetch(DETAIL_URL + 'show/' + id, { headers: { 'Accept': 'application/json' } })
+        fetch(detailURL('show', id, currentSource), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 showLoading(false);
+                if (d && d.redirect) { reopen(d.redirect); return; }
                 if (!d || d.error) { setText('[data-vd-title]', 'Not found'); return; }
+                if (currentId !== id || currentKind !== 'show') return;
                 data = d; menuOpen = false; missingOnly = false;
                 selectedSeason = d.seasons && d.seasons.length ? d.seasons[0].season_number : null;
                 var mt = q('[data-vd-missing-toggle]');
                 if (mt) { mt.hidden = !(d.seasons && d.seasons.length); mt.classList.remove('vd-missing-toggle--on'); }
                 renderBillboard(d);
-                renderViewToggle(); renderSeasonNav(); renderEpisodes();
+                renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
-                maybeRefreshArt(id);
-                loadExtras('show', id);
+                if (currentSource === 'tmdb') {
+                    renderExtras('show', id, d);
+                } else {
+                    maybeRefreshArt(id);
+                    loadExtras('show', id);
+                }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load show'); });
     }
@@ -571,12 +653,37 @@
     // ── events ────────────────────────────────────────────────────────────────
     function onOpen(e) {
         if (!e || !e.detail) return;
-        if (e.detail.kind === 'movie') loadMovie(e.detail.id);
-        else if (e.detail.kind === 'show') loadShow(e.detail.id);
+        var src = e.detail.source || 'library';
+        if (e.detail.kind === 'movie') loadMovie(e.detail.id, src);
+        else if (e.detail.kind === 'show') loadShow(e.detail.id, src);
+        // 'person' is handled by video-person.js (same event).
+    }
+
+    function modified(e) {
+        return e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
     }
 
     function onClick(e) {
         var r = root(); if (!r) return;
+        // In-app drill-ins (real <a> links → modified clicks open new tabs).
+        var sim = e.target.closest('[data-vd-sim]');
+        if (sim && r.contains(sim)) {
+            if (modified(e)) return;
+            e.preventDefault();
+            var sid = parseInt(sim.getAttribute('data-vd-sim-id'), 10);
+            if (!isNaN(sid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                { detail: { kind: sim.getAttribute('data-vd-sim'), id: sid, source: 'tmdb' } }));
+            return;
+        }
+        var person = e.target.closest('[data-vd-person]');
+        if (person && r.contains(person)) {
+            if (modified(e)) return;
+            e.preventDefault();
+            var pid = parseInt(person.getAttribute('data-vd-person'), 10);
+            if (!isNaN(pid)) document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                { detail: { kind: 'person', id: pid, source: 'tmdb' } }));
+            return;
+        }
         var seasonBtn = e.target.closest('[data-vd-season]');
         if (seasonBtn && r.contains(seasonBtn)) { selectSeason(parseInt(seasonBtn.getAttribute('data-vd-season'), 10)); return; }
         var viewBtn = e.target.closest('[data-vd-view]');

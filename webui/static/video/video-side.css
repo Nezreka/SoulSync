@@ -804,3 +804,96 @@ body[data-side="video"] .dashboard-header-sweep {
 }
 .video-enrich-button:hover .video-enrich-glyph { transform: scale(1.1); }
 #vem-overlay .vem-glyph { font-size: 20px; line-height: 1; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   In-app SEARCH results + PERSON page (isolated, video side only).
+   Reuses the library card shell; adds owned/preview ribbons, grouped sections,
+   a person billboard, and a filmography grid.
+   ════════════════════════════════════════════════════════════════════════ */
+
+.vsr-title-ic { font-size: 22px; margin-right: 10px; }
+.vsr-search-box { max-width: 640px; }
+.vsr-search-box .library-search-input { font-size: 16px; }
+
+.vsr-results { display: flex; flex-direction: column; gap: 30px; }
+.vsr-group { animation: vsr-fade 0.35s ease both; }
+@keyframes vsr-fade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.vsr-group-title {
+    display: flex; align-items: center; gap: 10px; margin: 0 0 14px;
+    font-size: 18px; font-weight: 700; color: #fff; letter-spacing: 0.2px;
+}
+.vsr-group-ic { font-size: 18px; }
+.vsr-group-count {
+    font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.55);
+    background: rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 2px 9px;
+}
+.vsr-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 18px;
+}
+
+/* Owned vs preview ribbon on a result card. */
+.vsr-card { position: relative; }
+.vsr-ribbon {
+    position: absolute; top: 10px; left: 10px; z-index: 2;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+    padding: 4px 9px; border-radius: 7px; color: #fff;
+    backdrop-filter: blur(6px); box-shadow: 0 3px 10px rgba(0, 0, 0, 0.45);
+}
+.vsr-ribbon--owned { background: rgba(34, 197, 94, 0.92); }
+.vsr-ribbon--preview { background: rgba(99, 102, 241, 0.88); }
+.vsr-card--person .library-artist-image,
+.vsr-person-img { border-radius: 50% !important; overflow: hidden; aspect-ratio: 1 / 1; }
+.vsr-card--person { text-align: center; }
+
+/* ── person page ─────────────────────────────────────────────────────────── */
+.vp-page { padding: 0 0 60px; position: relative; min-height: 70vh; }
+.vp-hero {
+    display: flex; gap: 28px; align-items: flex-start;
+    padding: 10px 4px 26px; margin-bottom: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vp-photo-wrap {
+    flex: 0 0 auto; width: 168px; height: 168px; border-radius: 50%; overflow: hidden;
+    background: rgba(255, 255, 255, 0.05); display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(var(--vd-accent-rgb, 99, 102, 241), 0.25);
+}
+.vp-photo { width: 100%; height: 100%; object-fit: cover; }
+.vp-photo-ph { font-size: 62px; opacity: 0.5; }
+.vp-hero-info { flex: 1; min-width: 0; }
+.vp-name { margin: 4px 0 10px; font-size: 34px; font-weight: 800; color: #fff; line-height: 1.05; }
+.vp-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 14px; }
+.vp-meta span { font-size: 13px; color: rgba(255, 255, 255, 0.62); }
+.vp-meta span + span::before { content: ""; }
+.vp-bio {
+    font-size: 14px; line-height: 1.6; color: rgba(255, 255, 255, 0.78);
+    max-width: 880px; max-height: 9.6em; overflow-y: auto; margin: 0; white-space: pre-line;
+}
+.vp-credit-tabs { display: flex; gap: 8px; }
+.vp-tab {
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7); border-radius: 20px; padding: 6px 14px; cursor: pointer;
+    font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 7px;
+    transition: all 0.18s ease;
+}
+.vp-tab:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.vp-tab--active {
+    background: rgba(var(--vd-accent-rgb, 99, 102, 241), 0.9); border-color: transparent; color: #fff;
+}
+.vp-tab-count { font-size: 11px; opacity: 0.8; }
+
+/* Cast card becomes a real link when a person page exists for it. */
+.vd-cast-card--link { cursor: pointer; text-decoration: none; transition: transform 0.18s ease; }
+.vd-cast-card--link:hover { transform: translateY(-4px); }
+.vd-cast-card--link:hover .vd-cast-name { color: #fff; }
+
+@media (max-width: 640px) {
+    .vp-hero { flex-direction: column; align-items: center; text-align: center; }
+    .vp-name { font-size: 26px; }
+    .vsr-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 14px; }
+}
+
+.vd-status--preview {
+    background: rgba(99, 102, 241, 0.9) !important; color: #fff !important;
+    border-color: transparent !important;
+}

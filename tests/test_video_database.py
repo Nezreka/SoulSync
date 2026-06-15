@@ -554,7 +554,7 @@ def test_enrichment_backfills_cast_and_crew(db):
     d = db.show_detail(sid)
     assert [c["name"] for c in d["cast"]] == ["Aidan Gillen", "Amanda Schull"]   # billing order
     assert d["cast"][0]["character"] == "James Cole" and d["cast"][0]["photo"] == "https://img/ag.jpg"
-    assert d["crew"] == [{"name": "Terry Matalas", "job": "Creator"}]
+    assert d["crew"] == [{"name": "Terry Matalas", "job": "Creator", "tmdb_id": 1}]
     # Clearlogo backfills like the other art (gap-only) and rides in the payload.
     db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1,
                         metadata={"logo_url": "https://img/logo.png"})

@@ -167,6 +167,120 @@ def test_show_match_info(db):
     assert db.show_match_info(999999) is None
 
 
+class _Resp:
+    def __init__(self, b): self._b = b
+    def raise_for_status(self): pass
+    def json(self): return self._b
+
+
+def test_tmdb_search_parses_multi(monkeypatch):
+    body = {"results": [
+        {"media_type": "movie", "id": 1, "title": "Dune", "release_date": "2021-10-22",
+         "poster_path": "/d.jpg", "vote_average": 8.0},
+        {"media_type": "tv", "id": 2, "name": "Loki", "first_air_date": "2021-06-09", "poster_path": "/l.jpg"},
+        {"media_type": "person", "id": 3, "name": "Zendaya", "profile_path": "/z.jpg",
+         "known_for_department": "Acting",
+         "known_for": [{"title": "Dune"}, {"name": "Euphoria"}]},
+        {"media_type": "company", "id": 9, "name": "ignore me"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    res = TMDBClient("KEY").search("d")
+    kinds = [r["kind"] for r in res]
+    assert kinds == ["movie", "show", "person"]              # company dropped
+    assert res[0] == {"kind": "movie", "tmdb_id": 1, "title": "Dune", "year": "2021",
+                      "overview": None, "rating": 8.0,
+                      "poster": "https://image.tmdb.org/t/p/w300/d.jpg"}
+    assert res[2]["known_for"] == "Dune, Euphoria"
+
+
+def test_tmdb_full_detail_movie(monkeypatch):
+    detail = {"id": 1, "title": "Dune", "overview": "O", "release_date": "2021-10-22",
+              "runtime": 155, "vote_average": 8.0, "tagline": "Fear is the mind-killer",
+              "poster_path": "/p.jpg", "backdrop_path": "/b.jpg",
+              "genres": [{"name": "Sci-Fi"}], "production_companies": [{"name": "Legendary"}],
+              "external_ids": {"imdb_id": "tt1160419"},
+              "credits": {"cast": [{"name": "Timothée", "id": 11, "character": "Paul", "profile_path": "/t.jpg"}],
+                          "crew": [{"name": "Denis", "id": 12, "job": "Director"}]},
+              "images": {"logos": [{"iso_639_1": "en", "file_path": "/logo.png"}]}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    d = TMDBClient("KEY").full_detail("movie", 1)
+    assert d["title"] == "Dune" and d["year"] == "2021" and d["studio"] == "Legendary"
+    assert d["poster_url"] == "https://image.tmdb.org/t/p/original/p.jpg"
+    assert d["cast"][0] == {"name": "Timothée", "character": "Paul",
+                            "photo": "https://image.tmdb.org/t/p/w185/t.jpg", "tmdb_id": 11}
+    assert d["imdb_id"] == "tt1160419" and d["logo"].endswith("/logo.png")
+    assert d["_extras"] == {}                                 # no videos/providers/similar here
+
+
+def test_engine_tmdb_detail_redirects_when_owned(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 77})
+
+    class Tmdb:
+        enabled = True
+        def full_detail(self, kind, tid): raise AssertionError("must not fetch an owned title")
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    assert eng.tmdb_detail("movie", 77) == {"redirect": {"source": "library", "kind": "movie", "id": mid}}
+
+
+def test_engine_tmdb_detail_assembles_show(db):
+    class Tmdb:
+        enabled = True
+        def full_detail(self, kind, tid):
+            return {"kind": "show", "tmdb_id": tid, "title": "Loki", "imdb_id": None,
+                    "poster_url": "http://p", "backdrop_url": None, "cast": [], "crew": [],
+                    "_extras": {"similar": [{"title": "X", "tmdb_id": 5, "kind": "show"}]},
+                    "_seasons": [{"season_number": 1, "title": "Season 1",
+                                  "poster_url": "http://s1", "episode_count": 6}]}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    d = eng.tmdb_detail("show", 84958)
+    assert d["source"] == "tmdb" and d["owned"] is False and d["id"] == 84958
+    assert d["has_poster"] is True and d["has_backdrop"] is False
+    assert d["similar"][0]["tmdb_id"] == 5
+    s = d["seasons"][0]
+    assert s["episode_total"] == 6 and s["episode_owned"] == 0 and s["episodes"] == []
+    assert d["season_count"] == 1 and d["episode_total"] == 6
+
+
+def test_engine_search_annotates_library(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+
+    class Tmdb:
+        enabled = True
+        def search(self, q):
+            return [{"kind": "movie", "tmdb_id": 1, "title": "Owned"},
+                    {"kind": "movie", "tmdb_id": 2, "title": "Not owned"},
+                    {"kind": "person", "tmdb_id": 3, "title": "Someone"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    res = eng.search("own")
+    assert res[0]["library_id"] == mid
+    assert res[1]["library_id"] is None
+    assert "library_id" not in res[2]                         # people aren't library-matched
+
+
+def test_engine_person_detail_annotates_credits(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+
+    class Tmdb:
+        enabled = True
+        def person(self, tid):
+            return {"tmdb_id": tid, "name": "P", "credits": [
+                {"kind": "movie", "tmdb_id": 1, "title": "Owned"},
+                {"kind": "show", "tmdb_id": 9, "title": "Other"}]}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    p = eng.person_detail(55)
+    assert p["credits"][0]["library_id"] == mid
+    assert p["credits"][1]["library_id"] is None
+
+
+def test_library_id_for_tmdb(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M", "tmdb_id": 500})
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 600, "seasons": []})
+    assert db.library_id_for_tmdb("movie", 500) == mid
+    assert db.library_id_for_tmdb("show", 600) == sid
+    assert db.library_id_for_tmdb("movie", 999) is None
+    assert db.library_id_for_tmdb("bogus", 500) is None
+    assert db.library_id_for_tmdb("movie", None) is None
+
+
 def test_omdb_worker_processes_ratings_queue(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
     db.upsert_movie("plex", {"server_id": "m2", "title": "B"})        # no imdb_id → skipped

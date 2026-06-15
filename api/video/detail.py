@@ -67,6 +67,48 @@ def register_routes(bp):
             res = {"ok": False, "reason": "error"}
         return jsonify(res)
 
+    @bp.route("/tmdb/<kind>/<int:tmdb_id>", methods=["GET"])
+    def video_tmdb_detail(kind, tmdb_id):
+        """Full detail for a TMDB title not in the library (the search → detail
+        view). May return {redirect:{source,kind,id}} if it's actually owned."""
+        if kind not in ("movie", "show"):
+            return jsonify({"error": "bad kind"}), 400
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            d = get_video_enrichment_engine().tmdb_detail(kind, tmdb_id)
+        except Exception:
+            logger.exception("tmdb detail failed for %s %s", kind, tmdb_id)
+            d = None
+        if not d:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(d)
+
+    @bp.route("/tmdb/show/<int:tv_id>/season/<int:season_number>", methods=["GET"])
+    def video_tmdb_season(tv_id, season_number):
+        """Lazy per-season episodes for a TMDB (un-owned) show detail."""
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            d = get_video_enrichment_engine().tmdb_season(tv_id, season_number)
+        except Exception:
+            logger.exception("tmdb season failed for %s S%s", tv_id, season_number)
+            d = None
+        if not d:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(d)
+
+    @bp.route("/person/<int:tmdb_id>", methods=["GET"])
+    def video_person_detail(tmdb_id):
+        """In-app person page: bio + filmography (each credit annotated owned/not)."""
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            d = get_video_enrichment_engine().person_detail(tmdb_id)
+        except Exception:
+            logger.exception("person detail failed for %s", tmdb_id)
+            d = None
+        if not d:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(d)
+
     @bp.route("/detail/<kind>/<int:item_id>/extras", methods=["GET"])
     def video_detail_extras(kind, item_id):
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail page."""

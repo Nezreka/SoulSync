@@ -31,7 +31,7 @@
     // reload / Back / Forward / open-in-new-tab all work. ``source`` is 'library'
     // (a video.db id) today; 'tmdb' (a search result not yet in the library) later.
     var DETAIL_BASE = '/video-detail/';
-    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1 };
+    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1 };
 
     function buildDetailPath(source, kind, id) {
         return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + id;
@@ -41,7 +41,7 @@
         var p = pathname.slice(DETAIL_BASE.length).split('/').filter(Boolean);
         if (p.length < 3) return null;
         var kind = p[1], id = parseInt(p[2], 10);
-        if ((kind !== 'movie' && kind !== 'show') || isNaN(id)) return null;
+        if ((kind !== 'movie' && kind !== 'show' && kind !== 'person') || isNaN(id)) return null;
         return { source: decodeURIComponent(p[0]), kind: kind, id: id };
     }
     // Restore a detail from the URL (popstate / initial load) WITHOUT re-pushing.
@@ -81,6 +81,7 @@
         // Drill-in detail pages — reachable from cards, not the sidebar nav.
         { id: 'video-show-detail', label: 'Show' },
         { id: 'video-movie-detail', label: 'Movie' },
+        { id: 'video-person-detail', label: 'Person' },
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
@@ -243,6 +244,7 @@
             var d = e && e.detail; if (!d) return;
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
+            else if (d.kind === 'person') navigate('video-person-detail');
             else return;
             if (!d._restore) {
                 var path = buildDetailPath(d.source, d.kind, d.id);

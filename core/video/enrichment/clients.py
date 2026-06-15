@@ -170,7 +170,11 @@ class TMDBClient:
         r = requests.get(self.BASE + path, params={
             "api_key": self.api_key, "append_to_response": "videos,watch/providers,similar"}, timeout=15)
         r.raise_for_status()
-        d = r.json() or {}
+        return self._parse_extras(kind, r.json() or {}, region)
+
+    def _parse_extras(self, kind, d, region="US"):
+        """Pull trailer / where-to-watch / similar out of a TMDB detail body. Shared
+        by extras() and full_detail() so the search detail can render them too."""
         out = {}
 
         # Trailer — prefer a YouTube "Trailer", fall back to a teaser.
@@ -234,6 +238,142 @@ class TMDBClient:
         return {"overview": data.get("overview"),
                 "poster_url": (self.IMG + data["poster_path"]) if data.get("poster_path") else None,
                 "episodes": out}
+
+    def search(self, query):
+        """Multi-search (movies / TV / people) for the in-app search page. Returns
+        a flat list of {kind, tmdb_id, title, year, poster, ...} — no external IDs,
+        everything resolves back into SoulSync."""
+        if not self.api_key or not (query or "").strip():
+            return []
+        import requests
+        r = requests.get(self.BASE + "/search/multi", params={
+            "api_key": self.api_key, "query": query, "include_adult": "false"}, timeout=15)
+        r.raise_for_status()
+        out = []
+        for it in ((r.json() or {}).get("results") or [])[:32]:
+            mt, tid = it.get("media_type"), it.get("id")
+            if not tid:
+                continue
+            if mt == "movie":
+                out.append({"kind": "movie", "tmdb_id": tid, "title": it.get("title"),
+                            "year": (it.get("release_date") or "")[:4] or None,
+                            "overview": it.get("overview"), "rating": it.get("vote_average") or None,
+                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
+            elif mt == "tv":
+                out.append({"kind": "show", "tmdb_id": tid, "title": it.get("name"),
+                            "year": (it.get("first_air_date") or "")[:4] or None,
+                            "overview": it.get("overview"), "rating": it.get("vote_average") or None,
+                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
+            elif mt == "person":
+                known = [k.get("title") or k.get("name") for k in (it.get("known_for") or [])]
+                out.append({"kind": "person", "tmdb_id": tid, "title": it.get("name"),
+                            "known_for": ", ".join([k for k in known if k][:3]) or None,
+                            "department": it.get("known_for_department"),
+                            "poster": (self.PROFILE + it["profile_path"]) if it.get("profile_path") else None})
+        return out
+
+    def full_detail(self, kind, tmdb_id):
+        """Complete detail for a TMDB title NOT in the library — shaped like the
+        library detail payload but with direct image URLs (so the same detail UI
+        renders it). Seasons carry counts; episodes load lazily per season."""
+        if not self.api_key or tmdb_id is None:
+            return None
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id)
+        r = requests.get(self.BASE + path, params={
+            "api_key": self.api_key,
+            "append_to_response": "external_ids,credits,images,videos,watch/providers,similar",
+            "include_image_language": "en,null"}, timeout=15)
+        r.raise_for_status()
+        dr = r.json() or {}
+        if not dr.get("id"):
+            return None
+        ext = dr.get("external_ids") or {}
+        logo = self._pick_logo((dr.get("images") or {}).get("logos") or [])
+        cmeta = {}
+        self._add_credits(cmeta, dr.get("credits") or {}, dr.get("created_by") or [])
+        out = {
+            "kind": kind, "tmdb_id": tmdb_id,
+            "title": dr.get("title") or dr.get("name"),
+            "overview": dr.get("overview"), "tagline": dr.get("tagline") or None,
+            "status": dr.get("status"), "rating": dr.get("vote_average") or None,
+            "imdb_id": ext.get("imdb_id") or dr.get("imdb_id"),
+            "poster_url": (self.IMG + dr["poster_path"]) if dr.get("poster_path") else None,
+            "backdrop_url": (self.IMG + dr["backdrop_path"]) if dr.get("backdrop_path") else None,
+            "logo": (self.LOGO + logo) if logo else None,
+            "genres": [g.get("name") for g in (dr.get("genres") or []) if g.get("name")],
+            "cast": [{"name": p["name"], "character": p.get("character"),
+                      "photo": p.get("photo_url"), "tmdb_id": p.get("tmdb_id")}
+                     for p in cmeta.get("cast") or []],
+            "crew": [{"name": p["name"], "job": p.get("job"), "tmdb_id": p.get("tmdb_id")}
+                     for p in cmeta.get("crew") or []],
+            "_extras": self._parse_extras(kind, dr),
+        }
+        if kind == "movie":
+            out["year"] = (dr.get("release_date") or "")[:4] or None
+            out["release_date"] = dr.get("release_date") or None
+            out["runtime_minutes"] = dr.get("runtime")
+            out["studio"] = next((c.get("name") for c in (dr.get("production_companies") or [])), None)
+        else:
+            out["year"] = (dr.get("first_air_date") or "")[:4] or None
+            out["first_air_date"] = dr.get("first_air_date") or None
+            out["last_air_date"] = dr.get("last_air_date") or None
+            ert = dr.get("episode_run_time") or []
+            out["runtime_minutes"] = ert[0] if ert else None
+            out["network"] = next((n.get("name") for n in (dr.get("networks") or [])), None)
+            out["tvdb_id"] = _int(ext.get("tvdb_id"))
+            seasons = []
+            for s in (dr.get("seasons") or []):
+                num = s.get("season_number")
+                if num is None:
+                    continue
+                seasons.append({
+                    "season_number": num,
+                    "title": s.get("name") or ("Specials" if num == 0 else "Season %d" % num),
+                    "poster_url": (self.POSTER_W + s["poster_path"]) if s.get("poster_path") else None,
+                    "episode_count": s.get("episode_count") or 0})
+            out["_seasons"] = sorted(seasons, key=lambda s: s["season_number"])
+        return out
+
+    def person(self, tmdb_id):
+        """Person detail + their filmography (cast + crew credits) for the in-app
+        person page. Everything points back to TMDB ids we resolve in SoulSync."""
+        if not self.api_key or tmdb_id is None:
+            return None
+        import requests
+        r = requests.get(self.BASE + "/person/" + str(tmdb_id), params={
+            "api_key": self.api_key, "append_to_response": "combined_credits,external_ids"}, timeout=15)
+        r.raise_for_status()
+        d = r.json() or {}
+        if not d.get("id"):
+            return None
+        cc = d.get("combined_credits") or {}
+        seen, credits = set(), []
+        for c in (cc.get("cast") or []) + (cc.get("crew") or []):
+            mt, tid = c.get("media_type"), c.get("id")
+            if not tid or mt not in ("movie", "tv"):
+                continue
+            kind = "movie" if mt == "movie" else "show"
+            key = (kind, tid)
+            if key in seen:
+                continue
+            seen.add(key)
+            date = c.get("release_date") or c.get("first_air_date") or ""
+            credits.append({
+                "kind": kind, "tmdb_id": tid, "title": c.get("title") or c.get("name"),
+                "year": (date or "")[:4] or None, "date": date or None,
+                "role": c.get("character") or c.get("job") or None,
+                "popularity": c.get("popularity") or 0,
+                "poster": (self.POSTER_W + c["poster_path"]) if c.get("poster_path") else None})
+        credits.sort(key=lambda x: x["popularity"], reverse=True)
+        return {
+            "tmdb_id": d.get("id"), "name": d.get("name"),
+            "biography": d.get("biography") or None,
+            "known_for": d.get("known_for_department") or None,
+            "birthday": d.get("birthday") or None, "deathday": d.get("deathday") or None,
+            "place_of_birth": d.get("place_of_birth") or None,
+            "photo": (self.PROFILE + d["profile_path"]) if d.get("profile_path") else None,
+            "credits": credits}
 
 
 class TVDBClient:

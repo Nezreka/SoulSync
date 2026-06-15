@@ -45,7 +45,41 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/detail/show/<int:show_id>/refresh-art" in rules
     assert "/api/video/detail/movie/<int:movie_id>/refresh-art" in rules
     assert "/api/video/detail/<kind>/<int:item_id>/extras" in rules
+    assert "/api/video/search" in rules
+    assert "/api/video/tmdb/<kind>/<int:tmdb_id>" in rules
+    assert "/api/video/tmdb/show/<int:tv_id>/season/<int:season_number>" in rules
+    assert "/api/video/person/<int:tmdb_id>" in rules
     assert any(r.startswith("/api/video/backdrop/") for r in rules)
+
+
+def test_search_endpoint_empty_query(tmp_path):
+    client, _ = _make_client(tmp_path)
+    resp = client.get("/api/video/search?q=")
+    assert resp.status_code == 200
+    assert resp.get_json() == {"results": [], "query": ""}
+
+
+def test_search_endpoint_uses_engine(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+
+    class FakeEngine:
+        def search(self, q): return [{"kind": "movie", "tmdb_id": 1, "title": "Dune", "library_id": None}]
+    monkeypatch.setattr("core.video.enrichment.engine.get_video_enrichment_engine",
+                        lambda: FakeEngine())
+    body = client.get("/api/video/search?q=dune").get_json()
+    assert body["query"] == "dune" and body["results"][0]["title"] == "Dune"
+
+
+def test_tmdb_detail_endpoint(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+
+    class FakeEngine:
+        def tmdb_detail(self, kind, tid): return {"source": "tmdb", "kind": kind, "id": tid, "title": "X"}
+    monkeypatch.setattr("core.video.enrichment.engine.get_video_enrichment_engine",
+                        lambda: FakeEngine())
+    resp = client.get("/api/video/tmdb/movie/438631")
+    assert resp.status_code == 200 and resp.get_json()["source"] == "tmdb"
+    assert client.get("/api/video/tmdb/bogus/1").status_code == 400
 
 
 def test_show_detail_endpoint(tmp_path):
