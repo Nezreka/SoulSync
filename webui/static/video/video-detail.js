@@ -939,7 +939,15 @@
                     fetch(DETAIL_URL + 'movie/' + id, { headers: { 'Accept': 'application/json' } })
                         .then(function (r) { return r.ok ? r.json() : null; })
                         .then(function (d) {
-                            if (d && !d.error && currentId === id) { data = d; renderBillboard(d); renderDetails(d); }
+                            if (d && !d.error && currentId === id) {
+                                // Keep the live extras (server/trailer/next-ep) the
+                                // detail payload lacks — else Play/Trailer vanish.
+                                var prev = data || {};
+                                d.server = prev.server || null;
+                                d.trailer = prev.trailer || null;
+                                d.next_episode = prev.next_episode || null;
+                                data = d; renderBillboard(d); renderDetails(d);
+                            }
                         });
                 }
             }).catch(function () { /* best-effort */ });
