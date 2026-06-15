@@ -137,6 +137,27 @@ def test_show_match_info(db):
     assert db.show_match_info(999999) is None
 
 
+def test_refresh_movie_art_backfills_cast_and_genres(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "tmdb_id": 438631})
+
+    class C:
+        enabled = True
+        def match(self, kind, title, year, known_id=None):
+            assert kind == "movie" and known_id == 438631
+            return {"id": 438631, "metadata": {"genres": ["Sci-Fi"],
+                                               "cast": [{"name": "Timothee", "tmdb_id": 1}]}}
+
+    assert VideoEnrichmentEngine(db, {"tmdb": C()}).refresh_movie_art(mid)["ok"] is True
+    d = db.movie_detail(mid)
+    assert d["genres"] == ["Sci-Fi"] and d["cast"][0]["name"] == "Timothee"
+
+
+def test_movie_match_info(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "year": 2021, "tmdb_id": 438631})
+    assert db.movie_match_info(mid) == {"title": "Dune", "year": 2021, "tmdb_id": 438631}
+    assert db.movie_match_info(999999) is None
+
+
 def test_enrichment_next_priority_pins_kind_first(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
     db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": []})

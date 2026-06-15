@@ -76,12 +76,9 @@
         if (kind === 'movie') meta.push(it.has_file ? 'Owned' : 'Wanted');
         else meta.push((it.owned_count || 0) + '/' + (it.episode_count || 0) + ' eps');
 
-        // Shows drill into the detail page; movies aren't clickable until the
-        // movie-detail page lands (then this opens kind === 'movie' too).
-        var clickable = kind === 'show' ? ' video-card--clickable' : '';
-        var hook = kind === 'show'
-            ? ' data-video-card-open="show" data-video-card-id="' + it.id + '"' : '';
-        return '<div class="library-artist-card' + clickable + '"' + hook + '>' + img + badge +
+        // Both movies and shows drill into their detail page.
+        var hook = ' data-video-card-open="' + kind + '" data-video-card-id="' + it.id + '"';
+        return '<div class="library-artist-card video-card--clickable"' + hook + '>' + img + badge +
             '<div class="library-artist-info">' +
             '<h3 class="library-artist-name" title="' + esc(it.title) + '">' + esc(it.title) + '</h3>' +
             '<div class="library-artist-stats"><span class="library-artist-stat">' +

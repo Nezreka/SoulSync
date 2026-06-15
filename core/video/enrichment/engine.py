@@ -93,6 +93,28 @@ class VideoEnrichmentEngine:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
         return {"ok": True}
 
+    def refresh_movie_art(self, movie_id) -> dict:
+        """On-demand (lazy) backfill of a movie's cast / genres / backdrop / ratings
+        from TMDB when the detail page is opened and they're missing. Works
+        regardless of match status; caches the result."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return {"ok": False, "reason": "tmdb_not_configured"}
+        info = self.db.movie_match_info(movie_id)
+        if not info:
+            return {"ok": False, "reason": "not_found"}
+        try:
+            result = w.client.match("movie", info.get("title"), info.get("year"),
+                                    known_id=info.get("tmdb_id"))
+        except Exception:
+            logger.exception("refresh_movie_art: match failed for movie %s", movie_id)
+            return {"ok": False, "reason": "match_error"}
+        if not result or not result.get("id"):
+            return {"ok": False, "reason": "no_match"}
+        self.db.enrichment_apply("tmdb", "movie", movie_id, matched=True,
+                                 external_id=result["id"], metadata=result.get("metadata"))
+        return {"ok": True}
+
     def worker(self, service):
         return self.workers.get(service)
 
