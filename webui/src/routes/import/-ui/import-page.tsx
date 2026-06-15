@@ -1,12 +1,14 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Outlet } from '@tanstack/react-router';
 import clsx from 'clsx';
 
-import { Button } from '@/components/form/form';
+import { Button, Switch } from '@/components/form/form';
 import { Show } from '@/components/primitives';
 import { useReactPageShell } from '@/platform/shell/route-controllers';
 
-import type { ImportQueueEntry } from '../-import.types';
+import type { ImportOptionsPayload, ImportQueueEntry } from '../-import.types';
 
+import { importOptionsQueryOptions, IMPORT_QUERY_KEY, saveImportOptions } from '../-import.api';
 import {
   getQueueProgressPercent,
   getQueueStatusText,
@@ -36,6 +38,7 @@ export function ImportPage() {
           lastRefreshedAt={lastRefreshedAt}
           onRefresh={refreshStaging}
         />
+        <ImportOptions />
         <ImportProcessingQueue />
         <ImportTabNav />
         <section className={clsx(styles.importPageTabContent, styles.active)}>
@@ -52,6 +55,75 @@ function formatShortTime(timestamp: number) {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+// The two import behaviour toggles, also in Settings → Import, surfaced here so
+// they're visible right where you import. Each writes its `import.*` config key
+// on change (POST /api/settings partial-merges, so the rest of config is safe).
+function ImportOptions() {
+  const queryClient = useQueryClient();
+  const optionsQuery = useQuery(importOptionsQueryOptions());
+  const saveMutation = useMutation({
+    mutationFn: saveImportOptions,
+    onSuccess: () => {
+      window.showToast?.('Import options saved', 'success');
+    },
+    onError: (error: unknown) => {
+      window.showToast?.(
+        error instanceof Error ? error.message : 'Could not save import options',
+        'error',
+      );
+      // Re-sync the toggles to the server's actual state after a failed save.
+      void queryClient.invalidateQueries({
+        queryKey: [...IMPORT_QUERY_KEY, 'import-options'],
+      });
+    },
+  });
+
+  const opts = optionsQuery.data;
+  if (!opts) return null;
+
+  const update = (patch: Partial<ImportOptionsPayload>) => {
+    const next = { ...opts, ...patch };
+    // Optimistic: reflect the toggle immediately, the mutation persists it.
+    queryClient.setQueryData([...IMPORT_QUERY_KEY, 'import-options'], next);
+    saveMutation.mutate(next);
+  };
+
+  return (
+    <section className={styles.importOptionsRow} data-testid="import-options">
+      <div className={styles.importOption}>
+        <Switch
+          id="import-quality-filter"
+          checked={opts.qualityFilterEnabled}
+          disabled={saveMutation.isPending}
+          aria-labelledby="import-quality-filter-label"
+          onCheckedChange={(checked) => update({ qualityFilterEnabled: checked })}
+        />
+        <span
+          id="import-quality-filter-label"
+          title="Only import tracks that meet your quality profile; otherwise import everything regardless of quality."
+        >
+          Quality check on import
+        </span>
+      </div>
+      <div className={styles.importOption}>
+        <Switch
+          id="import-folder-artist"
+          checked={opts.folderArtistOverride}
+          disabled={saveMutation.isPending}
+          aria-labelledby="import-folder-artist-label"
+          onCheckedChange={(checked) => update({ folderArtistOverride: checked })}
+        />
+        <span
+          id="import-folder-artist-label"
+          title="Use the top Staging folder as the album artist (good for mixtapes; turn off for mixed piles of songs)."
+        >
+          Use folder as artist
+        </span>
+      </div>
+    </section>
+  );
 }
 
 function ImportHeader({
