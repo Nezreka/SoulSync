@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -95,6 +95,8 @@ _COLUMN_MIGRATIONS = [
     ("movies", "metacritic", "INTEGER"),
     ("shows", "imdb_rating", "REAL"), ("shows", "rt_rating", "INTEGER"),
     ("shows", "metacritic", "INTEGER"),
+    ("movies", "ratings_synced", "INTEGER NOT NULL DEFAULT 0"),
+    ("shows", "ratings_synced", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -287,6 +289,8 @@ class VideoDatabase:
             conn.close()
 
     def enrichment_breakdown(self, service: str) -> dict:
+        if service == "omdb":
+            return self._ratings_breakdown()
         kinds = _ENRICH.get(service, {})
         out = {}
         conn = self._get_connection()
@@ -333,21 +337,48 @@ class VideoDatabase:
             conn.close()
 
     def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
-        """Store IMDb / RT / Metacritic scores (from OMDb). Ratings are dynamic, so
-        these overwrite (unlike the gap-only metadata backfill)."""
+        """Store IMDb / RT / Metacritic scores (from OMDb) + mark ratings_synced.
+        Ratings are dynamic, so these overwrite (unlike gap-only metadata)."""
         table = {"movie": "movies", "show": "shows"}.get(kind)
         cols = {"imdb_rating", "rt_rating", "metacritic"}
-        sets, params = [], []
+        sets, params = ["ratings_synced=1"], []
         for c, v in (ratings or {}).items():
             if c in cols and v is not None:
                 sets.append(f"{c}=?")
                 params.append(v)
-        if not table or not sets:
+        if not table:
             return
         params.append(item_id)
         conn = self._get_connection()
         try:
             conn.execute(f"UPDATE {table} SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def ratings_next(self) -> dict | None:
+        """Next library item that needs OMDb ratings (has an imdb_id, not synced).
+        Drives the OMDb worker's background pass. Returns {kind, id, title, imdb_id}."""
+        conn = self._get_connection()
+        try:
+            for kind, tbl in (("movie", "movies"), ("show", "shows")):
+                row = conn.execute(
+                    f"SELECT id, title, imdb_id FROM {tbl} "
+                    "WHERE imdb_id IS NOT NULL AND imdb_id<>'' AND ratings_synced=0 "
+                    "ORDER BY id LIMIT 1").fetchone()
+                if row:
+                    return {"kind": kind, "id": row["id"], "title": row["title"], "imdb_id": row["imdb_id"]}
+            return None
+        finally:
+            conn.close()
+
+    def mark_ratings_synced(self, kind: str, item_id: int) -> None:
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        if not table:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {table} SET ratings_synced=1 WHERE id=?", (item_id,))
             conn.commit()
         finally:
             conn.close()
@@ -380,6 +411,25 @@ class VideoDatabase:
         try:
             return conn.execute(
                 "SELECT COUNT(*) FROM shows WHERE tmdb_id IS NOT NULL AND episodes_synced=0").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _ratings_breakdown(self) -> dict:
+        """OMDb 'coverage' breakdown: matched = ratings present, pending = has an
+        imdb_id but not fetched, not_found = fetched but OMDb had no rating."""
+        conn = self._get_connection()
+        out = {}
+        try:
+            for kind, tbl in (("movie", "movies"), ("show", "shows")):
+                def c(where):
+                    return conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {where}").fetchone()[0]
+                out[kind] = {
+                    "matched": c("imdb_rating IS NOT NULL"),
+                    "not_found": c("ratings_synced=1 AND imdb_rating IS NULL AND imdb_id IS NOT NULL"),
+                    "errors": 0,
+                    "pending": c("imdb_id IS NOT NULL AND imdb_id<>'' AND ratings_synced=0"),
+                }
+            return out
         finally:
             conn.close()
 
@@ -446,6 +496,8 @@ class VideoDatabase:
                              search=None, limit: int = 50, offset: int = 0) -> dict:
         if kind == "episode" and service == "tmdb":
             return self._episodes_missing_art(search, limit, offset)
+        if service == "omdb" and kind in ("movie", "show"):
+            return self._ratings_unmatched(kind, search, limit, offset)
         spec = _ENRICH.get(service, {}).get(kind)
         if not spec:
             return {"items": [], "total": 0}
@@ -503,8 +555,41 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def _ratings_unmatched(self, kind: str, search, limit: int, offset: int) -> dict:
+        tbl = {"movie": "movies", "show": "shows"}[kind]
+        where = ["imdb_rating IS NULL", "imdb_id IS NOT NULL", "imdb_id<>''"]
+        params: list = []
+        if search:
+            where.append("title LIKE ? COLLATE NOCASE")
+            params.append("%" + search + "%")
+        where_sql = " WHERE " + " AND ".join(where)
+        conn = self._get_connection()
+        try:
+            total = conn.execute(f"SELECT COUNT(*) FROM {tbl}{where_sql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT id, title, year, (poster_url IS NOT NULL AND poster_url<>'') AS has_poster "
+                f"FROM {tbl}{where_sql} ORDER BY COALESCE(sort_title, title) COLLATE NOCASE "
+                "LIMIT ? OFFSET ?", params + [limit, offset]).fetchall()
+            return {"items": [dict(r) | {"has_poster": bool(r["has_poster"])} for r in rows], "total": total}
+        finally:
+            conn.close()
+
     def enrichment_retry(self, service: str, kind: str, scope: str = "failed", item_id=None) -> int:
         """Re-queue items by resetting status/last_attempted to NULL."""
+        if service == "omdb":
+            tbl = {"movie": "movies", "show": "shows"}.get(kind)
+            if not tbl:
+                return 0
+            conn = self._get_connection()
+            try:
+                if scope == "item" and item_id is not None:
+                    cur = conn.execute(f"UPDATE {tbl} SET ratings_synced=0 WHERE id=?", (item_id,))
+                else:
+                    cur = conn.execute(f"UPDATE {tbl} SET ratings_synced=0 WHERE imdb_rating IS NULL")
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
         spec = _ENRICH.get(service, {}).get(kind)
         if not spec:
             return 0

@@ -17,6 +17,7 @@
     var WORKERS = [
         { id: 'tmdb', name: 'TMDB', color: '#38bdf8', rgb: '56, 189, 248', kinds: ['movie', 'show'] },
         { id: 'tvdb', name: 'TVDB', color: '#a855f7', rgb: '168, 85, 247', kinds: ['show'] },
+        { id: 'omdb', name: 'OMDb', color: '#f5c518', rgb: '245, 197, 24', kinds: ['movie', 'show'] },
     ];
 
     function workerDef(id) {
@@ -116,8 +117,11 @@
             var pct = overallPct(s);
             var cov = pct == null ? '' :
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
+            var icon = LOGOS[w.id]
+                ? '<img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt="">'
+                : '<span class="vem-glyph" style="color:' + w.color + '">★</span>';
             return '<button class="em-worker-row" data-em-select="' + w.id + '" style="--row-accent: ' + w.rgb + '">' +
-                '<span class="em-worker-icon"><img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt=""></span>' +
+                '<span class="em-worker-icon">' + icon + '</span>' +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
                 '<span class="em-worker-sub">' + esc(railSub(s)) + '</span>' + cov + '</span>' +
                 '<span class="em-dot em-dot--' + info.cls + '" title="' + info.label + '"></span></button>';

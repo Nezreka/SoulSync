@@ -25,6 +25,10 @@ class VideoEnrichmentWorker:
         self.interval = interval
         self.retry_days = retry_days
 
+        # OMDb is a ratings filler, not a matcher — it fetches scores by imdb_id
+        # instead of running a match queue.
+        self.is_ratings = hasattr(client, "ratings") and not hasattr(client, "match")
+
         self.running = False
         self.paused = False
         self.should_stop = False
@@ -98,6 +102,8 @@ class VideoEnrichmentWorker:
 
     def process_one(self) -> bool:
         """Process a single item. Returns True if one was processed."""
+        if self.is_ratings:
+            return self._process_ratings_one()
         priority = None
         try:
             priority = self.db.get_setting("enrichment_priority") or None
@@ -138,6 +144,28 @@ class VideoEnrichmentWorker:
             self.db.enrichment_apply(self.service, item["kind"], item["id"], matched=False)
             self.stats["not_found"] += 1
             logger.info("No %s match for %s '%s'", self.display_name, item["kind"], item["title"])
+        return True
+
+    def _process_ratings_one(self) -> bool:
+        """OMDb worker: fetch IMDb/RT/Metacritic for the next library item that has
+        an imdb_id but no ratings yet."""
+        item = self.db.ratings_next()
+        if not item:
+            return False
+        self.current_item = {"type": item["kind"], "name": item["title"]}
+        try:
+            r = self.client.ratings(item["imdb_id"])
+            if r:
+                self.db.apply_ratings(item["kind"], item["id"], r)   # marks synced
+                self.stats["matched"] += 1
+                logger.info("Rated %s '%s' -> IMDb %s", item["kind"], item["title"], item["imdb_id"])
+            else:
+                self.db.mark_ratings_synced(item["kind"], item["id"])
+                self.stats["not_found"] += 1
+        except Exception:
+            logger.exception("OMDb ratings fetch failed for '%s'", item["title"])
+            self.stats["errors"] += 1
+            self.db.mark_ratings_synced(item["kind"], item["id"])    # move on (no loop)
         return True
 
     def _sync_episodes_once(self) -> bool:

@@ -104,15 +104,11 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/test", methods=["POST"])
     def video_enrichment_test(service):
-        # OMDb is a ratings provider, not a worker.
-        client = engine().ratings_client if service == "omdb" else None
-        if client is None:
-            w = engine().worker(service)
-            client = w.client if w else None
-        if client is None:
+        w = engine().worker(service)
+        if not w:
             return jsonify({"success": False, "error": "unknown service"}), 404
         try:
-            ok, msg = client.test()
+            ok, msg = w.client.test()
             return jsonify({"success": bool(ok), "message": msg, "error": None if ok else msg})
         except Exception:
             logger.exception("video enrichment test failed for %s", service)

@@ -245,6 +245,7 @@ def test_dashboard_enrichment_buttons_present():
     block = _block(
         _INDEX, r'<section class="video-subpage" data-video-subpage="video-dashboard"', "</section>")
     assert 'data-video-enrich="tmdb"' in block and 'data-video-enrich="tvdb"' in block
+    assert 'data-video-enrich="omdb"' in block       # OMDb is a full worker too
     assert "data-video-manage-workers" in block
     assert "video-enrich-spinner" in block          # spins while running
     assert "onclick" not in block

@@ -167,6 +167,35 @@ def test_show_match_info(db):
     assert db.show_match_info(999999) is None
 
 
+def test_omdb_worker_processes_ratings_queue(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "B"})        # no imdb_id → skipped
+
+    class Omdb:
+        enabled = True
+        def ratings(self, imdb_id):
+            assert imdb_id == "tt1"
+            return {"imdb_rating": 8.0, "rt_rating": 90, "metacritic": 77}
+
+    w = VideoEnrichmentWorker(db, "omdb", Omdb())
+    assert w.is_ratings is True                       # ratings mode, not a matcher
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT imdb_rating, ratings_synced FROM movies WHERE server_id='m1'").fetchone()
+    assert r["imdb_rating"] == 8.0 and r["ratings_synced"] == 1
+    assert db.ratings_next() is None                  # B has no imdb_id → nothing left
+    assert w.process_one() is False
+
+
+def test_omdb_breakdown_is_ratings_coverage(db):
+    a = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "imdb_id": "tt1"})   # pending
+    db.upsert_movie("plex", {"server_id": "m2", "title": "B", "imdb_id": "tt2"})
+    db.apply_ratings("movie", a, {"imdb_rating": 8.0})                  # one rated
+    bd = db.enrichment_breakdown("omdb")
+    assert bd["movie"]["matched"] == 1 and bd["movie"]["pending"] == 1
+    assert "show" in bd
+
+
 def test_omdb_ratings_parse(monkeypatch):
     class _Resp:
         status_code = 200
