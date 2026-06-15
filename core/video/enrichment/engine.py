@@ -150,19 +150,88 @@ class VideoEnrichmentEngine:
 
     def item_extras(self, kind, item_id) -> dict:
         """Live TMDB extras (trailer / where-to-watch / similar) for the detail
-        page. Not cached — fetched per view so providers stay current."""
+        page. Not cached — fetched per view so providers stay current. For an
+        owned item we also surface a 'watch on your server' deep link as the first
+        where-to-watch option."""
+        out = {}
         w = self.workers.get("tmdb")
-        if not w or not w.enabled:
-            return {}
-        info = (self.db.movie_match_info(item_id) if kind == "movie"
-                else self.db.show_match_info(item_id))
-        if not info or not info.get("tmdb_id"):
-            return {}
+        if w and w.enabled:
+            info = (self.db.movie_match_info(item_id) if kind == "movie"
+                    else self.db.show_match_info(item_id))
+            if info and info.get("tmdb_id"):
+                try:
+                    out = w.client.extras(kind, info["tmdb_id"]) or {}
+                except Exception:
+                    logger.exception("item_extras failed for %s %s", kind, item_id)
+        srv = self._server_watch_link(kind, item_id)
+        if srv:
+            out["server"] = srv
+        return out
+
+    def _server_watch_link(self, kind, item_id) -> dict | None:
+        """A 'play on your media server' deep link for an owned item, or None.
+        Plex → the Plex web app at the item; Jellyfin → its web detail page."""
+        table = "movies" if kind == "movie" else "shows"
         try:
-            return w.client.extras(kind, info["tmdb_id"]) or {}
+            with self.db.connect() as c:
+                row = c.execute(
+                    f"SELECT server_source, server_id FROM {table} WHERE id=?", (item_id,)).fetchone()
         except Exception:
-            logger.exception("item_extras failed for %s %s", kind, item_id)
-            return {}
+            return None
+        if not row:
+            return None
+        source, sid = row["server_source"], row["server_id"]
+        if not source or not sid:
+            return None                      # not on a server (e.g. a wishlist row)
+        try:
+            from config.settings import config_manager
+            if source == "plex":
+                cfg = config_manager.get_plex_config() or {}
+                base, token = cfg.get("base_url"), cfg.get("token")
+                if not base or not token:
+                    return None
+                mid = self._plex_machine_id(base, token)
+                if not mid:
+                    return None
+                from urllib.parse import quote
+                key = quote("/library/metadata/" + str(sid), safe="")
+                return {"server": "Plex",
+                        "url": "https://app.plex.tv/desktop/#!/server/%s/details?key=%s" % (mid, key)}
+            if source == "jellyfin":
+                cfg = config_manager.get_jellyfin_config() or {}
+                base = cfg.get("base_url")
+                if not base:
+                    return None
+                return {"server": "Jellyfin",
+                        "url": base.rstrip("/") + "/web/index.html#!/details?id=" + str(sid)}
+        except Exception:
+            logger.exception("server watch link failed for %s %s", kind, item_id)
+        return None
+
+    def _plex_machine_id(self, base, token):
+        """The Plex server's machineIdentifier (needed for app.plex.tv deep links),
+        fetched once and cached per base URL."""
+        cached = getattr(self, "_plex_mid", None)
+        if cached and cached[0] == base:
+            return cached[1]
+        try:
+            import requests
+            r = requests.get(base.rstrip("/") + "/identity",
+                             params={"X-Plex-Token": token},
+                             headers={"Accept": "application/json"}, timeout=8)
+            mid = None
+            try:
+                mid = ((r.json() or {}).get("MediaContainer") or {}).get("machineIdentifier")
+            except Exception:
+                import re
+                m = re.search(r'machineIdentifier="([^"]+)"', r.text or "")
+                mid = m.group(1) if m else None
+            if mid:
+                self._plex_mid = (base, mid)
+            return mid
+        except Exception:
+            logger.exception("plex identity fetch failed")
+            return None
 
     # ── in-app search + TMDB-backed (un-owned) detail ─────────────────────────
     def search(self, query) -> list:

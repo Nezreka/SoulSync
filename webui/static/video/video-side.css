@@ -754,6 +754,17 @@ body[data-side="video"] .dashboard-header-sweep {
     color: #fff; background: linear-gradient(135deg, rgba(var(--vd-accent-rgb), 0.4), rgba(var(--vd-accent-rgb), 0.1)); }
 .vd-prov-name { font-size: 11.5px; color: rgba(255, 255, 255, 0.7); line-height: 1.25;
     overflow: hidden; text-overflow: ellipsis; }
+/* Clickable provider / server tiles (anchors). */
+a.vd-prov { text-decoration: none; color: inherit; cursor: pointer; transition: transform 0.2s ease; }
+a.vd-prov:hover { transform: translateY(-4px); }
+a.vd-prov:hover .vd-prov-name { color: #fff; }
+a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-accent-rgb), 0.6); }
+/* "Play on your server" tile — leads the row, glows green like the owned ribbon. */
+.vd-prov--server .vd-prov-play {
+    background: linear-gradient(135deg, #22c55e, #15803d); color: #fff; font-size: 22px;
+    box-shadow: 0 6px 18px rgba(34, 197, 94, 0.45); border-color: rgba(255, 255, 255, 0.2);
+}
+.vd-prov--server .vd-prov-name { color: #6ee7a0; font-weight: 700; }
 
 .vd-similar { display: flex; gap: 16px; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x proximity; }
 .vd-similar::-webkit-scrollbar { height: 8px; }
