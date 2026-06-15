@@ -256,6 +256,30 @@ def test_engine_search_annotates_library(db):
     assert "library_id" not in res[2]                         # people aren't library-matched
 
 
+def test_engine_trending_annotates_library(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+
+    class Tmdb:
+        enabled = True
+        def trending(self):
+            return [{"kind": "movie", "tmdb_id": 1, "title": "Owned"},
+                    {"kind": "show", "tmdb_id": 2, "title": "Hot show"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    res = eng.trending()
+    assert res[0]["library_id"] == mid and res[1]["library_id"] is None
+
+
+def test_tmdb_trending_parses(monkeypatch):
+    body = {"results": [
+        {"media_type": "movie", "id": 1, "title": "A", "release_date": "2024-01-01", "poster_path": "/a.jpg"},
+        {"media_type": "tv", "id": 2, "name": "B", "first_air_date": "2023-05-05"},
+        {"media_type": "person", "id": 3, "name": "C"}]}     # people excluded from the rail
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    res = TMDBClient("KEY").trending()
+    assert [r["kind"] for r in res] == ["movie", "show"]
+    assert res[0]["poster"] == "https://image.tmdb.org/t/p/w300/a.jpg"
+
+
 def test_engine_person_detail_annotates_credits(db):
     mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
 

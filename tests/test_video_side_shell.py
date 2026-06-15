@@ -394,6 +394,7 @@ def test_search_subpage_and_module():
     assert "(function" in src and "})();" in src
     assert "window." not in src                          # no globals
     assert "/api/video/search" in src
+    assert "/api/video/trending" in src                  # idle page shows a trending rail
     assert "soulsync:video-open-detail" in src           # results drill in via the shared event
     assert "themoviedb.org" not in src and "imdb.com" not in src   # stays in-app
 
@@ -430,6 +431,18 @@ def test_library_cards_open_detail():
 def test_video_side_registers_detail_pages_and_open_event():
     assert "video-show-detail" in _JS and "video-movie-detail" in _JS
     assert "soulsync:video-open-detail" in _JS          # navigates on the event
+
+
+def test_smart_back_button_remembers_origin():
+    # The back button label is dynamic (a span we rewrite), and the JS keeps an
+    # origin stack + layer-stamped history so back returns to where you came from
+    # (not always the library).
+    assert _INDEX.count("data-vd-back-label") >= 3      # all three detail back buttons
+    assert "_backStack" in _JS and "currentOrigin" in _JS
+    assert "updateBackLabels" in _JS
+    assert "layer: _backStack.length" in _JS            # depth stamped on history state
+    # Fallback must use the recorded first origin, not a hardcoded library jump.
+    assert "_backStack[0]" in _JS
 
 
 def test_music_worker_orbs_untouched_by_video():

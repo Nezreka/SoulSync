@@ -63,12 +63,24 @@
         }).join('');
     }
 
+    function renderKnownFor() {
+        var section = q('[data-vp-known-section]'), host = q('[data-vp-known]');
+        if (!section || !host || !data) return;
+        // The credits arrive popularity-sorted → the top few are the "known for".
+        var top = (data.credits || []).slice(0, 10);
+        section.hidden = top.length < 3;             // only worth a rail if there are a few
+        host.innerHTML = top.map(creditCard).join('');
+    }
+
     function renderCredits() {
         var host = q('[data-vp-credits]');
         if (!host || !data) return;
         var credits = (data.credits || []).filter(function (c) {
             return tab === 'all' || c.kind === tab;
         });
+        // Full filmography reads best chronologically (newest first); Known For
+        // already covers the popular ones.
+        credits.sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
         host.innerHTML = credits.map(creditCard).join('');
     }
 
@@ -105,7 +117,7 @@
         if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; bio.classList.remove('vp-bio--open'); }
         if (more) { more.hidden = !((d.biography || '').length > 320); more.textContent = 'Read more'; }
 
-        renderTabs(); renderCredits();
+        renderKnownFor(); renderTabs(); renderCredits();
         var sub = document.querySelector('.video-subpage[data-video-subpage="video-person-detail"]');
         if (sub) sub.scrollTop = 0;
     }
@@ -118,6 +130,8 @@
         var m = q('[data-vp-meta]'); if (m) m.innerHTML = '';
         var c = q('[data-vp-credits]'); if (c) c.innerHTML = '';
         var t = q('[data-vp-tabs]'); if (t) t.innerHTML = '';
+        var ks = q('[data-vp-known-section]'); if (ks) ks.hidden = true;
+        var k = q('[data-vp-known]'); if (k) k.innerHTML = '';
         fetch(PERSON_URL + id, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {

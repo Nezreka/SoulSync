@@ -454,6 +454,10 @@ body[data-side="video"] .dashboard-header-sweep {
     backdrop-filter: blur(10px); transition: all 0.2s ease;
 }
 .vd-back:hover { background: rgba(0,0,0,0.7); transform: translateX(-2px); }
+.vd-back [data-vd-back-label] {
+    display: inline-block; max-width: 230px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; vertical-align: bottom;
+}
 
 /* ── Billboard ─────────────────────────────────────────────────────────────── */
 .vd-billboard { position: relative; width: 100%; min-height: 76vh; display: flex; align-items: flex-end; overflow: hidden; }
@@ -1022,6 +1026,16 @@ body[data-side="video"] .dashboard-header-sweep {
     cursor: pointer; padding: 4px 0; margin: 0 0 30px; display: inline-block;
 }
 .vp-bio-more[hidden] { display: none; }
+
+/* Known For — a horizontal hero rail of the person's best-known titles */
+.vp-known-section { position: relative; z-index: 2; margin-bottom: 38px; }
+.vp-known-title { margin: 0 0 16px; }
+.vp-known-rail {
+    display: flex; gap: 18px; overflow-x: auto; padding: 4px 2px 14px; scroll-snap-type: x proximity;
+}
+.vp-known-rail::-webkit-scrollbar { height: 8px; }
+.vp-known-rail::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+.vp-known-rail .vsr-card { flex: 0 0 152px; width: 152px; scroll-snap-align: start; }
 
 .vp-credits-section { position: relative; z-index: 2; }
 .vp-credits-head {
