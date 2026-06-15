@@ -23,6 +23,17 @@ def register_routes(bp):
         try:
             import requests
             from config.settings import config_manager
+            path = ref["poster_url"]
+            # Enrichment can store a full external URL (e.g. a TMDB season poster) —
+            # stream it directly; otherwise it's a server path needing the token.
+            if path.startswith("http://") or path.startswith("https://"):
+                upstream = requests.get(path, timeout=15, stream=True)
+                if upstream.status_code != 200:
+                    abort(404)
+                resp = Response(upstream.iter_content(8192),
+                                content_type=upstream.headers.get("Content-Type", "image/jpeg"))
+                resp.headers["Cache-Control"] = "public, max-age=86400"
+                return resp
             source = ref.get("server_source")
             if source == "plex":
                 cfg = config_manager.get_plex_config() or {}

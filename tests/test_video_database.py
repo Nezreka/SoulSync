@@ -542,6 +542,22 @@ def test_enrichment_backfills_genres_when_item_has_none(db):
     assert db.movie_detail(mid)["genres"] == ["Comedy", "Drama"]
 
 
+def test_enrichment_backfills_season_posters_only_when_missing(db):
+    # Season 1 has no art (server didn't provide it); season 2 has server art.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "seasons": [
+        {"season_number": 1, "episodes": [{"episode_number": 1}]},
+        {"season_number": 2, "poster_url": "/server.jpg", "episodes": [{"episode_number": 1}]}]})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1, metadata={"seasons": [
+        {"season_number": 1, "poster_url": "https://image.tmdb.org/s1.jpg"},
+        {"season_number": 2, "poster_url": "https://image.tmdb.org/s2.jpg"}]})
+    with db.connect() as c:
+        rows = {r["season_number"]: r["poster_url"] for r in c.execute(
+            "SELECT season_number, poster_url FROM seasons WHERE show_id=?", (sid,)).fetchall()}
+    assert rows[1] == "https://image.tmdb.org/s1.jpg"   # gap filled from TMDB
+    assert rows[2] == "/server.jpg"                      # server art kept, not clobbered
+    assert db.show_detail(sid)["seasons"][0]["has_poster"] is True
+
+
 def test_error_status_is_distinct_and_retryable_in_ui(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
     db.enrichment_apply("tmdb", "movie", a, matched=False, error=True)

@@ -250,6 +250,17 @@ class VideoDatabase:
                 has = conn.execute(f"SELECT 1 FROM {lt} WHERE {oc}=? LIMIT 1", (item_id,)).fetchone()
                 if not has:
                     self._set_genres(conn, lt, oc, item_id, genres)
+            # Per-season poster backfill (TMDB) — fills only seasons the server
+            # left without art.
+            seasons_meta = (metadata or {}).get("seasons")
+            if matched and seasons_meta and tbl == "shows":
+                for s in seasons_meta:
+                    sn, purl = s.get("season_number"), s.get("poster_url")
+                    if sn is None or not purl:
+                        continue
+                    conn.execute(
+                        "UPDATE seasons SET poster_url=COALESCE(NULLIF(poster_url, ''), ?) "
+                        "WHERE show_id=? AND season_number=?", (purl, item_id, sn))
             conn.commit()
         finally:
             conn.close()

@@ -102,6 +102,15 @@ class TMDBClient:
                 if ert:
                     meta["runtime_minutes"] = ert[0]
                 meta["tvdb_id"] = _int(ext.get("tvdb_id"))
+                # Per-season posters — the reliable source of distinct season art
+                # (the media server usually lacks it). Backfilled into seasons.
+                seasons = []
+                for s in (dr.get("seasons") or []):
+                    pp, sn = s.get("poster_path"), s.get("season_number")
+                    if pp and sn is not None:
+                        seasons.append({"season_number": sn, "poster_url": self.IMG + pp})
+                if seasons:
+                    meta["seasons"] = seasons
         except Exception:
             logger.exception("TMDB details fetch failed for %s", title or tmdb_id)
         return {"id": tmdb_id, "metadata": {k: v for k, v in meta.items() if v}}
