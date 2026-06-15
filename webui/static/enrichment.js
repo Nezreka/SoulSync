@@ -2736,7 +2736,8 @@ async function loadRepairFindings() {
             missing_cover_art: 'Missing Art', track_number_mismatch: 'Track Number',
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
-            missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag'
+            missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
+            quality_upgrade: 'Low Quality'
         };
 
         // Finding types that have an automated fix action
@@ -2754,6 +2755,7 @@ async function loadRepairFindings() {
             incomplete_album: 'Auto-Fill',
             missing_lossy_copy: 'Convert',
             acoustid_mismatch: 'Fix',
+            quality_upgrade: 'Upgrade',
             missing_discography_track: 'Add to Wishlist',
             library_retag: 'Apply Tags',
         };
@@ -3468,6 +3470,15 @@ async function fixRepairFinding(id, findingType) {
         fixAction = await _promptAcoustidAction();
         if (!fixAction) return;
     }
+    // Quality upgrade: redownload, delete, or ignore (dismiss)
+    if (findingType === 'quality_upgrade') {
+        fixAction = await _promptQualityUpgradeAction();
+        if (!fixAction) return;  // cancelled
+        if (fixAction === 'ignore') {
+            await dismissRepairFinding(id);
+            return;
+        }
+    }
     // Discography backfill: add to wishlist or just clear the finding
     if (findingType === 'missing_discography_track') {
         const choice = await _promptDiscographyBackfillAction(1);
@@ -3625,6 +3636,46 @@ function _promptAcoustidAction() {
     });
 }
 
+function _promptQualityUpgradeAction() {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.style.cssText = 'display:flex;align-items:center;justify-content:center;z-index:10000;';
+        overlay.innerHTML = `
+            <div style="background:#1e1e2e;border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:28px;max-width:460px;width:90%;text-align:center;">
+                <div style="font-size:1.1em;font-weight:600;color:#fff;margin-bottom:8px;">Low-Quality Track</div>
+                <div style="font-size:0.88em;color:rgba(255,255,255,0.6);margin-bottom:20px;">
+                    This file is below your quality profile. Choose what to do.
+                </div>
+                <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                    <button id="_qual-redownload" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(29,185,84,0.4);background:rgba(29,185,84,0.15);color:#1db954;font-weight:600;cursor:pointer;font-family:inherit;">
+                        Re-download
+                    </button>
+                    <button id="_qual-delete" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(239,68,68,0.4);background:rgba(239,68,68,0.1);color:#ef4444;font-weight:500;cursor:pointer;font-family:inherit;">
+                        Delete
+                    </button>
+                    <button id="_qual-ignore" style="padding:10px 20px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.7);font-weight:500;cursor:pointer;font-family:inherit;">
+                        Ignore
+                    </button>
+                </div>
+                <div style="margin-top:12px;font-size:0.78em;color:rgba(255,255,255,0.35);line-height:1.4;">
+                    Re-download = add to wishlist for a better-quality copy &amp; delete this file &bull; Delete = remove file and DB entry &bull; Ignore = keep the file and dismiss this finding
+                </div>
+                <button id="_qual-cancel" style="margin-top:12px;padding:6px 16px;border:none;background:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:0.82em;font-family:inherit;">
+                    Cancel
+                </button>
+            </div>
+        `;
+        document.body.appendChild(overlay);
+
+        overlay.querySelector('#_qual-redownload').onclick = () => { overlay.remove(); resolve('redownload'); };
+        overlay.querySelector('#_qual-delete').onclick = () => { overlay.remove(); resolve('delete'); };
+        overlay.querySelector('#_qual-ignore').onclick = () => { overlay.remove(); resolve('ignore'); };
+        overlay.querySelector('#_qual-cancel').onclick = () => { overlay.remove(); resolve(null); };
+        overlay.onclick = (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } };
+    });
+}
+
 function _promptDiscographyBackfillAction(count = 1) {
     const isSingle = count <= 1;
     const headerText = isSingle ? 'Missing Discography Track' : `Missing Discography Tracks (${count})`;
@@ -3762,6 +3813,17 @@ async function bulkFixFindings() {
         if (!backfillAction) return;
     }
 
+    // If any selected findings are quality upgrades, prompt once (redownload/delete/ignore)
+    const selectedQualityCards = ids.filter(id => {
+        const card = document.querySelector(`.repair-finding-card[data-id="${id}"]`);
+        return card && card.dataset.jobId === 'quality_upgrade_scanner';
+    });
+    let qualityFixAction = null;
+    if (selectedQualityCards.length > 0) {
+        qualityFixAction = await _promptQualityUpgradeAction();
+        if (!qualityFixAction) return;
+    }
+
     let fixed = 0, failed = 0, lastError = '';
     showToast(`Fixing ${ids.length} findings...`, 'info');
 
@@ -3773,6 +3835,7 @@ async function bulkFixFindings() {
             const isDead = card && card.dataset.jobId === 'dead_file_cleaner';
             const isAcoustid = card && card.dataset.jobId === 'acoustid_scanner';
             const isBackfill = card && card.dataset.jobId === 'discography_backfill';
+            const isQuality = card && card.dataset.jobId === 'quality_upgrade_scanner';
 
             // Discography backfill "Just Clear" path uses the dismiss endpoint,
             // not the fix endpoint — so handle it inline before the fix call.
@@ -3787,10 +3850,23 @@ async function bulkFixFindings() {
                 continue;
             }
 
+            // Quality "Ignore" likewise dismisses rather than fixing.
+            if (isQuality && qualityFixAction === 'ignore') {
+                try {
+                    const resp = await fetch(`/api/repair/findings/${id}/dismiss`, { method: 'POST' });
+                    if (resp.ok) fixed++;
+                    else { failed++; lastError = 'dismiss failed'; }
+                } catch {
+                    failed++;
+                }
+                continue;
+            }
+
             let body = {};
             if (isOrphan && orphanFixAction) body = { fix_action: orphanFixAction };
             else if (isDead && deadFixAction) body = { fix_action: deadFixAction };
             else if (isAcoustid && acoustidFixAction) body = { fix_action: acoustidFixAction };
+            else if (isQuality && qualityFixAction) body = { fix_action: qualityFixAction };
             // Discography backfill "Add to Wishlist" falls through with empty body
             // — the fix handler already adds to wishlist by default.
 
