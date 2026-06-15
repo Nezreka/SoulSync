@@ -970,48 +970,90 @@ body[data-side="video"] .dashboard-header-sweep {
     --vd-accent-rgb: var(--accent-rgb, 88, 101, 242);
     position: relative; margin: -40px -40px -90px; min-height: 80vh;
 }
+/* Cinematic hero: a blurred-portrait wash + an accent colour mesh, capped by a
+   vignette and a fade into the page. Layers are static (painted once) so the
+   hero stays cheap. */
 .vp-ambient {
-    position: absolute; inset: 0 0 auto 0; height: 520px; z-index: 0; overflow: hidden;
+    position: absolute; inset: 0 0 auto 0; height: 560px; z-index: 0; overflow: hidden;
+    -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent);
+            mask-image: linear-gradient(180deg, #000 62%, transparent);
 }
 .vp-ambient::before {
-    content: ''; position: absolute; inset: -60px; background-size: cover; background-position: center 20%;
-    background-image: var(--vp-bg, none); filter: blur(46px) saturate(1.25); transform: scale(1.18);
-    opacity: 0.45;
+    content: ''; position: absolute; inset: -80px; background-size: cover; background-position: center 18%;
+    background-image: var(--vp-bg, none); filter: blur(54px) saturate(1.35); transform: scale(1.2);
+    opacity: 0.5;
 }
 .vp-ambient::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(180deg, rgba(11,11,15,0.35) 0%, rgba(11,11,15,0.7) 55%, var(--bg-primary, #0b0b0f) 100%);
+    background:
+        radial-gradient(80% 90% at 16% -10%, rgba(var(--vd-accent-rgb), 0.42), transparent 60%),
+        radial-gradient(70% 80% at 100% 0%, rgba(var(--vd-accent-rgb), 0.2), transparent 65%),
+        radial-gradient(120% 80% at 50% 120%, rgba(0, 0, 0, 0.5), transparent 60%),
+        linear-gradient(180deg, rgba(11,11,15,0.25) 0%, rgba(11,11,15,0.62) 58%, var(--bg-primary, #0b0b0f) 100%);
 }
 .vp-page[data-has-bg="0"] .vp-ambient::before {
-    background-image: radial-gradient(80% 120% at 30% 0%, rgba(var(--vd-accent-rgb), 0.5), transparent 70%);
-    filter: none; opacity: 0.7;
+    background-image: radial-gradient(80% 120% at 30% 0%, rgba(var(--vd-accent-rgb), 0.55), transparent 70%);
+    filter: none; opacity: 0.8;
 }
 
 .vp-page .vd-back { z-index: 6; }
 .vp-hero {
-    position: relative; z-index: 2; display: flex; gap: 36px; align-items: flex-end;
-    padding: 130px 56px 30px; animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    position: relative; z-index: 2; display: flex; gap: 40px; align-items: flex-end;
+    padding: 150px 56px 34px; animation: vdRise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 @keyframes vdRise { from { opacity: 0; transform: translateY(26px); } to { opacity: 1; transform: none; } }
+
+/* Portrait: a frame with a slowly-rotating accent gradient ring (GPU transform —
+   cheap) + a gentle float. */
 .vp-photo-wrap {
-    flex: 0 0 auto; width: 188px; height: 188px; border-radius: 50%; overflow: hidden;
-    background: linear-gradient(145deg, rgba(var(--vd-accent-rgb), 0.4), rgba(8, 8, 12, 0.9));
+    position: relative; flex: 0 0 auto; width: 200px; height: 200px;
+    animation: vp-float 7s ease-in-out infinite;
+}
+@keyframes vp-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
+.vp-photo-ring {
+    position: absolute; inset: -7px; border-radius: 50%; z-index: 0;
+    background: conic-gradient(from 0deg,
+        rgba(var(--vd-accent-rgb), 0.95), rgba(var(--vd-accent-rgb), 0.04) 38%,
+        rgba(var(--vd-accent-rgb), 0.55) 72%, rgba(var(--vd-accent-rgb), 0.95));
+    -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+            mask: radial-gradient(closest-side, transparent calc(100% - 9px), #000 calc(100% - 8px));
+    animation: vp-spin 18s linear infinite; will-change: transform; opacity: 0.9;
+}
+@keyframes vp-spin { to { transform: rotate(360deg); } }
+.vp-photo-frame {
+    position: absolute; inset: 0; border-radius: 50%; overflow: hidden; z-index: 1;
+    background: linear-gradient(145deg, rgba(var(--vd-accent-rgb), 0.42), rgba(8, 8, 12, 0.92));
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6), 0 0 0 4px rgba(var(--vd-accent-rgb), 0.35),
-        0 0 40px rgba(var(--vd-accent-rgb), 0.3);
+    box-shadow: 0 22px 56px rgba(0, 0, 0, 0.62), 0 0 60px rgba(var(--vd-accent-rgb), 0.32),
+        inset 0 0 0 2px rgba(255, 255, 255, 0.07);
 }
 .vp-photo { width: 100%; height: 100%; object-fit: cover; }
-.vp-photo-ph { font-size: 76px; opacity: 0.55; }
-.vp-hero-info { flex: 1; min-width: 0; padding-bottom: 6px; }
+.vp-photo-ph { font-size: 80px; opacity: 0.55; }
+
+.vp-hero-info { flex: 1; min-width: 0; padding-bottom: 10px; }
+.vp-role {
+    display: inline-block; margin-bottom: 12px; font-size: 12px; font-weight: 800;
+    letter-spacing: 1.4px; text-transform: uppercase; color: rgb(var(--vd-accent-rgb));
+    padding: 5px 13px; border-radius: 999px;
+    background: rgba(var(--vd-accent-rgb), 0.14); border: 1px solid rgba(var(--vd-accent-rgb), 0.34);
+    text-shadow: 0 0 18px rgba(var(--vd-accent-rgb), 0.5);
+}
 .vp-name {
-    margin: 0 0 12px; font-size: clamp(2.2em, 4.5vw, 3.4em); font-weight: 900; color: #fff;
-    line-height: 1; letter-spacing: -0.02em; text-shadow: 0 4px 30px rgba(0, 0, 0, 0.6);
+    margin: 0 0 14px; font-size: clamp(2.4em, 5vw, 3.8em); font-weight: 900;
+    line-height: 0.98; letter-spacing: -0.025em;
+    background: linear-gradient(180deg, #fff 55%, rgba(255, 255, 255, 0.72));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 6px 30px rgba(0, 0, 0, 0.6));
 }
 .vp-meta { display: flex; flex-wrap: wrap; gap: 9px; }
 .vp-meta span {
     font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.82);
     padding: 5px 12px; border-radius: 999px;
     background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14); backdrop-filter: blur(6px);
+}
+@media (prefers-reduced-motion: reduce) {
+    .vp-photo-wrap { animation: none; }
+    .vp-photo-ring { animation: none; }
 }
 
 .vp-body { position: relative; z-index: 2; padding: 16px 56px 60px; }
@@ -1036,6 +1078,15 @@ body[data-side="video"] .dashboard-header-sweep {
 .vp-known-rail::-webkit-scrollbar { height: 8px; }
 .vp-known-rail::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
 .vp-known-rail .vsr-card { flex: 0 0 152px; width: 152px; scroll-snap-align: start; }
+
+/* Long filmography grids can be hundreds of cards — let the browser skip
+   rendering the off-screen ones (cheap scrolling) and don't replay the entrance
+   animation as cards recycle in and out of view. */
+.vp-credits-section .vsr-grid > .vsr-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 300px;
+    animation: none;
+}
 
 .vp-credits-section { position: relative; z-index: 2; }
 .vp-credits-head {
