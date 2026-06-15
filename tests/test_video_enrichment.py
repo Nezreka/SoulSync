@@ -83,6 +83,21 @@ def test_tmdb_client_with_known_id_skips_the_search(monkeypatch):
     assert not any("/search/" in u for u in urls)
 
 
+def test_tmdb_pulls_full_metadata(monkeypatch):
+    # Everything TMDB offers comes from the one detail call.
+    class _Resp:
+        def __init__(self, b): self._b = b
+        def raise_for_status(self): pass
+        def json(self): return self._b
+    detail = {"overview": "O", "tagline": "Fear", "vote_average": 8.4, "runtime": 155,
+              "genres": [{"name": "Sci-Fi"}, {"name": "Drama"}], "status": "Released",
+              "backdrop_path": "/b.jpg", "external_ids": {"imdb_id": "tt1"}}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(detail)))
+    m = TMDBClient("KEY").match("movie", "Dune", 2021, known_id=438631)["metadata"]
+    assert m["tagline"] == "Fear" and m["rating"] == 8.4 and m["runtime_minutes"] == 155
+    assert m["genres"] == ["Sci-Fi", "Drama"] and m["status"] == "Released" and m["imdb_id"] == "tt1"
+
+
 def test_tmdb_client_raises_on_rate_limit(monkeypatch):
     # A 429 must raise (→ worker records 'error'), not silently return no-match.
     class _Resp429:

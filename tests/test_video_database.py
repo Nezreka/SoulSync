@@ -492,6 +492,27 @@ def test_enrichment_breakdown_unmatched_retry(db):
     assert db.enrichment_breakdown("tmdb")["movie"]["pending"] == 1
 
 
+def test_enrichment_backfills_only_gaps_never_clobbers_server(db):
+    # Server gave overview + a genre; enrichment must fill the EMPTY fields
+    # (tagline/rating) but leave the server's overview + genres untouched.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Dune",
+                                   "overview": "server overview", "genres": ["Sci-Fi"]})
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=438631, metadata={
+        "overview": "tmdb overview", "tagline": "Fear is the mind-killer",
+        "rating": 8.4, "genres": ["Drama"]})
+    d = db.movie_detail(mid)
+    assert d["overview"] == "server overview"     # NOT clobbered
+    assert d["tagline"] == "Fear is the mind-killer" and d["rating"] == 8.4   # gaps filled
+    assert d["genres"] == ["Sci-Fi"]              # had genres → enrichment left them
+
+
+def test_enrichment_backfills_genres_when_item_has_none(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "X"})   # no genres
+    db.enrichment_apply("tmdb", "movie", mid, matched=True, external_id=1,
+                        metadata={"genres": ["Drama", "Comedy"]})
+    assert db.movie_detail(mid)["genres"] == ["Comedy", "Drama"]
+
+
 def test_error_status_is_distinct_and_retryable_in_ui(db):
     a = db.upsert_movie("plex", {"server_id": "m1", "title": "A"})
     db.enrichment_apply("tmdb", "movie", a, matched=False, error=True)
