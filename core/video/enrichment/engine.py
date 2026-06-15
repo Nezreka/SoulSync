@@ -11,6 +11,7 @@ import threading
 
 from utils.logging_config import get_logger
 
+from .cache import TTLCache
 from .worker import VideoEnrichmentWorker
 
 logger = get_logger("video_enrichment.engine")
@@ -28,25 +29,20 @@ class VideoEnrichmentEngine:
         # OMDb ratings (IMDb/RT/Metacritic) — not a matcher, so not a worker;
         # backfilled on the lazy detail refresh.
         self.ratings_client = ratings_client
-        # Short-TTL cache for live TMDB detail extras / preview payloads, so
-        # re-opening a title is instant instead of re-hitting TMDB.
-        self._tmdb_cache = {}
+        # Thread-safe TTL+LRU cache for live TMDB detail extras / preview payloads /
+        # person pages / seasons / trending, so re-opening a title is instant
+        # instead of re-hitting TMDB. (Volatile by design — durable art/episodes/
+        # ratings live in video.db; we don't persist this tier.)
+        self._cache = TTLCache(maxsize=256, ttl=1800)
         # Restore each worker's persisted pause state (survives restart).
         for w in self.workers.values():
             w.restore_paused()
 
     def _cache_get(self, key):
-        import time
-        hit = self._tmdb_cache.get(key)
-        if hit and hit[0] > time.monotonic():
-            return hit[1]
-        return None
+        return self._cache.get(key)
 
     def _cache_put(self, key, data, ttl=1800):
-        import time
-        if len(self._tmdb_cache) > 256:        # cheap bound — clear wholesale
-            self._tmdb_cache.clear()
-        self._tmdb_cache[key] = (time.monotonic() + ttl, data)
+        self._cache.put(key, data, ttl=ttl)
 
     def _backfill_ratings(self, kind, item_id):
         # The OMDb worker owns the ratings client (fallback to an injected one
@@ -263,11 +259,17 @@ class VideoEnrichmentEngine:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
-        try:
-            results = w.client.search(query) or []
-        except Exception:
-            logger.exception("video search failed for %r", query)
-            return []
+        # Short TTL — identical queries within ~a minute reuse the result; ownership
+        # is re-stamped fresh below so 'In Library' badges stay current.
+        key = ("search", (query or "").strip().lower())
+        results = self._cache_get(key)
+        if results is None:
+            try:
+                results = w.client.search(query) or []
+                self._cache_put(key, results, ttl=60)
+            except Exception:
+                logger.exception("video search failed for %r", query)
+                return []
         for r in results:
             if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
                 r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
