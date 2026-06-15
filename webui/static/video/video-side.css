@@ -1487,3 +1487,9 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
     background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.32);
 }
 .video-noserver.hidden { display: none; }
+
+/* Navidrome + SoulSync Standalone are music-only — don't offer them as server
+   options on the VIDEO side (scoped to body[data-side="video"], so the music side
+   is untouched). The "Video Source" panel governs which video server is used. */
+body[data-side="video"] #navidrome-toggle,
+body[data-side="video"] #soulsync-toggle { display: none; }
