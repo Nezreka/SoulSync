@@ -16,7 +16,8 @@
     var PERSON_URL = '/api/video/person/';
     var data = null;
     var currentId = null;
-    var tab = 'all';            // all | movie | show
+    var tab = 'all';            // kind filter: all | movie | show
+    var own = 'all';            // ownership filter: all | owned | missing
     var ROLE_NOUNS = {
         Acting: 'Actor', Directing: 'Director', Writing: 'Writer', Production: 'Producer',
         Sound: 'Composer', Camera: 'Cinematographer', Editing: 'Editor', Creator: 'Creator',
@@ -53,39 +54,77 @@
             '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
+    function tabBtn(attr, key, active, label, count) {
+        return '<button class="vp-tab' + (active ? ' vp-tab--active' : '') + '" type="button" ' +
+            attr + '="' + key + '">' + esc(label) +
+            '<span class="vp-tab-count">' + count + '</span></button>';
+    }
+
     function renderTabs() {
         var host = q('[data-vp-tabs]');
         if (!host || !data) return;
-        var credits = data.credits || [];
-        var movies = credits.filter(function (c) { return c.kind === 'movie'; }).length;
-        var shows = credits.filter(function (c) { return c.kind === 'show'; }).length;
-        var defs = [['all', 'All', credits.length], ['movie', 'Movies', movies], ['show', 'TV', shows]];
-        host.innerHTML = defs.filter(function (d) { return d[2] > 0; }).map(function (d) {
-            return '<button class="vp-tab' + (d[0] === tab ? ' vp-tab--active' : '') +
-                '" type="button" data-vp-tab="' + d[0] + '">' + esc(d[1]) +
-                '<span class="vp-tab-count">' + d[2] + '</span></button>';
+        // Counts reflect the CURRENT ownership filter (so the numbers match what
+        // you'd actually see).
+        var base = (data.credits || []).filter(function (c) { return matchOwn(c, own); });
+        var movies = base.filter(function (c) { return c.kind === 'movie'; }).length;
+        var shows = base.filter(function (c) { return c.kind === 'show'; }).length;
+        var defs = [['all', 'All', base.length], ['movie', 'Movies', movies], ['show', 'TV', shows]];
+        host.innerHTML = defs.filter(function (d) { return d[2] > 0 || d[0] === 'all'; }).map(function (d) {
+            return tabBtn('data-vp-tab', d[0], d[0] === tab, d[1], d[2]);
         }).join('');
+    }
+
+    function renderOwn() {
+        var host = q('[data-vp-own]');
+        if (!host || !data) return;
+        // Counts reflect the current KIND filter.
+        var base = (data.credits || []).filter(function (c) { return matchKind(c, tab); });
+        var owned = base.filter(isOwned).length;
+        var defs = [['all', 'All', base.length], ['owned', 'In Library', owned],
+                    ['missing', 'Missing', base.length - owned]];
+        host.innerHTML = defs.map(function (d) {
+            return tabBtn('data-vp-own', d[0], d[0] === own, d[1], d[2]);
+        }).join('');
+    }
+
+    function applyFilters() {
+        renderTabs(); renderOwn(); renderKnownFor(); renderCredits();
+    }
+
+    // ── filters (kind + ownership) ────────────────────────────────────────────
+    function matchKind(c, k) { return k === 'all' || c.kind === k; }
+    function isOwned(c) { return c.library_id != null; }
+    function matchOwn(c, o) { return o === 'all' || (o === 'owned' ? isOwned(c) : !isOwned(c)); }
+    function filtered() {
+        return (data.credits || []).filter(function (c) { return matchKind(c, tab) && matchOwn(c, own); });
     }
 
     function renderKnownFor() {
         var section = q('[data-vp-known-section]'), host = q('[data-vp-known]');
         if (!section || !host || !data) return;
-        // The credits arrive popularity-sorted → the top few are the "known for".
-        var top = (data.credits || []).slice(0, 10);
+        // Credits arrive popularity-sorted → the top few of the FILTERED set are
+        // the "known for" (so it tracks the owned/missing + kind filters too).
+        var top = filtered().slice(0, 10);
         section.hidden = top.length < 3;             // only worth a rail if there are a few
         host.innerHTML = top.map(creditCard).join('');
     }
 
     function renderCredits() {
-        var host = q('[data-vp-credits]');
+        var host = q('[data-vp-credits]'), empty = q('[data-vp-credits-empty]');
         if (!host || !data) return;
-        var credits = (data.credits || []).filter(function (c) {
-            return tab === 'all' || c.kind === tab;
-        });
+        var credits = filtered();
         // Full filmography reads best chronologically (newest first); Known For
         // already covers the popular ones.
         credits.sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
         host.innerHTML = credits.map(creditCard).join('');
+        if (empty) {
+            empty.hidden = credits.length > 0;
+            if (!credits.length) {
+                empty.textContent = own === 'owned' ? 'Nothing from this person in your library yet.'
+                    : own === 'missing' ? 'You already have everything here. 🎉'
+                        : 'No titles here.';
+            }
+        }
     }
 
     function lifespan(d) {
@@ -96,7 +135,7 @@
     }
 
     function render(d) {
-        data = d; tab = 'all';
+        data = d; tab = 'all'; own = 'all';
         var photo = q('[data-vp-photo]'), ph = q('[data-vp-photo-ph]');
         if (photo) {
             if (d.photo) {
@@ -130,7 +169,7 @@
         if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; bio.classList.remove('vp-bio--open'); }
         if (more) { more.hidden = !((d.biography || '').length > 320); more.textContent = 'Read more'; }
 
-        renderKnownFor(); renderTabs(); renderCredits();
+        applyFilters();
         var sub = document.querySelector('.video-subpage[data-video-subpage="video-person-detail"]');
         if (sub) sub.scrollTop = 0;
     }
@@ -143,6 +182,8 @@
         var m = q('[data-vp-meta]'); if (m) m.innerHTML = '';
         var c = q('[data-vp-credits]'); if (c) c.innerHTML = '';
         var t = q('[data-vp-tabs]'); if (t) t.innerHTML = '';
+        var o = q('[data-vp-own]'); if (o) o.innerHTML = '';
+        var ce = q('[data-vp-credits-empty]'); if (ce) ce.hidden = true;
         var ks = q('[data-vp-known-section]'); if (ks) ks.hidden = true;
         var k = q('[data-vp-known]'); if (k) k.innerHTML = '';
         fetch(PERSON_URL + id, { headers: { 'Accept': 'application/json' } })
@@ -163,9 +204,13 @@
 
     function onClick(e) {
         var r = root(); if (!r) return;
-        var tabBtn = e.target.closest('[data-vp-tab]');
-        if (tabBtn && r.contains(tabBtn)) {
-            tab = tabBtn.getAttribute('data-vp-tab'); renderTabs(); renderCredits(); return;
+        var kindBtn = e.target.closest('[data-vp-tab]');
+        if (kindBtn && r.contains(kindBtn)) {
+            tab = kindBtn.getAttribute('data-vp-tab'); applyFilters(); return;
+        }
+        var ownBtn = e.target.closest('[data-vp-own]');
+        if (ownBtn && r.contains(ownBtn)) {
+            own = ownBtn.getAttribute('data-vp-own'); applyFilters(); return;
         }
         var moreBtn = e.target.closest('[data-vp-bio-more]');
         if (moreBtn && r.contains(moreBtn)) {
