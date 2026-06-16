@@ -2273,9 +2273,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-toggle input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 16px; height: 16px; cursor: pointer; }
 .vdsc-hide-owned .vsr-card--owned { display: none; }
 
-/* rails: soft edge fade + a gentle fade-in when filled + per-title hue on hover */
-.vdsc-rail { -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent); }
+/* rails: a gentle fade-in when filled + per-title hue on hover */
 .vdsc-shelf--in .vdsc-rail { animation: vdscFade 0.45s ease both; }
 @keyframes vdscFade { from { opacity: 0.35; } to { opacity: 1; } }
 .vdsc-rail .vsr-card, .vdsc-grid .vsr-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
@@ -2298,11 +2296,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-seg { display: inline-flex; gap: 6px; }
 .vdsc-seg::before { display: none; }
 
-/* chip rows (genres, providers, eras) — horizontally scrollable, edge-faded */
+/* chip rows (genres, providers, eras) — horizontally scrollable */
 .vdsc-chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 1px 7px; margin-top: 13px;
-    scrollbar-width: thin;
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent); }
+    scrollbar-width: thin; }
 .vdsc-chips::-webkit-scrollbar { height: 6px; }
 .vdsc-chips::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.13); border-radius: 3px; }
 .vdsc-chips--era { margin-top: 0; }
@@ -2322,16 +2318,16 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     box-shadow: 0 9px 22px -9px rgba(var(--c, 120, 130, 240), 0.9),
         0 0 0 1px rgba(var(--c, 120, 130, 240), 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
 
-/* the palette — cycles across each row so a filter row reads colorful
-   (comma-separated triples so they slot into rgba(var(--c), a)) */
-.vdsc-chip:nth-child(8n+1), .vdsc-seg-btn:nth-child(8n+1) { --c: 29, 185, 84; }    /* green  */
-.vdsc-chip:nth-child(8n+2), .vdsc-seg-btn:nth-child(8n+2) { --c: 147, 112, 219; }  /* purple */
-.vdsc-chip:nth-child(8n+3), .vdsc-seg-btn:nth-child(8n+3) { --c: 100, 149, 237; }  /* blue   */
-.vdsc-chip:nth-child(8n+4), .vdsc-seg-btn:nth-child(8n+4) { --c: 245, 158, 11; }   /* amber  */
-.vdsc-chip:nth-child(8n+5), .vdsc-seg-btn:nth-child(8n+5) { --c: 236, 72, 153; }   /* pink   */
-.vdsc-chip:nth-child(8n+6), .vdsc-seg-btn:nth-child(8n+6) { --c: 34, 211, 238; }   /* cyan   */
-.vdsc-chip:nth-child(8n+7), .vdsc-seg-btn:nth-child(8n+7) { --c: 248, 113, 113; }  /* coral  */
-.vdsc-chip:nth-child(8n),   .vdsc-seg-btn:nth-child(8n)   { --c: 168, 85, 247; }   /* violet */
+/* Colours carry meaning, not position:
+   - segments (Movies/TV, sort) → the app accent (they're modes, not categories)
+   - genre chips → a thematic colour per genre (set inline by JS)
+   - provider chips → the service's brand colour (set inline in markup)
+   - era chips → a single warm amber; reset chips ('All/Any …') → neutral
+   so each --c is provided where it's meaningful and falls back to neutral here. */
+.vdsc-seg-btn { --c: var(--accent-rgb, 29, 185, 84); }
+.vdsc-chip--reset { --c: 148, 163, 184; }   /* All genres / Any service / Any era */
+.vdsc-chips--era .vdsc-chip { --c: 245, 158, 11; }
+.vdsc-chips--era .vdsc-chip--reset { --c: 148, 163, 184; }
 
 .vdsc-browse-bottom { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
 .vdsc-browse-bottom .vdsc-chips { flex: 1; min-width: 0; margin-top: 0; }

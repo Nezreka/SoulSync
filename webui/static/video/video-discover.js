@@ -48,6 +48,18 @@
     ];
     var GENRE_RAILS = ['Action', 'Adventure', 'Comedy', 'Drama', 'Science Fiction',
         'Thriller', 'Horror', 'Animation', 'Fantasy', 'Romance', 'Documentary', 'Crime'];
+    // A thematic colour per genre so the chips read intentional, not random.
+    var GENRE_COLORS = {
+        'action': '239, 68, 68', 'adventure': '34, 197, 94', 'animation': '168, 85, 247',
+        'comedy': '245, 197, 24', 'crime': '120, 113, 108', 'documentary': '20, 184, 166',
+        'drama': '96, 165, 250', 'family': '74, 222, 128', 'fantasy': '192, 132, 252',
+        'history': '202, 138, 4', 'horror': '220, 38, 38', 'music': '236, 72, 153',
+        'mystery': '99, 102, 241', 'romance': '244, 114, 182', 'science fiction': '34, 211, 238',
+        'sci-fi & fantasy': '34, 211, 238', 'tv movie': '148, 163, 184', 'thriller': '100, 116, 139',
+        'war': '161, 98, 7', 'war & politics': '161, 98, 7', 'western': '180, 130, 80',
+        'kids': '74, 222, 128', 'reality': '251, 146, 60', 'soap': '244, 114, 182',
+        'talk': '148, 163, 184', 'news': '148, 163, 184',
+    };
     var DECADE_RAILS = [
         { title: 'Best of the 2010s', q: 'kind=movie&decade=2010&sort=vote_average.desc' },
         { title: '2000s Favorites', q: 'kind=movie&decade=2000&sort=vote_average.desc' },
@@ -366,9 +378,11 @@
     }
     function renderGenreChips() {
         var box = $('[data-vdsc-chipset="genre"]'); if (!box) return;
-        box.innerHTML = '<button class="vdsc-chip vdsc-chip--on" type="button" data-val="">All genres</button>' +
+        box.innerHTML = '<button class="vdsc-chip vdsc-chip--reset vdsc-chip--on" type="button" data-val="">All genres</button>' +
             (state.genres[state.sel.kind] || []).map(function (g) {
-                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '">' + esc(g.name) + '</button>';
+                var c = GENRE_COLORS[(g.name || '').toLowerCase()];
+                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '"' +
+                    (c ? ' style="--c: ' + c + '"' : '') + '>' + esc(g.name) + '</button>';
             }).join('');
         state.sel.genre = '';
     }
