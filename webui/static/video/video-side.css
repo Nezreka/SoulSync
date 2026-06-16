@@ -1973,3 +1973,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    additive (no flow change); buttons are absolute top-right within them. */
 .vsr-card, .vd-sim-card, .vd-cast-card { position: relative; }
 .vd-cast-card:hover .vget-btn { opacity: 1; transform: none; }
+
+/* Card control GROUP (eye + get can co-exist on an airing show). The wrapper is
+   positioned top-right; the buttons inside flow statically in a little row. */
+.vcard-ctrls { position: absolute; top: 8px; right: 8px; z-index: 4; display: flex; gap: 6px; }
+.vcard-ctrls .vwl-btn, .vcard-ctrls .vget-btn { position: static; top: auto; right: auto; }

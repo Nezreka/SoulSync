@@ -46,8 +46,11 @@
             ? '<img class="vwlp-card-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
               'onload="this.classList.add(\'vwlp-loaded\')" onerror="this.style.display=\'none\'">'
             : '<div class="vwlp-card-ph">' + ph + '</div>';
-        var btn = wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title,
-                          poster: it.poster_url, libraryId: it.library_id });
+        var btn = window.VideoGet
+            ? VideoGet.cardButton({ kind: kind, tmdbId: it.tmdb_id, libraryId: it.library_id,
+                title: it.title, poster: it.poster_url, status: it.status,
+                source: it.library_id ? 'library' : 'tmdb' })
+            : wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title, poster: it.poster_url, libraryId: it.library_id });
         var pill = kind === 'show' ? statusPill(it.status) : '';
         var meta = (kind === 'show' && it.episode_count)
             ? '<span class="vwlp-card-meta">' + (it.owned_count || 0) + '/' + it.episode_count + ' eps</span>' : '';
