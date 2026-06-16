@@ -319,7 +319,11 @@ def build_import_album_info(
         (album_info or {}).get("track_number")
         or track_info.get("track_number")
         or original_search.get("track_number")
-        or 1
+        # "Track 01" bug: default to 0 (the codebase's "unknown" sentinel,
+        # same as total_tracks below), NOT 1. A fabricated 1 looks
+        # authoritative and blocks the pipeline's downstream recovery
+        # (embedded file tag / resolve chain); 0 lets it fall through.
+        or 0
     )
     disc_number = (
         (album_info or {}).get("disc_number")
