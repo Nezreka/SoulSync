@@ -25,6 +25,8 @@
         sel: { kind: 'movie', genre: '', decade: '', providers: '', sort: 'popularity.desc' },   // Browse panel
     };
     var AUTO = (typeof IntersectionObserver !== 'undefined');   // infinite-scroll capable
+    var sentinelVisible = false;
+    var listCache = {};   // session cache of /discover/list responses, keyed by URL
 
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
@@ -34,6 +36,15 @@
     }
     function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
     function idMap(list) { var m = {}; (list || []).forEach(function (g) { m[(g.name || '').toLowerCase()] = g.id; }); return m; }
+    // Session-memoized GET → JSON for the list endpoint, so revisiting Discover /
+    // paging / reopening a category is instant and doesn't re-hit TMDB. (Ownership
+    // is re-stamped server-side; caching for a session is fine.)
+    function cachedFetch(url) {
+        if (listCache[url]) return Promise.resolve(listCache[url]);
+        return fetch(url, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) listCache[url] = d; return d; });
+    }
 
     // ── the rail stack (personalized + curated + genre + decade) ──────────────
     var CURATED = [
@@ -301,8 +312,7 @@
         shelf.setAttribute('data-vdsc-loaded', '1');
         var rail = $('[data-vdsc-rail]', shelf);
         // 2 pages (~40 items) so a rail still looks full after 'Hide owned'.
-        fetch(LIST_URL + '?' + shelf.getAttribute('data-vdsc-q') + '&pages=2', { headers: { Accept: 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
+        cachedFetch(LIST_URL + '?' + shelf.getAttribute('data-vdsc-q') + '&pages=2')
             .then(function (d) {
                 var items = (d && d.items) || [];
                 if (!items.length) { shelf.remove(); return; }    // drop empty shelves
@@ -334,11 +344,11 @@
         var c = state.cat;
         if (c.busy) return;
         c.busy = true;
+        if (!reset) c.page++;                                   // advance to the next page here
         var more = $('[data-vdsc-more]'); if (more && !reset) { more.disabled = true; more.textContent = 'Loading…'; }
         var ld = reset ? $('[data-vdsc-grid-loading]') : $('[data-vdsc-more-loading]');
         if (ld) ld.classList.remove('hidden');
-        fetch(LIST_URL + '?' + c.q + '&page=' + c.page, { headers: { Accept: 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
+        cachedFetch(LIST_URL + '?' + c.q + '&page=' + c.page)
             .then(function (d) {
                 c.busy = false;
                 if (ld) ld.classList.add('hidden');
@@ -348,15 +358,24 @@
                 var empty = $('[data-vdsc-grid-empty]');
                 if (empty) empty.classList.toggle('hidden', !(reset && !items.length));
                 c.hasMore = c.paginates && items.length >= 18;
-                // With infinite scroll the sentinel pulls more — keep the button only
-                // as a no-IntersectionObserver fallback.
-                if (more) { more.textContent = 'Load more'; more.disabled = false; more.classList.toggle('hidden', AUTO || !c.hasMore); }
+                // Button is always the reliable control; the sentinel auto-loads on top.
+                if (more) { more.textContent = 'Load more'; more.disabled = false; more.classList.toggle('hidden', !c.hasMore); }
+                maybeAutoLoad();                                // keep filling while the sentinel stays in view
             })
             .catch(function () {
                 c.busy = false;
                 if (ld) ld.classList.add('hidden');
                 if (more) { more.textContent = 'Load more'; more.disabled = false; }
             });
+    }
+    // Self-correcting infinite scroll: if the sentinel is still on-screen after a
+    // load (short page), pull the next one. rAF lets the observer update first so
+    // a fully-cached category doesn't load every page at once.
+    function maybeAutoLoad() {
+        if (!(state.mode === 'grid' && sentinelVisible && state.cat.hasMore && !state.cat.busy)) return;
+        requestAnimationFrame(function () {
+            if (state.mode === 'grid' && sentinelVisible && state.cat.hasMore && !state.cat.busy) loadGrid(false);
+        });
     }
     function activeChipText(chipset) {
         var c = $('[data-vdsc-chipset="' + chipset + '"] .vdsc-chip--on');
@@ -452,7 +471,7 @@
 
         var apply = $('[data-vdsc-apply]'); if (apply) apply.addEventListener('click', applyFilter);
         var clear = $('[data-vdsc-clear]'); if (clear) clear.addEventListener('click', closeCategory);
-        var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { state.cat.page++; loadGrid(false); });
+        var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { loadGrid(false); });
 
         var hide = $('[data-vdsc-hideowned]');
         if (hide) {
@@ -467,9 +486,8 @@
         var sentinel = $('[data-vdsc-sentinel]');
         if (sentinel && AUTO) {
             new IntersectionObserver(function (entries) {
-                if (entries[0].isIntersecting && state.mode === 'grid' && state.cat.hasMore && !state.cat.busy) {
-                    state.cat.page++; loadGrid(false);
-                }
+                sentinelVisible = entries[0].isIntersecting;
+                maybeAutoLoad();
             }, { rootMargin: '600px 0px' }).observe(sentinel);
         }
 
