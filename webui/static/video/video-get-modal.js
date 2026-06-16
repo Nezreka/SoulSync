@@ -64,6 +64,58 @@
         setTimeout(function () { if (el && el.parentNode) el.parentNode.removeChild(el); }, 220);
     }
 
+    // ── wishlist / watchlist writes ───────────────────────────────────────────
+    function postJSON(url, body) {
+        return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body) }).then(function (r) { return r.ok ? r.json() : null; });
+    }
+    // Build the wishlist payload from the modal's selection and POST it; for a
+    // show, optionally also follow it (the "Add to watchlist" tick).
+    function submitWishlist(ov) {
+        if (!modalState || !modalState.tmdbId) { toast('Missing title info', 'error'); return; }
+        var btn = ov.querySelector('[data-vgm-wishlist]');
+        if (btn) btn.disabled = true;
+        var fail = function () { if (btn) btn.disabled = false; toast('Could not add to wishlist', 'error'); };
+        var done = function (msg) {
+            toast(msg, 'success');
+            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+            closeModal();
+        };
+
+        if (modalState.kind === 'movie') {
+            postJSON('/api/video/wishlist/add', { movie: { tmdb_id: modalState.tmdbId, title: modalState.title,
+                year: modalState.year, poster_url: modalState.poster, library_id: modalState.libraryId } })
+                .then(function (d) { if (d && d.success) done(modalState.owned ? 'Queued for re-download' : 'Added to wishlist'); else fail(); })
+                .catch(fail);
+            return;
+        }
+
+        // show: turn the selected "S_E" keys into episode rows
+        var eps = [];
+        modalState.sel.forEach(function (key) {
+            var p = key.split('_'), m = (modalState.epMeta || {})[key] || {};
+            eps.push({ season_number: parseInt(p[0], 10), episode_number: parseInt(p[1], 10),
+                title: m.title, air_date: m.air_date });
+        });
+        if (!eps.length) { if (btn) btn.disabled = false; toast('Select at least one episode', 'info'); return; }
+
+        var aw = ov.querySelector('[data-vgm-add-watch]');
+        var alsoWatch = !!(aw && aw.checked);
+        if (alsoWatch) {
+            postJSON('/api/video/watchlist/add', { kind: 'show', tmdb_id: modalState.tmdbId, title: modalState.title,
+                poster_url: modalState.poster, library_id: modalState.libraryId })
+                .then(function () { document.dispatchEvent(new CustomEvent('soulsync:video-watchlist-changed')); })
+                .catch(function () { /* best-effort */ });
+        }
+        postJSON('/api/video/wishlist/add', { show: { tmdb_id: modalState.tmdbId, title: modalState.title,
+            poster_url: modalState.poster, library_id: modalState.libraryId }, episodes: eps })
+            .then(function (d) {
+                if (!d || !d.success) return fail();
+                done(eps.length + ' episode' + (eps.length === 1 ? '' : 's') + ' added' + (alsoWatch ? ' · now watching' : ''));
+            })
+            .catch(fail);
+    }
+
     var modalState = null;   // { kind, sel:Set<key> } for the open show modal
 
     function isoToday() {
@@ -146,17 +198,7 @@
                 }
                 return;
             }
-            if (e.target.closest('[data-vgm-wishlist]')) {
-                // v1: visual only — everything funnels through the wishlist; the
-                // real write + download-from-wishlist come later.
-                var n = (modalState && modalState.sel) ? modalState.sel.size : 0;
-                var aw = ov.querySelector('[data-vgm-add-watch]');
-                var follow = (aw && aw.checked) ? ' + Watchlist' : '';
-                var ownedMovie = modalState && modalState.kind === 'movie' && modalState.owned;
-                var verb = ownedMovie ? 'Re-download' : 'Wishlist';
-                toast(((modalState && modalState.sel) ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') +
-                    verb + follow + ' coming soon', 'info');
-            }
+            if (e.target.closest('[data-vgm-wishlist]')) { submitWishlist(ov); }
         });
         ov.addEventListener('change', function (e) {
             var sa = e.target.closest('[data-vgm-season-all]');
@@ -271,7 +313,7 @@
         // they load per-season on expand (like the full detail page). Stash the tv
         // id so the lazy loader can fetch them.
         var tvId = (o && o.source === 'tmdb') ? parseInt(o.id, 10) : null;
-        modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today };
+        modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today, epMeta: {} };
         var totalMissing = 0, anyLazy = false;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
             '<label class="vgm-eps-toggle"><input type="checkbox" data-vgm-missing-only checked>' +
@@ -294,7 +336,10 @@
                 return;
             }
             var missing = 0;
-            eps.forEach(function (e) { if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); } });
+            eps.forEach(function (e) {
+                modalState.epMeta[s.season_number + '_' + e.episode_number] = { title: e.title, air_date: e.air_date };
+                if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); }
+            });
             totalMissing += missing;
             // Fully-owned seasons are hidden while "Missing only" is on (turn it off
             // to re-download); otherwise an owned season expanded to nothing.
@@ -352,7 +397,9 @@
                 if (!eps.length) { if (b) b.innerHTML = '<div class="vgm-season-loading">No episode info available.</div>'; return; }
                 var today = modalState.today;
                 if (b) b.innerHTML = eps.map(function (e) { return epRow(sn, e, today); }).join('');
+                modalState.epMeta = modalState.epMeta || {};
                 eps.forEach(function (e) {
+                    modalState.epMeta[sn + '_' + e.episode_number] = { title: e.title, air_date: e.air_date };
                     if (epState(e, today) === 'missing') modalState.sel.add(sn + '_' + e.episode_number);
                 });
                 var all = seasonEl.querySelector('[data-vgm-season-all]');
@@ -412,11 +459,17 @@
         }
 
         renderRatings(d);   // IMDb / Rotten Tomatoes / Metacritic chips (both kinds)
+        var libId = (o.source === 'library') ? parseInt(o.id, 10) : (d.library_id || null);
         if (o.kind === 'show') {
-            modalState = modalState || { kind: 'show', sel: new Set() };
+            modalState = modalState || { kind: 'show', sel: new Set(), epMeta: {} };
             renderEpisodes(d, o); renderNext(d); maybeFollow(d);   // selector + next-up + follow offer
+            if (modalState) {   // identity for the wishlist/watchlist writes
+                modalState.tmdbId = d.tmdb_id; modalState.title = d.title;
+                modalState.poster = pUrl || null; modalState.libraryId = libId;
+            }
         } else {
-            modalState = { kind: 'movie', owned: !!d.owned };   // owned movies → re-download, not wishlist
+            modalState = { kind: 'movie', owned: !!d.owned, tmdbId: d.tmdb_id, title: d.title,
+                year: d.year || null, poster: pUrl || null, libraryId: libId };   // owned → re-download
             renderOwned(d);
         }
         updateFooter();
