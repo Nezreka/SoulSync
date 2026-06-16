@@ -9114,7 +9114,11 @@ def get_artist_discography(artist_id):
                 effective_override_source = 'spotify'
 
         from core.metadata.lookup import MetadataLookupOptions
-        from core.metadata_service import get_artist_discography as _get_artist_discography
+        # #877: use the artist-DETAIL discography so the Download Discography modal
+        # gets the SAME release-type split (albums / eps / singles) the Artist
+        # Detail view shows — EPs were being lumped into singles before, leaving
+        # the modal's EPs toggle dead.
+        from core.metadata.discography import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,
@@ -9192,6 +9196,7 @@ def get_artist_discography(artist_id):
         )
 
         album_list = discography['albums']
+        eps_list = discography.get('eps', [])
         singles_list = discography['singles']
         active_source = discography['source']
         source_priority = discography['source_priority']
@@ -9303,6 +9308,7 @@ def get_artist_discography(artist_id):
 
         return jsonify({
             "albums": album_list,
+            "eps": eps_list,
             "singles": singles_list,
             "source": active_source or (source_priority[0] if source_priority else "unknown"),
             "artist_info": artist_info,
