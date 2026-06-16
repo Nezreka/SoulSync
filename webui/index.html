@@ -862,6 +862,32 @@
                         </div>
                     </div>
                 </section>
+                <!-- Calendar — upcoming TV episodes for owned shows (agenda + day
+                     strip). Built by video/video-calendar.js, styled by .vcal-* in
+                     video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-calendar" hidden>
+                    <div class="vcal-page">
+                        <div class="vcal-head">
+                            <div class="vcal-head-glow" aria-hidden="true"></div>
+                            <h1 class="vcal-title">This Week</h1>
+                            <p class="vcal-sub" data-video-cal-sub>Upcoming episodes from your shows</p>
+                        </div>
+                        <div class="vcal-body">
+                            <div class="vcal-loading hidden" data-video-cal-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Loading calendar&hellip;</div>
+                            </div>
+                            <div class="vcal-grid" data-video-cal-grid>
+                                <div class="vcal-cols" data-video-cal-cols></div>
+                            </div>
+                            <div class="vcal-state hidden" data-video-cal-empty>
+                                <div class="vcal-state-ic">&#128250;</div>
+                                <div class="vcal-state-title">Nothing scheduled this week</div>
+                                <div class="vcal-state-sub">No upcoming episodes for your shows in the next 7 days.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <!-- TV-show detail (drill-in from a show card; not a nav page).
                      Isolated: built by video/video-detail.js, styled by .vd-* in
                      video-side.css. Inspired by the music artist-detail vibe. -->
@@ -9470,6 +9496,7 @@
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
     <!-- Video search (isolated; in-app multi-search → library/tmdb detail) -->
     <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
