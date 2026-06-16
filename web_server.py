@@ -16823,6 +16823,7 @@ def remove_batch_from_wishlist():
 def get_wishlist_ignore_list():
     """#874: active (non-expired) wishlist ignore entries for this profile."""
     try:
+        from core.wishlist_service import get_wishlist_service
         runtime = _build_wishlist_route_runtime()
         entries = get_wishlist_service().database.get_wishlist_ignore(profile_id=runtime.profile_id)
         from core.wishlist.ignore import IGNORE_TTL_DAYS
@@ -16839,6 +16840,7 @@ def remove_from_wishlist_ignore_list():
         track_id = data.get('track_id') or data.get('spotify_track_id')
         if not track_id:
             return jsonify({"success": False, "error": "No track_id provided"}), 400
+        from core.wishlist_service import get_wishlist_service
         runtime = _build_wishlist_route_runtime()
         ok = get_wishlist_service().database.remove_from_wishlist_ignore(
             track_id, profile_id=runtime.profile_id)
@@ -16851,6 +16853,7 @@ def remove_from_wishlist_ignore_list():
 def clear_wishlist_ignore_list():
     """#874: clear the entire wishlist ignore-list for this profile."""
     try:
+        from core.wishlist_service import get_wishlist_service
         runtime = _build_wishlist_route_runtime()
         count = get_wishlist_service().database.clear_wishlist_ignore(profile_id=runtime.profile_id)
         return jsonify({"success": True, "cleared": count})
