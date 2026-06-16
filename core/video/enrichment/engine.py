@@ -279,11 +279,7 @@ class VideoEnrichmentEngine:
             except Exception:
                 logger.exception("video search failed for %r", query)
                 return []
-        srv = self._server()
-        for r in results:
-            if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
-                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
-        return results
+        return self._stamp_owned(results)
 
     def trending(self) -> list:
         """Trending titles for the idle search page, annotated owned/not."""
@@ -298,21 +294,26 @@ class VideoEnrichmentEngine:
             except Exception:
                 logger.exception("video trending failed")
                 return []
-        # Re-annotate ownership fresh each call (cheap) so it tracks the library.
-        srv = self._server()
-        for r in cached:
-            if r.get("tmdb_id"):
-                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
-        return cached
+        # Re-annotate ownership fresh each call (batched) so it tracks the library.
+        return self._stamp_owned(cached)
 
     # ── discover (browse TMDB lists; owned titles annotated) ──────────────────
     def _stamp_owned(self, items):
         """Annotate each movie/show with its library_id for the active server —
-        stamped fresh (not cached with ownership) so 'In Library' tracks scans."""
+        stamped fresh (not cached with ownership) so 'In Library' tracks scans.
+        Batched: one query per kind for the whole list, not one per item."""
         srv = self._server()
+        by_kind: dict = {}
         for r in items or []:
             if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
-                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
+                by_kind.setdefault(r["kind"], []).append(r["tmdb_id"])
+        maps = {k: self.db.library_ids_for_tmdb(k, ids, srv) for k, ids in by_kind.items()}
+        for r in items or []:
+            if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
+                try:
+                    r["library_id"] = maps.get(r["kind"], {}).get(int(r["tmdb_id"]))
+                except (TypeError, ValueError):
+                    r["library_id"] = None
         return items
 
     def discover_curated(self, key, page=1) -> list:
