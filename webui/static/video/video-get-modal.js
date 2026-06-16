@@ -98,8 +98,11 @@
                 '</div>' +
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
-                    '<button class="vgm-btn vgm-btn--text" type="button" data-vgm-open>Full page &rarr;</button>' +
-                    '<button class="vgm-btn vgm-btn--primary" type="button" data-vgm-wishlist>+ Add to Wishlist</button>' +
+                    '<button class="discog-cancel-btn" type="button" data-vgm-open>Full page &rarr;</button>' +
+                    '<button class="discog-submit-btn" type="button" data-vgm-wishlist>' +
+                        '<span class="discog-submit-icon">⬇</span>' +
+                        '<span class="discog-submit-text" data-vgm-add-label>+ Add to Wishlist</span>' +
+                    '</button>' +
                 '</div>' +
             '</div>';
         document.body.appendChild(ov);
@@ -201,12 +204,15 @@
         var n = modalState ? modalState.sel.size : 0;
         var cnt = modalEl.querySelector('[data-vgm-count]');
         var add = modalEl.querySelector('[data-vgm-wishlist]');
+        var addLbl = modalEl.querySelector('[data-vgm-add-label]');   // set label only (keep the icon)
         if (modalState && modalState.kind === 'show') {
             if (cnt) cnt.textContent = n + ' episode' + (n === 1 ? '' : 's') + ' selected';
-            if (add) { add.textContent = '+ Add ' + n + ' to Wishlist'; add.disabled = n === 0; }
+            if (addLbl) addLbl.textContent = '+ Add ' + n + ' to Wishlist';
+            if (add) add.disabled = n === 0;
         } else {
             if (cnt) cnt.textContent = '';
-            if (add) { add.textContent = '+ Add to Wishlist'; add.disabled = false; }
+            if (addLbl) addLbl.textContent = '+ Add to Wishlist';
+            if (add) add.disabled = false;
         }
     }
 
