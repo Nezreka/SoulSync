@@ -80,7 +80,6 @@ body {
     /* Soft translucent borders */
     border-right: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
-    border-top-right-radius: 24px;
     border-bottom-right-radius: 24px;
 
     /* Soft floating shadow with inner glow */
@@ -291,17 +290,16 @@ body.reduce-effects .sidebar::after {
 
 .sidebar-header {
     min-height: 115px;
-    /* Opaque base layered under the accent gradient so nav items scrolling
-       past the sticky header don't bleed through the translucent stops. */
+    /* Translucent so the backdrop-filter blur below is visible — the dark tint
+       keeps the header readable while nav items scrolling behind it read as a
+       soft frosted blur instead of a sharp bleed-through. */
     background:
         linear-gradient(180deg,
-            rgba(var(--accent-rgb), 0.14) 0%,
-            rgba(var(--accent-rgb), 0.08) 30%,
-            rgba(var(--accent-rgb), 0.03) 70%,
-            rgba(18, 18, 18, 1) 100%),
-        rgb(18, 18, 18);
+            rgba(var(--accent-rgb), 0.16) 0%,
+            rgba(var(--accent-rgb), 0.10) 30%,
+            rgba(24, 24, 24, 0.62) 70%,
+            rgba(18, 18, 18, 0.72) 100%);
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    border-top-right-radius: 20px;
     padding: 20px 24px;
     display: flex;
     flex-direction: column;
@@ -309,8 +307,20 @@ body.reduce-effects .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
+    /* Above the nav (the sidebar gives its children z-index:1) so nav items
+       scrolling up sit BEHIND the header — i.e. in its backdrop, where the
+       blur below can actually act on them. Without this they paint in front
+       and backdrop-filter has nothing to blur. */
+    z-index: 2;
     overflow: hidden;
     flex-shrink: 0;
+
+    /* Intense frosted-glass blur: nav items scrolling up behind the translucent
+       accent-gradient top now read as a soft blur instead of bleeding through
+       sharply. (Only visible where the background is translucent — the opaque
+       base toward the bottom still stops any bleed.) */
+    backdrop-filter: blur(28px) saturate(1.3);
+    -webkit-backdrop-filter: blur(28px) saturate(1.3);
 
     /* Subtle inner glow */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -60149,8 +60159,9 @@ body.reduce-effects #page-particles-canvas {
 
 .dl-nav-badge {
     position: absolute;
-    top: 4px;
+    top: 50%;
     right: 8px;
+    transform: translateY(-50%);
     background: rgb(var(--accent-rgb));
     color: #fff;
     font-size: 0.6rem;
