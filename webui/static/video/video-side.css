@@ -1978,3 +1978,49 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    positioned top-right; the buttons inside flow statically in a little row. */
 .vcard-ctrls { position: absolute; top: 8px; right: 8px; z-index: 4; display: flex; gap: 6px; }
 .vcard-ctrls .vwl-btn, .vcard-ctrls .vget-btn { position: static; top: auto; right: auto; }
+
+/* ── Get-modal: season/episode selector + smarter footer ──────────────────── */
+.vgm-eps { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.vgm-eps[hidden] { display: none; }
+.vgm-eps-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.vgm-eps-h { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.55); }
+.vgm-eps-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 700;
+    color: rgba(255, 255, 255, 0.6); cursor: pointer; user-select: none; }
+.vgm-eps-toggle input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 15px; height: 15px; cursor: pointer; }
+
+.vgm-eps-list { display: flex; flex-direction: column; gap: 8px; }
+.vgm-season { border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 12px; background: rgba(255, 255, 255, 0.02); overflow: hidden; }
+.vgm-season-head { display: flex; align-items: center; gap: 11px; padding: 12px 14px; cursor: pointer; transition: background 0.15s ease; }
+.vgm-season-head:hover { background: rgba(255, 255, 255, 0.04); }
+.vgm-season-check { display: inline-flex; align-items: center; }
+.vgm-season-check input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 17px; height: 17px; cursor: pointer; }
+.vgm-season-check--lock { color: rgba(108, 211, 145, 0.85); font-size: 14px; font-weight: 900; width: 17px; justify-content: center; }
+.vgm-season-name { font-size: 14px; font-weight: 800; color: #fff; }
+.vgm-season-meta { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.45); margin-left: auto; }
+.vgm-season-chev { color: rgba(255, 255, 255, 0.4); transition: transform 0.2s ease; font-size: 13px; }
+.vgm-season--open .vgm-season-chev { transform: rotate(180deg); }
+.vgm-season-eps { display: none; padding: 2px 6px 8px; }
+.vgm-season--open .vgm-season-eps { display: block; }
+
+.vgm-ep { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 9px; cursor: pointer; transition: background 0.12s ease; }
+.vgm-ep:hover { background: rgba(255, 255, 255, 0.04); }
+.vgm-eps--missing-only .vgm-ep--owned { display: none; }
+.vgm-ep-ctrl { width: 18px; display: inline-flex; justify-content: center; flex-shrink: 0; }
+.vgm-ep-cb { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 16px; height: 16px; cursor: pointer; }
+.vgm-ep-lock { font-size: 13px; }
+.vgm-ep--owned .vgm-ep-lock { color: rgba(108, 211, 145, 0.8); }
+.vgm-ep--upcoming .vgm-ep-lock { color: rgba(255, 255, 255, 0.3); }
+.vgm-ep-num { font-size: 11.5px; font-weight: 800; color: rgba(255, 255, 255, 0.4); min-width: 30px; flex-shrink: 0; }
+.vgm-ep-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vgm-ep--owned .vgm-ep-title, .vgm-ep--upcoming .vgm-ep-title { color: rgba(255, 255, 255, 0.45); }
+.vgm-ep-date { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.35); margin-left: 8px; flex-shrink: 0; }
+.vgm-ep-badge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 6px; margin-left: 8px; flex-shrink: 0; }
+.vgm-ep-badge--owned { background: rgba(108, 211, 145, 0.16); color: #6cd391; }
+.vgm-ep-badge--missing { background: rgba(var(--accent-rgb, 88 101 242), 0.18); color: #c4cbff; }
+.vgm-ep-badge--soon { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
+
+/* footer */
+.vgm-sel-count { margin-right: auto; font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.55); }
+.vgm-btn--text { background: transparent; border-color: transparent; color: rgba(255, 255, 255, 0.6); padding: 11px 8px; }
+.vgm-btn--text:hover { color: #fff; }
+.vgm-btn:disabled { opacity: 0.4; cursor: default; transform: none !important; filter: none !important; }
