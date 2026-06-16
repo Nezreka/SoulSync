@@ -1152,6 +1152,81 @@ def test_stamp_owned_is_one_query_per_kind(db, monkeypatch):
     assert items[0]["library_id"] is not None and items[1]["library_id"] is None
 
 
+def test_tmdb_recommendations_parses_with_forced_kind(monkeypatch):
+    body = {"results": [
+        {"id": 5, "title": "Rec", "release_date": "2019-01-01", "poster_path": "/r.jpg",
+         "backdrop_path": "/b.jpg", "vote_average": 7.0, "overview": "O"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    res = TMDBClient("KEY").recommendations("movie", 1)
+    assert res[0]["kind"] == "movie" and res[0]["tmdb_id"] == 5 and res[0]["year"] == "2019"
+
+
+def test_tmdb_video_trailer_prefers_trailer_over_teaser(monkeypatch):
+    body = {"results": [
+        {"site": "YouTube", "type": "Teaser", "key": "teasekey", "name": "Teaser"},
+        {"site": "Vimeo", "type": "Trailer", "key": "nope"},          # wrong site, ignored
+        {"site": "YouTube", "type": "Trailer", "key": "trailkey", "name": "Official"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    assert TMDBClient("KEY").video_trailer("movie", 1) == {"key": "trailkey", "name": "Official"}
+
+
+def test_tmdb_video_trailer_falls_back_to_teaser(monkeypatch):
+    body = {"results": [{"site": "YouTube", "type": "Teaser", "key": "teasekey", "name": "T"}]}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    assert TMDBClient("KEY").video_trailer("show", 1) == {"key": "teasekey", "name": "T"}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp({"results": []})))
+    assert TMDBClient("KEY").video_trailer("movie", 1) is None     # nothing → None
+
+
+def test_engine_recommendations_annotates_and_caches(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+    calls = []
+
+    class Tmdb:
+        enabled = True
+        def recommendations(self, kind, tmdb_id, page=1):
+            calls.append((kind, tmdb_id, page))
+            return [{"kind": "movie", "tmdb_id": 1, "title": "Owned"},
+                    {"kind": "movie", "tmdb_id": 2, "title": "Other"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    res = eng.recommendations("movie", 99)
+    assert res[0]["library_id"] == mid and res[1]["library_id"] is None
+    eng.recommendations("movie", 99)
+    assert calls == [("movie", 99, 1)]                              # cached on repeat
+
+
+def test_engine_trailer_caches(db):
+    calls = []
+
+    class Tmdb:
+        enabled = True
+        def video_trailer(self, kind, tmdb_id):
+            calls.append((kind, tmdb_id)); return {"key": "abc", "name": "T"}
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    assert eng.trailer("movie", 5)["key"] == "abc"
+    eng.trailer("movie", 5)
+    assert calls == [("movie", 5)]
+
+
+def test_engine_trailer_none_when_no_video(db):
+    class Tmdb:
+        enabled = True
+        def video_trailer(self, kind, tmdb_id): return None
+    assert VideoEnrichmentEngine(db, {"tmdb": Tmdb()}).trailer("movie", 5) is None
+
+
+def test_random_owned_titles_only_owned_with_tmdb(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1, "file": {"relative_path": "a.mkv"}})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "NoFile", "tmdb_id": 2})            # not owned
+    db.upsert_movie("plex", {"server_id": "m3", "title": "NoTmdb", "file": {"relative_path": "c.mkv"}})  # no tmdb
+    db.upsert_show_tree("plex", {"server_id": "s1", "title": "Show", "tmdb_id": 9, "seasons": []})
+    seeds = db.random_owned_titles(5, server_source="plex")
+    by_title = {s["title"]: s for s in seeds}
+    assert "Owned" in by_title and by_title["Owned"]["tmdb_id"] == 1
+    assert "Show" in by_title                                        # library shows seed too
+    assert "NoFile" not in by_title and "NoTmdb" not in by_title
+
+
 def test_top_owned_genres_orders_by_count(db):
     db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 1,
                              "genres": ["Action", "Drama"], "file": {"relative_path": "a.mkv"}})

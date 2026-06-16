@@ -51,6 +51,56 @@ def register_routes(bp):
             logger.exception("discover taste failed")
             return jsonify({"movie": [], "show": []})
 
+    @bp.route("/discover/morelike", methods=["GET"])
+    def video_discover_morelike():
+        """'More like <owned title>' rails — TMDB recommendations seeded from a few
+        random titles you already own (interleaved movie/show, max 3 rails)."""
+        from . import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        try:
+            from core.video.sources import resolve_video_server
+            srv = resolve_video_server()
+        except Exception:
+            srv = None
+        db = get_video_db()
+        eng = get_video_enrichment_engine()
+        try:
+            seeds = db.random_owned_titles(2, srv)
+            movies = [s for s in seeds if s["kind"] == "movie"]
+            shows = [s for s in seeds if s["kind"] == "show"]
+            ordered = []
+            while (movies or shows) and len(ordered) < 3:
+                if movies:
+                    ordered.append(movies.pop(0))
+                if shows and len(ordered) < 3:
+                    ordered.append(shows.pop(0))
+            rails = []
+            for s in ordered:
+                items = [it for it in eng.recommendations(s["kind"], s["tmdb_id"])
+                         if it.get("tmdb_id") != s["tmdb_id"]]
+                if len(items) >= 4:
+                    rails.append({"title": "More like " + s["title"], "items": items[:30]})
+            return jsonify({"rails": rails})
+        except Exception:
+            logger.exception("discover morelike failed")
+            return jsonify({"rails": []})
+
+    @bp.route("/discover/trailer", methods=["GET"])
+    def video_discover_trailer():
+        """Best YouTube trailer {key,name} for a tmdb title (hero 'Trailer' button)."""
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        kind = request.args.get("kind", "movie")
+        try:
+            tmdb_id = int(request.args.get("tmdb_id"))
+        except (TypeError, ValueError):
+            return jsonify({"trailer": None})
+        try:
+            tr = get_video_enrichment_engine().trailer(kind, tmdb_id)
+        except Exception:
+            logger.exception("discover trailer failed")
+            tr = None
+        return jsonify({"trailer": tr or None})
+
     @bp.route("/discover/genres", methods=["GET"])
     def video_discover_genres():
         """Genre id→name maps for both kinds (powers the genre rails + filter)."""

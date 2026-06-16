@@ -58,6 +58,35 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/discover/genres" in rules
     assert "/api/video/discover/taste" in rules
     assert "/api/video/discover/list" in rules
+    assert "/api/video/discover/morelike" in rules
+    assert "/api/video/discover/trailer" in rules
+
+
+def test_discover_trailer_returns_key(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def trailer(self, kind, tmdb_id): return {"key": "abc123", "name": "Official"}
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    assert client.get("/api/video/discover/trailer?kind=movie&tmdb_id=5").get_json()["trailer"]["key"] == "abc123"
+    # a non-numeric id is rejected without touching the engine
+    assert client.get("/api/video/discover/trailer?kind=movie").get_json() == {"trailer": None}
+
+
+def test_discover_morelike_builds_seeded_rails(tmp_path, monkeypatch):
+    client, vapi = _make_client(tmp_path)
+    db = vapi._video_db
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Dune", "tmdb_id": 1, "file": {"relative_path": "a.mkv"}})
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def recommendations(self, kind, tmdb_id, page=1):
+            return [{"kind": "movie", "tmdb_id": 100 + i} for i in range(6)]
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    rails = client.get("/api/video/discover/morelike").get_json()["rails"]
+    assert rails and rails[0]["title"] == "More like Dune"
+    assert len(rails[0]["items"]) == 6
 
 
 def test_discover_list_pages_concatenates_and_dedupes(tmp_path, monkeypatch):

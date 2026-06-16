@@ -544,6 +544,37 @@ class TMDBClient:
         return [{"id": g["id"], "name": g["name"]}
                 for g in (r.json() or {}).get("genres") or [] if g.get("id")]
 
+    def recommendations(self, kind, tmdb_id, page=1):
+        """TMDB 'recommended' titles for a movie/show — powers 'More like …' rails."""
+        if not self.api_key or tmdb_id is None:
+            return []
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id) + "/recommendations"
+        r = requests.get(self.BASE + path,
+                         params={"api_key": self.api_key, "page": page}, timeout=15)
+        r.raise_for_status()
+        return self._disc_map((r.json() or {}).get("results"), kind)
+
+    def video_trailer(self, kind, tmdb_id):
+        """The best YouTube trailer key for a title (official Trailer over Teaser).
+        Light — just the /videos endpoint, not the whole detail append."""
+        if not self.api_key or tmdb_id is None:
+            return None
+        import requests
+        path = ("/movie/" if kind == "movie" else "/tv/") + str(tmdb_id) + "/videos"
+        r = requests.get(self.BASE + path, params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        teaser = None
+        for v in ((r.json() or {}).get("results") or []):
+            if v.get("site") != "YouTube" or not v.get("key"):
+                continue
+            t = v.get("type") or ""
+            if t == "Trailer":
+                return {"key": v["key"], "name": v.get("name")}
+            if t == "Teaser" and teaser is None:
+                teaser = {"key": v["key"], "name": v.get("name")}
+        return teaser
+
     def full_detail(self, kind, tmdb_id, region="US"):
         """Complete detail for a TMDB title NOT in the library — shaped like the
         library detail payload but with direct image URLs (so the same detail UI

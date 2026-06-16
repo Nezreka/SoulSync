@@ -425,6 +425,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def random_owned_titles(self, limit: int = 2, server_source=None) -> list:
+        """A few random owned titles (with a tmdb_id) to seed 'More like …' rails —
+        up to ``limit`` movies and ``limit`` shows."""
+        out = []
+        conn = self._get_connection()
+        try:
+            for kind, tbl, alias, owned in (("movie", "movies", "m", "m.has_file=1"),
+                                            ("show", "shows", "s", "1=1")):
+                sql = (f"SELECT {alias}.id AS id, {alias}.tmdb_id AS tmdb_id, {alias}.title AS title "
+                       f"FROM {tbl} {alias} WHERE {alias}.tmdb_id IS NOT NULL AND {owned}")
+                args: list = []
+                if server_source:
+                    sql += f" AND {alias}.server_source=?"
+                    args.append(server_source)
+                sql += " ORDER BY RANDOM() LIMIT ?"
+                args.append(int(limit))
+                for r in conn.execute(sql, args):
+                    out.append({"kind": kind, "tmdb_id": r["tmdb_id"],
+                                "title": r["title"], "library_id": r["id"]})
+            return out
+        except sqlite3.Error:
+            return out
+        finally:
+            conn.close()
+
     def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
         """Store IMDb / RT / Metacritic scores (from OMDb) + mark ratings_synced.
         Ratings are dynamic, so these overwrite (unlike gap-only metadata)."""
