@@ -2034,3 +2034,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vgm-follow-row input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 17px; height: 17px; cursor: pointer; flex-shrink: 0; }
 .vgm-follow-txt { font-size: 13px; color: rgba(255, 255, 255, 0.82); }
 .vgm-follow-txt strong { color: #fff; font-weight: 800; }
+
+/* Fully-owned seasons hide while "Missing only" is on (turn it off to re-download). */
+.vgm-eps--missing-only .vgm-season--owned { display: none; }
+.vgm-eps-allowned { display: none; padding: 22px 14px; text-align: center; font-size: 13.5px; font-weight: 600; color: rgba(108, 211, 145, 0.85); }
+.vgm-eps--missing-only .vgm-eps-allowned { display: block; }
