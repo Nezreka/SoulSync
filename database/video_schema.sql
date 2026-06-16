@@ -353,6 +353,34 @@ CREATE TABLE IF NOT EXISTS video_watchlist (
 );
 CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
 
+-- WISHLIST (curated 'get this') — atomic units are MOVIES and EPISODES. Adding a
+-- whole show or a season just expands into episode rows. Upcoming (un-aired)
+-- episodes do NOT live here; the watchlist/calendar promote them once they air,
+-- so the wishlist only ever holds things you can actually acquire right now.
+CREATE TABLE IF NOT EXISTS video_wishlist (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind           TEXT NOT NULL,            -- 'movie' | 'episode'
+    tmdb_id        INTEGER NOT NULL,         -- movie's tmdb id | the SHOW's tmdb id (episode rows)
+    title          TEXT NOT NULL,            -- movie title | show title
+    poster_url     TEXT,                     -- movie/show poster
+    year           INTEGER,                  -- movie year (movie rows)
+    season_number  INTEGER,                  -- episode rows
+    episode_number INTEGER,                  -- episode rows
+    episode_title  TEXT,                     -- episode rows
+    air_date       TEXT,                     -- episode rows (already aired by the time it's here)
+    status         TEXT NOT NULL DEFAULT 'wanted',  -- wanted|searching|downloading|downloaded|failed
+    library_id     INTEGER,                  -- owned movies.id/shows.id when re-downloading
+    server_source  TEXT,                     -- server context that added it (informational)
+    date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- one row per movie, one per (show, season, episode) — partial uniques so the two
+-- shapes don't collide and re-adding is an idempotent upsert.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_movie
+    ON video_wishlist(tmdb_id) WHERE kind = 'movie';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_episode
+    ON video_wishlist(tmdb_id, season_number, episode_number) WHERE kind = 'episode';
+CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
+
 -- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
 -- WATCHLIST = things you follow for NEW content: monitored shows + channels.
 CREATE VIEW IF NOT EXISTS v_watchlist AS

@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1472,6 +1472,198 @@ class VideoDatabase:
         return {"items": items[start:start + limit], "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+
+    # ── Wishlist (curated 'get this': movies + episodes) ──────────────────────
+    # Atomic units are movies and episodes. Adding a whole show/season expands
+    # into episode rows (the caller supplies the explicit episodes); show/season
+    # are just bulk add/remove operations over those rows.
+    def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None,
+                              library_id=None, server_source=None) -> bool:
+        """Wish for a movie. Idempotent upsert on its tmdb id."""
+        if not tmdb_id or not title:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source)
+                   VALUES ('movie', ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(tmdb_id) WHERE kind='movie' DO UPDATE SET
+                       title=excluded.title,
+                       poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
+                       year=COALESCE(excluded.year, video_wishlist.year),
+                       library_id=COALESCE(excluded.library_id, video_wishlist.library_id)""",
+                (int(tmdb_id), title, poster_url, year, library_id, server_source))
+            conn.commit()
+            return True
+        except Exception:
+            logger.exception("add_movie_to_wishlist failed (%s)", tmdb_id)
+            return False
+        finally:
+            conn.close()
+
+    def add_episodes_to_wishlist(self, show_tmdb_id, show_title, episodes, *,
+                                 poster_url=None, library_id=None, server_source=None) -> int:
+        """Wish for one or more episodes of a show (the show's tmdb id keys them).
+        ``episodes`` = [{season_number, episode_number, title?, air_date?}, …].
+        Idempotent per (show, season, episode). Returns the count written."""
+        if not show_tmdb_id or not show_title or not episodes:
+            return 0
+        conn = self._get_connection()
+        n = 0
+        try:
+            for e in episodes:
+                sn, en = e.get("season_number"), e.get("episode_number")
+                if sn is None or en is None:
+                    continue
+                conn.execute(
+                    """INSERT INTO video_wishlist
+                           (kind, tmdb_id, title, poster_url, season_number, episode_number,
+                            episode_title, air_date, library_id, server_source)
+                       VALUES ('episode', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(tmdb_id, season_number, episode_number) WHERE kind='episode' DO UPDATE SET
+                           title=excluded.title,
+                           poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
+                           episode_title=COALESCE(excluded.episode_title, video_wishlist.episode_title),
+                           air_date=COALESCE(excluded.air_date, video_wishlist.air_date),
+                           library_id=COALESCE(excluded.library_id, video_wishlist.library_id)""",
+                    (int(show_tmdb_id), show_title, poster_url, int(sn), int(en),
+                     e.get("title"), e.get("air_date"), library_id, server_source))
+                n += 1
+            conn.commit()
+            return n
+        except Exception:
+            logger.exception("add_episodes_to_wishlist failed (%s)", show_tmdb_id)
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def remove_from_wishlist(self, scope, *, tmdb_id, season_number=None, episode_number=None) -> int:
+        """Remove at any granularity: 'movie' | 'show' (all its episodes) |
+        'season' | 'episode'. Returns the number of rows removed."""
+        if not tmdb_id:
+            return 0
+        if scope == "movie":
+            sql, args = "DELETE FROM video_wishlist WHERE kind='movie' AND tmdb_id=?", (int(tmdb_id),)
+        elif scope == "show":
+            sql, args = "DELETE FROM video_wishlist WHERE kind='episode' AND tmdb_id=?", (int(tmdb_id),)
+        elif scope == "season":
+            if season_number is None:
+                return 0
+            sql = "DELETE FROM video_wishlist WHERE kind='episode' AND tmdb_id=? AND season_number=?"
+            args = (int(tmdb_id), int(season_number))
+        elif scope == "episode":
+            if season_number is None or episode_number is None:
+                return 0
+            sql = ("DELETE FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                   "AND season_number=? AND episode_number=?")
+            args = (int(tmdb_id), int(season_number), int(episode_number))
+        else:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(sql, args)
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def wishlist_counts(self) -> dict:
+        """{'movie': n, 'show': n, 'episode': n, 'total': movies+episodes}."""
+        conn = self._get_connection()
+        try:
+            movie = conn.execute("SELECT COUNT(*) c FROM video_wishlist WHERE kind='movie'").fetchone()["c"]
+            episode = conn.execute("SELECT COUNT(*) c FROM video_wishlist WHERE kind='episode'").fetchone()["c"]
+            shows = conn.execute("SELECT COUNT(DISTINCT tmdb_id) c FROM video_wishlist WHERE kind='episode'").fetchone()["c"]
+            return {"movie": movie, "show": shows, "episode": episode, "total": movie + episode}
+        finally:
+            conn.close()
+
+    def query_wishlist(self, kind: str, *, search=None, page=1, limit=60) -> dict:
+        """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
+        → shows grouped show→season→episode with wanted/done roll-ups. {items,
+        pagination} like the other paged queries."""
+        try:
+            page = max(1, int(page or 1))
+            limit = max(1, min(200, int(limit or 60)))
+        except (TypeError, ValueError):
+            page, limit = 1, 60
+        s = (search or "").strip()
+        conn = self._get_connection()
+        try:
+            if kind == "movie":
+                where, args = ["kind='movie'"], []
+                if s:
+                    where.append("title LIKE ? COLLATE NOCASE"); args.append("%" + s + "%")
+                wsql = " WHERE " + " AND ".join(where)
+                total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
+                rows = conn.execute(
+                    "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added "
+                    "FROM video_wishlist" + wsql + " ORDER BY date_added DESC, id DESC LIMIT ? OFFSET ?",
+                    args + [limit, (page - 1) * limit]).fetchall()
+                items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
+                          "poster_url": r["poster_url"], "year": r["year"], "status": r["status"],
+                          "library_id": r["library_id"]} for r in rows]
+            else:   # shows (grouped from episode rows)
+                where, args = ["kind='episode'"], []
+                if s:
+                    where.append("title LIKE ? COLLATE NOCASE"); args.append("%" + s + "%")
+                wsql = " WHERE " + " AND ".join(where)
+                total = conn.execute(
+                    "SELECT COUNT(DISTINCT tmdb_id) c FROM video_wishlist" + wsql, args).fetchone()["c"]
+                show_rows = conn.execute(
+                    "SELECT tmdb_id, MAX(title) AS title, MAX(poster_url) AS poster_url, "
+                    "COUNT(*) AS wanted, "
+                    "SUM(CASE WHEN status='downloaded' THEN 1 ELSE 0 END) AS done, "
+                    "MAX(date_added) AS last_added "
+                    "FROM video_wishlist" + wsql +
+                    " GROUP BY tmdb_id ORDER BY last_added DESC LIMIT ? OFFSET ?",
+                    args + [limit, (page - 1) * limit]).fetchall()
+                items = []
+                for sr in show_rows:
+                    eps = conn.execute(
+                        "SELECT season_number, episode_number, episode_title, air_date, status "
+                        "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
+                        "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
+                    by_season: dict = {}
+                    for e in eps:
+                        by_season.setdefault(e["season_number"], []).append({
+                            "episode_number": e["episode_number"], "title": e["episode_title"],
+                            "air_date": e["air_date"], "status": e["status"]})
+                    seasons = [{"season_number": sn, "episodes": by_season[sn]}
+                               for sn in sorted(by_season)]
+                    items.append({"kind": "show", "tmdb_id": sr["tmdb_id"], "title": sr["title"],
+                                  "poster_url": sr["poster_url"], "wanted": sr["wanted"],
+                                  "done": sr["done"] or 0, "seasons": seasons})
+        finally:
+            conn.close()
+        total_pages = max(1, (total + limit - 1) // limit)
+        page = min(page, total_pages)
+        return {"items": items, "pagination": {
+            "page": page, "total_pages": total_pages, "total_count": total,
+            "has_prev": page > 1, "has_next": page < total_pages}}
+
+    def wishlist_state(self, *, movie_ids=None, show_tmdb_id=None) -> dict:
+        """Hydration: which of ``movie_ids`` are wishlisted, and which episode
+        keys ('S_E') of ``show_tmdb_id`` are. Returns {movies:set, episodes:set}."""
+        out = {"movies": set(), "episodes": set()}
+        conn = self._get_connection()
+        try:
+            ids = [int(x) for x in (movie_ids or []) if x]
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT tmdb_id FROM video_wishlist WHERE kind='movie' AND tmdb_id IN ({ph})", chunk):
+                    out["movies"].add(r["tmdb_id"])
+            if show_tmdb_id:
+                for r in conn.execute(
+                        "SELECT season_number, episode_number FROM video_wishlist "
+                        "WHERE kind='episode' AND tmdb_id=?", (int(show_tmdb_id),)):
+                    out["episodes"].add("%s_%s" % (r["season_number"], r["episode_number"]))
+            return out
+        finally:
+            conn.close()
 
     def movie_detail(self, movie_id: int) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)

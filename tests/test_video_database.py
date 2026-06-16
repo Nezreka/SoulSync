@@ -843,3 +843,81 @@ def test_query_watchlist_paginates_and_searches(db):
     assert res2["pagination"]["total_count"] == 1
     # page beyond range clamps to the last page
     assert db.query_watchlist("person", page=99, limit=3)["pagination"]["page"] == 3
+
+
+# ── wishlist (movies + episodes; show/season are bulk ops over episodes) ──────
+
+def test_wishlist_movie_add_is_idempotent(db):
+    assert db.add_movie_to_wishlist(603, "The Matrix", year=1999, poster_url="/m.jpg") is True
+    db.add_movie_to_wishlist(603, "The Matrix", year=1999)            # re-add → upsert, not dup
+    res = db.query_wishlist("movie")
+    assert len(res["items"]) == 1
+    m = res["items"][0]
+    assert m["tmdb_id"] == 603 and m["year"] == 1999 and m["poster_url"] == "/m.jpg"  # poster kept
+    assert db.wishlist_counts()["movie"] == 1
+
+
+def test_wishlist_episodes_group_into_show_tree(db):
+    n = db.add_episodes_to_wishlist(1396, "Breaking Bad", [
+        {"season_number": 1, "episode_number": 1, "title": "Pilot", "air_date": "2008-01-20"},
+        {"season_number": 1, "episode_number": 2, "title": "Cat's in the Bag"},
+        {"season_number": 2, "episode_number": 1, "title": "Seven Thirty-Seven"}],
+        poster_url="/bb.jpg")
+    assert n == 3
+    db.add_episodes_to_wishlist(1396, "Breaking Bad", [
+        {"season_number": 1, "episode_number": 1, "title": "Pilot"}])   # re-add → no dup
+    res = db.query_wishlist("show")
+    assert res["pagination"]["total_count"] == 1                        # one show
+    show = res["items"][0]
+    assert show["tmdb_id"] == 1396 and show["wanted"] == 3 and show["done"] == 0
+    assert [s["season_number"] for s in show["seasons"]] == [1, 2]
+    assert [e["episode_number"] for e in show["seasons"][0]["episodes"]] == [1, 2]
+    counts = db.wishlist_counts()
+    assert counts == {"movie": 0, "show": 1, "episode": 3, "total": 3}
+
+
+def test_wishlist_remove_scopes(db):
+    db.add_movie_to_wishlist(603, "The Matrix")
+    db.add_episodes_to_wishlist(1396, "Breaking Bad", [
+        {"season_number": 1, "episode_number": 1}, {"season_number": 1, "episode_number": 2},
+        {"season_number": 2, "episode_number": 1}])
+    # remove one episode
+    assert db.remove_from_wishlist("episode", tmdb_id=1396, season_number=1, episode_number=2) == 1
+    assert db.wishlist_counts()["episode"] == 2
+    # remove a whole season
+    assert db.remove_from_wishlist("season", tmdb_id=1396, season_number=1) == 1   # only S1E1 left in S1
+    assert db.wishlist_counts()["episode"] == 1
+    # remove the whole show (its remaining episodes)
+    assert db.remove_from_wishlist("show", tmdb_id=1396) == 1
+    assert db.wishlist_counts()["show"] == 0
+    # movie still there; remove it
+    assert db.remove_from_wishlist("movie", tmdb_id=603) == 1
+    assert db.wishlist_counts()["total"] == 0
+
+
+def test_wishlist_movie_and_episode_same_tmdb_dont_collide(db):
+    # A movie and a show could share a tmdb id across namespaces — the partial
+    # uniques must keep them independent.
+    db.add_movie_to_wishlist(42, "Some Movie")
+    db.add_episodes_to_wishlist(42, "Some Show", [{"season_number": 1, "episode_number": 1}])
+    c = db.wishlist_counts()
+    assert c["movie"] == 1 and c["episode"] == 1
+
+
+def test_wishlist_state_hydration(db):
+    db.add_movie_to_wishlist(603, "The Matrix")
+    db.add_episodes_to_wishlist(1396, "Breaking Bad", [
+        {"season_number": 1, "episode_number": 1}, {"season_number": 2, "episode_number": 3}])
+    st = db.wishlist_state(movie_ids=[603, 604], show_tmdb_id=1396)
+    assert st["movies"] == {603}
+    assert st["episodes"] == {"1_1", "2_3"}
+
+
+def test_wishlist_query_search_and_paging(db):
+    for i in range(5):
+        db.add_movie_to_wishlist(100 + i, "Movie %d" % i)
+    db.add_movie_to_wishlist(900, "Zebra")
+    assert db.query_wishlist("movie", search="zeb")["pagination"]["total_count"] == 1
+    p1 = db.query_wishlist("movie", page=1, limit=2)
+    assert len(p1["items"]) == 2 and p1["pagination"]["total_pages"] == 3
+    assert db.query_wishlist("movie", page=99, limit=2)["pagination"]["page"] == 3   # clamps
