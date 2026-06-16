@@ -2419,10 +2419,10 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* ══════════════════════════════════════════════════════════════════════════
    Wishlist page (.vwsh-*) — Movies grid + grouped TV show→season→episode tree
    ══════════════════════════════════════════════════════════════════════════ */
-.vwsh-page { max-width: 1180px; margin: 0 auto; padding: 0 0 60px; }
-.vwsh-head { position: relative; padding: 26px 0 16px; }
-.vwsh-head-glow { position: absolute; top: -20px; left: 0; width: 320px; height: 180px; pointer-events: none;
-    background: radial-gradient(60% 80% at 0% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.16), transparent 70%); }
+.vwsh-page { color: var(--text-primary, #fff); padding: 0 0 70px; }
+.vwsh-head { position: relative; padding: 30px 40px 0; overflow: hidden; }
+.vwsh-head-glow { position: absolute; top: -190px; left: 50%; transform: translateX(-50%); width: 620px; height: 360px;
+    pointer-events: none; background: radial-gradient(50% 50% at 50% 50%, rgba(var(--accent-rgb, 29, 185, 84), 0.16), transparent 70%); }
 .vwsh-head-row { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .vwsh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.025em; color: #fff; margin: 0; }
 .vwsh-sub { font-size: 14px; color: rgba(255, 255, 255, 0.5); margin: 6px 0 0; }
@@ -2435,7 +2435,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     box-shadow: 0 6px 18px -6px rgba(var(--accent-rgb, 29, 185, 84), 0.7); }
 .vwsh-tab-n { font-size: 11px; font-weight: 800; opacity: 0.7; margin-left: 4px; }
 
-.vwsh-toolbar { display: flex; gap: 12px; margin: 6px 0 22px; }
+.vwsh-toolbar { display: flex; gap: 12px; padding: 18px 40px 0; }
+.vwsh-body { padding: 26px 40px 0; }
 .vwsh-search { position: relative; flex: 1; max-width: 360px; }
 .vwsh-search-ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: rgba(255, 255, 255, 0.35); }
 .vwsh-search-input { width: 100%; padding: 11px 14px 11px 38px; border-radius: 11px; background: rgba(255, 255, 255, 0.05);
@@ -2517,3 +2518,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-season-head .vwsh-rm, .vwsh-ep .vwsh-rm { width: 24px; height: 24px; font-size: 15px; }
 .vwsh-season-head .vwsh-rm { margin-left: 10px; }
 @media (hover: none) { .vwsh-movie-art .vwsh-rm { opacity: 1; } }
+@media (max-width: 700px) {
+    .vwsh-head, .vwsh-toolbar, .vwsh-body { padding-left: 18px; padding-right: 18px; }
+    .vwsh-grid--movies { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
+}
