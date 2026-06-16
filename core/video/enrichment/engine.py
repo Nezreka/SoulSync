@@ -371,6 +371,38 @@ class VideoEnrichmentEngine:
                 return []
         return items
 
+    def recommendations(self, kind, tmdb_id, page=1) -> list:
+        """'More like this' titles for a tmdb id — cached + owned-annotated."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not tmdb_id:
+            return []
+        ck = ("recs", kind, tmdb_id, page)
+        items = self._cache_get(ck)
+        if items is None:
+            try:
+                items = w.client.recommendations(kind, tmdb_id, page=page) or []
+                self._cache_put(ck, items, ttl=3600)
+            except Exception:
+                logger.exception("recommendations failed (%s %s)", kind, tmdb_id)
+                return []
+        return self._stamp_owned(items)
+
+    def trailer(self, kind, tmdb_id) -> dict | None:
+        """Best YouTube trailer for a title (cached a day — trailers don't move)."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not tmdb_id:
+            return None
+        ck = ("trailer", kind, tmdb_id)
+        cached = self._cache_get(ck)
+        if cached is None:
+            try:
+                cached = w.client.video_trailer(kind, tmdb_id) or {}
+                self._cache_put(ck, cached, ttl=86400)
+            except Exception:
+                logger.exception("trailer failed (%s %s)", kind, tmdb_id)
+                return None
+        return cached or None
+
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
         """Full detail for a TMDB title not in the library — same shape as the
         library detail (source='tmdb', direct image URLs, nothing owned). If it IS

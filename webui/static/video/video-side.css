@@ -2351,3 +2351,37 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vdsc-seg::before { transition: none; }
     .vdsc-chip, .vdsc-chip:hover, .vdsc-chip--on { transition: color 0.15s ease, background 0.15s ease; transform: none; }
 }
+
+/* ── hero actions: View CTA + Trailer button ──────────────────────────────── */
+.vdsc-hero-actions { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
+.vdsc-hero-actions .vdsc-hero-cta { margin-top: 0; }
+.vdsc-hero-trailer { display: inline-flex; align-items: center; gap: 8px; padding: 11px 19px; border-radius: 12px;
+    font-size: 13px; font-weight: 800; cursor: pointer; color: #fff; backdrop-filter: blur(6px);
+    background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.22);
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease; }
+.vdsc-hero-trailer:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.42); transform: translateY(-1px); }
+.vdsc-tr-ic { font-size: 10px; }
+
+/* "More like…" rails get a gradient title as a personalized cue */
+.vdsc-shelf--ml .vdsc-shelf-title { color: #fff;
+    background: linear-gradient(90deg, #fff 35%, hsl(265 85% 78%) 100%);
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* ── trailer lightbox (in-app YouTube embed) ──────────────────────────────── */
+.vdsc-tr-overlay { position: fixed; inset: 0; z-index: 9200; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(3, 3, 6, 0.86); backdrop-filter: blur(10px); opacity: 0; transition: opacity 0.2s ease; }
+.vdsc-tr-overlay.vdsc-tr-open { opacity: 1; }
+.vdsc-tr-box { position: relative; width: min(960px, 100%); }
+.vdsc-tr-close { position: absolute; top: -46px; right: 0; width: 38px; height: 38px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(0, 0, 0, 0.5); color: #fff; font-size: 22px; line-height: 1;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, transform 0.25s ease; }
+.vdsc-tr-close:hover { background: rgba(0, 0, 0, 0.82); transform: rotate(90deg); }
+.vdsc-tr-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #000;
+    box-shadow: 0 40px 120px rgba(0, 0, 0, 0.7); display: flex; align-items: center; justify-content: center;
+    transform: scale(0.97); transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.vdsc-tr-open .vdsc-tr-frame { transform: none; }
+.vdsc-tr-frame iframe { width: 100%; height: 100%; border: 0; }
+.vdsc-tr-none { color: rgba(255, 255, 255, 0.6); font-size: 15px; font-weight: 600; }
+.vdsc-tr-title { margin-top: 14px; text-align: center; font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
+@media (prefers-reduced-motion: reduce) { .vdsc-tr-frame { transition: none; } }

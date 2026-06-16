@@ -148,9 +148,14 @@
             '<div class="vdsc-hero-pills">' + pills.map(function (p) {
                 return '<span class="vdsc-hero-pill">' + esc(p) + '</span>'; }).join('') + '</div>' +
             (it.overview ? '<p class="vdsc-hero-ov">' + esc(it.overview) + '</p>' : '') +
+            '<div class="vdsc-hero-actions">' +
             '<button class="discog-submit-btn vdsc-hero-cta" type="button" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
-            '<span class="discog-submit-text">View ' + (it.kind === 'movie' ? 'movie' : 'show') + ' →</span></button>';
+            '<span class="discog-submit-text">View ' + (it.kind === 'movie' ? 'movie' : 'show') + ' →</span></button>' +
+            '<button class="vdsc-hero-trailer" type="button" data-vdsc-trailer ' +
+            'data-kind="' + it.kind + '" data-tmdb="' + it.tmdb_id + '" data-title="' + esc(it.title) + '">' +
+            '<span class="vdsc-tr-ic" aria-hidden="true">▶</span> Trailer</button>' +
+            '</div>';
     }
     function goHero(i) {
         var items = state.hero.items; if (!items.length) return;
@@ -168,6 +173,81 @@
         state.hero.timer = setInterval(function () { goHero(state.hero.idx + 1); }, 6500);
     }
     function stopHeroTimer() { if (state.hero.timer) { clearInterval(state.hero.timer); state.hero.timer = null; } }
+
+    // ── trailer lightbox (in-app YouTube embed) ───────────────────────────────
+    var trailerEl = null, trKey = null;
+    function closeTrailer() {
+        if (!trailerEl) return;
+        var el = trailerEl; trailerEl = null;
+        el.classList.remove('vdsc-tr-open');
+        document.body.style.removeProperty('overflow');
+        if (trKey) { document.removeEventListener('keydown', trKey); trKey = null; }
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 200);
+        startHeroTimer();
+    }
+    function openTrailer(kind, tmdbId, title) {
+        closeTrailer();
+        stopHeroTimer();
+        var ov = document.createElement('div');
+        ov.className = 'vdsc-tr-overlay';
+        ov.innerHTML =
+            '<div class="vdsc-tr-box" role="dialog" aria-modal="true">' +
+                '<button class="vdsc-tr-close" type="button" data-vdsc-tr-close aria-label="Close">&times;</button>' +
+                '<div class="vdsc-tr-frame" data-vdsc-tr-frame><div class="loading-spinner"></div></div>' +
+                '<div class="vdsc-tr-title">' + esc(title || '') + '</div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        document.body.style.overflow = 'hidden';
+        trailerEl = ov;
+        requestAnimationFrame(function () { ov.classList.add('vdsc-tr-open'); });
+        ov.addEventListener('click', function (e) {
+            if (e.target === ov || e.target.closest('[data-vdsc-tr-close]')) closeTrailer();
+        });
+        trKey = function (e) { if (e.key === 'Escape') closeTrailer(); };
+        document.addEventListener('keydown', trKey);
+        fetch('/api/video/discover/trailer?kind=' + encodeURIComponent(kind) + '&tmdb_id=' + encodeURIComponent(tmdbId),
+              { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!trailerEl) return;
+                var frame = trailerEl.querySelector('[data-vdsc-tr-frame]');
+                var key = d && d.trailer && d.trailer.key;
+                if (!key) { if (frame) frame.innerHTML = '<div class="vdsc-tr-none">No trailer available</div>'; return; }
+                if (frame) frame.innerHTML = '<iframe src="https://www.youtube.com/embed/' + encodeURIComponent(key) +
+                    '?autoplay=1&rel=0" title="Trailer" frameborder="0" ' +
+                    'allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>';
+            })
+            .catch(function () {
+                var frame = trailerEl && trailerEl.querySelector('[data-vdsc-tr-frame]');
+                if (frame) frame.innerHTML = '<div class="vdsc-tr-none">Couldn’t load trailer</div>';
+            });
+    }
+
+    // ── "More like <owned title>" rails (pre-filled, prepended above the stack) ─
+    function loadMoreLike() {
+        fetch('/api/video/discover/morelike', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rails = (d && d.rails) || [];
+                var host = $('[data-vdsc-shelves]');
+                if (!rails.length || !host) return;
+                var html = rails.map(function (rl) {
+                    return '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--ml" data-vdsc-loaded="1">' +
+                        '<div class="vdsc-shelf-head">' +
+                            '<h3 class="vdsc-shelf-title">' + esc(rl.title) + '</h3>' +
+                            '<div class="vdsc-shelf-nav">' +
+                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
+                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="vdsc-rail" data-vdsc-rail>' + (rl.items || []).map(card).join('') + '</div>' +
+                    '</section>';
+                }).join('');
+                host.insertAdjacentHTML('afterbegin', html);
+                hydrateGet(host);
+            })
+            .catch(function () { /* personalization is best-effort */ });
+    }
 
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
     function renderShelves() {
@@ -322,6 +402,11 @@
                 }));
                 return;
             }
+            var trbtn = e.target.closest('[data-vdsc-trailer]');
+            if (trbtn) {
+                openTrailer(trbtn.getAttribute('data-kind'), trbtn.getAttribute('data-tmdb'), trbtn.getAttribute('data-title'));
+                return;
+            }
             var seeall = e.target.closest('[data-vdsc-seeall]');
             if (seeall) {
                 var shelf = seeall.closest('.vdsc-shelf');
@@ -386,6 +471,7 @@
                 if (!state.genres.movie.length && !state.genres.show.length) { showEmpty(); return; }
                 renderGenreChips();
                 renderShelves();
+                loadMoreLike();   // prepend personalized 'More like…' rails when ready
                 requestAnimationFrame(positionSegs);
             });
     }
