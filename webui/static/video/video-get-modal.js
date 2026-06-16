@@ -96,7 +96,6 @@
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
                     '<button class="vgm-btn vgm-btn--text" type="button" data-vgm-open>Full page &rarr;</button>' +
-                    '<button class="vgm-btn vgm-btn--ghost" type="button" data-vgm-download>Download</button>' +
                     '<button class="vgm-btn vgm-btn--primary" type="button" data-vgm-wishlist>+ Add to Wishlist</button>' +
                 '</div>' +
             '</div>';
@@ -121,14 +120,14 @@
                 sh.parentNode.classList.toggle('vgm-season--open');
                 return;
             }
-            if (e.target.closest('[data-vgm-wishlist]') || e.target.closest('[data-vgm-download]')) {
-                // v1: visual only — real wishlist/download is a later phase.
+            if (e.target.closest('[data-vgm-wishlist]')) {
+                // v1: visual only — everything funnels through the wishlist; the
+                // real write + download-from-wishlist come later.
                 var n = modalState ? modalState.sel.size : 0;
-                var isDl = !!e.target.closest('[data-vgm-download]');
                 var aw = ov.querySelector('[data-vgm-add-watch]');
-                var follow = (!isDl && aw && aw.checked) ? ' + Watchlist' : '';
+                var follow = (aw && aw.checked) ? ' + Watchlist' : '';
                 toast((modalState ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') +
-                    (isDl ? 'Download' : 'Wishlist') + follow + ' coming soon', 'info');
+                    'Wishlist' + follow + ' coming soon', 'info');
             }
         });
         ov.addEventListener('change', function (e) {
@@ -199,15 +198,12 @@
         var n = modalState ? modalState.sel.size : 0;
         var cnt = modalEl.querySelector('[data-vgm-count]');
         var add = modalEl.querySelector('[data-vgm-wishlist]');
-        var dl = modalEl.querySelector('[data-vgm-download]');
         if (modalState && modalState.kind === 'show') {
             if (cnt) cnt.textContent = n + ' episode' + (n === 1 ? '' : 's') + ' selected';
             if (add) { add.textContent = '+ Add ' + n + ' to Wishlist'; add.disabled = n === 0; }
-            if (dl) { dl.textContent = 'Download ' + n; dl.disabled = n === 0; }
         } else {
             if (cnt) cnt.textContent = '';
             if (add) { add.textContent = '+ Add to Wishlist'; add.disabled = false; }
-            if (dl) { dl.textContent = 'Download'; dl.disabled = false; }
         }
     }
 
