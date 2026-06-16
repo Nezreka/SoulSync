@@ -20,6 +20,7 @@
         return String(s == null ? '' : s)
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
+    function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
 
     var STATUS = {
         wanted: ['Wanted', 'vwsh-st--wanted'], searching: ['Searching', 'vwsh-st--searching'],
@@ -52,40 +53,44 @@
             '</div></div>';
     }
 
-    // ── show group (collapsible show → season → episode) ──────────────────────
-    function showGroup(sh) {
+    // ── show reel (poster + per-season film strips of episode cells) ──────────
+    function reelCard(sh) {
+        var src = sh.library_id != null ? 'library' : 'tmdb';
+        var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
+        var hook = ' data-vwsh-open-show="1" data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '"';
         var poster = sh.poster_url
-            ? '<img class="vwsh-show-img" src="' + esc(sh.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
-            : '<div class="vwsh-show-ph">📺</div>';
+            ? '<img class="vwsh-reel-img" src="' + esc(sh.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '<div class="vwsh-reel-ph">📺</div>';
         var done = sh.done ? ' · ' + sh.done + ' done' : '';
-        var seasons = (sh.seasons || []).map(function (se) {
-            var eps = (se.episodes || []).map(function (e) {
-                return '<div class="vwsh-ep">' +
-                    '<span class="vwsh-ep-code">S' + se.season_number + '·E' + e.episode_number + '</span>' +
-                    '<span class="vwsh-ep-title">' + esc(e.title || ('Episode ' + e.episode_number)) + '</span>' +
-                    statusPill(e.status) +
+        var strips = (sh.seasons || []).map(function (se) {
+            var cells = (se.episodes || []).map(function (e) {
+                var st = STATUS[e.status] ? e.status : 'wanted';
+                var t = e.title || ('Episode ' + e.episode_number);
+                return '<div class="vwsh-cell vwsh-cell--' + st + '" title="S' + se.season_number + '·E' + e.episode_number + ' — ' + esc(t) + '">' +
+                    '<span class="vwsh-cell-num">E' + e.episode_number + '</span>' +
+                    '<span class="vwsh-cell-title">' + esc(t) + '</span>' +
                     rmBtn('episode', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"') +
                     '</div>';
             }).join('');
-            return '<div class="vwsh-season">' +
-                '<div class="vwsh-season-head" data-vwsh-season-toggle>' +
-                    '<span class="vwsh-season-chev" aria-hidden="true">⌄</span>' +
-                    '<span class="vwsh-season-name">Season ' + se.season_number + '</span>' +
-                    '<span class="vwsh-season-meta">' + se.episodes.length + ' wanted</span>' +
+            return '<div class="vwsh-strip">' +
+                '<div class="vwsh-strip-label">S' + se.season_number +
                     rmBtn('season', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"') +
                 '</div>' +
-                '<div class="vwsh-season-eps">' + eps + '</div>' +
+                '<div class="vwsh-strip-track">' + cells + '</div>' +
             '</div>';
         }).join('');
-        return '<div class="vwsh-show" data-vwsh-show="' + esc(sh.tmdb_id) + '">' +
-            '<div class="vwsh-show-head" data-vwsh-show-toggle>' +
-                '<span class="vwsh-show-chev" aria-hidden="true">⌄</span>' +
-                '<div class="vwsh-show-art">' + poster + '</div>' +
-                '<div class="vwsh-show-titles"><span class="vwsh-show-title" title="' + esc(sh.title) + '">' + esc(sh.title) + '</span>' +
-                '<span class="vwsh-show-meta">' + sh.wanted + ' wanted' + done + '</span></div>' +
-                rmBtn('show', ' data-tmdb="' + esc(sh.tmdb_id) + '"') +
+        return '<div class="vwsh-reel" style="--vwsh-h:' + hueOf(sh.title) + '">' +
+            '<div class="vwsh-reel-poster"' + hook + '>' + poster + '</div>' +
+            '<div class="vwsh-reel-body">' +
+                '<div class="vwsh-reel-head">' +
+                    '<div class="vwsh-reel-titles"' + hook + '>' +
+                        '<span class="vwsh-reel-title" title="' + esc(sh.title) + '">' + esc(sh.title) + '</span>' +
+                        '<span class="vwsh-reel-meta">' + sh.wanted + ' wanted' + done + '</span>' +
+                    '</div>' +
+                    rmBtn('show', ' data-tmdb="' + esc(sh.tmdb_id) + '"') +
+                '</div>' +
+                '<div class="vwsh-strips">' + strips + '</div>' +
             '</div>' +
-            '<div class="vwsh-show-body">' + seasons + '</div>' +
         '</div>';
     }
 
@@ -94,7 +99,7 @@
         var shows = state.tab === 'show';
         grid.classList.toggle('vwsh-grid--shows', shows);
         grid.classList.toggle('vwsh-grid--movies', !shows);
-        grid.innerHTML = items.map(shows ? showGroup : movieCard).join('');
+        grid.innerHTML = items.map(shows ? reelCard : movieCard).join('');
     }
 
     // ── counts / badges / pager ───────────────────────────────────────────────
@@ -187,16 +192,13 @@
     function onGridClick(e) {
         var rm = e.target.closest('[data-vwsh-rm]');
         if (rm) { e.preventDefault(); e.stopPropagation(); doRemove(rm); return; }
-        var st = e.target.closest('[data-vwsh-season-toggle]');
-        if (st) { st.parentNode.classList.toggle('vwsh-season--open'); return; }
-        var sh = e.target.closest('[data-vwsh-show-toggle]');
-        if (sh) { sh.parentNode.classList.toggle('vwsh-show--open'); return; }
-        var mv = e.target.closest('[data-vwsh-open-movie]');
-        if (mv) {
-            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var open = e.target.closest('[data-vwsh-open-show], [data-vwsh-open-movie]');
+        if (open) {
             document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
-                detail: { kind: 'movie', id: parseInt(mv.getAttribute('data-vwsh-id'), 10),
-                          source: mv.getAttribute('data-vwsh-src') || 'tmdb' },
+                detail: { kind: open.hasAttribute('data-vwsh-open-show') ? 'show' : 'movie',
+                          id: parseInt(open.getAttribute('data-vwsh-id'), 10),
+                          source: open.getAttribute('data-vwsh-src') || 'tmdb' },
             }));
         }
     }

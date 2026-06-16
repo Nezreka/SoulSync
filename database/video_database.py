@@ -1612,7 +1612,7 @@ class VideoDatabase:
                     "SELECT COUNT(DISTINCT tmdb_id) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 show_rows = conn.execute(
                     "SELECT tmdb_id, MAX(title) AS title, MAX(poster_url) AS poster_url, "
-                    "COUNT(*) AS wanted, "
+                    "MAX(library_id) AS library_id, COUNT(*) AS wanted, "
                     "SUM(CASE WHEN status='downloaded' THEN 1 ELSE 0 END) AS done, "
                     "MAX(date_added) AS last_added "
                     "FROM video_wishlist" + wsql +
@@ -1632,8 +1632,8 @@ class VideoDatabase:
                     seasons = [{"season_number": sn, "episodes": by_season[sn]}
                                for sn in sorted(by_season)]
                     items.append({"kind": "show", "tmdb_id": sr["tmdb_id"], "title": sr["title"],
-                                  "poster_url": sr["poster_url"], "wanted": sr["wanted"],
-                                  "done": sr["done"] or 0, "seasons": seasons})
+                                  "poster_url": sr["poster_url"], "library_id": sr["library_id"],
+                                  "wanted": sr["wanted"], "done": sr["done"] or 0, "seasons": seasons})
         finally:
             conn.close()
         total_pages = max(1, (total + limit - 1) // limit)
