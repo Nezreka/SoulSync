@@ -214,7 +214,11 @@ class WishlistService:
                     "preview_url": track_data.get("preview_url") if isinstance(track_data, dict) else None,
                     "external_urls": track_data.get("external_urls", {}) if isinstance(track_data, dict) else {},
                     "popularity": track_data.get("popularity", 0) if isinstance(track_data, dict) else 0,
-                    "track_number": track_data.get("track_number", 1) if isinstance(track_data, dict) else 1,
+                    # "Track 01" bug: 0 = "unknown position", NOT a fabricated 1.
+                    # A fake 1 looks authoritative and blocks the import
+                    # pipeline's track-number recovery; 0 lets it recover the
+                    # real position (file tag / source lookup) before the floor.
+                    "track_number": track_data.get("track_number", 0) if isinstance(track_data, dict) else 0,
                     "disc_number": track_data.get("disc_number", 1) if isinstance(track_data, dict) else 1,
                 }
 
