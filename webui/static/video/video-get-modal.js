@@ -156,27 +156,30 @@
         });
     }, true);
 
-    // Pick the right overlay control for any card: person → eye; movie → get;
-    // show → eye when airing (or status unknown = still followable), get when
-    // confirmed ended. One helper so every surface stays consistent.
+    // The control group for any card, so every surface stays consistent:
+    //   person          → eye (watchlist)
+    //   movie           → get (download/wishlist)
+    //   airing show     → eye + get   (follow new episodes AND grab the back catalog)
+    //   ended show      → get
+    // Returns a positioned wrapper holding 0–2 buttons.
     function cardButton(o) {
         if (!o || !o.kind) return '';
+        var parts = [];
         if (o.kind === 'person') {
-            return window.VideoWatchlist
-                ? VideoWatchlist.btn({ kind: 'person', tmdbId: o.tmdbId, title: o.title, poster: o.poster }) : '';
-        }
-        if (o.kind === 'show') {
+            if (window.VideoWatchlist) parts.push(VideoWatchlist.btn({ kind: 'person', tmdbId: o.tmdbId, title: o.title, poster: o.poster }));
+        } else if (o.kind === 'show') {
             var airing = !o.status ? true : isAiring(o.status);
             if (airing && o.tmdbId && window.VideoWatchlist) {
-                return VideoWatchlist.btn({ kind: 'show', tmdbId: o.tmdbId, title: o.title,
-                                            poster: o.poster, libraryId: o.libraryId });
+                parts.push(VideoWatchlist.btn({ kind: 'show', tmdbId: o.tmdbId, title: o.title,
+                                                poster: o.poster, libraryId: o.libraryId }));
             }
-            return btn({ kind: 'show', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title });
+            // every show can be acquired (missing/back-catalog episodes)
+            parts.push(btn({ kind: 'show', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title }));
+        } else if (o.kind === 'movie') {
+            parts.push(btn({ kind: 'movie', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title }));
         }
-        if (o.kind === 'movie') {
-            return btn({ kind: 'movie', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title });
-        }
-        return '';
+        parts = parts.filter(Boolean);
+        return parts.length ? '<span class="vcard-ctrls">' + parts.join('') + '</span>' : '';
     }
 
     window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, cardButton: cardButton };
