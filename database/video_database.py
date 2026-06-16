@@ -337,10 +337,11 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def library_id_for_tmdb(self, kind: str, tmdb_id) -> int | None:
-        """The library row id for a TMDB id if it's already owned, else None. Lets
-        the search → detail flow link owned titles to their real library detail
-        (instead of the live TMDB view)."""
+    def library_id_for_tmdb(self, kind: str, tmdb_id, server_source=None) -> int | None:
+        """The library row id for a TMDB id if it's owned on the active video
+        server (``server_source``), else None. Lets the search → detail flow link
+        owned titles to their real library detail — scoped per server so an item
+        owned only on the inactive server doesn't read as owned here."""
         table = {"movie": "movies", "show": "shows"}.get(kind)
         if not table or tmdb_id is None:
             return None
@@ -350,8 +351,13 @@ class VideoDatabase:
             return None
         conn = self._get_connection()
         try:
-            row = conn.execute(
-                f"SELECT id FROM {table} WHERE tmdb_id=? LIMIT 1", (tmdb_id,)).fetchone()
+            if server_source:
+                row = conn.execute(
+                    f"SELECT id FROM {table} WHERE tmdb_id=? AND server_source=? LIMIT 1",
+                    (tmdb_id, server_source)).fetchone()
+            else:
+                row = conn.execute(
+                    f"SELECT id FROM {table} WHERE tmdb_id=? LIMIT 1", (tmdb_id,)).fetchone()
             return row["id"] if row else None
         except sqlite3.Error:
             return None
@@ -687,23 +693,35 @@ class VideoDatabase:
         self.set_setting(server + ".tv_library", tv or "")
 
     # ── dashboard ─────────────────────────────────────────────────────────────
-    def dashboard_stats(self) -> dict:
-        """Live counts for the video dashboard, straight from video.db.
+    def dashboard_stats(self, server_source=None) -> dict:
+        """Live counts for the video dashboard, straight from video.db. Library
+        counts are scoped to the active video server (``server_source``) so Plex
+        and Jellyfin never commingle.
 
         Shape is stable so the frontend can map it directly; with an empty
         database every number is a real 0 (not a stub).
         """
+        # server_source given → scope to that server; None → all servers.
+        mw = " WHERE server_source=?" if server_source else ""
+        sw = " WHERE s.server_source=?" if server_source else ""
+        sv = (server_source,) if server_source else ()
+        size_sql = ("SELECT COALESCE(SUM(size_bytes), 0) FROM media_files mf "
+                    "WHERE mf.movie_id IN (SELECT id FROM movies WHERE server_source=?) "
+                    "OR mf.episode_id IN (SELECT e.id FROM episodes e JOIN shows s ON s.id=e.show_id "
+                    "WHERE s.server_source=?)") if server_source else \
+                   "SELECT COALESCE(SUM(size_bytes), 0) FROM media_files"
         conn = self._get_connection()
         try:
-            def scalar(sql: str):
-                return conn.execute(sql).fetchone()[0]
+            def scalar(sql: str, params=()):
+                return conn.execute(sql, params).fetchone()[0]
 
             return {
                 "library": {
-                    "movies": scalar("SELECT COUNT(*) FROM movies"),
-                    "shows": scalar("SELECT COUNT(*) FROM shows"),
-                    "episodes": scalar("SELECT COUNT(*) FROM episodes"),
-                    "size_bytes": scalar("SELECT COALESCE(SUM(size_bytes), 0) FROM media_files"),
+                    "movies": scalar("SELECT COUNT(*) FROM movies" + mw, sv),
+                    "shows": scalar("SELECT COUNT(*) FROM shows" + mw, sv),
+                    "episodes": scalar(
+                        "SELECT COUNT(*) FROM episodes e JOIN shows s ON s.id=e.show_id" + sw, sv),
+                    "size_bytes": scalar(size_sql, (sv + sv) if server_source else ()),
                 },
                 "downloads": {
                     "active": scalar(
@@ -1023,12 +1041,16 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def calendar_upcoming(self, start_date: str, end_date: str) -> list[dict]:
-        """Episodes airing in [start_date, end_date] (ISO) for OWNED shows — the
-        Calendar feed. Owned = the show is on a media server (server_source set),
-        so we surface upcoming episodes for things the user actually follows. Each
-        row carries owned/missing (has_file), a still flag, and show network/year
-        for the card. Ordered by air date then show then episode."""
+    def calendar_upcoming(self, start_date: str, end_date: str, server_source=None) -> list[dict]:
+        """Episodes airing in [start_date, end_date] (ISO) for shows on the active
+        video server (``server_source``) — the Calendar feed. Scoped to one server
+        so Plex and Jellyfin never commingle. Each row carries owned/missing
+        (has_file), a still flag, and show network/airs_time/year for the card."""
+        # server_source given → that server only; None → all owned shows.
+        if server_source:
+            srv_where, pre = "s.server_source = ?", [server_source]
+        else:
+            srv_where, pre = "s.server_source IS NOT NULL", []
         conn = self._get_connection()
         try:
             rows = conn.execute(
@@ -1039,11 +1061,11 @@ class VideoDatabase:
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
-                "WHERE s.server_source IS NOT NULL "
+                "WHERE " + srv_where + " "
                 "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ? "
                 "ORDER BY e.air_date, COALESCE(s.sort_title, s.title) COLLATE NOCASE, "
                 "e.season_number, e.episode_number",
-                (start_date, end_date)).fetchall()
+                pre + [start_date, end_date]).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
@@ -1220,10 +1242,11 @@ class VideoDatabase:
 
     # ── paged/filtered/sorted library query (server-side, like music) ─────────
     def query_library(self, kind: str, *, search=None, letter=None, sort="title",
-                      status="all", page=1, limit=75) -> dict:
+                      status="all", page=1, limit=75, server_source=None) -> dict:
         """One page of movies/shows with search + A–Z + sort + owned/wanted
-        filtering done in SQL. Returns {items, pagination:{...}} mirroring the
-        music library's contract."""
+        filtering done in SQL. Scoped to ``server_source`` (the active video
+        server) so Plex and Jellyfin libraries never commingle — mirrors how the
+        music side keeps servers separate. Returns {items, pagination:{...}}."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(500, int(limit or 75)))
@@ -1234,6 +1257,9 @@ class VideoDatabase:
         tbl = "shows" if is_shows else "movies"
 
         where, params = [], []
+        if server_source:
+            where.append(f"{alias}.server_source = ?")
+            params.append(server_source)
         if search:
             where.append(f"{alias}.title LIKE ? COLLATE NOCASE")
             params.append("%" + search + "%")

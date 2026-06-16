@@ -17,6 +17,7 @@ def register_routes(bp):
     @bp.route("/library", methods=["GET"])
     def video_library():
         from . import get_video_db
+        from core.video.sources import resolve_video_server
         try:
             return jsonify(get_video_db().query_library(
                 request.args.get("kind", "movies"),
@@ -26,6 +27,7 @@ def register_routes(bp):
                 status=request.args.get("status", "all"),
                 page=request.args.get("page", 1),
                 limit=request.args.get("limit", 75),
+                server_source=resolve_video_server(),
             ))
         except Exception:
             logger.exception("Failed to query video library")

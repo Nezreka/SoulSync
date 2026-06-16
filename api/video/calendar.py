@@ -38,7 +38,9 @@ def register_routes(bp):
             except Exception:
                 logger.exception("airs_time backfill queue failed")
 
-            eps = db.calendar_upcoming(start.isoformat(), end.isoformat())
+            from core.video.sources import resolve_video_server
+            eps = db.calendar_upcoming(start.isoformat(), end.isoformat(),
+                                       server_source=resolve_video_server())
 
             # Per-date counts drive the day-strip dots without a second query.
             counts: dict[str, int] = {}
