@@ -20,10 +20,11 @@
     function wlBtn(opts) { return (window.VideoWatchlist) ? VideoWatchlist.btn(opts) : ''; }
 
     function cardHTML(it, kind) {
-        var href = kind === 'person'
-            ? '/video-detail/tmdb/person/' + it.tmdb_id
-            : (it.library_id ? '/video-detail/library/show/' + it.library_id
-                : '/video-detail/tmdb/show/' + it.tmdb_id);
+        // SPA open target: library shows open by library id ('library' source);
+        // people + un-owned shows open by tmdb id ('tmdb').
+        var source = (kind === 'show' && it.library_id) ? 'library' : 'tmdb';
+        var openId = source === 'library' ? it.library_id : it.tmdb_id;
+        var href = '/video-detail/' + source + '/' + kind + '/' + openId;
         var ph = kind === 'person' ? '👤' : '📺';   // 👤 / 📺
         var art = it.poster_url
             ? '<img class="vwlp-card-img" src="' + esc(it.poster_url) + '" alt="" loading="lazy" ' +
@@ -32,7 +33,8 @@
         var btn = wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title,
                           poster: it.poster_url, libraryId: it.library_id });
         return '<a class="vwlp-card' + (kind === 'person' ? ' vwlp-card--person' : '') + '" href="' + href + '" ' +
-            'data-vwlp-card="' + kind + '" data-vwlp-id="' + esc(it.tmdb_id) + '">' +
+            'data-vwlp-card="' + kind + '" data-vwlp-id="' + esc(it.tmdb_id) + '" ' +
+            'data-vwlp-open="' + kind + '" data-vwlp-source="' + source + '" data-vwlp-openid="' + esc(openId) + '">' +
             '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + btn + '</div>' +
             '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span></div></a>';
@@ -102,11 +104,31 @@
         updateEmpty();
     }
 
+    // Intercept card clicks → in-app SPA navigation (a bare <a href> would do a
+    // FULL page reload, re-downloading the whole app — ~15s freeze). The eye
+    // button's own capture-phase handler already stops its clicks from reaching
+    // here. Mirrors video-library.js.
+    function onGridClick(e) {
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;  // let new-tab work
+        var card = e.target.closest('[data-vwlp-open]');
+        if (!card) return;
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+            detail: {
+                kind: card.getAttribute('data-vwlp-open'),
+                id: parseInt(card.getAttribute('data-vwlp-openid'), 10),
+                source: card.getAttribute('data-vwlp-source') || 'library',
+            },
+        }));
+    }
+
     function wire() {
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++) (function (b) {
             b.addEventListener('click', function () { setTab(b.getAttribute('data-vwlp-tab')); });
         })(tabs[i]);
+        var grids = document.querySelectorAll('[data-vwlp-grid]');
+        for (var j = 0; j < grids.length; j++) grids[j].addEventListener('click', onGridClick);
         document.addEventListener('soulsync:video-watchlist-changed', onChanged);
     }
 
