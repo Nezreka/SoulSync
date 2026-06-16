@@ -733,8 +733,14 @@ class VideoDatabase:
                         "SELECT COALESCE(SUM(download_speed_bps), 0) FROM downloads "
                         "WHERE status = 'downloading'"),
                 },
-                "watchlist": scalar("SELECT COUNT(*) FROM v_watchlist"),
-                "wishlist": scalar("SELECT COUNT(*) FROM v_wishlist"),
+                # Curated watchlist (explicit follows + actively-airing library
+                # shows), NOT the old monitored-based v_watchlist view.
+                "watchlist": self.watchlist_counts(server_source=server_source)["total"],
+                # Wishlist is intentionally 0 for now: the old v_wishlist view
+                # auto-listed EVERY missing movie/episode (monitored defaults to
+                # 1), which isn't the intended curated wishlist. Repoint this at
+                # the curated source once "add to wishlist" population lands.
+                "wishlist": 0,
             }
         finally:
             conn.close()
