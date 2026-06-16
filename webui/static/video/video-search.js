@@ -52,8 +52,10 @@
         var id = owned ? it.library_id : it.tmdb_id;
         var href = '/video-detail/' + source + '/' + it.kind + '/' + id;
         var sub = [it.year, it.kind === 'movie' ? 'Movie' : 'TV'].filter(Boolean).join(' · ');
+        var cb = window.VideoGet ? VideoGet.cardButton({ kind: it.kind, tmdbId: it.tmdb_id,
+            libraryId: it.library_id, title: it.title, poster: it.poster, status: it.status, source: source }) : '';
         return '<a class="vsr-card" href="' + href + '" ' +
-            'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' +
+            'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id + '">' + cb +
             '<div class="vsr-poster">' + img + ribbon + rating +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +
@@ -66,8 +68,10 @@
               'onerror="this.outerHTML=\'<div class=&quot;vsr-poster-ph&quot;>👤</div>\'">'
             : '<div class="vsr-poster-ph">👤</div>';
         var sub = it.known_for ? it.known_for : (it.department || '');
+        var cb = window.VideoGet ? VideoGet.cardButton({ kind: 'person', tmdbId: it.tmdb_id,
+            title: it.title, poster: it.poster }) : '';
         return '<a class="vsr-card vsr-card--person" href="#" ' +
-            'data-vsr-open="person" data-vsr-id="' + it.tmdb_id + '">' +
+            'data-vsr-open="person" data-vsr-id="' + it.tmdb_id + '">' + cb +
             '<div class="vsr-poster">' + img + '</div>' +
             '<div class="vsr-info vsr-info--center"><span class="vsr-name" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
@@ -93,6 +97,7 @@
                 '</div></div>';
         });
         host.innerHTML = html;
+        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
     }
 
     // Idle state: a "Trending this week" rail so the page isn't a blank box.
@@ -104,6 +109,7 @@
         host.innerHTML = '<div class="vsr-group"><h2 class="vsr-group-title">' +
             '<span class="vsr-group-ic" aria-hidden="true">🔥</span>Trending this week</h2>' +
             '<div class="vsr-grid">' + trendingCache.map(titleCard).join('') + '</div></div>';
+        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
     }
     function loadTrending() {
         if (trendingCache !== null) { if (!lastQuery) renderTrending(); return; }

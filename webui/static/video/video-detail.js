@@ -303,11 +303,14 @@
                     '<span class="vd-cast-name">' + esc(p.name) + '</span>' +
                     (p.character ? '<span class="vd-cast-char">' + esc(p.character) + '</span>' : '');
                 // Clickable → in-app person page when we have a TMDB person id.
+                var cb = (p.tmdb_id && window.VideoGet)
+                    ? VideoGet.cardButton({ kind: 'person', tmdbId: p.tmdb_id, title: p.name, poster: p.photo }) : '';
                 return p.tmdb_id
                     ? '<a class="vd-cast-card vd-cast-card--link" href="/video-detail/tmdb/person/' + p.tmdb_id +
-                      '" data-vd-person="' + p.tmdb_id + '">' + inner + '</a>'
+                      '" data-vd-person="' + p.tmdb_id + '">' + cb + inner + '</a>'
                     : '<div class="vd-cast-card">' + inner + '</div>';
             }).join('');
+            if (window.VideoWatchlist) VideoWatchlist.hydrate(castHost);
         }
     }
 
@@ -440,8 +443,10 @@
             : '<span class="vd-sim-poster vd-sim-poster--ph">🎬</span>';
         var simKind = s.kind === 'movie' ? 'movie' : 'show';
         var yr = s.year ? '<span class="vd-sim-year">' + esc(s.year) + '</span>' : '';
+        var cb = window.VideoGet ? VideoGet.cardButton({ kind: simKind, tmdbId: s.tmdb_id,
+            title: s.title, poster: s.poster, status: s.status, source: 'tmdb' }) : '';
         return '<a class="vd-sim-card" href="/video-detail/tmdb/' + simKind + '/' + s.tmdb_id +
-            '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' +
+            '" data-vd-sim="' + simKind + '" data-vd-sim-id="' + s.tmdb_id + '">' + cb +
             poster + '<span class="vd-sim-title">' + esc(s.title) + '</span>' + yr + '</a>';
     }
     function renderRow(sectionSel, hostSel, items) {
@@ -450,6 +455,7 @@
         if (!items || !items.length) { sec.hidden = true; return; }
         sec.hidden = false;
         host.innerHTML = items.map(simCard).join('');
+        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
     }
 
     function renderExtras(kind, id, ex) {
@@ -516,6 +522,7 @@
                 cs.hidden = false;
                 if (ct) ct.textContent = coll.name || 'Collection';
                 ch.innerHTML = coll.items.map(simCard).join('');
+                if (window.VideoWatchlist) VideoWatchlist.hydrate(ch);
             } else { cs.hidden = true; }
         }
 

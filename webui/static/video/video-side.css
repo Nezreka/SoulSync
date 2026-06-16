@@ -1968,3 +1968,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     cursor: pointer; outline: none; transition: border-color 0.15s ease; }
 .vwlp-sort:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
 .vwlp-sort option { background: #16161d; color: #fff; }
+
+/* The eye/get button anchors to these card roots (other surfaces). Position is
+   additive (no flow change); buttons are absolute top-right within them. */
+.vsr-card, .vd-sim-card, .vd-cast-card { position: relative; }
+.vd-cast-card:hover .vget-btn { opacity: 1; transform: none; }
