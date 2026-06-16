@@ -11,14 +11,14 @@
     'use strict';
 
     var PAGE_ID = 'video-calendar';
-    var URL = '/api/video/calendar?days=7';
+    var URL = '/api/video/calendar';
     var COLS = 7;
     var WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     var WD_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var MO_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
         'September', 'October', 'November', 'December'];
-    var state = { loaded: false, eps: {} };
+    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all' };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -161,7 +161,8 @@
                 (bg ? '<div class="vcal-bb-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
                 '<div class="vcal-bb-scrim"></div>' +
                 '<div class="vcal-bb-content">' +
-                    '<div class="vcal-bb-eyebrow"><span class="vcal-bb-dot"></span>NEXT UP · ' + esc(whenLabel(ep, d.today)) + '</div>' +
+                    '<div class="vcal-bb-eyebrow"><span class="vcal-bb-dot"></span>' +
+                        (state.offset === 0 ? 'NEXT UP' : 'FEATURED') + ' · ' + esc(whenLabel(ep, d.today)) + '</div>' +
                     '<h2 class="vcal-bb-title">' + esc(ep.show_title) + '</h2>' +
                     '<div class="vcal-bb-sub"><span class="vcal-bb-se">' + se + '</span>' + (epTitle ? ' · ' + esc(epTitle) : '') + '</div>' +
                     '<div class="vcal-bb-actions"><span class="vcal-bb-btn">View details</span>' + owned + '</div>' +
@@ -169,20 +170,51 @@
             '</div>';
     }
 
+    function filterEps(eps) {
+        if (state.filter === 'owned') return eps.filter(function (e) { return e.has_file; });
+        if (state.filter === 'missing') return eps.filter(function (e) { return !e.has_file; });
+        return eps;
+    }
+    function updateChrome() {
+        var t = $('[data-video-cal-title]');
+        if (t) t.textContent = state.offset === 0 ? 'This Week'
+            : state.offset === 1 ? 'Next Week' : state.offset === -1 ? 'Last Week'
+                : state.offset > 0 ? 'In ' + state.offset + ' weeks' : Math.abs(state.offset) + ' weeks ago';
+        var today = $('[data-video-cal-today]');
+        if (today) today.disabled = state.offset === 0;
+        var fbs = document.querySelectorAll('[data-video-cal-filter]');
+        for (var i = 0; i < fbs.length; i++)
+            fbs[i].classList.toggle('vcal-filter-btn--on', fbs[i].getAttribute('data-video-cal-filter') === state.filter);
+    }
+    // Render from the cached payload + the active filter (no refetch).
+    function render() {
+        var d = state.data;
+        updateChrome();
+        var hero = $('[data-video-cal-hero]'), cols = $('[data-video-cal-cols]');
+        if (!d) { showEmpty(true); if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; return; }
+        var eps = filterEps(d.episodes || []);
+        var view = { episodes: eps, total: eps.length, today: d.today, start: d.start, end: d.end, days: d.days };
+        var has = eps.length > 0;
+        showEmpty(!has);
+        if (has) { renderHero(view); renderGrid(view); }
+        else { if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; }
+        setSub(view);
+    }
     function load() {
         state.loaded = true;
         showEmpty(false); showLoading(true);
-        fetch(URL, { headers: { 'Accept': 'application/json' } })
+        var base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + state.offset * 7);
+        fetch(URL + '?days=7&start=' + isoOf(base), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 showLoading(false);
-                if (!d || d.error) { showEmpty(true); return; }
-                if (!(d.episodes && d.episodes.length)) { showEmpty(true); return; }
+                if (!d || d.error) { state.data = null; render(); return; }
+                state.data = d;
                 state.eps = {};
-                d.episodes.forEach(function (e) { state.eps[e.id] = e; });
-                renderHero(d); renderGrid(d); setSub(d);
+                (d.episodes || []).forEach(function (e) { state.eps[e.id] = e; });
+                render();
             })
-            .catch(function () { showLoading(false); showEmpty(true); });
+            .catch(function () { showLoading(false); state.data = null; render(); });
     }
 
     function openFrom(target) {
@@ -225,6 +257,15 @@
             wireTilt(hero, '.vcal-bb', 3);
         }
         wireTilt(cols, '.vcal-cell', 7);
+
+        var prev = $('[data-video-cal-prev]'); if (prev) prev.addEventListener('click', function () { state.offset--; load(); });
+        var next = $('[data-video-cal-next]'); if (next) next.addEventListener('click', function () { state.offset++; load(); });
+        var today = $('[data-video-cal-today]');
+        if (today) today.addEventListener('click', function () { if (state.offset !== 0) { state.offset = 0; load(); } });
+        var fbs = document.querySelectorAll('[data-video-cal-filter]');
+        for (var i = 0; i < fbs.length; i++) (function (b) {
+            b.addEventListener('click', function () { state.filter = b.getAttribute('data-video-cal-filter'); render(); });
+        })(fbs[i]);
     }
 
     // ── episode modal ─────────────────────────────────────────────────────────

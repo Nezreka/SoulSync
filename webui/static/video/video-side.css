@@ -1716,3 +1716,23 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vcal-hero-wrap { padding-left: 18px; padding-right: 18px; }
     .vcal-bb-title { font-size: 30px; } .vcal-bb { min-height: 240px; }
 }
+
+/* ── Calendar — header controls (week nav + filter) ───────────────────────── */
+.vcal-head-row { position: relative; z-index: 1; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.vcal-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vcal-nav { display: inline-flex; align-items: center; gap: 2px; padding: 4px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
+.vcal-nav-btn { width: 34px; height: 32px; border: 0; background: transparent; color: rgba(255, 255, 255, 0.75);
+    font-size: 20px; font-weight: 700; cursor: pointer; border-radius: 8px; line-height: 1; transition: all 0.15s ease; }
+.vcal-nav-btn:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.vcal-nav-today { border: 0; background: transparent; color: rgba(255, 255, 255, 0.82); font-size: 12.5px; font-weight: 800;
+    padding: 7px 12px; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+.vcal-nav-today:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.vcal-nav-today:disabled { opacity: 0.34; cursor: default; }
+.vcal-filter { display: inline-flex; gap: 3px; padding: 4px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
+.vcal-filter-btn { border: 0; background: transparent; color: rgba(255, 255, 255, 0.7); font-size: 12.5px; font-weight: 700;
+    padding: 7px 14px; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
+.vcal-filter-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.vcal-filter-btn--on { color: #fff; background: rgba(var(--vcal-accent), 0.9); box-shadow: 0 4px 14px rgba(var(--vcal-accent), 0.32); }
+@media (max-width: 720px) { .vcal-head-row { flex-direction: column; align-items: stretch; } .vcal-controls { justify-content: space-between; } }

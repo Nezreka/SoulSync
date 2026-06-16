@@ -7,7 +7,7 @@ via VideoDatabase, writes nothing, never touches the music side.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import jsonify, request
 
@@ -22,8 +22,18 @@ def register_routes(bp):
         from . import get_video_db
         try:
             days = request.args.get("days", default=7, type=int) or 7
-            days = max(1, min(days, 90))            # clamp: today .. +90d
-            start = date.today()
+            days = max(1, min(days, 31))            # one week (or a few) per view
+            today = date.today()
+            # Optional ?start=YYYY-MM-DD for week navigation; default = today.
+            start = today
+            start_s = request.args.get("start")
+            if start_s:
+                try:
+                    start = datetime.strptime(start_s, "%Y-%m-%d").date()
+                except ValueError:
+                    start = today
+            if abs((start - today).days) > 400:     # sane bound around today
+                start = today
             end = start + timedelta(days=days - 1)
             db = get_video_db()
 
@@ -50,8 +60,8 @@ def register_routes(bp):
                 if e.get("has_file"):
                     owned += 1
             return jsonify({
-                "today": start.isoformat(),
-                "start": start.isoformat(),
+                "today": today.isoformat(),       # real today (for the highlight)
+                "start": start.isoformat(),       # window start (may be a future week)
                 "end": end.isoformat(),
                 "days": days,
                 "counts_by_date": counts,

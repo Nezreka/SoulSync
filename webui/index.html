@@ -869,8 +869,24 @@
                     <div class="vcal-page">
                         <div class="vcal-head">
                             <div class="vcal-head-glow" aria-hidden="true"></div>
-                            <h1 class="vcal-title">This Week</h1>
-                            <p class="vcal-sub" data-video-cal-sub>Upcoming episodes from your shows</p>
+                            <div class="vcal-head-row">
+                                <div class="vcal-head-titles">
+                                    <h1 class="vcal-title" data-video-cal-title>This Week</h1>
+                                    <p class="vcal-sub" data-video-cal-sub>Upcoming episodes from your shows</p>
+                                </div>
+                                <div class="vcal-controls">
+                                    <div class="vcal-nav" role="group" aria-label="Week">
+                                        <button class="vcal-nav-btn" type="button" data-video-cal-prev aria-label="Previous week">&#8249;</button>
+                                        <button class="vcal-nav-today" type="button" data-video-cal-today>Today</button>
+                                        <button class="vcal-nav-btn" type="button" data-video-cal-next aria-label="Next week">&#8250;</button>
+                                    </div>
+                                    <div class="vcal-filter" role="group" aria-label="Filter">
+                                        <button class="vcal-filter-btn vcal-filter-btn--on" type="button" data-video-cal-filter="all">All</button>
+                                        <button class="vcal-filter-btn" type="button" data-video-cal-filter="owned">In library</button>
+                                        <button class="vcal-filter-btn" type="button" data-video-cal-filter="missing">Missing</button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="vcal-body">
                             <div class="vcal-loading hidden" data-video-cal-loading>
