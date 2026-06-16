@@ -54,6 +54,39 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/episode/<int:tmdb_id>/<int:season>/<int:episode>" in rules
     assert any(r.startswith("/api/video/backdrop/") for r in rules)
     assert "/api/video/img" in rules
+    assert "/api/video/discover/hero" in rules
+    assert "/api/video/discover/genres" in rules
+    assert "/api/video/discover/taste" in rules
+    assert "/api/video/discover/list" in rules
+
+
+def test_discover_list_pages_concatenates_and_dedupes(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def discover_curated(self, key, page=1):
+            # page 1 → ids 1,2 ; page 2 → ids 2,3 (overlap on 2)
+            return ([{"kind": "movie", "tmdb_id": 1}, {"kind": "movie", "tmdb_id": 2}] if page == 1
+                    else [{"kind": "movie", "tmdb_id": 2}, {"kind": "movie", "tmdb_id": 3}])
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    r = client.get("/api/video/discover/list?key=popular_movies&pages=2")
+    assert [it["tmdb_id"] for it in r.get_json()["items"]] == [1, 2, 3]   # concatenated + deduped
+
+
+def test_discover_list_trending_fetches_once_despite_pages(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.enrichment.engine as eng_mod
+    calls = {"n": 0}
+
+    class FakeEng:
+        def trending(self):
+            calls["n"] += 1
+            return [{"kind": "movie", "tmdb_id": 9}]
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    r = client.get("/api/video/discover/list?key=trending&pages=3")
+    assert calls["n"] == 1                                    # fixed list — not refetched per page
+    assert [it["tmdb_id"] for it in r.get_json()["items"]] == [9]
 
 
 def test_img_proxy_rejects_non_tmdb(tmp_path):
