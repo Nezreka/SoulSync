@@ -16819,6 +16819,45 @@ def remove_batch_from_wishlist():
         logger.error(f"Error batch removing from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/wishlist/ignore-list', methods=['GET'])
+def get_wishlist_ignore_list():
+    """#874: active (non-expired) wishlist ignore entries for this profile."""
+    try:
+        runtime = _build_wishlist_route_runtime()
+        entries = get_wishlist_service().database.get_wishlist_ignore(profile_id=runtime.profile_id)
+        from core.wishlist.ignore import IGNORE_TTL_DAYS
+        return jsonify({"success": True, "entries": entries, "ttl_days": IGNORE_TTL_DAYS})
+    except Exception as e:
+        logger.error(f"Error reading wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e), "entries": []}), 500
+
+@app.route('/api/wishlist/ignore-list/remove', methods=['POST'])
+def remove_from_wishlist_ignore_list():
+    """#874: un-ignore a track so it can be auto-acquired again."""
+    try:
+        data = request.get_json() or {}
+        track_id = data.get('track_id') or data.get('spotify_track_id')
+        if not track_id:
+            return jsonify({"success": False, "error": "No track_id provided"}), 400
+        runtime = _build_wishlist_route_runtime()
+        ok = get_wishlist_service().database.remove_from_wishlist_ignore(
+            track_id, profile_id=runtime.profile_id)
+        return jsonify({"success": True, "removed": ok})
+    except Exception as e:
+        logger.error(f"Error removing from wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/ignore-list/clear', methods=['POST'])
+def clear_wishlist_ignore_list():
+    """#874: clear the entire wishlist ignore-list for this profile."""
+    try:
+        runtime = _build_wishlist_route_runtime()
+        count = get_wishlist_service().database.clear_wishlist_ignore(profile_id=runtime.profile_id)
+        return jsonify({"success": True, "cleared": count})
+    except Exception as e:
+        logger.error(f"Error clearing wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/add-album-to-wishlist', methods=['POST'])
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""
@@ -18956,26 +18995,44 @@ def _check_batch_completion_v2(batch_id):
 
 
 def _add_cancelled_task_to_wishlist(task):
-    """
-    Helper function to add cancelled task to wishlist.
-    Separated for clarity and error isolation.
+    """Handle a user-cancelled download's wishlist state.
+
+    #874: a manual cancel means "stop auto-retrying this release". The
+    previous behaviour re-added the cancelled track to the wishlist, which
+    the auto-processor then re-downloaded → re-cancelled → re-added,
+    forever. Instead we record a TTL'd ignore entry (so the watchlist /
+    auto-processor skip it) and drop it from the active wishlist. The user
+    can still force-download it manually (manual paths bypass the gate),
+    and the ignore lapses after core.wishlist.ignore.IGNORE_TTL_DAYS so it
+    is reconsidered later. Error-isolated; never raises into the caller.
     """
     if not task:
         return
-        
+
     try:
         from core.wishlist_service import get_wishlist_service
+        from core.wishlist.ignore import extract_display, REASON_CANCELLED
         wishlist_service = get_wishlist_service()
-        payload = _build_cancelled_task_wishlist_payload(task, profile_id=get_current_profile_id())
-        success = wishlist_service.add_spotify_track_to_wishlist(**payload)
-        
-        if success:
-            logger.info(f"[Atomic Cancel] Added '{task.get('track_info', {}).get('name')}' to wishlist")
-        else:
-            logger.error(f"[Atomic Cancel] Failed to add '{task.get('track_info', {}).get('name')}' to wishlist")
-            
+        profile_id = get_current_profile_id()
+        track_info = task.get('track_info', {}) or {}
+        track_id = track_info.get('id')
+        name = track_info.get('name')
+
+        if not track_id:
+            logger.warning("[Atomic Cancel] No track id on cancelled task — cannot ignore '%s'", name)
+            return
+
+        disp_name, disp_artist = extract_display(track_info)
+        wishlist_service.database.add_to_wishlist_ignore(
+            track_id, track_name=disp_name, artist_name=disp_artist,
+            reason=REASON_CANCELLED, profile_id=profile_id)
+        # Drop it from the active wishlist so the auto-processor stops
+        # re-attempting it; the gate then blocks any automatic re-add.
+        wishlist_service.remove_track_from_wishlist(track_id, profile_id=profile_id)
+        logger.info("[Atomic Cancel] Ignored (TTL) + removed from wishlist: '%s'", name or track_id)
+
     except Exception as e:
-        logger.error(f"[Atomic Cancel] Critical error adding to wishlist: {e}")
+        logger.error(f"[Atomic Cancel] Critical error handling cancelled task: {e}")
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
