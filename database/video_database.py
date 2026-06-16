@@ -1351,6 +1351,29 @@ class VideoDatabase:
         people = self.list_watchlist("person")
         return {"show": len(shows), "person": len(people), "total": len(shows) + len(people)}
 
+    def query_watchlist(self, kind: str, *, search=None, page=1, limit=60,
+                        server_source=None) -> dict:
+        """One searched/paged slice of the effective watchlist for a kind — mirrors
+        query_library's {items, pagination} shape so the page can paginate like
+        the library. The effective list is bounded (follows + airing library
+        shows), so it's computed then filtered/sliced rather than via heavier SQL."""
+        try:
+            page = max(1, int(page or 1))
+            limit = max(1, min(200, int(limit or 60)))
+        except (TypeError, ValueError):
+            page, limit = 1, 60
+        items = self.list_watchlist(kind, server_source=server_source) if kind in ("show", "person") else []
+        s = (search or "").strip().lower()
+        if s:
+            items = [it for it in items if s in (it.get("title") or "").lower()]
+        total = len(items)
+        total_pages = max(1, (total + limit - 1) // limit)
+        page = min(page, total_pages)
+        start = (page - 1) * limit
+        return {"items": items[start:start + limit], "pagination": {
+            "page": page, "total_pages": total_pages, "total_count": total,
+            "has_prev": page > 1, "has_next": page < total_pages}}
+
     def movie_detail(self, movie_id: int) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)
         video movie-detail page."""

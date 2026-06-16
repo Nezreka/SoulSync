@@ -1865,3 +1865,26 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* Ensure the show poster box is a positioning context for its .vwl-btn
    (scoped to VIDEO cards so the shared music .library-artist-image is untouched). */
 .video-card--clickable .library-artist-image { position: relative; }
+
+/* ── Watchlist page — search toolbar + pagination ─────────────────────────── */
+.vwlp-toolbar { padding: 18px 40px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vwlp-search { position: relative; flex: 1; max-width: 420px; min-width: 220px; }
+.vwlp-search-ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+    color: rgba(255, 255, 255, 0.4); pointer-events: none; }
+.vwlp-search-input { width: 100%; padding: 11px 14px 11px 38px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff; font-size: 14px; font-weight: 500; outline: none; transition: border-color 0.15s ease, background 0.15s ease; }
+.vwlp-search-input::placeholder { color: rgba(255, 255, 255, 0.35); }
+.vwlp-search-input:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6);
+    background: rgba(255, 255, 255, 0.07); }
+
+.vwlp-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 30px 0 4px; }
+.vwlp-pagination.hidden { display: none; }
+.vwlp-page-btn { padding: 9px 16px; border-radius: 10px; font-size: 13px; font-weight: 700;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85); cursor: pointer; transition: all 0.15s ease; }
+.vwlp-page-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.vwlp-page-btn:disabled { opacity: 0.35; cursor: default; }
+.vwlp-page-info { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.6); min-width: 110px; text-align: center; }
+
+@media (max-width: 900px) { .vwlp-toolbar { padding-left: 18px; padding-right: 18px; } }

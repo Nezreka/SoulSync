@@ -1,16 +1,20 @@
 /*
  * SoulSync — Video Watchlist page (isolated).
  *
- * The shows + people you follow, split by a Shows / People tab switcher. Reads
- * /api/video/watchlist; cards reuse the shared VideoWatchlist eye-button (here it
- * reads as "watched" and un-follows on click). v1 is membership only — the
- * monitoring/discovery engine that turns follows into downloads comes later.
+ * The shows + people you follow, split by a Shows / People tab switcher.
+ * Server-paged + searchable like the library (only a page of cards/posters
+ * renders at once). Reads /api/video/watchlist?kind=&search=&page=&limit=.
+ * Cards reuse the shared VideoWatchlist eye-button (reads as "watched" here;
+ * un-follows on click, with a confirm).
  */
 (function () {
     'use strict';
 
     var PAGE_ID = 'video-watchlist';
-    var state = { loaded: false, tab: 'show', data: { show: [], person: [] } };
+    var LIMIT = 60;
+    var state = { loaded: false, tab: 'show', search: '', page: 1,
+                  counts: { show: 0, person: 0 } };
+    var searchTimer = null;
 
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
@@ -33,83 +37,119 @@
         var btn = wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title,
                           poster: it.poster_url, libraryId: it.library_id });
         return '<a class="vwlp-card' + (kind === 'person' ? ' vwlp-card--person' : '') + '" href="' + href + '" ' +
-            'data-vwlp-card="' + kind + '" data-vwlp-id="' + esc(it.tmdb_id) + '" ' +
             'data-vwlp-open="' + kind + '" data-vwlp-source="' + source + '" data-vwlp-openid="' + esc(openId) + '">' +
             '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + btn + '</div>' +
             '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
             esc(it.title) + '</span></div></a>';
     }
 
-    function updateEmpty() {
-        var n = state.data[state.tab].length;
-        ['show', 'person'].forEach(function (k) {
-            var g = $('[data-vwlp-grid="' + k + '"]');
-            if (g) g.classList.toggle('hidden', k !== state.tab || state.data[k].length === 0);
-        });
+    function setCounts(counts) {
+        state.counts = { show: (counts && counts.show) || 0, person: (counts && counts.person) || 0 };
+        var cs = $('[data-vwlp-count-show]'); if (cs) cs.textContent = state.counts.show;
+        var cp = $('[data-vwlp-count-person]'); if (cp) cp.textContent = state.counts.person;
+    }
+
+    function updatePagination(p) {
+        var box = $('[data-vwlp-pagination]'), prev = $('[data-vwlp-prev]'),
+            next = $('[data-vwlp-next]'), info = $('[data-vwlp-pageinfo]');
+        if (!box) return;
+        if (!p || p.total_pages <= 1) { box.classList.add('hidden'); return; }
+        if (prev) prev.disabled = !p.has_prev;
+        if (next) next.disabled = !p.has_next;
+        if (info) info.textContent = 'Page ' + p.page + ' of ' + p.total_pages;
+        box.classList.remove('hidden');
+    }
+
+    function updateEmpty(total) {
         var empty = $('[data-vwlp-empty]');
-        if (empty) empty.classList.toggle('hidden', n > 0);
+        if (empty) empty.classList.toggle('hidden', total > 0);
         var et = $('[data-vwlp-empty-title]');
-        if (et && n === 0) et.textContent = state.tab === 'show'
-            ? 'No shows on your watchlist yet' : 'No people on your watchlist yet';
-    }
-
-    function setTab(tab) {
-        state.tab = tab;
-        var tabs = document.querySelectorAll('[data-vwlp-tab]');
-        for (var i = 0; i < tabs.length; i++)
-            tabs[i].classList.toggle('vwlp-tab--on', tabs[i].getAttribute('data-vwlp-tab') === tab);
-        updateEmpty();
-    }
-
-    function render() {
-        // Seed the shared cache so every button paints "watched" with no flash
-        // (everything on this page is, by definition, followed).
-        if (window.VideoWatchlist) {
-            state.data.show.forEach(function (it) { VideoWatchlist._watched.show[it.tmdb_id] = true; });
-            state.data.person.forEach(function (it) { VideoWatchlist._watched.person[it.tmdb_id] = true; });
+        if (et && total === 0) {
+            et.textContent = state.search
+                ? 'No matches'
+                : (state.tab === 'show' ? 'No shows on your watchlist yet' : 'No people on your watchlist yet');
         }
-        var sg = $('[data-vwlp-grid="show"]'), pg = $('[data-vwlp-grid="person"]');
-        if (sg) sg.innerHTML = state.data.show.map(function (it) { return cardHTML(it, 'show'); }).join('');
-        if (pg) pg.innerHTML = state.data.person.map(function (it) { return cardHTML(it, 'person'); }).join('');
-        var cs = $('[data-vwlp-count-show]'); if (cs) cs.textContent = state.data.show.length;
-        var cp = $('[data-vwlp-count-person]'); if (cp) cp.textContent = state.data.person.length;
-        setTab(state.tab);
+    }
+
+    function render(items) {
+        // Everything on this page is watched — seed the shared cache so the eyes
+        // paint "watched" with no flash.
+        if (window.VideoWatchlist) {
+            items.forEach(function (it) { VideoWatchlist._watched[state.tab][it.tmdb_id] = true; });
+        }
+        var grid = $('[data-vwlp-grid]');
+        if (grid) {
+            grid.innerHTML = items.map(function (it) { return cardHTML(it, state.tab); }).join('');
+            if (window.VideoWatchlist) VideoWatchlist.hydrate(grid);
+        }
     }
 
     function load() {
         state.loaded = true;
         var ld = $('[data-vwlp-loading]'); if (ld) ld.classList.remove('hidden');
-        fetch('/api/video/watchlist', { headers: { Accept: 'application/json' } })
+        var params = new URLSearchParams({
+            kind: state.tab, search: state.search, page: state.page, limit: LIMIT });
+        fetch('/api/video/watchlist?' + params.toString(), { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (ld) ld.classList.add('hidden');
-                state.data = (d && d.success)
-                    ? { show: d.shows || [], person: d.people || [] }
-                    : { show: [], person: [] };
-                render();
+                if (!d || !d.success) { render([]); updatePagination(null); updateEmpty(0); return; }
+                setCounts(d.counts);
+                var p = d.pagination || { page: 1, total_pages: 1, total_count: (d.items || []).length };
+                state.page = p.page;
+                render(d.items || []);
+                updatePagination(p);
+                updateEmpty(p.total_count);
             })
-            .catch(function () { if (ld) ld.classList.add('hidden'); state.data = { show: [], person: [] }; render(); });
+            .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updatePagination(null); updateEmpty(0); });
     }
 
-    // When an item is un-followed (here or anywhere), drop its card + fix counts.
-    function onChanged(e) {
-        var det = (e && e.detail) || {};
-        if (det.watched) return;   // additions are picked up on next page load
-        var kind = det.kind, id = String(det.id);
-        if (!state.data[kind]) return;
-        state.data[kind] = state.data[kind].filter(function (it) { return String(it.tmdb_id) !== id; });
-        var card = document.querySelector('.vwlp-card[data-vwlp-card="' + kind + '"][data-vwlp-id="' + id + '"]');
-        if (card && card.parentNode) card.parentNode.removeChild(card);
-        var c = $('[data-vwlp-count-' + kind + ']'); if (c) c.textContent = state.data[kind].length;
-        updateEmpty();
+    function setTab(tab) {
+        if (tab !== 'show' && tab !== 'person') return;
+        state.tab = tab; state.page = 1;
+        var tabs = document.querySelectorAll('[data-vwlp-tab]');
+        for (var i = 0; i < tabs.length; i++)
+            tabs[i].classList.toggle('vwlp-tab--on', tabs[i].getAttribute('data-vwlp-tab') === tab);
+        load();
+    }
+
+    // A removal anywhere → if we're showing the watchlist, reload the page so the
+    // un-followed card drops and counts/pagination stay correct.
+    function onChanged() {
+        var grid = $('[data-vwlp-grid]');
+        if (state.loaded && grid && grid.offsetParent !== null) load();
+    }
+
+    function wire() {
+        var tabs = document.querySelectorAll('[data-vwlp-tab]');
+        for (var i = 0; i < tabs.length; i++) (function (b) {
+            b.addEventListener('click', function () { setTab(b.getAttribute('data-vwlp-tab')); });
+        })(tabs[i]);
+
+        var grid = $('[data-vwlp-grid]');
+        if (grid) grid.addEventListener('click', onGridClick);
+
+        var search = $('[data-vwlp-search]');
+        if (search) search.addEventListener('input', function () {
+            if (searchTimer) clearTimeout(searchTimer);
+            searchTimer = setTimeout(function () {
+                state.search = search.value.trim(); state.page = 1; load();
+            }, 250);
+        });
+
+        var prev = $('[data-vwlp-prev]');
+        if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
+        var next = $('[data-vwlp-next]');
+        if (next) next.addEventListener('click', function () { state.page++; load(); });
+
+        document.addEventListener('soulsync:video-watchlist-changed', onChanged);
     }
 
     // Intercept card clicks → in-app SPA navigation (a bare <a href> would do a
-    // FULL page reload, re-downloading the whole app — ~15s freeze). The eye
-    // button's own capture-phase handler already stops its clicks from reaching
-    // here. Mirrors video-library.js.
+    // FULL page reload). The eye button's capture-phase handler already stops its
+    // own clicks from reaching here. Mirrors video-library.js.
     function onGridClick(e) {
-        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;  // let new-tab work
+        if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var card = e.target.closest('[data-vwlp-open]');
         if (!card) return;
         e.preventDefault();
@@ -122,17 +162,7 @@
         }));
     }
 
-    function wire() {
-        var tabs = document.querySelectorAll('[data-vwlp-tab]');
-        for (var i = 0; i < tabs.length; i++) (function (b) {
-            b.addEventListener('click', function () { setTab(b.getAttribute('data-vwlp-tab')); });
-        })(tabs[i]);
-        var grids = document.querySelectorAll('[data-vwlp-grid]');
-        for (var j = 0; j < grids.length; j++) grids[j].addEventListener('click', onGridClick);
-        document.addEventListener('soulsync:video-watchlist-changed', onChanged);
-    }
-
-    function onShown(e) { if (e && e.detail === PAGE_ID) load(); }   // reload each visit → stays fresh
+    function onShown(e) { if (e && e.detail === PAGE_ID) { state.page = 1; load(); } }
 
     function init() {
         wire();
