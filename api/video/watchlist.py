@@ -38,15 +38,19 @@ def register_routes(bp):
             db = get_video_db()
             server = _server()
             kind = request.args.get("kind")
+            counts = db.watchlist_counts(server_source=server)
             if kind in _KINDS:
-                items = db.list_watchlist(kind, server_source=server)
-                return jsonify({"success": True, "kind": kind, "items": items})
+                # Paged + searchable, like the library page.
+                res = db.query_watchlist(
+                    kind, search=request.args.get("search", ""),
+                    page=request.args.get("page", 1), limit=request.args.get("limit", 60),
+                    server_source=server)
+                return jsonify({"success": True, "kind": kind, "counts": counts, **res})
+            # No kind → grouped (counts + first-glance lists).
             rows = db.list_watchlist(server_source=server)
             shows = [r for r in rows if r.get("kind") == "show"]
             people = [r for r in rows if r.get("kind") == "person"]
-            return jsonify({"success": True, "shows": shows, "people": people,
-                            "counts": {"show": len(shows), "person": len(people),
-                                       "total": len(rows)}})
+            return jsonify({"success": True, "shows": shows, "people": people, "counts": counts})
         except Exception:
             logger.exception("Failed to list video watchlist")
             return jsonify({"success": False, "error": "Failed to load watchlist"}), 500

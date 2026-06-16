@@ -927,17 +927,27 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="vwlp-toolbar">
+                            <div class="vwlp-search">
+                                <svg class="vwlp-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                                <input type="text" class="vwlp-search-input" data-vwlp-search placeholder="Search watchlist&hellip;" autocomplete="off" spellcheck="false">
+                            </div>
+                        </div>
                         <div class="vwlp-body">
                             <div class="vwlp-loading hidden" data-vwlp-loading>
                                 <div class="loading-spinner"></div>
                                 <div class="loading-text">Loading watchlist&hellip;</div>
                             </div>
-                            <div class="vwlp-grid" data-vwlp-grid="show"></div>
-                            <div class="vwlp-grid hidden" data-vwlp-grid="person"></div>
+                            <div class="vwlp-grid" data-vwlp-grid></div>
                             <div class="vwlp-state hidden" data-vwlp-empty>
                                 <div class="vwlp-state-ic">&#128065;</div>
                                 <div class="vwlp-state-title" data-vwlp-empty-title>Nothing on your watchlist yet</div>
                                 <div class="vwlp-state-sub">Hover any show or person card and hit the eye to follow them — new content lands here.</div>
+                            </div>
+                            <div class="vwlp-pagination hidden" data-vwlp-pagination>
+                                <button class="vwlp-page-btn" type="button" data-vwlp-prev>&lsaquo; Prev</button>
+                                <span class="vwlp-page-info" data-vwlp-pageinfo></span>
+                                <button class="vwlp-page-btn" type="button" data-vwlp-next>Next &rsaquo;</button>
                             </div>
                         </div>
                     </div>

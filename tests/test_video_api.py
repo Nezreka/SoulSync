@@ -351,3 +351,15 @@ def test_watchlist_add_validates_input(tmp_path):
     assert client.post("/api/video/watchlist/add", json={"kind": "show", "tmdb_id": 1}).status_code == 400  # no title
     assert client.post("/api/video/watchlist/remove", json={"kind": "person"}).status_code == 400
     assert client.post("/api/video/watchlist/check", json={"tmdb_ids": [1]}).status_code == 400  # no kind
+
+
+def test_watchlist_endpoint_paginates_and_searches(tmp_path):
+    client, _ = _make_client(tmp_path)
+    for i in range(1, 6):
+        client.post("/api/video/watchlist/add", json={"kind": "person", "tmdb_id": 300 + i, "title": "P%d" % i})
+    d = client.get("/api/video/watchlist?kind=person&page=1&limit=2").get_json()
+    assert d["success"] and len(d["items"]) == 2
+    assert d["pagination"]["total_count"] == 5 and d["pagination"]["total_pages"] == 3
+    assert d["counts"]["person"] == 5
+    s = client.get("/api/video/watchlist?kind=person&search=P3").get_json()
+    assert len(s["items"]) == 1 and s["items"][0]["title"] == "P3"

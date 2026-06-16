@@ -827,3 +827,19 @@ def test_watchlist_state_and_counts(db):
     assert db.watchlist_state("show", []) == {}
     assert db.watchlist_state("person", [287]) == {287: True}
     assert db.watchlist_counts() == {"show": 2, "person": 1, "total": 3}
+
+
+def test_query_watchlist_paginates_and_searches(db):
+    for i in range(1, 8):
+        db.add_to_watchlist("person", 100 + i, "Person %d" % i)
+    db.add_to_watchlist("person", 200, "Brad Pitt")
+    res = db.query_watchlist("person", page=1, limit=3)
+    assert len(res["items"]) == 3
+    assert res["pagination"]["total_count"] == 8 and res["pagination"]["total_pages"] == 3
+    assert res["pagination"]["has_next"] is True and res["pagination"]["has_prev"] is False
+    # search (case-insensitive title contains)
+    res2 = db.query_watchlist("person", search="brad", limit=60)
+    assert len(res2["items"]) == 1 and res2["items"][0]["title"] == "Brad Pitt"
+    assert res2["pagination"]["total_count"] == 1
+    # page beyond range clamps to the last page
+    assert db.query_watchlist("person", page=99, limit=3)["pagination"]["page"] == 3
