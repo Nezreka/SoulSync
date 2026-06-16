@@ -1514,3 +1514,151 @@ a.vd-guest:hover .vd-guest-name { color: rgb(var(--vd-accent-rgb)); }
    is untouched). The "Video Source" panel governs which video server is used. */
 body[data-side="video"] #navidrome-toggle,
 body[data-side="video"] #soulsync-toggle { display: none; }
+
+
+/* ── Calendar — the Week Grid (every episode, air times, breathing cells) ──── */
+.vcal-page { --vcal-accent: var(--accent-rgb, 88, 101, 242); color: var(--text-primary, #fff); padding: 0 0 70px; }
+.vcal-head { position: relative; padding: 30px 40px 18px; overflow: hidden; }
+.vcal-head-glow {
+    position: absolute; top: -190px; left: 50%; transform: translateX(-50%);
+    width: 860px; height: 390px; pointer-events: none; z-index: 0;
+    background: radial-gradient(56% 70% at 50% 0%, rgba(var(--vcal-accent), 0.26), transparent 70%); filter: blur(10px);
+}
+.vcal-title { position: relative; z-index: 1; font-size: 36px; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
+.vcal-sub { position: relative; z-index: 1; margin: 7px 0 0; color: rgba(255, 255, 255, 0.55); font-size: 14px; font-weight: 600; }
+.vcal-body { padding: 4px 40px 0; }
+.vcal-loading { padding: 90px 0; text-align: center; }
+
+.vcal-grid { border-radius: 20px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, #0d0d12, #0a0a0e); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
+.vcal-grid.hidden { display: none; }
+.vcal-cols { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); align-items: start; }
+.vcal-col { border-left: 1px solid rgba(255, 255, 255, 0.06); min-width: 0; }
+.vcal-col:first-child { border-left: 0; }
+.vcal-col--today { background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.10), rgba(var(--vcal-accent), 0.02) 30%, transparent 60%); }
+
+/* Day header — sticky */
+.vcal-col-head { position: sticky; top: 0; z-index: 4; padding: 15px 15px 13px;
+    background: linear-gradient(180deg, rgba(15, 15, 20, 0.96), rgba(13, 13, 18, 0.85));
+    backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
+.vcal-col-wd { display: block; font-size: 14px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-col-date { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+.vcal-col-n { position: absolute; top: 14px; right: 14px; font-size: 11px; font-weight: 800; color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.08); padding: 3px 9px; border-radius: 999px; }
+.vcal-col--today .vcal-col-wd { color: hsl(232, 100%, 82%); }
+.vcal-col--today .vcal-col-head { border-bottom-color: rgba(var(--vcal-accent), 0.5);
+    box-shadow: 0 1px 0 rgba(var(--vcal-accent), 0.5), 0 10px 26px -12px rgba(var(--vcal-accent), 0.5); }
+.vcal-col--today .vcal-col-n { background: rgba(var(--vcal-accent), 0.88); color: #fff; }
+
+.vcal-col-stack { display: flex; flex-direction: column; gap: 16px; padding: 16px 14px 20px; }
+.vcal-col-empty { padding: 26px 8px; text-align: center; font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.22); }
+
+/* Episode cell — one clean card (art + info), breathing colour halo behind it */
+.vcal-cell { --vcal-show: var(--vcal-h, 230); position: relative; display: block; text-decoration: none; color: inherit;
+    transition: transform 0.2s ease; }
+.vcal-glow { position: absolute; inset: -11px; z-index: 0; border-radius: 22px; pointer-events: none;
+    background: radial-gradient(closest-side, hsla(var(--vcal-show), 90%, 55%, 0.55), transparent 76%);
+    opacity: 0.18; animation: vcalBreathe 6.5s ease-in-out infinite; animation-delay: calc(var(--i) * -0.43s); }
+@keyframes vcalBreathe { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.42; } }
+.vcal-card { position: relative; z-index: 1; display: block; border-radius: 14px; overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08); background: #14141a;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease; }
+.vcal-art { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden;
+    background: linear-gradient(135deg, hsl(var(--vcal-show), 48%, 26%), #0b0b0f 88%); }
+.vcal-cell-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vcal-art-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.45), transparent 55%); }
+.vcal-flag { position: absolute; top: 8px; right: 8px; z-index: 2; width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900;
+    background: rgba(108, 211, 145, 0.94); color: #07130c; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
+.vcal-info { display: block; padding: 9px 11px 11px; }
+.vcal-time { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; letter-spacing: 0.01em;
+    color: hsl(var(--vcal-show), 85%, 80%); }
+.vcal-time-dot { width: 6px; height: 6px; border-radius: 50%; background: hsl(var(--vcal-show), 85%, 62%);
+    box-shadow: 0 0 8px hsl(var(--vcal-show), 85%, 60%); }
+.vcal-time--none { color: rgba(255, 255, 255, 0.32); font-weight: 700; }
+.vcal-show { display: block; font-size: 13.5px; font-weight: 800; line-height: 1.25; margin-top: 5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vcal-meta { display: block; font-size: 11.5px; color: rgba(255, 255, 255, 0.5); margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vcal-se { font-weight: 800; color: rgba(255, 255, 255, 0.72); }
+.vcal-ep { margin-left: 6px; }
+.vcal-cell:hover { transform: translateY(-4px); }
+.vcal-cell:hover .vcal-glow { opacity: 0.6 !important; animation-play-state: paused; }
+.vcal-cell:hover .vcal-card { border-color: hsla(var(--vcal-show), 78%, 60%, 0.6);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 22px hsla(var(--vcal-show), 75%, 55%, 0.25); }
+
+@media (prefers-reduced-motion: reduce) { .vcal-glow { animation: none; opacity: 0.2; } }
+
+/* Empty state */
+.vcal-state { text-align: center; padding: 90px 20px; color: rgba(255, 255, 255, 0.6); }
+.vcal-state-ic { font-size: 48px; opacity: 0.55; }
+.vcal-state-title { font-size: 20px; font-weight: 800; color: #fff; margin-top: 12px; }
+.vcal-state-sub { font-size: 14px; margin-top: 6px; }
+
+@media (max-width: 900px) { .vcal-head, .vcal-body { padding-left: 18px; padding-right: 18px; } .vcal-cols { overflow-x: auto; } }
+
+/* ── Calendar — episode modal ─────────────────────────────────────────────── */
+.vcm-overlay { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(5, 5, 8, 0.72); backdrop-filter: blur(9px); opacity: 0; transition: opacity 0.2s ease; }
+.vcm-overlay.vcm-open { opacity: 1; }
+.vcm-modal { --vcm-h: 230; position: relative; width: min(700px, 100%); max-height: 90vh; overflow-y: auto;
+    border-radius: 22px; background: #101015; border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 50px 130px rgba(0, 0, 0, 0.72); transform: translateY(16px) scale(0.985);
+    transition: transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.vcm-overlay.vcm-open .vcm-modal { transform: none; }
+.vcm-modal::-webkit-scrollbar { width: 9px; }
+.vcm-modal::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 5px; }
+.vcm-close { position: absolute; top: 14px; right: 14px; z-index: 3; width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 22px; cursor: pointer;
+    backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; line-height: 1; transition: all 0.15s ease; }
+.vcm-close:hover { background: rgba(0, 0, 0, 0.72); border-color: rgba(255, 255, 255, 0.4); }
+
+.vcm-hero { position: relative; min-height: 210px; border-radius: 22px 22px 0 0; overflow: hidden; display: flex; align-items: flex-end; }
+.vcm-hero-bg { position: absolute; inset: 0; background-size: cover; background-position: center 28%; transform: scale(1.05); }
+.vcm-hero-scrim { position: absolute; inset: 0;
+    background: linear-gradient(0deg, #101015 3%, rgba(16, 16, 21, 0.45) 52%, rgba(16, 16, 21, 0.15)),
+        radial-gradient(130% 110% at 0% 100%, hsla(var(--vcm-h), 72%, 45%, 0.38), transparent 60%); }
+.vcm-hero-content { position: relative; z-index: 1; padding: 24px 26px 18px; width: 100%; }
+.vcm-eyebrow { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--vcm-h), 82%, 80%); }
+.vcm-eyebrow:empty { display: none; }
+.vcm-show { font-size: 27px; font-weight: 800; letter-spacing: -0.02em; margin: 6px 0 0; line-height: 1.1; }
+.vcm-genres { display: flex; gap: 7px; margin-top: 11px; flex-wrap: wrap; }
+.vcm-genre { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.82); }
+
+.vcm-body { padding: 20px 26px; }
+.vcm-ep { display: grid; grid-template-columns: 176px 1fr; gap: 20px; }
+.vcm-ep-still { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
+    background: linear-gradient(135deg, hsl(var(--vcm-h), 48%, 28%), #0b0b0f); }
+.vcm-ep-still img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vcm-ep-fb { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; color: rgba(255, 255, 255, 0.3); }
+.vcm-ep-main { min-width: 0; }
+.vcm-ep-se { font-size: 12px; font-weight: 800; color: hsl(var(--vcm-h), 82%, 78%); letter-spacing: 0.03em; }
+.vcm-ep-title { font-size: 20px; font-weight: 800; margin: 3px 0 0; line-height: 1.2; }
+.vcm-when { font-size: 13px; color: rgba(255, 255, 255, 0.62); margin-top: 8px; font-weight: 600; }
+.vcm-tags { display: flex; gap: 8px; margin-top: 13px; flex-wrap: wrap; align-items: center; }
+.vcm-badge { font-size: 11px; font-weight: 800; padding: 4px 11px; border-radius: 999px; }
+.vcm-badge--have { background: rgba(108, 211, 145, 0.16); color: #6cd391; }
+.vcm-badge--miss { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.55); }
+.vcm-tag { font-size: 11.5px; font-weight: 700; color: rgba(255, 255, 255, 0.62); }
+.vcm-tag--star { color: rgba(245, 197, 24, 0.95); }
+.vcm-ep-ov { font-size: 13.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.8); margin: 15px 0 0; }
+.vcm-ep-ov--none { color: rgba(255, 255, 255, 0.35); font-style: italic; }
+
+.vcm-about { margin-top: 22px; padding-top: 18px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.vcm-about-h { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.5); margin: 0 0 8px; }
+.vcm-about-ov { font-size: 13.5px; line-height: 1.6; color: rgba(255, 255, 255, 0.72); margin: 0; }
+
+.vcm-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 4px 26px 24px; }
+.vcm-btn { font-size: 13px; font-weight: 800; padding: 11px 18px; border-radius: 12px; cursor: pointer; border: 1px solid transparent; transition: all 0.15s ease; }
+.vcm-btn--ghost { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.82); }
+.vcm-btn--ghost:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.vcm-btn--primary { background: hsl(var(--vcm-h), 68%, 52%); color: #fff; box-shadow: 0 8px 24px hsla(var(--vcm-h), 70%, 45%, 0.4); }
+.vcm-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+@media (max-width: 560px) {
+    .vcm-ep { grid-template-columns: 1fr; }
+    .vcm-ep-still { max-width: 240px; }
+    .vcm-actions { flex-direction: column-reverse; }
+    .vcm-btn { width: 100%; }
+}

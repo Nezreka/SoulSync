@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS shows (
     overview           TEXT,
     status             TEXT,             -- continuing | ended | upcoming
     network            TEXT,
+    airs_time          TEXT,             -- TVDB show air time, e.g. "21:00" (network local)
     runtime_minutes    INTEGER,
     content_rating     TEXT,
     tagline            TEXT,

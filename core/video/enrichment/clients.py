@@ -658,6 +658,9 @@ class TVDBClient:
                 gs = [g.get("name") for g in (sd.get("genres") or []) if g.get("name")]
                 if gs:
                     meta["genres"] = gs
+                # Show-level air time (network local time, e.g. "21:00") — drives
+                # the Calendar's per-day time sort. Streaming shows have none.
+                meta["airs_time"] = (sd.get("airsTime") or "").strip() or None
             except Exception:
                 logger.exception("TVDB details fetch failed for %s", title or tvdb_id)
         if tvdb_id is None:

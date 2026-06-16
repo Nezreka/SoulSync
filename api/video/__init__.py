@@ -45,6 +45,7 @@ def create_video_blueprint() -> Blueprint:
     from .enrichment import register_routes as reg_enrichment
     from .detail import register_routes as reg_detail
     from .search import register_routes as reg_search
+    from .calendar import register_routes as reg_calendar
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -53,5 +54,6 @@ def create_video_blueprint() -> Blueprint:
     reg_enrichment(bp)
     reg_detail(bp)
     reg_search(bp)
+    reg_calendar(bp)
 
     return bp

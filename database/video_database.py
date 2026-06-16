@@ -66,7 +66,7 @@ _ENRICH_META_COLS = {
                "runtime_minutes", "studio", "tagline", "rating", "rating_critic",
                "imdb_id", "tmdb_id"},
     "shows": {"overview", "backdrop_url", "logo_url", "status", "network", "content_rating",
-              "tagline", "rating", "first_air_date", "last_air_date",
+              "tagline", "rating", "first_air_date", "last_air_date", "airs_time",
               "imdb_id", "tmdb_id", "tvdb_id"},
 }
 
@@ -97,6 +97,7 @@ _COLUMN_MIGRATIONS = [
     ("shows", "metacritic", "INTEGER"),
     ("movies", "ratings_synced", "INTEGER NOT NULL DEFAULT 0"),
     ("shows", "ratings_synced", "INTEGER NOT NULL DEFAULT 0"),
+    ("shows", "airs_time", "TEXT"),   # TVDB show air time, e.g. "21:00" (network local)
 ]
 
 
@@ -627,6 +628,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def requeue_shows_for_airtime(self) -> int:
+        """One-time backfill: re-queue TVDB enrichment for shows that have a
+        tvdb_id but no air time yet, so the worker re-fetches `airsTime`. Only
+        touches shows missing the time — idempotent, fills in the background."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE shows SET tvdb_match_status=NULL, tvdb_last_attempted=NULL "
+                "WHERE tvdb_id IS NOT NULL AND (airs_time IS NULL OR airs_time='')")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     @property
     def schema_version(self) -> int:
         conn = self._get_connection()
@@ -1005,6 +1020,31 @@ class VideoDatabase:
                 "FROM shows s ORDER BY COALESCE(s.sort_title, s.title) COLLATE NOCASE, s.title"
             ).fetchall()
             return [self._with_poster_flag(r) for r in rows]
+        finally:
+            conn.close()
+
+    def calendar_upcoming(self, start_date: str, end_date: str) -> list[dict]:
+        """Episodes airing in [start_date, end_date] (ISO) for OWNED shows — the
+        Calendar feed. Owned = the show is on a media server (server_source set),
+        so we surface upcoming episodes for things the user actually follows. Each
+        row carries owned/missing (has_file), a still flag, and show network/year
+        for the card. Ordered by air date then show then episode."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title, "
+                "e.overview, e.air_date, e.runtime_minutes, e.rating, e.has_file, e.monitored, "
+                "(e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
+                "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
+                "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
+                "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
+                "FROM episodes e JOIN shows s ON s.id = e.show_id "
+                "WHERE s.server_source IS NOT NULL "
+                "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ? "
+                "ORDER BY e.air_date, COALESCE(s.sort_title, s.title) COLLATE NOCASE, "
+                "e.season_number, e.episode_number",
+                (start_date, end_date)).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
