@@ -43,6 +43,7 @@ def register_routes(bp):
                 # Paged + searchable, like the library page.
                 res = db.query_watchlist(
                     kind, search=request.args.get("search", ""),
+                    sort=request.args.get("sort", "default"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60),
                     server_source=server)
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})

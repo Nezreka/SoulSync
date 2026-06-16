@@ -1269,21 +1269,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # owned/total episode counts — joined off s.id in both queries below.
+    _EPS_COLS = ("(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
+                 "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count")
+
     def _effective_shows(self, conn, server_source) -> list[dict]:
-        """Explicit show follows ∪ actively-airing library shows (not muted)."""
+        """Explicit show follows ∪ actively-airing library shows (not muted),
+        each carrying status + owned/total episode counts for the card chrome."""
         out, seen = [], set()
         for r in conn.execute(
-                "SELECT tmdb_id, title, poster_url, library_id, date_added FROM video_watchlist "
-                "WHERE kind='show' AND state='follow' ORDER BY date_added DESC, id DESC"):
+                "SELECT w.tmdb_id, w.title, w.poster_url, w.library_id, w.date_added, s.status, "
+                + self._EPS_COLS +
+                " FROM video_watchlist w LEFT JOIN shows s ON s.id = w.library_id "
+                "WHERE w.kind='show' AND w.state='follow' ORDER BY w.date_added DESC, w.id DESC"):
             d = dict(r); d["kind"] = "show"; out.append(d); seen.add(r["tmdb_id"])
         muted = {r["tmdb_id"] for r in conn.execute(
             "SELECT tmdb_id FROM video_watchlist WHERE kind='show' AND state='mute'")}
-        sql = ("SELECT tmdb_id, title, id AS library_id FROM shows "
-               "WHERE tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL)
+        sql = ("SELECT s.tmdb_id, s.title, s.id AS library_id, s.status, " + self._EPS_COLS +
+               " FROM shows s WHERE s.tmdb_id IS NOT NULL AND " + self._ACTIVE_SHOW_SQL)
         args: list = []
         if server_source:
-            sql += " AND server_source = ?"; args.append(server_source)
-        sql += " ORDER BY COALESCE(sort_title, title) COLLATE NOCASE"
+            sql += " AND s.server_source = ?"; args.append(server_source)
+        sql += " ORDER BY COALESCE(s.sort_title, s.title) COLLATE NOCASE"
         for r in conn.execute(sql, args):
             tid = r["tmdb_id"]
             if tid in seen or tid in muted:
@@ -1291,7 +1298,9 @@ class VideoDatabase:
             seen.add(tid)
             out.append({"kind": "show", "tmdb_id": tid, "title": r["title"],
                         "poster_url": "/api/video/poster/show/%d" % r["library_id"],
-                        "library_id": r["library_id"], "date_added": None, "auto": True})
+                        "library_id": r["library_id"], "status": r["status"],
+                        "episode_count": r["episode_count"], "owned_count": r["owned_count"],
+                        "date_added": None, "auto": True})
         return out
 
     def list_watchlist(self, kind: str | None = None, server_source=None) -> list[dict]:
@@ -1351,12 +1360,12 @@ class VideoDatabase:
         people = self.list_watchlist("person")
         return {"show": len(shows), "person": len(people), "total": len(shows) + len(people)}
 
-    def query_watchlist(self, kind: str, *, search=None, page=1, limit=60,
+    def query_watchlist(self, kind: str, *, search=None, sort="default", page=1, limit=60,
                         server_source=None) -> dict:
-        """One searched/paged slice of the effective watchlist for a kind — mirrors
-        query_library's {items, pagination} shape so the page can paginate like
-        the library. The effective list is bounded (follows + airing library
-        shows), so it's computed then filtered/sliced rather than via heavier SQL."""
+        """One searched/sorted/paged slice of the effective watchlist for a kind —
+        mirrors query_library's {items, pagination} shape so the page can paginate
+        like the library. The effective list is bounded (follows + airing library
+        shows), so it's computed then filtered/sorted/sliced rather than via SQL."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(200, int(limit or 60)))
@@ -1366,6 +1375,11 @@ class VideoDatabase:
         s = (search or "").strip().lower()
         if s:
             items = [it for it in items if s in (it.get("title") or "").lower()]
+        if sort == "title":
+            items.sort(key=lambda it: (it.get("title") or "").lower())
+        elif sort == "added":   # explicit follows (have a date) newest-first; airing defaults last
+            items.sort(key=lambda it: (it.get("date_added") or ""), reverse=True)
+        # "default": keep the natural effective order (follows first, then airing A–Z)
         total = len(items)
         total_pages = max(1, (total + limit - 1) // limit)
         page = min(page, total_pages)
