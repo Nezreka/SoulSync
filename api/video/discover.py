@@ -134,6 +134,7 @@ def register_routes(bp):
         genre = request.args.get("genre") or None
         year = request.args.get("year") or None
         decade = request.args.get("decade") or None
+        providers = request.args.get("providers") or None
         sort = request.args.get("sort") or "popularity.desc"
 
         def fetch(p):
@@ -142,7 +143,7 @@ def register_routes(bp):
             if key:
                 return eng.discover_curated(key, page=p)
             return eng.discover_filter(kind, genre=genre, year=year, decade=decade,
-                                       sort_by=sort, page=p)
+                                       providers=providers, sort_by=sort, page=p)
 
         try:
             items, seen = [], set()

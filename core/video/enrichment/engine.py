@@ -333,23 +333,26 @@ class VideoEnrichmentEngine:
                 return []
         return self._stamp_owned(items)
 
-    def discover_filter(self, kind, *, genre=None, year=None, decade=None,
+    def discover_filter(self, kind, *, genre=None, year=None, decade=None, providers=None,
                         sort_by="popularity.desc", page=1) -> list:
-        """Browse /discover filtered by genre / year / decade, cached + annotated."""
+        """Browse /discover filtered by genre / year / decade / streaming provider,
+        cached + owned-annotated."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
         if kind not in ("movie", "show"):
             kind = "movie"
-        ck = ("disc-flt", kind, genre, year, decade, sort_by, page)
+        ck = ("disc-flt", kind, genre, year, decade, providers, sort_by, page)
         items = self._cache_get(ck)
         if items is None:
             try:
                 items = w.client.discover(kind, genre=genre, year=year, decade=decade,
-                                          sort_by=sort_by, page=page) or []
+                                          providers=providers, sort_by=sort_by, page=page,
+                                          region=self._region()) or []
                 self._cache_put(ck, items, ttl=3600)
             except Exception:
-                logger.exception("discover filter failed (%s g=%s y=%s d=%s)", kind, genre, year, decade)
+                logger.exception("discover filter failed (%s g=%s y=%s d=%s p=%s)",
+                                 kind, genre, year, decade, providers)
                 return []
         return self._stamp_owned(items)
 

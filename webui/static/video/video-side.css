@@ -2385,3 +2385,12 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-tr-none { color: rgba(255, 255, 255, 0.6); font-size: 15px; font-weight: 600; }
 .vdsc-tr-title { margin-top: 14px; text-align: center; font-size: 15px; font-weight: 700; color: rgba(255, 255, 255, 0.85); }
 @media (prefers-reduced-motion: reduce) { .vdsc-tr-frame { transition: none; } }
+
+/* infinite-scroll sentinel (invisible trigger near the grid bottom) */
+.vdsc-sentinel { height: 1px; width: 100%; }
+
+/* keyboard focus rings (a11y) */
+.vdsc-chip:focus-visible, .vdsc-seg-btn:focus-visible, .vdsc-arrow:focus-visible, .vdsc-seeall:focus-visible,
+.vdsc-btn:focus-visible, .vdsc-hero-trailer:focus-visible, .vdsc-dot:focus-visible, .vdsc-toggle:focus-within,
+.vdsc-page .vsr-card:focus-visible {
+    outline: 2px solid rgba(var(--accent-rgb, 88 101 242), 0.9); outline-offset: 2px; }
