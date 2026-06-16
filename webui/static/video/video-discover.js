@@ -79,7 +79,7 @@
     function card(it) {
         var fallback = it.kind === 'movie' ? '🎬' : '📺';
         var img = it.poster
-            ? '<img src="' + esc(it.poster) + '" alt="" loading="lazy" ' +
+            ? '<img src="' + esc(it.poster) + '" alt="" loading="lazy" decoding="async" ' +
               'onerror="this.outerHTML=\'<div class=&quot;vsr-poster-ph&quot;>' + fallback + '</div>\'">'
             : '<div class="vsr-poster-ph">' + fallback + '</div>';
         var owned = it.library_id != null;
@@ -290,6 +290,18 @@
         var all = box.querySelectorAll(selector);
         for (var i = 0; i < all.length; i++) all[i].classList.toggle(onClass, all[i] === el);
     }
+    // Slide the segmented-control highlight under the active button.
+    function moveSeg(box) {
+        if (!box) return;
+        var on = box.querySelector('.vdsc-seg-btn--on');
+        if (!on || !on.offsetWidth) return;            // hidden / not laid out yet
+        box.style.setProperty('--seg-x', on.offsetLeft + 'px');
+        box.style.setProperty('--seg-w', on.offsetWidth + 'px');
+    }
+    function positionSegs() {
+        var segs = document.querySelectorAll('[data-video-subpage="' + PAGE_ID + '"] .vdsc-seg');
+        for (var i = 0; i < segs.length; i++) moveSeg(segs[i]);
+    }
 
     // ── wiring ────────────────────────────────────────────────────────────────
     function wire() {
@@ -321,6 +333,7 @@
                 var sbox = seg.closest('[data-vdsc-seg]');
                 var which = sbox.getAttribute('data-vdsc-seg');
                 setActive(sbox, seg, '.vdsc-seg-btn', 'vdsc-seg-btn--on');
+                moveSeg(sbox);
                 state.sel[which] = seg.getAttribute('data-val');
                 if (which === 'kind') renderGenreChips();   // genres differ by kind
                 return;
@@ -350,7 +363,15 @@
         var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { state.cat.page++; loadGrid(false); });
 
         var hide = $('[data-vdsc-hideowned]');
-        if (hide) hide.addEventListener('change', function () { page.classList.toggle('vdsc-hide-owned', hide.checked); });
+        if (hide) {
+            try { if (localStorage.getItem('vdsc_hideowned') === '1') hide.checked = true; } catch (e) { /* ignore */ }
+            page.classList.toggle('vdsc-hide-owned', hide.checked);
+            hide.addEventListener('change', function () {
+                page.classList.toggle('vdsc-hide-owned', hide.checked);
+                try { localStorage.setItem('vdsc_hideowned', hide.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+            });
+        }
+        window.addEventListener('resize', positionSegs);
     }
 
     function loadMeta() {
@@ -361,9 +382,18 @@
                 var g = res[0] || {}, t = res[1] || {};
                 state.genres = { movie: g.movie || [], show: g.show || [] };
                 state.taste = { movie: t.movie || [], show: t.show || [] };
+                // Genres are a static TMDB endpoint — empty means TMDB isn't set up.
+                if (!state.genres.movie.length && !state.genres.show.length) { showEmpty(); return; }
                 renderGenreChips();
                 renderShelves();
+                requestAnimationFrame(positionSegs);
             });
+    }
+    function showEmpty() {
+        var e = $('[data-vdsc-empty]'); if (e) e.classList.remove('hidden');
+        var b = $('[data-video-subpage="' + PAGE_ID + '"] .vdsc-browse'); if (b) b.classList.add('hidden');
+        var sh = $('[data-vdsc-shelves]'); if (sh) sh.classList.add('hidden');
+        var h = $('[data-vdsc-hero]'); if (h) h.classList.add('hidden');
     }
     function load() {
         if (state.loaded) return;
@@ -374,7 +404,7 @@
 
     function onShown(e) {
         if (!e) return;
-        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); }
+        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); requestAnimationFrame(positionSegs); }
         else stopHeroTimer();   // left the page → stop the slideshow
     }
     function init() { document.addEventListener('soulsync:video-page-shown', onShown); }
