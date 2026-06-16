@@ -48,6 +48,7 @@ def create_video_blueprint() -> Blueprint:
     from .discover import register_routes as reg_discover
     from .calendar import register_routes as reg_calendar
     from .watchlist import register_routes as reg_watchlist
+    from .wishlist import register_routes as reg_wishlist
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -59,5 +60,6 @@ def create_video_blueprint() -> Blueprint:
     reg_discover(bp)
     reg_calendar(bp)
     reg_watchlist(bp)
+    reg_wishlist(bp)
 
     return bp
