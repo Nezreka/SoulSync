@@ -863,6 +863,57 @@
                         </div>
                     </div>
                 </section>
+                <!-- Discover — browse TMDB titles you don't own: a trending hero
+                     slideshow + a deep stack of lazy genre/decade/curated rails, with
+                     a filter bar that flips into a paged grid. Built by
+                     video/video-discover.js, styled by .vdsc-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-discover" hidden>
+                    <div class="vdsc-page">
+                        <div class="vdsc-hero hidden" data-vdsc-hero></div>
+                        <div class="vdsc-filterbar">
+                            <span class="vdsc-filter-label">Browse</span>
+                            <select class="vdsc-select" data-vdsc-f-kind aria-label="Type">
+                                <option value="movie">Movies</option>
+                                <option value="show">TV Shows</option>
+                            </select>
+                            <select class="vdsc-select" data-vdsc-f-genre aria-label="Genre">
+                                <option value="">All genres</option>
+                            </select>
+                            <select class="vdsc-select" data-vdsc-f-decade aria-label="Decade">
+                                <option value="">Any decade</option>
+                                <option value="2020">2020s</option>
+                                <option value="2010">2010s</option>
+                                <option value="2000">2000s</option>
+                                <option value="1990">1990s</option>
+                                <option value="1980">1980s</option>
+                                <option value="1970">1970s</option>
+                            </select>
+                            <select class="vdsc-select" data-vdsc-f-sort aria-label="Sort">
+                                <option value="popularity.desc">Most popular</option>
+                                <option value="vote_average.desc">Top rated</option>
+                                <option value="vote_count.desc">Most voted</option>
+                            </select>
+                            <button class="vdsc-btn" type="button" data-vdsc-apply>Browse</button>
+                            <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-clear>Clear</button>
+                        </div>
+                        <div class="vdsc-shelves" data-vdsc-shelves></div>
+                        <div class="vdsc-grid-wrap hidden" data-vdsc-grid-wrap>
+                            <div class="vsr-loading hidden" data-vdsc-grid-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Loading&hellip;</div>
+                            </div>
+                            <div class="vsr-grid vdsc-grid" data-vdsc-grid></div>
+                            <div class="vsr-state hidden" data-vdsc-grid-empty>
+                                <div class="vsr-state-ic">&#129300;</div>
+                                <div class="vsr-state-title">Nothing here</div>
+                                <div class="vsr-state-sub">Try a different genre, decade or sort.</div>
+                            </div>
+                            <div class="vdsc-more-wrap">
+                                <button class="vdsc-btn vdsc-more hidden" type="button" data-vdsc-more>Load more</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <!-- Calendar — upcoming TV episodes for owned shows (agenda + day
                      strip). Built by video/video-calendar.js, styled by .vcal-* in
                      video-side.css. -->
@@ -9571,6 +9622,8 @@
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
     <!-- Video search (isolated; in-app multi-search → library/tmdb detail) -->
     <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
+    <!-- Video discover (isolated; trending hero + lazy genre/decade rails + filter grid) -->
+    <script src="{{ url_for('static', filename='video/video-discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
