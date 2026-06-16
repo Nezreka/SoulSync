@@ -2311,26 +2311,27 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    vibey palette (mirrors the music album-detail action buttons); active = filled. */
 .vdsc-chip, .vdsc-seg-btn { flex: 0 0 auto; padding: 8px 15px; border-radius: 9px; cursor: pointer;
     white-space: nowrap; font-size: 12.5px; font-weight: 700; letter-spacing: -0.01em;
-    color: rgba(var(--c, 200 205 230), 0.64);
-    background: rgba(var(--c, 200 205 230), 0.07);
-    border: 1px solid rgba(var(--c, 200 205 230), 0.18);
+    color: rgba(var(--c, 200, 205, 230), 0.64);
+    background: rgba(var(--c, 200, 205, 230), 0.07);
+    border: 1px solid rgba(var(--c, 200, 205, 230), 0.18);
     transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease, transform 0.18s cubic-bezier(0.34, 1.4, 0.5, 1); }
-.vdsc-chip:hover, .vdsc-seg-btn:hover { color: rgba(var(--c, 200 205 230), 0.96);
-    background: rgba(var(--c, 200 205 230), 0.14); border-color: rgba(var(--c, 200 205 230), 0.4); transform: translateY(-1px); }
+.vdsc-chip:hover, .vdsc-seg-btn:hover { color: rgba(var(--c, 200, 205, 230), 0.96);
+    background: rgba(var(--c, 200, 205, 230), 0.14); border-color: rgba(var(--c, 200, 205, 230), 0.4); transform: translateY(-1px); }
 .vdsc-chip--on, .vdsc-seg-btn--on { color: #fff; border-color: transparent; transform: translateY(-1px);
-    background: linear-gradient(135deg, rgba(var(--c, 120 130 240), 0.96), rgba(var(--c, 120 130 240), 0.6));
-    box-shadow: 0 9px 22px -9px rgba(var(--c, 120 130 240), 0.9),
-        0 0 0 1px rgba(var(--c, 120 130 240), 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+    background: linear-gradient(135deg, rgba(var(--c, 120, 130, 240), 0.96), rgba(var(--c, 120, 130, 240), 0.6));
+    box-shadow: 0 9px 22px -9px rgba(var(--c, 120, 130, 240), 0.9),
+        0 0 0 1px rgba(var(--c, 120, 130, 240), 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.25); }
 
-/* the palette — cycles across each row so a filter row reads colorful */
-.vdsc-chip:nth-child(8n+1), .vdsc-seg-btn:nth-child(8n+1) { --c: 29 185 84; }    /* green  */
-.vdsc-chip:nth-child(8n+2), .vdsc-seg-btn:nth-child(8n+2) { --c: 147 112 219; }  /* purple */
-.vdsc-chip:nth-child(8n+3), .vdsc-seg-btn:nth-child(8n+3) { --c: 100 149 237; }  /* blue   */
-.vdsc-chip:nth-child(8n+4), .vdsc-seg-btn:nth-child(8n+4) { --c: 245 158 11; }   /* amber  */
-.vdsc-chip:nth-child(8n+5), .vdsc-seg-btn:nth-child(8n+5) { --c: 236 72 153; }   /* pink   */
-.vdsc-chip:nth-child(8n+6), .vdsc-seg-btn:nth-child(8n+6) { --c: 34 211 238; }   /* cyan   */
-.vdsc-chip:nth-child(8n+7), .vdsc-seg-btn:nth-child(8n+7) { --c: 248 113 113; }  /* coral  */
-.vdsc-chip:nth-child(8n),   .vdsc-seg-btn:nth-child(8n)   { --c: 168 85 247; }   /* violet */
+/* the palette — cycles across each row so a filter row reads colorful
+   (comma-separated triples so they slot into rgba(var(--c), a)) */
+.vdsc-chip:nth-child(8n+1), .vdsc-seg-btn:nth-child(8n+1) { --c: 29, 185, 84; }    /* green  */
+.vdsc-chip:nth-child(8n+2), .vdsc-seg-btn:nth-child(8n+2) { --c: 147, 112, 219; }  /* purple */
+.vdsc-chip:nth-child(8n+3), .vdsc-seg-btn:nth-child(8n+3) { --c: 100, 149, 237; }  /* blue   */
+.vdsc-chip:nth-child(8n+4), .vdsc-seg-btn:nth-child(8n+4) { --c: 245, 158, 11; }   /* amber  */
+.vdsc-chip:nth-child(8n+5), .vdsc-seg-btn:nth-child(8n+5) { --c: 236, 72, 153; }   /* pink   */
+.vdsc-chip:nth-child(8n+6), .vdsc-seg-btn:nth-child(8n+6) { --c: 34, 211, 238; }   /* cyan   */
+.vdsc-chip:nth-child(8n+7), .vdsc-seg-btn:nth-child(8n+7) { --c: 248, 113, 113; }  /* coral  */
+.vdsc-chip:nth-child(8n),   .vdsc-seg-btn:nth-child(8n)   { --c: 168, 85, 247; }   /* violet */
 
 .vdsc-browse-bottom { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
 .vdsc-browse-bottom .vdsc-chips { flex: 1; min-width: 0; margin-top: 0; }
