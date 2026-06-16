@@ -821,11 +821,9 @@ class VideoDatabase:
                 # Curated watchlist (explicit follows + actively-airing library
                 # shows), NOT the old monitored-based v_watchlist view.
                 "watchlist": self.watchlist_counts(server_source=server_source)["total"],
-                # Wishlist is intentionally 0 for now: the old v_wishlist view
-                # auto-listed EVERY missing movie/episode (monitored defaults to
-                # 1), which isn't the intended curated wishlist. Repoint this at
-                # the curated source once "add to wishlist" population lands.
-                "wishlist": 0,
+                # Curated wishlist (movies + wanted episodes), NOT the old
+                # v_wishlist view that auto-listed every missing item.
+                "wishlist": self.wishlist_counts()["total"],
             }
         finally:
             conn.close()

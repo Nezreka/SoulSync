@@ -425,3 +425,65 @@ def test_watchlist_endpoint_paginates_and_searches(tmp_path):
     assert d["counts"]["person"] == 5
     s = client.get("/api/video/watchlist?kind=person&search=P3").get_json()
     assert len(s["items"]) == 1 and s["items"][0]["title"] == "P3"
+
+
+# ── wishlist endpoints ────────────────────────────────────────────────────────
+
+def test_wishlist_add_movie_then_list(tmp_path):
+    client, _ = _make_client(tmp_path)
+    r = client.post("/api/video/wishlist/add", json={"movie": {"tmdb_id": 603, "title": "The Matrix", "year": 1999}})
+    assert r.get_json() == {"success": True, "added": 1, "counts": {"movie": 1, "show": 0, "episode": 0, "total": 1}}
+    lst = client.get("/api/video/wishlist?kind=movie").get_json()
+    assert lst["success"] and lst["items"][0]["tmdb_id"] == 603 and lst["counts"]["movie"] == 1
+
+
+def test_wishlist_add_episodes_groups_into_show(tmp_path):
+    client, _ = _make_client(tmp_path)
+    r = client.post("/api/video/wishlist/add", json={
+        "show": {"tmdb_id": 1396, "title": "Breaking Bad", "poster_url": "/bb.jpg"},
+        "episodes": [{"season_number": 1, "episode_number": 1, "title": "Pilot"},
+                     {"season_number": 1, "episode_number": 2}]})
+    assert r.get_json()["added"] == 2
+    show = client.get("/api/video/wishlist?kind=show").get_json()["items"][0]
+    assert show["tmdb_id"] == 1396 and show["wanted"] == 2
+    assert show["seasons"][0]["season_number"] == 1
+
+
+def test_wishlist_add_requires_valid_body(tmp_path):
+    client, _ = _make_client(tmp_path)
+    assert client.post("/api/video/wishlist/add", json={}).status_code == 400
+    # show with no episodes is rejected (episodes are the atomic unit)
+    assert client.post("/api/video/wishlist/add", json={"show": {"tmdb_id": 1, "title": "S"}}).status_code == 400
+
+
+def test_wishlist_remove_scopes_via_api(tmp_path):
+    client, _ = _make_client(tmp_path)
+    client.post("/api/video/wishlist/add", json={
+        "show": {"tmdb_id": 1396, "title": "Breaking Bad"},
+        "episodes": [{"season_number": 1, "episode_number": 1}, {"season_number": 1, "episode_number": 2}]})
+    r = client.post("/api/video/wishlist/remove",
+                    json={"scope": "episode", "tmdb_id": 1396, "season_number": 1, "episode_number": 2})
+    assert r.get_json()["removed"] == 1 and r.get_json()["counts"]["episode"] == 1
+    assert client.post("/api/video/wishlist/remove", json={"scope": "show", "tmdb_id": 1396}).get_json()["removed"] == 1
+    assert client.post("/api/video/wishlist/remove", json={"scope": "bogus", "tmdb_id": 1}).status_code == 400
+
+
+def test_wishlist_check_hydration(tmp_path):
+    client, _ = _make_client(tmp_path)
+    client.post("/api/video/wishlist/add", json={"movie": {"tmdb_id": 603, "title": "The Matrix"}})
+    client.post("/api/video/wishlist/add", json={
+        "show": {"tmdb_id": 1396, "title": "Breaking Bad"},
+        "episodes": [{"season_number": 2, "episode_number": 3}]})
+    res = client.post("/api/video/wishlist/check", json={"movie_ids": [603, 700], "show_tmdb_id": 1396}).get_json()
+    assert res["movies"] == [603] and res["episodes"] == ["2_3"]
+
+
+def test_wishlist_routes_registered():
+    from flask import Flask
+    from api.video import create_video_blueprint
+    app = Flask(__name__)
+    app.register_blueprint(create_video_blueprint(), url_prefix="/api/video")
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    for r in ("/api/video/wishlist", "/api/video/wishlist/add", "/api/video/wishlist/remove",
+              "/api/video/wishlist/check", "/api/video/wishlist/counts"):
+        assert r in rules
