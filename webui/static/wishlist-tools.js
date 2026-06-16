@@ -3253,7 +3253,21 @@ function openLibraryHistoryModal() {
         overlay.classList.remove('hidden');
         _libraryHistoryState.page = 1;
         loadLibraryHistory();
+        _refreshQuarantineTabCount();   // #876: count correct on open, not only after clicking the tab
     }
+}
+
+// #876: keep the Quarantine tab badge accurate the moment the modal opens. The
+// full count was previously only set by loadQuarantineList() (i.e. after the tab
+// was clicked), so it showed a stale 0 until then.
+async function _refreshQuarantineTabCount() {
+    const el = document.getElementById('history-quarantine-count');
+    if (!el) return;
+    try {
+        const resp = await fetch('/api/quarantine/list');
+        const data = await resp.json();
+        el.textContent = (data.entries || []).length;
+    } catch (e) { /* leave the existing value on error */ }
 }
 
 // ──────────────────────────────────────────────────────────────────────
