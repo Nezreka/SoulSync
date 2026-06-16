@@ -291,8 +291,69 @@
                 state.eps = {};
                 (d.episodes || []).forEach(function (e) { state.eps[e.id] = e; });
                 render();
+                refreshAddMissing();   // surface the catch-up button for aired-missing eps
             })
             .catch(function () { showLoading(false); state.data = null; render(); });
+    }
+
+    // ── "Add missing to wishlist" (catch-up for the auto-promoter) ────────────
+    // Targets already-AIRED, MISSING episodes in this week that aren't yet on the
+    // wishlist. Upcoming episodes are left alone (the calendar promotes them once
+    // they air). Mostly a no-op on the current/future weeks; useful on past ones.
+    function airedMissing() {
+        var d = state.data; if (!d) return [];
+        var today = d.today;
+        return (d.episodes || []).filter(function (e) {
+            return !e.has_file && e.show_tmdb_id && e.air_date && e.air_date < today;
+        });
+    }
+    function refreshAddMissing() {
+        var btn = $('[data-video-cal-addmissing]'); if (!btn) return;
+        state.addMissing = [];
+        btn.classList.add('hidden');
+        var cand = airedMissing();
+        if (!cand.length) return;
+        var ids = []; cand.forEach(function (e) { if (ids.indexOf(e.show_tmdb_id) < 0) ids.push(e.show_tmdb_id); });
+        fetch('/api/video/wishlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shows: ids }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                var by = (res && res.by_show) || {};
+                var fresh = cand.filter(function (e) {
+                    var have = by[String(e.show_tmdb_id)] || [];
+                    return have.indexOf(e.season_number + '_' + e.episode_number) < 0;
+                });
+                state.addMissing = fresh;
+                var lbl = $('[data-video-cal-addmissing-label]');
+                if (lbl) lbl.textContent = 'Add ' + fresh.length + ' missing to wishlist';
+                btn.classList.toggle('hidden', !fresh.length);
+            })
+            .catch(function () { /* leave hidden */ });
+    }
+    function addMissing() {
+        var eps = state.addMissing || []; if (!eps.length) return;
+        var btn = $('[data-video-cal-addmissing]'); if (btn) btn.disabled = true;
+        var byShow = {};
+        eps.forEach(function (e) {
+            var g = byShow[e.show_tmdb_id] || (byShow[e.show_tmdb_id] = {
+                tmdb_id: e.show_tmdb_id, title: e.show_title,
+                poster_url: e.show_has_poster ? ('/api/video/poster/show/' + e.show_id) : null,
+                library_id: e.show_id, episodes: [] });
+            g.episodes.push({ season_number: e.season_number, episode_number: e.episode_number,
+                title: e.title, air_date: e.air_date });
+        });
+        var posts = Object.keys(byShow).map(function (k) {
+            var g = byShow[k];
+            return fetch('/api/video/wishlist/add', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ show: { tmdb_id: g.tmdb_id, title: g.title, poster_url: g.poster_url,
+                    library_id: g.library_id }, episodes: g.episodes }) }).then(function (r) { return r.ok ? r.json() : null; });
+        });
+        Promise.all(posts).then(function () {
+            if (typeof showToast === 'function') showToast('Added ' + eps.length + ' missing episode' + (eps.length === 1 ? '' : 's') + ' to wishlist', 'success');
+            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+            if (btn) btn.disabled = false;
+            refreshAddMissing();   // recompute → button hides what's now queued
+        }).catch(function () { if (btn) btn.disabled = false; });
     }
 
     function openFrom(target) {
@@ -344,6 +405,8 @@
         for (var i = 0; i < fbs.length; i++) (function (b) {
             b.addEventListener('click', function () { state.filter = b.getAttribute('data-video-cal-filter'); render(); });
         })(fbs[i]);
+        var addBtn = $('[data-video-cal-addmissing]');
+        if (addBtn) addBtn.addEventListener('click', addMissing);
 
         // Keyboard nav for a page users live in: ← / → step weeks, T jumps to
         // today. Only when the calendar is the visible page, no modal is open,

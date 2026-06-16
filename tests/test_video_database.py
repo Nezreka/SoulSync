@@ -921,3 +921,12 @@ def test_wishlist_query_search_and_paging(db):
     p1 = db.query_wishlist("movie", page=1, limit=2)
     assert len(p1["items"]) == 2 and p1["pagination"]["total_pages"] == 3
     assert db.query_wishlist("movie", page=99, limit=2)["pagination"]["page"] == 3   # clamps
+
+
+def test_wishlist_keys_for_shows(db):
+    db.add_episodes_to_wishlist(1396, "BB", [{"season_number": 1, "episode_number": 1},
+                                             {"season_number": 2, "episode_number": 3}])
+    db.add_episodes_to_wishlist(1399, "GoT", [{"season_number": 1, "episode_number": 1}])
+    keys = db.wishlist_keys_for_shows([1396, 1399, 9999])
+    assert keys[1396] == {"1_1", "2_3"} and keys[1399] == {"1_1"} and 9999 not in keys
+    assert db.wishlist_keys_for_shows([]) == {}
