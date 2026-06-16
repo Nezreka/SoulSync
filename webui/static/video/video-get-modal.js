@@ -156,5 +156,28 @@
         });
     }, true);
 
-    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal };
+    // Pick the right overlay control for any card: person → eye; movie → get;
+    // show → eye when airing (or status unknown = still followable), get when
+    // confirmed ended. One helper so every surface stays consistent.
+    function cardButton(o) {
+        if (!o || !o.kind) return '';
+        if (o.kind === 'person') {
+            return window.VideoWatchlist
+                ? VideoWatchlist.btn({ kind: 'person', tmdbId: o.tmdbId, title: o.title, poster: o.poster }) : '';
+        }
+        if (o.kind === 'show') {
+            var airing = !o.status ? true : isAiring(o.status);
+            if (airing && o.tmdbId && window.VideoWatchlist) {
+                return VideoWatchlist.btn({ kind: 'show', tmdbId: o.tmdbId, title: o.title,
+                                            poster: o.poster, libraryId: o.libraryId });
+            }
+            return btn({ kind: 'show', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title });
+        }
+        if (o.kind === 'movie') {
+            return btn({ kind: 'movie', source: o.source || 'tmdb', openId: o.libraryId || o.tmdbId, title: o.title });
+        }
+        return '';
+    }
+
+    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, cardButton: cardButton };
 })();

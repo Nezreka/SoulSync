@@ -48,8 +48,10 @@
         var id = owned ? c.library_id : c.tmdb_id;
         var href = '/video-detail/' + source + '/' + c.kind + '/' + id;
         var sub = [c.year, c.role].filter(Boolean).join(' · ');
+        var cb = window.VideoGet ? VideoGet.cardButton({ kind: c.kind, tmdbId: c.tmdb_id,
+            libraryId: c.library_id, title: c.title, poster: c.poster, status: c.status, source: source }) : '';
         return '<a class="vsr-card" href="' + href + '" ' +
-            'data-vp-open="' + c.kind + '" data-vp-source="' + source + '" data-vp-cid="' + id + '">' +
+            'data-vp-open="' + c.kind + '" data-vp-source="' + source + '" data-vp-cid="' + id + '">' + cb +
             '<div class="vsr-poster">' + img + ribbon +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(c.title) + '">' + esc(c.title) +
@@ -130,6 +132,7 @@
         var top = filtered().slice(0, 10);
         section.hidden = top.length < 3;             // only worth a rail if there are a few
         host.innerHTML = top.map(creditCard).join('');
+        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
     }
 
     function renderCredits() {
@@ -144,6 +147,7 @@
             credits.sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
         }
         host.innerHTML = credits.map(creditCard).join('');
+        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
         if (empty) {
             empty.hidden = credits.length > 0;
             if (!credits.length) {
