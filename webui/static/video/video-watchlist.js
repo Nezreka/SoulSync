@@ -58,10 +58,24 @@
             esc(it.title) + '</span>' + meta + '</div></a>';
     }
 
+    function updateNavBadge(counts) {
+        var b = $('[data-video-watchlist-badge]'); if (!b) return;
+        var n = counts ? ((counts.show || 0) + (counts.person || 0)) : 0;
+        b.textContent = n;
+        b.classList.toggle('hidden', !n);
+    }
+    function refreshBadge() {
+        fetch('/api/video/watchlist/counts', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d && d.success) updateNavBadge(d); })
+            .catch(function () { /* ignore */ });
+    }
+
     function setCounts(counts) {
         state.counts = { show: (counts && counts.show) || 0, person: (counts && counts.person) || 0 };
         var cs = $('[data-vwlp-count-show]'); if (cs) cs.textContent = state.counts.show;
         var cp = $('[data-vwlp-count-person]'); if (cp) cp.textContent = state.counts.person;
+        updateNavBadge(state.counts);
     }
 
     function updatePagination(p) {
@@ -132,7 +146,8 @@
     // un-followed card drops and counts/pagination stay correct.
     function onChanged() {
         var grid = $('[data-vwlp-grid]');
-        if (state.loaded && grid && grid.offsetParent !== null) load();
+        if (grid && grid.offsetParent !== null) load();   // visible → reload (refreshes badge via setCounts)
+        else refreshBadge();                              // not visible → keep the nav badge current
     }
 
     function wire() {
@@ -187,6 +202,7 @@
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onShown);
+        refreshBadge();   // seed the nav badge on boot
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
