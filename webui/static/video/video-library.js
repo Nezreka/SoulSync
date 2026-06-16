@@ -65,6 +65,16 @@
               fallback + '</div>\'"></div>'
             : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
 
+        // #watchlist: TV shows get a hover "follow" eye (movies don't — they're
+        // wishlist, not watchlist). Injected inside the positioned poster box.
+        if (kind === 'show' && it.tmdb_id && window.VideoWatchlist) {
+            var wlb = VideoWatchlist.btn({
+                kind: 'show', tmdbId: it.tmdb_id, title: it.title,
+                poster: it.has_poster ? ('/api/video/poster/show/' + it.id) : '', libraryId: it.id
+            });
+            if (wlb) img = img.replace(/<\/div>$/, wlb + '</div>');
+        }
+
         var badge = '';
         if (kind === 'movie') {
             var rl = resLabel(it.resolution);
@@ -97,6 +107,8 @@
         var empty = $('[data-video-lib-empty]');
         if (grid) grid.innerHTML = items.map(function (it) { return cardHTML(it, kind); }).join('');
         if (empty) empty.classList.toggle('hidden', items.length > 0);
+        // #watchlist: paint the follow eye on shows already on the watchlist.
+        if (grid && kind === 'show' && window.VideoWatchlist) VideoWatchlist.hydrate(grid);
     }
 
     function updatePagination(p) {

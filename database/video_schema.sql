@@ -330,6 +330,24 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at);
 
+-- ── User watchlist (curated follow-list: shows + people) ────────────────────
+-- DISTINCT from the library-derived v_watchlist below: this is the user's
+-- explicit follow-list and may include shows/people that are NOT in the library
+-- yet (the whole point of following someone). Keyed on the stable cross-context
+-- tmdb_id that both shows and people carry. The monitoring/discovery engine is a
+-- later phase — this table just records membership + enough to render + link.
+CREATE TABLE IF NOT EXISTS video_watchlist (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,             -- 'show' | 'person'
+    tmdb_id     INTEGER NOT NULL,
+    title       TEXT NOT NULL,             -- show title / person name
+    poster_url  TEXT,                      -- poster (show) / photo (person)
+    library_id  INTEGER,                   -- shows.id when owned (else NULL)
+    date_added  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(kind, tmdb_id)
+);
+CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
+
 -- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
 -- WATCHLIST = things you follow for NEW content: monitored shows + channels.
 CREATE VIEW IF NOT EXISTS v_watchlist AS

@@ -767,3 +767,38 @@ def test_prune_is_scoped_to_one_server(db):
     db.prune_missing("movies", "plex", seen_ids=[])
     assert db.query_library("movies", server_source="plex")["pagination"]["total_count"] == 0
     assert db.query_library("movies", server_source="jellyfin")["pagination"]["total_count"] == 1
+
+
+# ── user watchlist (shows + people) ─────────────────────────────────────
+
+def test_watchlist_add_list_remove(db):
+    assert db.add_to_watchlist("show", 1399, "Game of Thrones", poster_url="/p.jpg", library_id=7) is True
+    assert db.add_to_watchlist("person", 287, "Brad Pitt") is True
+    assert db.add_to_watchlist("movie", 1, "nope") is False          # wrong kind
+    assert db.add_to_watchlist("show", 0, "no id") is False          # no tmdb id
+    rows = db.list_watchlist()
+    assert {r["kind"] for r in rows} == {"show", "person"}
+    assert db.list_watchlist("person")[0]["title"] == "Brad Pitt"
+    assert db.remove_from_watchlist("show", 1399) is True
+    assert db.remove_from_watchlist("show", 1399) is False           # already gone
+
+
+def test_watchlist_reAdd_is_upsert_and_coalesces_library_id(db):
+    db.add_to_watchlist("show", 1399, "GoT", poster_url="/a.jpg", library_id=7)
+    # Re-add WITHOUT library_id/poster (e.g. from a TMDB search card) must not
+    # wipe the previously-known library_id/poster, but should refresh the title.
+    db.add_to_watchlist("show", 1399, "Game of Thrones")
+    rows = db.list_watchlist("show")
+    assert len(rows) == 1                                            # no duplicate
+    assert rows[0]["title"] == "Game of Thrones"                    # refreshed
+    assert rows[0]["library_id"] == 7 and rows[0]["poster_url"] == "/a.jpg"  # preserved
+
+
+def test_watchlist_state_and_counts(db):
+    db.add_to_watchlist("show", 1399, "GoT")
+    db.add_to_watchlist("show", 1396, "Breaking Bad")
+    db.add_to_watchlist("person", 287, "Brad Pitt")
+    assert db.watchlist_state("show", [1399, 1396, 9999]) == {1399: True, 1396: True}
+    assert db.watchlist_state("show", []) == {}
+    assert db.watchlist_state("person", [287]) == {287: True}
+    assert db.watchlist_counts() == {"show": 2, "person": 1, "total": 3}

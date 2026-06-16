@@ -291,3 +291,63 @@ def test_video_api_imports_nothing_from_music():
             s = line.strip()
             if s.startswith("import ") or s.startswith("from "):
                 assert "music" not in s.lower(), f"{py.name}: music import leaked: {s!r}"
+
+
+# ── Watchlist endpoints (shows + people) ────────────────────────────────
+
+def test_watchlist_routes_registered():
+    from api.video import create_video_blueprint
+    app = Flask(__name__)
+    app.register_blueprint(create_video_blueprint(), url_prefix="/api/video")
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    for r in ("/api/video/watchlist", "/api/video/watchlist/add",
+              "/api/video/watchlist/remove", "/api/video/watchlist/check",
+              "/api/video/watchlist/counts"):
+        assert r in rules, r
+
+
+def test_watchlist_add_check_list_remove_roundtrip(tmp_path):
+    client, _ = _make_client(tmp_path)
+
+    # empty to start
+    assert client.get("/api/video/watchlist").get_json() == {
+        "success": True, "shows": [], "people": [],
+        "counts": {"show": 0, "person": 0, "total": 0}}
+
+    # add a show + a person
+    r = client.post("/api/video/watchlist/add", json={
+        "kind": "show", "tmdb_id": 1399, "title": "Game of Thrones",
+        "poster_url": "/p.jpg", "library_id": 7})
+    assert r.get_json() == {"success": True, "watched": True}
+    client.post("/api/video/watchlist/add", json={
+        "kind": "person", "tmdb_id": 287, "title": "Brad Pitt"})
+
+    # list groups by kind
+    data = client.get("/api/video/watchlist").get_json()
+    assert data["counts"] == {"show": 1, "person": 1, "total": 2}
+    assert data["shows"][0]["title"] == "Game of Thrones"
+    assert data["people"][0]["tmdb_id"] == 287
+
+    # check (hydration) — only watched ids come back, keys are strings
+    chk = client.post("/api/video/watchlist/check",
+                      json={"kind": "show", "tmdb_ids": [1399, 9999]}).get_json()
+    assert chk == {"success": True, "results": {"1399": True}}
+
+    # counts endpoint
+    assert client.get("/api/video/watchlist/counts").get_json() == {
+        "success": True, "show": 1, "person": 1, "total": 2}
+
+    # remove
+    rem = client.post("/api/video/watchlist/remove",
+                      json={"kind": "show", "tmdb_id": 1399}).get_json()
+    assert rem["success"] is True and rem["watched"] is False and rem["removed"] is True
+    assert client.get("/api/video/watchlist/counts").get_json()["show"] == 0
+
+
+def test_watchlist_add_validates_input(tmp_path):
+    client, _ = _make_client(tmp_path)
+    assert client.post("/api/video/watchlist/add", json={"kind": "movie", "tmdb_id": 1, "title": "x"}).status_code == 400
+    assert client.post("/api/video/watchlist/add", json={"kind": "show", "title": "no id"}).status_code == 400
+    assert client.post("/api/video/watchlist/add", json={"kind": "show", "tmdb_id": 1}).status_code == 400  # no title
+    assert client.post("/api/video/watchlist/remove", json={"kind": "person"}).status_code == 400
+    assert client.post("/api/video/watchlist/check", json={"tmdb_ids": [1]}).status_code == 400  # no kind
