@@ -136,7 +136,14 @@
             // Collapse/expand a season (ignore clicks on its checkbox).
             var sh = e.target.closest('[data-vgm-season-toggle]');
             if (sh && !e.target.closest('.vgm-season-check')) {
-                sh.parentNode.classList.toggle('vgm-season--open');
+                var seasonEl = sh.parentNode;
+                var opening = !seasonEl.classList.contains('vgm-season--open');
+                seasonEl.classList.toggle('vgm-season--open');
+                // First expand of an un-owned (tmdb) season → fetch its episodes.
+                if (opening && seasonEl.getAttribute('data-vgm-lazy') === '1' &&
+                    !seasonEl.getAttribute('data-vgm-loaded')) {
+                    loadSeason(seasonEl);
+                }
                 return;
             }
             if (e.target.closest('[data-vgm-wishlist]')) {
@@ -256,17 +263,36 @@
             badge + '</label>';
     }
 
-    function renderEpisodes(d) {
+    function renderEpisodes(d, o) {
         var wrap = modalEl.querySelector('[data-vgm-eps]'); if (!wrap) return;
         if (!d.seasons || !d.seasons.length) { wrap.hidden = true; return; }
         var today = isoToday();
-        modalState = { kind: 'show', sel: new Set() };
-        var totalMissing = 0;
+        // For an un-owned (tmdb) show the episodes aren't shipped with the detail —
+        // they load per-season on expand (like the full detail page). Stash the tv
+        // id so the lazy loader can fetch them.
+        var tvId = (o && o.source === 'tmdb') ? parseInt(o.id, 10) : null;
+        modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today };
+        var totalMissing = 0, anyLazy = false;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
             '<label class="vgm-eps-toggle"><input type="checkbox" data-vgm-missing-only checked>' +
             '<span>Missing only</span></label></div><div class="vgm-eps-list">';
         d.seasons.forEach(function (s) {
             var eps = s.episodes || [];
+            // Lazy: a tmdb season with a known count but no episodes shipped yet.
+            if (!eps.length && (s.episode_total || 0) > 0 && tvId) {
+                anyLazy = true;
+                totalMissing += s.episode_total;   // all wanted → never "all owned"
+                html += '<div class="vgm-season" data-vgm-lazy="1" data-vgm-season="' + s.season_number + '">' +
+                    '<div class="vgm-season-head" data-vgm-season-toggle>' +
+                        '<span class="vgm-season-check"><input type="checkbox" data-vgm-season-all="' + s.season_number + '" disabled></span>' +
+                        '<span class="vgm-season-name">' + esc(s.title || ('Season ' + s.season_number)) + '</span>' +
+                        '<span class="vgm-season-meta">' + s.episode_total + ' eps</span>' +
+                        '<span class="vgm-season-chev" aria-hidden="true">⌄</span>' +
+                    '</div>' +
+                    '<div class="vgm-season-eps"><div class="vgm-season-loading">Expand to load episodes…</div></div>' +
+                    '</div>';
+                return;
+            }
             var missing = 0;
             eps.forEach(function (e) { if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); } });
             totalMissing += missing;
@@ -284,7 +310,8 @@
         });
         html += '</div>';
         // When you own everything, the missing-only view would be blank — say so.
-        if (totalMissing === 0) {
+        // (Skipped for lazy/un-owned shows: nothing is owned, episodes load on expand.)
+        if (totalMissing === 0 && !anyLazy) {
             html += '<div class="vgm-eps-allowned">✓ You have every episode. Turn off “Missing only” to re-download.</div>';
         }
         wrap.innerHTML = html;
@@ -292,6 +319,38 @@
         wrap.hidden = false;
         // initial season-checkbox states reflect the (missing-only) selection
         d.seasons.forEach(function (s) { syncSeasonCheck(modalEl, s.season_number); });
+    }
+
+    // Fetch a tmdb season's episodes the first time it's expanded, render them,
+    // and pre-select the missing-aired ones (everything un-owned that has aired).
+    function loadSeason(seasonEl) {
+        if (!modalState || !modalState.tvId || !seasonEl) return;
+        var sn = parseInt(seasonEl.getAttribute('data-vgm-season'), 10);
+        seasonEl.setAttribute('data-vgm-loaded', '1');   // guard double-fetch
+        var body = seasonEl.querySelector('.vgm-season-eps');
+        if (body) body.innerHTML = '<div class="vgm-season-loading">Loading episodes…</div>';
+        fetch('/api/video/tmdb/show/' + modalState.tvId + '/season/' + sn, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!modalEl || !seasonEl.parentNode) return;
+                var eps = (data && data.episodes) || [];
+                var b = seasonEl.querySelector('.vgm-season-eps');
+                if (!eps.length) { if (b) b.innerHTML = '<div class="vgm-season-loading">No episode info available.</div>'; return; }
+                var today = modalState.today;
+                if (b) b.innerHTML = eps.map(function (e) { return epRow(sn, e, today); }).join('');
+                eps.forEach(function (e) {
+                    if (epState(e, today) === 'missing') modalState.sel.add(sn + '_' + e.episode_number);
+                });
+                var all = seasonEl.querySelector('[data-vgm-season-all]');
+                if (all) all.disabled = false;
+                syncSeasonCheck(modalEl, sn);
+                updateFooter();
+            })
+            .catch(function () {
+                var b = seasonEl.querySelector('.vgm-season-eps');
+                if (b) b.innerHTML = '<div class="vgm-season-loading">Couldn’t load episodes — tap to retry.</div>';
+                seasonEl.removeAttribute('data-vgm-loaded');   // allow a retry on next expand
+            });
     }
 
     function fill(d, o) {
@@ -341,7 +400,7 @@
         renderRatings(d);   // IMDb / Rotten Tomatoes / Metacritic chips (both kinds)
         if (o.kind === 'show') {
             modalState = modalState || { kind: 'show', sel: new Set() };
-            renderEpisodes(d); renderNext(d); maybeFollow(d);   // selector + next-up + follow offer
+            renderEpisodes(d, o); renderNext(d); maybeFollow(d);   // selector + next-up + follow offer
         } else {
             modalState = { kind: 'movie', owned: !!d.owned };   // owned movies → re-download, not wishlist
             renderOwned(d);
@@ -391,11 +450,17 @@
                     best = { s: s.season_number, e: e.episode_number, air_date: e.air_date, title: e.title };
             });
         });
+        // Un-owned (tmdb) shows ship no episodes — fall back to the payload's
+        // next_episode stub from the TMDB extras.
+        if (!best && d.next_episode && d.next_episode.episode_number != null) {
+            var ne = d.next_episode;
+            best = { s: ne.season_number, e: ne.episode_number, air_date: ne.air_date, title: ne.name };
+        }
         if (!best) { box.hidden = true; return; }
         box.innerHTML = '<span class="vgm-next-ic">▶</span>' +
             '<span class="vgm-next-txt"><strong>Next episode</strong> · S' + best.s + ' · E' + best.e +
             (best.title ? ' — ' + esc(best.title) : '') + '</span>' +
-            '<span class="vgm-next-date">' + esc(fmtDate(best.air_date)) + '</span>';
+            (best.air_date ? '<span class="vgm-next-date">' + esc(fmtDate(best.air_date)) + '</span>' : '');
         box.hidden = false;
     }
 
