@@ -22,6 +22,7 @@
         io: null,
         hero: { items: [], idx: 0, timer: null },
         cat: { title: '', q: '', page: 1, paginates: true, busy: false },
+        sel: { kind: 'movie', genre: '', decade: '', sort: 'popularity.desc' },   // Browse panel
     };
 
     function $(s, r) { return (r || document).querySelector(s); }
@@ -206,7 +207,8 @@
         if (!shelf || shelf.getAttribute('data-vdsc-loaded')) return;
         shelf.setAttribute('data-vdsc-loaded', '1');
         var rail = $('[data-vdsc-rail]', shelf);
-        fetch(LIST_URL + '?' + shelf.getAttribute('data-vdsc-q'), { headers: { Accept: 'application/json' } })
+        // 2 pages (~40 items) so a rail still looks full after 'Hide owned'.
+        fetch(LIST_URL + '?' + shelf.getAttribute('data-vdsc-q') + '&pages=2', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 var items = (d && d.items) || [];
@@ -264,14 +266,11 @@
             });
     }
     function applyFilter() {
-        var kind = ($('[data-vdsc-f-kind]') || {}).value === 'show' ? 'show' : 'movie';
-        var genre = ($('[data-vdsc-f-genre]') || {}).value || '';
-        var decade = ($('[data-vdsc-f-decade]') || {}).value || '';
-        var sort = ($('[data-vdsc-f-sort]') || {}).value || 'popularity.desc';
-        var q = ['kind=' + kind, 'sort=' + encodeURIComponent(sort)];
-        var bits = [kind === 'show' ? 'Shows' : 'Movies'];
-        if (genre) { q.push('genre=' + genre); var gn = genreName(kind, genre); if (gn) bits.push(gn); }
-        if (decade) { q.push('decade=' + decade); bits.push(decade + 's'); }
+        var s = state.sel;
+        var q = ['kind=' + s.kind, 'sort=' + encodeURIComponent(s.sort)];
+        var bits = [s.kind === 'show' ? 'Shows' : 'Movies'];
+        if (s.genre) { q.push('genre=' + s.genre); var gn = genreName(s.kind, s.genre); if (gn) bits.push(gn); }
+        if (s.decade) { q.push('decade=' + s.decade); bits.push(s.decade + 's'); }
         openCategory(bits.join(' · '), q.join('&'));
     }
     function genreName(kind, id) {
@@ -279,12 +278,17 @@
         for (var i = 0; i < list.length; i++) if (String(list[i].id) === String(id)) return list[i].name;
         return '';
     }
-    function rebuildGenreOptions() {
-        var sel = $('[data-vdsc-f-genre]'); if (!sel) return;
-        var kind = ($('[data-vdsc-f-kind]') || {}).value === 'show' ? 'show' : 'movie';
-        sel.innerHTML = '<option value="">All genres</option>' + (state.genres[kind] || []).map(function (g) {
-            return '<option value="' + g.id + '">' + esc(g.name) + '</option>';
-        }).join('');
+    function renderGenreChips() {
+        var box = $('[data-vdsc-chipset="genre"]'); if (!box) return;
+        box.innerHTML = '<button class="vdsc-chip vdsc-chip--on" type="button" data-val="">All genres</button>' +
+            (state.genres[state.sel.kind] || []).map(function (g) {
+                return '<button class="vdsc-chip" type="button" data-val="' + g.id + '">' + esc(g.name) + '</button>';
+            }).join('');
+        state.sel.genre = '';
+    }
+    function setActive(box, el, selector, onClass) {
+        var all = box.querySelectorAll(selector);
+        for (var i = 0; i < all.length; i++) all[i].classList.toggle(onClass, all[i] === el);
     }
 
     // ── wiring ────────────────────────────────────────────────────────────────
@@ -312,6 +316,22 @@
                 if (shelf) openCategory(shelf.getAttribute('data-vdsc-title'), shelf.getAttribute('data-vdsc-q'));
                 return;
             }
+            var seg = e.target.closest('.vdsc-seg-btn');
+            if (seg) {
+                var sbox = seg.closest('[data-vdsc-seg]');
+                var which = sbox.getAttribute('data-vdsc-seg');
+                setActive(sbox, seg, '.vdsc-seg-btn', 'vdsc-seg-btn--on');
+                state.sel[which] = seg.getAttribute('data-val');
+                if (which === 'kind') renderGenreChips();   // genres differ by kind
+                return;
+            }
+            var chip = e.target.closest('.vdsc-chip');
+            if (chip) {
+                var cbox = chip.closest('[data-vdsc-chipset]');
+                setActive(cbox, chip, '.vdsc-chip', 'vdsc-chip--on');
+                state.sel[cbox.getAttribute('data-vdsc-chipset')] = chip.getAttribute('data-val');
+                return;
+            }
             var arrow = e.target.closest('[data-vdsc-scroll]');
             if (arrow) {
                 var rail = $('[data-vdsc-rail]', arrow.closest('.vdsc-shelf'));
@@ -325,8 +345,6 @@
         var hero = $('[data-vdsc-hero]');
         if (hero) { hero.addEventListener('mouseenter', stopHeroTimer); hero.addEventListener('mouseleave', startHeroTimer); }
 
-        var kindSel = $('[data-vdsc-f-kind]');
-        if (kindSel) kindSel.addEventListener('change', rebuildGenreOptions);
         var apply = $('[data-vdsc-apply]'); if (apply) apply.addEventListener('click', applyFilter);
         var clear = $('[data-vdsc-clear]'); if (clear) clear.addEventListener('click', closeCategory);
         var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { state.cat.page++; loadGrid(false); });
@@ -343,7 +361,7 @@
                 var g = res[0] || {}, t = res[1] || {};
                 state.genres = { movie: g.movie || [], show: g.show || [] };
                 state.taste = { movie: t.movie || [], show: t.show || [] };
-                rebuildGenreOptions();
+                renderGenreChips();
                 renderShelves();
             });
     }

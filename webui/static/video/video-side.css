@@ -2198,17 +2198,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     background: rgba(255, 255, 255, 0.32); transition: all 0.2s ease; }
 .vdsc-dot--on { background: hsl(var(--vgm-h, 230), 85%, 65%); width: 26px; border-radius: 5px; }
 
-/* ── filter bar ───────────────────────────────────────────────────────────── */
-.vdsc-filterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 24px;
-    padding: 14px 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.07); }
-.vdsc-filter-label { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em;
-    color: rgba(255, 255, 255, 0.42); margin-right: 2px; }
-.vdsc-select { padding: 10px 13px; border-radius: 10px; background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; font-weight: 600;
-    cursor: pointer; outline: none; transition: border-color 0.15s ease; }
-.vdsc-select:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
-.vdsc-select option { background: #16161d; color: #fff; }
+/* ── Browse button (shared by the Browse panel + grid header) ─────────────── */
 .vdsc-btn { padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 800; cursor: pointer;
     border: 1px solid transparent; background: rgb(var(--accent-rgb, 88 101 242)); color: #fff;
     box-shadow: 0 8px 22px rgba(var(--accent-rgb, 88 101 242), 0.34); transition: all 0.15s ease; }
@@ -2261,7 +2251,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 
 /* ── Discover v2: ambient glow + see-all + grid head + hide-owned + polish ─── */
 .vdsc-page { position: relative; }
-.vdsc-hero, .vdsc-filterbar, .vdsc-shelves, .vdsc-grid-wrap { position: relative; z-index: 1; }
+.vdsc-hero, .vdsc-browse, .vdsc-shelves, .vdsc-grid-wrap { position: relative; z-index: 1; }
 /* a faint page-top color bleed that follows the current hero slide's hue */
 .vdsc-amb { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); z-index: 0;
     width: 130%; height: 580px; pointer-events: none; opacity: 0.5; transition: opacity 0.7s ease;
@@ -2295,4 +2285,51 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @media (prefers-reduced-motion: reduce) {
     .vdsc-shelf--in .vdsc-rail { animation: none; }
     .vdsc-amb { transition: none; }
+}
+
+/* ── Discover Browse panel — segmented controls + genre/era chips ──────────── */
+.vdsc-browse { position: relative; z-index: 1; margin: 6px 0 28px; padding: 16px 18px 18px;
+    border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 18px 50px -30px rgba(var(--accent-rgb, 88 101 242), 0.5); }
+.vdsc-browse-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+
+/* segmented control (pill of buttons with one active) */
+.vdsc-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 11px;
+    background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.07); }
+.vdsc-seg-btn { padding: 8px 16px; border: none; background: none; cursor: pointer; border-radius: 9px;
+    font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.58); white-space: nowrap;
+    transition: color 0.15s ease, background 0.15s ease, box-shadow 0.2s ease; }
+.vdsc-seg-btn:hover { color: rgba(255, 255, 255, 0.92); }
+.vdsc-seg-btn--on { color: #fff;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 88 101 242), 0.95), rgba(var(--accent-rgb, 88 101 242), 0.72));
+    box-shadow: 0 6px 18px -6px rgba(var(--accent-rgb, 88 101 242), 0.7); }
+
+/* chip rows (genres, eras) — horizontally scrollable, edge-faded */
+.vdsc-chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 6px; margin-top: 14px;
+    scrollbar-width: thin;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 14px, #000 calc(100% - 14px), transparent); }
+.vdsc-chips::-webkit-scrollbar { height: 6px; }
+.vdsc-chips::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.13); border-radius: 3px; }
+.vdsc-chips--era { margin-top: 0; }
+.vdsc-chip { flex: 0 0 auto; padding: 7px 14px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+    font-size: 12.5px; font-weight: 700; color: rgba(255, 255, 255, 0.66);
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.2s ease; }
+.vdsc-chip:hover { color: #fff; background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); }
+.vdsc-chip--on { color: #fff; border-color: transparent;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb, 88 101 242), 0.95), rgba(var(--accent-rgb, 88 101 242), 0.7));
+    box-shadow: 0 8px 22px -8px rgba(var(--accent-rgb, 88 101 242), 0.8); }
+
+.vdsc-browse-bottom { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+.vdsc-browse-bottom .vdsc-chips { flex: 1; min-width: 0; margin-top: 0; }
+.vdsc-browse-go { flex: 0 0 auto; padding: 11px 22px;
+    box-shadow: 0 10px 26px -8px rgba(var(--accent-rgb, 88 101 242), 0.7); }
+.vdsc-browse-go:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.vdsc-browse .vdsc-toggle { margin-left: auto; }
+
+@media (max-width: 720px) {
+    .vdsc-browse-bottom { flex-direction: column; align-items: stretch; }
+    .vdsc-browse-go { width: 100%; }
 }

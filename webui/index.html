@@ -871,34 +871,37 @@
                     <div class="vdsc-page" data-vdsc-page>
                         <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
-                        <div class="vdsc-filterbar">
-                            <span class="vdsc-filter-label">Browse</span>
-                            <select class="vdsc-select" data-vdsc-f-kind aria-label="Type">
-                                <option value="movie">Movies</option>
-                                <option value="show">TV Shows</option>
-                            </select>
-                            <select class="vdsc-select" data-vdsc-f-genre aria-label="Genre">
-                                <option value="">All genres</option>
-                            </select>
-                            <select class="vdsc-select" data-vdsc-f-decade aria-label="Decade">
-                                <option value="">Any decade</option>
-                                <option value="2020">2020s</option>
-                                <option value="2010">2010s</option>
-                                <option value="2000">2000s</option>
-                                <option value="1990">1990s</option>
-                                <option value="1980">1980s</option>
-                                <option value="1970">1970s</option>
-                            </select>
-                            <select class="vdsc-select" data-vdsc-f-sort aria-label="Sort">
-                                <option value="popularity.desc">Most popular</option>
-                                <option value="vote_average.desc">Top rated</option>
-                                <option value="vote_count.desc">Most voted</option>
-                            </select>
-                            <button class="vdsc-btn" type="button" data-vdsc-apply>Browse</button>
-                            <label class="vdsc-toggle">
-                                <input type="checkbox" data-vdsc-hideowned>
-                                <span>Hide owned</span>
-                            </label>
+                        <div class="vdsc-browse">
+                            <div class="vdsc-browse-top">
+                                <div class="vdsc-seg" data-vdsc-seg="kind" role="group" aria-label="Type">
+                                    <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="movie">Movies</button>
+                                    <button class="vdsc-seg-btn" type="button" data-val="show">TV Shows</button>
+                                </div>
+                                <div class="vdsc-seg" data-vdsc-seg="sort" role="group" aria-label="Sort">
+                                    <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="popularity.desc">Popular</button>
+                                    <button class="vdsc-seg-btn" type="button" data-val="vote_average.desc">Top Rated</button>
+                                    <button class="vdsc-seg-btn" type="button" data-val="vote_count.desc">Most Voted</button>
+                                </div>
+                                <label class="vdsc-toggle">
+                                    <input type="checkbox" data-vdsc-hideowned>
+                                    <span>Hide owned</span>
+                                </label>
+                            </div>
+                            <div class="vdsc-chips" data-vdsc-chipset="genre" aria-label="Genre">
+                                <button class="vdsc-chip vdsc-chip--on" type="button" data-val="">All genres</button>
+                            </div>
+                            <div class="vdsc-browse-bottom">
+                                <div class="vdsc-chips vdsc-chips--era" data-vdsc-chipset="decade" aria-label="Decade">
+                                    <button class="vdsc-chip vdsc-chip--on" type="button" data-val="">Any era</button>
+                                    <button class="vdsc-chip" type="button" data-val="2020">2020s</button>
+                                    <button class="vdsc-chip" type="button" data-val="2010">2010s</button>
+                                    <button class="vdsc-chip" type="button" data-val="2000">2000s</button>
+                                    <button class="vdsc-chip" type="button" data-val="1990">1990s</button>
+                                    <button class="vdsc-chip" type="button" data-val="1980">1980s</button>
+                                    <button class="vdsc-chip" type="button" data-val="1970">1970s</button>
+                                </div>
+                                <button class="vdsc-btn vdsc-browse-go" type="button" data-vdsc-apply>Browse all &rarr;</button>
+                            </div>
                         </div>
                         <div class="vdsc-shelves" data-vdsc-shelves></div>
                         <div class="vdsc-grid-wrap hidden" data-vdsc-grid-wrap>

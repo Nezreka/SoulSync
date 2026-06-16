@@ -64,28 +64,48 @@ def register_routes(bp):
 
     @bp.route("/discover/list", methods=["GET"])
     def video_discover_list():
-        """One shelf (rail) or one page of a filtered browse — see module docstring."""
+        """One shelf (rail) or one page of a filtered browse — see module docstring.
+
+        ``pages`` (1–3, default 1) fetches that many consecutive TMDB pages and
+        concatenates them (deduped) in one response — so a rail can show ~40 items
+        and still look full after 'Hide owned' drops the ones you have."""
         from core.video.enrichment.engine import get_video_enrichment_engine
         eng = get_video_enrichment_engine()
         try:
             page = max(1, int(request.args.get("page", 1) or 1))
         except (TypeError, ValueError):
             page = 1
-        key = (request.args.get("key") or "").strip()
         try:
+            pages = min(3, max(1, int(request.args.get("pages", 1) or 1)))
+        except (TypeError, ValueError):
+            pages = 1
+        key = (request.args.get("key") or "").strip()
+        kind = request.args.get("kind", "movie")
+        genre = request.args.get("genre") or None
+        year = request.args.get("year") or None
+        decade = request.args.get("decade") or None
+        sort = request.args.get("sort") or "popularity.desc"
+
+        def fetch(p):
             if key == "trending":
-                items = eng.trending()
-            elif key:
-                items = eng.discover_curated(key, page=page)
-            else:
-                items = eng.discover_filter(
-                    request.args.get("kind", "movie"),
-                    genre=(request.args.get("genre") or None),
-                    year=(request.args.get("year") or None),
-                    decade=(request.args.get("decade") or None),
-                    sort_by=(request.args.get("sort") or "popularity.desc"),
-                    page=page)
-            return jsonify({"items": items or [], "page": page})
+                return eng.trending()
+            if key:
+                return eng.discover_curated(key, page=p)
+            return eng.discover_filter(kind, genre=genre, year=year, decade=decade,
+                                       sort_by=sort, page=p)
+
+        try:
+            items, seen = [], set()
+            for p in range(page, page + pages):
+                for it in (fetch(p) or []):
+                    dk = (it.get("kind"), it.get("tmdb_id"))
+                    if dk in seen:
+                        continue
+                    seen.add(dk)
+                    items.append(it)
+                if key == "trending":
+                    break        # trending is a fixed list — extra pages just repeat it
+            return jsonify({"items": items, "page": page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)
             return jsonify({"items": [], "page": page})
