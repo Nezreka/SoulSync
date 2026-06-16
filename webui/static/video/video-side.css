@@ -2415,3 +2415,105 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     /* keep the trailer close button on-screen (it sits above the frame on desktop) */
     .vdsc-tr-close { top: 6px; right: 6px; background: rgba(0, 0, 0, 0.65); }
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Wishlist page (.vwsh-*) — Movies grid + grouped TV show→season→episode tree
+   ══════════════════════════════════════════════════════════════════════════ */
+.vwsh-page { max-width: 1180px; margin: 0 auto; padding: 0 0 60px; }
+.vwsh-head { position: relative; padding: 26px 0 16px; }
+.vwsh-head-glow { position: absolute; top: -20px; left: 0; width: 320px; height: 180px; pointer-events: none;
+    background: radial-gradient(60% 80% at 0% 0%, rgba(var(--accent-rgb, 29, 185, 84), 0.16), transparent 70%); }
+.vwsh-head-row { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.vwsh-title { font-size: 30px; font-weight: 900; letter-spacing: -0.025em; color: #fff; margin: 0; }
+.vwsh-sub { font-size: 14px; color: rgba(255, 255, 255, 0.5); margin: 6px 0 0; }
+.vwsh-tabs { display: inline-flex; gap: 6px; background: rgba(255, 255, 255, 0.04); padding: 5px;
+    border-radius: 13px; border: 1px solid rgba(255, 255, 255, 0.07); }
+.vwsh-tab { padding: 9px 18px; border: none; background: none; cursor: pointer; border-radius: 9px;
+    font-size: 13.5px; font-weight: 800; color: rgba(255, 255, 255, 0.55); transition: color 0.15s ease, background 0.15s ease; }
+.vwsh-tab:hover { color: #fff; }
+.vwsh-tab--on { color: #fff; background: rgba(var(--accent-rgb, 29, 185, 84), 0.9);
+    box-shadow: 0 6px 18px -6px rgba(var(--accent-rgb, 29, 185, 84), 0.7); }
+.vwsh-tab-n { font-size: 11px; font-weight: 800; opacity: 0.7; margin-left: 4px; }
+
+.vwsh-toolbar { display: flex; gap: 12px; margin: 6px 0 22px; }
+.vwsh-search { position: relative; flex: 1; max-width: 360px; }
+.vwsh-search-ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: rgba(255, 255, 255, 0.35); }
+.vwsh-search-input { width: 100%; padding: 11px 14px 11px 38px; border-radius: 11px; background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13.5px; outline: none; transition: border-color 0.15s ease; }
+.vwsh-search-input:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
+
+.vwsh-loading { padding: 50px; text-align: center; }
+.vwsh-state { padding: 70px 24px; text-align: center; }
+.vwsh-state.hidden, .vwsh-loading.hidden, .vwsh-pagination.hidden { display: none; }
+.vwsh-state-ic { font-size: 42px; margin-bottom: 12px; opacity: 0.8; }
+.vwsh-state-title { font-size: 19px; font-weight: 800; color: #fff; margin-bottom: 7px; }
+.vwsh-state-sub { font-size: 13.5px; color: rgba(255, 255, 255, 0.5); max-width: 430px; margin: 0 auto; line-height: 1.55; }
+
+.vwsh-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 26px; }
+.vwsh-page-btn { padding: 9px 16px; border-radius: 10px; background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; font-weight: 700; cursor: pointer; }
+.vwsh-page-btn:disabled { opacity: 0.4; cursor: default; }
+.vwsh-page-info { font-size: 13px; color: rgba(255, 255, 255, 0.5); }
+
+/* movies grid */
+.vwsh-grid--movies { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 22px 18px; }
+.vwsh-movie { cursor: pointer; }
+.vwsh-movie-art { position: relative; aspect-ratio: 2 / 3; border-radius: 12px; overflow: hidden; background: #16161d;
+    border: 1px solid rgba(255, 255, 255, 0.07); transition: border-color 0.18s ease, transform 0.18s ease; }
+.vwsh-movie:hover .vwsh-movie-art { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.4); transform: translateY(-3px); }
+.vwsh-movie-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vwsh-movie-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 34px; opacity: 0.4; }
+.vwsh-movie-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.5), transparent 45%); opacity: 0; transition: opacity 0.2s; }
+.vwsh-movie:hover .vwsh-movie-scrim { opacity: 1; }
+.vwsh-movie-info { padding: 8px 2px 0; }
+.vwsh-movie-title { display: block; font-size: 13.5px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vwsh-movie-meta { display: block; font-size: 11.5px; color: rgba(255, 255, 255, 0.45); margin-top: 2px; }
+
+/* shows tree */
+.vwsh-grid--shows { display: flex; flex-direction: column; gap: 12px; }
+.vwsh-show { border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 14px; background: rgba(255, 255, 255, 0.02); overflow: hidden; }
+.vwsh-show-head { display: flex; align-items: center; gap: 13px; padding: 12px 14px; cursor: pointer; transition: background 0.15s; }
+.vwsh-show-head:hover { background: rgba(255, 255, 255, 0.03); }
+.vwsh-show-chev { color: rgba(255, 255, 255, 0.4); transition: transform 0.2s; font-size: 14px; }
+.vwsh-show--open .vwsh-show-chev { transform: rotate(180deg); }
+.vwsh-show-art { width: 42px; height: 60px; border-radius: 7px; overflow: hidden; flex-shrink: 0; background: #16161d; }
+.vwsh-show-img { width: 100%; height: 100%; object-fit: cover; }
+.vwsh-show-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 20px; opacity: 0.4; }
+.vwsh-show-titles { flex: 1; min-width: 0; }
+.vwsh-show-title { display: block; font-size: 15px; font-weight: 800; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vwsh-show-meta { display: block; font-size: 12.5px; color: rgba(255, 255, 255, 0.45); margin-top: 3px; }
+.vwsh-show-body { display: none; padding: 0 14px 10px; }
+.vwsh-show--open .vwsh-show-body { display: block; }
+
+.vwsh-season { border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.vwsh-season-head { display: flex; align-items: center; gap: 10px; padding: 10px 4px; cursor: pointer; }
+.vwsh-season-chev { color: rgba(255, 255, 255, 0.35); transition: transform 0.2s; font-size: 12px; }
+.vwsh-season--open .vwsh-season-chev { transform: rotate(180deg); }
+.vwsh-season-name { font-size: 13.5px; font-weight: 700; color: rgba(255, 255, 255, 0.9); }
+.vwsh-season-meta { font-size: 12px; color: rgba(255, 255, 255, 0.4); margin-left: auto; }
+.vwsh-season-eps { display: none; padding: 2px 0 6px; }
+.vwsh-season--open .vwsh-season-eps { display: block; }
+.vwsh-ep { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 22px; border-radius: 8px; }
+.vwsh-ep:hover { background: rgba(255, 255, 255, 0.03); }
+.vwsh-ep-code { font-size: 11.5px; font-weight: 800; color: rgba(255, 255, 255, 0.4); min-width: 56px; flex-shrink: 0; }
+.vwsh-ep-title { flex: 1; min-width: 0; font-size: 13px; color: rgba(255, 255, 255, 0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* status pills + remove button */
+.vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
+.vwsh-st--wanted { background: rgba(var(--accent-rgb, 29, 185, 84), 0.16); color: rgb(var(--accent-rgb, 29, 185, 84)); }
+.vwsh-st--searching { background: rgba(245, 158, 11, 0.16); color: #f59e0b; }
+.vwsh-st--downloading { background: rgba(100, 149, 237, 0.18); color: #8ab0ff; }
+.vwsh-st--done { background: rgba(34, 197, 94, 0.18); color: #4ade80; }
+.vwsh-st--failed { background: rgba(248, 113, 113, 0.16); color: #f87171; }
+.vwsh-movie-art .vwsh-st { position: absolute; top: 8px; left: 8px; z-index: 2; backdrop-filter: blur(6px); }
+
+.vwsh-rm { flex-shrink: 0; width: 26px; height: 26px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.6); font-size: 17px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all 0.15s ease; }
+.vwsh-rm:hover { background: rgba(248, 113, 113, 0.85); border-color: transparent; color: #fff; }
+.vwsh-rm:disabled { opacity: 0.4; cursor: default; }
+.vwsh-movie-art .vwsh-rm { position: absolute; top: 8px; right: 8px; z-index: 3; opacity: 0; }
+.vwsh-movie:hover .vwsh-movie-art .vwsh-rm { opacity: 1; }
+.vwsh-season-head .vwsh-rm, .vwsh-ep .vwsh-rm { width: 24px; height: 24px; font-size: 15px; }
+.vwsh-season-head .vwsh-rm { margin-left: 10px; }
+@media (hover: none) { .vwsh-movie-art .vwsh-rm { opacity: 1; } }
