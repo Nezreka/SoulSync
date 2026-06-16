@@ -319,6 +319,20 @@
         wrap.hidden = false;
         // initial season-checkbox states reflect the (missing-only) selection
         d.seasons.forEach(function (s) { syncSeasonCheck(modalEl, s.season_number); });
+        // Prefetch the first real season of an un-owned show so its first expand
+        // is instant (and its missing episodes pre-count in the footer).
+        if (anyLazy) prefetchFirstSeason(wrap);
+    }
+
+    function prefetchFirstSeason(wrap) {
+        var lazies = wrap.querySelectorAll('.vgm-season[data-vgm-lazy="1"]');
+        var pick = null, pickN = Infinity;
+        for (var i = 0; i < lazies.length; i++) {
+            var n = parseInt(lazies[i].getAttribute('data-vgm-season'), 10);
+            if (n >= 1 && n < pickN) { pickN = n; pick = lazies[i]; }   // prefer Season 1 over Specials
+        }
+        if (!pick && lazies.length) pick = lazies[0];
+        if (pick) loadSeason(pick);
     }
 
     // Fetch a tmdb season's episodes the first time it's expanded, render them,
