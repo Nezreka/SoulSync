@@ -1891,16 +1891,12 @@ function createReleaseCard(release) {
     // Store mutable reference so stream updates propagate to click handler
     card._releaseData = release;
 
-    // Tag card for content-type filtering
-    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^]]*\]/i;
-    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
-    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
-    const isLive = livePattern.test(release.title || '') || (release.album_type === 'compilation' && livePattern.test(release.title || ''));
-    const isCompilation = (release.album_type === 'compilation') || compilationPattern.test(release.title || '');
-    const isFeatured = featuredPattern.test(release.title || '');
-    card.setAttribute("data-is-live", isLive ? "true" : "false");
-    card.setAttribute("data-is-compilation", isCompilation ? "true" : "false");
-    card.setAttribute("data-is-featured", isFeatured ? "true" : "false");
+    // Tag card for content-type filtering (shared classifier — #877, so Artist
+    // Detail and the Download Discography modal never drift apart).
+    const cc = _classifyReleaseContent(release);
+    card.setAttribute("data-is-live", cc.isLive ? "true" : "false");
+    card.setAttribute("data-is-compilation", cc.isCompilation ? "true" : "false");
+    card.setAttribute("data-is-featured", cc.isFeatured ? "true" : "false");
 
     // Background image — use data-bg-src for IntersectionObserver lazy loading
     // (observeLazyBackgrounds is called by the caller after appending the grid).
@@ -2518,8 +2514,8 @@ async function openDiscographyModal() {
             const data = await res.json();
 
             if (!data.error) {
-                discography = { albums: data.albums || [], singles: data.singles || [] };
-                if (discography.albums.length > 0 || discography.singles.length > 0) {
+                discography = { albums: data.albums || [], eps: data.eps || [], singles: data.singles || [] };
+                if (discography.albums.length > 0 || discography.eps.length > 0 || discography.singles.length > 0) {
                     artistsPageState.artistDiscography = discography;
                     artistsPageState.sourceOverride = data.source || artistsPageState.sourceOverride || null;
                     // Use metadata source ID for the modal (needed for download API calls)
@@ -2569,6 +2565,9 @@ async function openDiscographyModal() {
                     <button class="discog-filter active" data-type="album" onclick="toggleDiscogFilter(this)">Albums</button>
                     <button class="discog-filter active" data-type="ep" onclick="toggleDiscogFilter(this)">EPs</button>
                     <button class="discog-filter active" data-type="single" onclick="toggleDiscogFilter(this)">Singles</button>
+                    <button class="discog-filter active" data-content="live" onclick="toggleDiscogFilter(this)">Live</button>
+                    <button class="discog-filter active" data-content="compilations" onclick="toggleDiscogFilter(this)">Compilations</button>
+                    <button class="discog-filter active" data-content="featured" onclick="toggleDiscogFilter(this)">Featured</button>
                 </div>
                 <div class="discog-select-actions">
                     <button class="discog-select-btn" onclick="discogSelectAll(true)">Select All</button>
@@ -2605,21 +2604,36 @@ async function openDiscographyModal() {
 
 function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
+// #877: single source of truth for content-type classification, shared by the
+// Artist Detail cards and the Download Discography modal so they can't drift.
+function _classifyReleaseContent(release) {
+    const t = (release && (release.title || release.name)) || '';
+    const livePattern = /\b(live)\b|\(live[^)]*\)|\[live[^\]]*\]/i;
+    const compilationPattern = /\b(greatest hits|best of|collection|anthology|essential)\b/i;
+    const featuredPattern = /\(?\bfeat\.?\s|\bft\.?\s|\bfeaturing\b/i;
+    return {
+        isLive: livePattern.test(t),
+        isCompilation: (release && release.album_type === 'compilation') || compilationPattern.test(t),
+        isFeatured: featuredPattern.test(t),
+    };
+}
+
 function _renderDiscogCard(release, index, completionData) {
     const comp = completionData?.albums?.find(c => c.id === release.id) || completionData?.singles?.find(c => c.id === release.id);
     const status = comp?.status || 'unknown';
     const isOwned = status === 'completed';
     const isPartial = status === 'partial' || status === 'nearly_complete';
     const year = release.release_date ? release.release_date.substring(0, 4) : '';
-    const tracks = release.total_tracks || 0;
+    const tracks = release.total_tracks || release.track_count || 0;
     const img = release.image_url || '';
+    const cc = _classifyReleaseContent(release);
     const checked = !isOwned;
     const statusClass = isOwned ? 'owned' : isPartial ? 'partial' : '';
     const statusIcon = isOwned ? '✓' : isPartial ? '◐' : '';
 
     const albumName = release.name || release.title || '';
     return `
-        <label class="discog-card ${statusClass}" data-type="${release._type}" style="animation-delay:${index * 0.03}s">
+        <label class="discog-card ${statusClass}" data-type="${release._type}" data-is-live="${cc.isLive}" data-is-compilation="${cc.isCompilation}" data-is-featured="${cc.isFeatured}" style="animation-delay:${index * 0.03}s">
             <input type="checkbox" class="discog-card-cb" data-album-id="${release.id}" data-album-name="${_esc(albumName)}" data-tracks="${tracks}" ${checked ? 'checked' : ''} onchange="_updateDiscogFooterCount()">
             <div class="discog-card-art">
                 ${img ? `<img src="${img}" alt="" loading="lazy">` : '<div class="discog-card-art-placeholder">🎵</div>'}
@@ -2636,9 +2650,29 @@ function _renderDiscogCard(release, index, completionData) {
 
 function toggleDiscogFilter(btn) {
     btn.classList.toggle('active');
-    const type = btn.dataset.type;
-    document.querySelectorAll(`.discog-card[data-type="${type}"]`).forEach(card => {
-        card.style.display = btn.classList.contains('active') ? '' : 'none';
+    _applyDiscogFilters();
+}
+
+// #877: combined category (Albums/EPs/Singles) + content (Live/Compilations/
+// Featured) filtering, mirroring the Artist Detail filter logic. A card is
+// hidden if its category is off OR any active content exclusion applies — and
+// because the download payload is built from VISIBLE checked cards, every
+// toggle now actually changes what gets downloaded.
+function _applyDiscogFilters() {
+    const typeActive = {};
+    document.querySelectorAll('.discog-filter[data-type]').forEach(b => {
+        typeActive[b.dataset.type] = b.classList.contains('active');
+    });
+    const contentActive = {};
+    document.querySelectorAll('.discog-filter[data-content]').forEach(b => {
+        contentActive[b.dataset.content] = b.classList.contains('active');
+    });
+    document.querySelectorAll('.discog-card').forEach(card => {
+        let hidden = typeActive[card.getAttribute('data-type')] === false;
+        if (!hidden && contentActive.live === false && card.getAttribute('data-is-live') === 'true') hidden = true;
+        if (!hidden && contentActive.compilations === false && card.getAttribute('data-is-compilation') === 'true') hidden = true;
+        if (!hidden && contentActive.featured === false && card.getAttribute('data-is-featured') === 'true') hidden = true;
+        card.style.display = hidden ? 'none' : '';
     });
     _updateDiscogFooterCount();
 }

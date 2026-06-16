@@ -65,17 +65,64 @@ def _coerce_spotify_data(track_info: Any) -> dict:
     return {}
 
 
+def read_embedded_track_number(file_path: str) -> Optional[int]:
+    """Read the track position from a downloaded audio file's own tags.
+
+    Streaming sources (Deezer/deemix, Qobuz, Tidal) and most Soulseek
+    uploads write the correct album position into the file itself. That
+    tag is authoritative for the *source's* idea of the track's place on
+    its album — more reliable than a filename guess — so the resolver
+    consults it before falling back to the filename / default-1 floor.
+
+    Issue #874-adjacent / "Track 01" bug: a single Deezer track is matched
+    via Deezer's ``/search/track`` endpoint, which omits ``track_position``
+    (core/deezer_client.py), so the metadata context never carried the
+    real number — but the downloaded file *does* (deemix wrote it). This
+    recovers it with no network call.
+
+    Returns a positive int, or None when the file has no usable
+    tracknumber tag / can't be read. Never raises. Handles the common
+    ``"2/15"`` (number/total) form by taking the leading number.
+    """
+    if not file_path:
+        return None
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(file_path, easy=True)
+        if audio is None:
+            return None
+        raw = audio.get('tracknumber')
+        if isinstance(raw, list):
+            raw = raw[0] if raw else None
+        if raw is None:
+            return None
+        # "2/15" -> "2"; bare "2" -> "2".
+        text = str(raw).split('/', 1)[0].strip()
+        return _coerce_positive(text)
+    except Exception:
+        return None
+
+
 def resolve_track_number(
     album_info: Any,
     track_info: Any,
     file_path: str,
+    embedded_track_number: Any = None,
 ) -> Optional[int]:
     """Walk the resolution chain and return the first valid positive
     int found, or None when every source is missing / unusable.
 
-    Caller is responsible for the final default-1 floor — leaving
-    that out of this function so tests can pin "everything missing
+    Order: album_info -> track_info -> nested spotify_data -> filename ->
+    ``embedded_track_number`` (the source-written file tag, when the caller
+    supplies it). Caller is responsible for the final default-1 floor —
+    leaving that out of this function so tests can pin "everything missing
     returns None" separate from the floor behaviour.
+
+    ``embedded_track_number`` is passed in (not read here) so this stays a
+    pure function — the file I/O lives in :func:`read_embedded_track_number`.
+    It is consulted **last**, only when every other source came up empty, so
+    it can never override a value the pre-fix resolver already produced — it
+    only fills the gap that would otherwise hit the default-1 floor.
     """
     album_info = album_info if isinstance(album_info, dict) else {}
     track_info = track_info if isinstance(track_info, dict) else {}
@@ -96,10 +143,19 @@ def resolve_track_number(
     # default-1 floor is the single source of that fallback —
     # otherwise this resolver would silently fill 1 and the
     # downstream floor logic would have no effect.
-    if not file_path:
-        return None
-    try:
-        from_filename = extract_explicit_track_number(file_path)
-    except Exception:
-        from_filename = None
-    return _coerce_positive(from_filename)
+    if file_path:
+        try:
+            from_filename = extract_explicit_track_number(file_path)
+        except Exception:
+            from_filename = None
+        ff = _coerce_positive(from_filename)
+        if ff is not None:
+            return ff
+
+    # Embedded source-written file tag is consulted LAST — only when every
+    # other source (metadata + the ripped-album "NN - Title" filename) came
+    # up empty. This is deliberate: it can ONLY fill the gap that would
+    # otherwise hit the caller's default-1 floor, so it never overrides a
+    # value the pre-fix resolver would have used. A correctly-named file
+    # with a stale/wrong embedded tag is therefore never regressed.
+    return _coerce_positive(embedded_track_number)

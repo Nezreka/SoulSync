@@ -344,7 +344,29 @@ class MusicDatabase:
                     source_info TEXT  -- JSON of source context (playlist name, album info, etc.)
                 )
             """)
-            
+
+            # Wishlist ignore-list (#874): a TTL'd skip-gate. When a user
+            # removes a track from the wishlist or cancels an in-flight
+            # wishlist download, the track is recorded here so the automatic
+            # re-add paths (watchlist scan, failed-track capture, cancel
+            # re-add) skip it until the entry ages out (see core.wishlist.
+            # ignore.IGNORE_TTL_DAYS). Softer than `blocklist`: it expires
+            # and never blocks a manual force-download. Keyed on the bare
+            # track id; unique per (profile, track) so re-ignoring refreshes.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS wishlist_ignore (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    profile_id INTEGER NOT NULL DEFAULT 1,
+                    track_id TEXT NOT NULL,
+                    track_name TEXT DEFAULT '',
+                    artist_name TEXT DEFAULT '',
+                    reason TEXT DEFAULT 'removed',  -- 'removed' | 'cancelled'
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(profile_id, track_id)
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_wishlist_ignore_profile ON wishlist_ignore (profile_id, track_id)")
+
             # Watchlist table for storing artists to monitor for new releases
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS watchlist_artists (
@@ -6887,10 +6909,25 @@ class MusicDatabase:
 
             # STRATEGY 1: Try basic SQL LIKE search first (fastest)
             basic_results = self._search_tracks_basic(cursor, title, artist, limit, server_source, rank_artist)
-            
+
             if basic_results:
                 logger.debug(f"Basic search found {len(basic_results)} results")
                 return basic_results
+
+            # STRATEGY 1b: Spotify renders versions as "Title - Qualifier"
+            # ("Calma - Remix") but libraries usually store just the base
+            # ("Calma"), so the literal search misses. Retry on the base title
+            # BEFORE the OR-fuzzy fallback (which would flood on the common
+            # qualifier word — every "... remix" matches "remix"). #: Calma - Remix
+            if title:
+                from core.text.title_match import base_title_before_dash
+                base_title = base_title_before_dash(title)
+                if base_title and base_title != title:
+                    base_results = self._search_tracks_basic(
+                        cursor, base_title, artist, limit, server_source, rank_artist)
+                    if base_results:
+                        logger.debug("Base-title search matched '%s' via '%s'", title, base_title)
+                        return base_results
 
             # STRATEGY 2: Broader fuzzy search - splits into individual words with OR matching
             fuzzy_results = self._search_tracks_fuzzy_fallback(cursor, title, artist, limit, server_source)
@@ -6919,6 +6956,17 @@ class MusicDatabase:
             basic_rows = self._search_tracks_basic_rows(cursor, title, artist, limit, server_source)
             if basic_rows:
                 return [dict(r) for r in basic_rows]
+
+            # Base-title fallback for Spotify "Title - Qualifier" forms (see
+            # search_tracks STRATEGY 1b) before the OR-fuzzy flood.
+            if title:
+                from core.text.title_match import base_title_before_dash
+                base_title = base_title_before_dash(title)
+                if base_title and base_title != title:
+                    base_rows = self._search_tracks_basic_rows(
+                        cursor, base_title, artist, limit, server_source)
+                    if base_rows:
+                        return [dict(r) for r in base_rows]
 
             fuzzy_rows = self._search_tracks_fuzzy_rows(cursor, title, artist, limit, server_source)
             return [dict(r) for r in fuzzy_rows]
@@ -8825,6 +8873,21 @@ class MusicDatabase:
                                 _blocked[0], _blocked[1])
                     return False
 
+                # Ignore-list guard (#874): a user who removed or cancelled this
+                # track asked us to stop AUTO-requeuing it — every automatic
+                # re-add funnels through here, so one check covers them all.
+                # A *manual* add is explicit user intent → bypass the gate AND
+                # clear any stale ignore so it sticks. Fail-open: any error here
+                # must never block a legitimate wishlist add.
+                try:
+                    if source_type == 'manual':
+                        self.remove_from_wishlist_ignore(track_id, profile_id=profile_id)
+                    elif self.is_track_ignored(track_id, profile_id=profile_id):
+                        logger.info("Skipping wishlist add — track is on the ignore-list (#874): %s", track_id)
+                        return False
+                except Exception as _ignore_exc:
+                    logger.debug("Wishlist ignore-list check skipped (fail-open): %s", _ignore_exc)
+
                 from core.library import manual_library_match as _mlm
                 if _mlm.get_match_for_track(self, profile_id, spotify_track_data):
                     logger.info(
@@ -8969,7 +9032,147 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error removing track from wishlist: {e}")
             return False
-    
+
+    # ── Wishlist ignore-list (#874) ──────────────────────────────────────
+    # A TTL'd skip-gate consulted by add_to_wishlist so user-removed /
+    # user-cancelled tracks are not auto-re-queued. All methods fail-open
+    # (an error here must never block a legitimate wishlist add).
+
+    def add_to_wishlist_ignore(self, track_id: str, track_name: str = "",
+                               artist_name: str = "", reason: str = "removed",
+                               profile_id: int = 1) -> bool:
+        """Record (or refresh) an ignore entry for a wishlist track id.
+
+        Keyed on the bare track id; UNIQUE(profile_id, track_id) means a
+        repeat ignore replaces the row and so refreshes its TTL clock.
+        """
+        from core.wishlist.ignore import normalize_ignore_id
+        key = normalize_ignore_id(track_id)
+        if not key:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO wishlist_ignore
+                    (profile_id, track_id, track_name, artist_name, reason, created_at)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (profile_id, key, track_name or "", artist_name or "", reason or "removed"))
+                conn.commit()
+                logger.info("Added track to wishlist ignore-list (%s): '%s' [%s]",
+                            reason or "removed", track_name or key, key)
+                return True
+        except Exception as e:
+            logger.error("Error adding to wishlist ignore-list: %s", e)
+            return False
+
+    def is_track_ignored(self, track_id: str, profile_id: int = 1,
+                         ttl_days: Optional[int] = None) -> bool:
+        """Whether ``track_id`` has a non-expired ignore entry. Fail-open False."""
+        from core.wishlist.ignore import normalize_ignore_id, is_expired, IGNORE_TTL_DAYS
+        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        key = normalize_ignore_id(track_id)
+        if not key:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT created_at FROM wishlist_ignore WHERE profile_id = ? AND track_id = ?",
+                    (profile_id, key))
+                row = cursor.fetchone()
+                if not row:
+                    return False
+                return not is_expired(row["created_at"], datetime.now(), ttl)
+        except Exception as e:
+            logger.debug("is_track_ignored failed open: %s", e)
+            return False
+
+    def remove_from_wishlist_ignore(self, track_id: str, profile_id: int = 1) -> bool:
+        """Un-ignore a track (manual override / UI action). Returns True if a row went."""
+        from core.wishlist.ignore import normalize_ignore_id
+        key = normalize_ignore_id(track_id)
+        if not key:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "DELETE FROM wishlist_ignore WHERE profile_id = ? AND track_id = ?",
+                    (profile_id, key))
+                conn.commit()
+                return cursor.rowcount > 0
+        except Exception as e:
+            logger.error("Error removing from wishlist ignore-list: %s", e)
+            return False
+
+    def get_wishlist_ignore(self, profile_id: int = 1,
+                            ttl_days: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Active (non-expired) ignore entries, newest first; purges lapsed rows."""
+        from core.wishlist.ignore import is_expired, IGNORE_TTL_DAYS
+        ttl = IGNORE_TTL_DAYS if ttl_days is None else ttl_days
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT track_id, track_name, artist_name, reason, created_at "
+                    "FROM wishlist_ignore WHERE profile_id = ? ORDER BY created_at DESC",
+                    (profile_id,))
+                rows = cursor.fetchall()
+                now = datetime.now()
+                active, expired_ids = [], []
+                for r in rows:
+                    if is_expired(r["created_at"], now, ttl):
+                        expired_ids.append(r["track_id"])
+                    else:
+                        active.append({
+                            "track_id": r["track_id"],
+                            "track_name": r["track_name"] or "",
+                            "artist_name": r["artist_name"] or "",
+                            "reason": r["reason"] or "removed",
+                            "created_at": r["created_at"],
+                        })
+                # Opportunistic housekeeping so the table can't grow unbounded.
+                if expired_ids:
+                    cursor.executemany(
+                        "DELETE FROM wishlist_ignore WHERE profile_id = ? AND track_id = ?",
+                        [(profile_id, tid) for tid in expired_ids])
+                    conn.commit()
+                return active
+        except Exception as e:
+            logger.error("Error reading wishlist ignore-list: %s", e)
+            return []
+
+    def clear_wishlist_ignore(self, profile_id: int = 1) -> int:
+        """Drop every ignore entry for a profile. Returns rows removed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM wishlist_ignore WHERE profile_id = ?", (profile_id,))
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.error("Error clearing wishlist ignore-list: %s", e)
+            return 0
+
+    def get_wishlist_spotify_data(self, track_id: str, profile_id: int = 1) -> Dict[str, Any]:
+        """Parsed ``spotify_data`` for a wishlist row, or {}. Used to label an
+        ignore entry with the track's name/artist before the row is removed."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT spotify_data FROM wishlist_tracks WHERE spotify_track_id = ? AND profile_id = ?",
+                    (track_id, profile_id))
+                row = cursor.fetchone()
+                if not row or not row["spotify_data"]:
+                    return {}
+                data = json.loads(row["spotify_data"])
+                return data if isinstance(data, dict) else {}
+        except Exception as e:
+            logger.debug("get_wishlist_spotify_data failed: %s", e)
+            return {}
+
     def get_wishlist_tracks(self, limit: Optional[int] = None, profile_id: int = 1,
                             offset: int = 0, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get tracks in the wishlist for the given profile, ordered by date added

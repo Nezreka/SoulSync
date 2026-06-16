@@ -201,9 +201,27 @@ def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
     return _digit_tokens(title_a) != _digit_tokens(title_b)
 
 
+def base_title_before_dash(title: str) -> str:
+    """The base title before Spotify's ' - <qualifier>' version separator.
+
+    Spotify renders versions as 'Calma - Remix' / 'Song - Radio Edit' /
+    'Track - Remastered 2019'. Libraries (and the files people actually have)
+    very often store just the base — 'Calma' — so a literal search for
+    'Calma - Remix' finds nothing and the OR-fuzzy fallback then floods on the
+    common qualifier word ('remix' matches every remix). This returns the base
+    ('Calma') for a base-title search fallback. Splits on the FIRST ' - ' (the
+    spaced hyphen is Spotify's separator; a bare hyphen inside a word is left
+    alone). Returns the title unchanged when there's no separator."""
+    if not title:
+        return title
+    idx = title.find(' - ')
+    return title[:idx].strip() if idx > 0 else title
+
+
 __all__ = [
     "titles_plausibly_same",
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",
+    "base_title_before_dash",
 ]

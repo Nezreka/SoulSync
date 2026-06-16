@@ -252,6 +252,55 @@ class TestIterCollectionTrackIds:
 
         assert ids == []
 
+    def test_429_mid_walk_retries_and_completes(self):
+        """Regression for #880: a 429 mid-pagination must RETRY the same
+        cursor page (with backoff), not truncate the collection. Before the
+        fix a transient 429 on page ~5 capped a 513-track favorites list at
+        ~98 (the log showed `status=429` then `Retrieved 98/100`)."""
+        client = _make_authed_client()
+        # page1 (200) → 429 (transient) → page2 (200, end of chain)
+        responses = iter([
+            _FakeResp(200, _PAGE_ONE),
+            _FakeResp(429, text=""),       # rate limited — retry, don't truncate
+            _FakeResp(200, _PAGE_TWO),
+        ])
+        with patch.object(client, '_ensure_valid_token', return_value=True), \
+             patch('core.tidal_client.requests.get', side_effect=lambda *a, **kw: next(responses)), \
+             patch('core.tidal_client.time.sleep'):
+            ids = client._iter_collection_track_ids()
+
+        assert ids == ['1001', '1002', '1003', '1004', '1005']  # full chain, nothing dropped
+
+    def test_429_does_not_set_reconnect_flag(self):
+        """A rate-limit is transient, NOT a scope problem — must not tell the
+        user to reconnect."""
+        client = _make_authed_client()
+        responses = iter([_FakeResp(200, _PAGE_ONE), _FakeResp(429, text=""), _FakeResp(200, _PAGE_TWO)])
+        with patch.object(client, '_ensure_valid_token', return_value=True), \
+             patch('core.tidal_client.requests.get', side_effect=lambda *a, **kw: next(responses)), \
+             patch('core.tidal_client.time.sleep'):
+            client._iter_collection_track_ids()
+
+        assert client.collection_needs_reconnect() is False
+
+    def test_429_exhausts_retries_returns_partial(self):
+        """If the 429s never clear, give up after the retry budget and return
+        what we have (PARTIAL) rather than looping forever."""
+        client = _make_authed_client()
+
+        def gen():
+            yield _FakeResp(200, _PAGE_ONE)
+            while True:
+                yield _FakeResp(429, text="")
+
+        responses = gen()
+        with patch.object(client, '_ensure_valid_token', return_value=True), \
+             patch('core.tidal_client.requests.get', side_effect=lambda *a, **kw: next(responses)), \
+             patch('core.tidal_client.time.sleep'):
+            ids = client._iter_collection_track_ids()
+
+        assert ids == ['1001', '1002', '1003']  # page 1 survives; no hang
+
 
 # ---------------------------------------------------------------------------
 # get_collection_tracks_count
