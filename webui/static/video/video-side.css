@@ -2258,3 +2258,41 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vdsc-hero-body { animation: none; }
     .vdsc-skel-card { animation: none; }
 }
+
+/* ── Discover v2: ambient glow + see-all + grid head + hide-owned + polish ─── */
+.vdsc-page { position: relative; }
+.vdsc-hero, .vdsc-filterbar, .vdsc-shelves, .vdsc-grid-wrap { position: relative; z-index: 1; }
+/* a faint page-top color bleed that follows the current hero slide's hue */
+.vdsc-amb { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); z-index: 0;
+    width: 130%; height: 580px; pointer-events: none; opacity: 0.5; transition: opacity 0.7s ease;
+    background: radial-gradient(58% 80% at 50% 0%, hsla(var(--vdsc-amb, 230), 82%, 55%, 0.22), transparent 70%); }
+
+/* "See all" → opens the rail as a paged grid */
+.vdsc-seeall { font-size: 12.5px; font-weight: 700; color: rgba(255, 255, 255, 0.5); background: none;
+    border: none; cursor: pointer; padding: 4px 9px; border-radius: 8px; margin-right: 4px;
+    transition: color 0.15s ease, background 0.15s ease; }
+.vdsc-seeall:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+
+/* grid (category) header — back button + title */
+.vdsc-grid-head { display: flex; align-items: center; gap: 16px; margin: 2px 0 22px; }
+.vdsc-grid-title { font-size: 23px; font-weight: 800; letter-spacing: -0.01em; color: #fff; margin: 0; }
+
+/* hide-owned toggle (sits at the far right of the filter bar) */
+.vdsc-toggle { display: inline-flex; align-items: center; gap: 7px; margin-left: auto;
+    font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.7); cursor: pointer; user-select: none; }
+.vdsc-toggle input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 16px; height: 16px; cursor: pointer; }
+.vdsc-hide-owned .vsr-card--owned { display: none; }
+
+/* rails: soft edge fade + a gentle fade-in when filled + per-title hue on hover */
+.vdsc-rail { -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 18px), transparent); }
+.vdsc-shelf--in .vdsc-rail { animation: vdscFade 0.45s ease both; }
+@keyframes vdscFade { from { opacity: 0.35; } to { opacity: 1; } }
+.vdsc-rail .vsr-card, .vdsc-grid .vsr-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+.vdsc-rail .vsr-card:hover, .vdsc-grid .vsr-card:hover {
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 26px -6px hsla(var(--vgm-h, 230), 80%, 58%, 0.5); }
+
+@media (prefers-reduced-motion: reduce) {
+    .vdsc-shelf--in .vdsc-rail { animation: none; }
+    .vdsc-amb { transition: none; }
+}

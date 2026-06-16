@@ -1116,3 +1116,49 @@ def test_engine_discover_swallows_client_errors(db):
     assert eng.discover_curated("popular_movies") == []
     assert eng.discover_filter("movie", genre=1) == []
     assert eng.genre_list("movie") == []
+
+
+def test_library_ids_for_tmdb_batched(db):
+    m1 = db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 10})
+    m2 = db.upsert_movie("plex", {"server_id": "m2", "title": "B", "tmdb_id": 20})
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 30, "seasons": []})
+    assert db.library_ids_for_tmdb("movie", [10, 20, 99]) == {10: m1, 20: m2}   # 99 not owned
+    assert db.library_ids_for_tmdb("show", [30, 31]) == {30: sid}
+    assert db.library_ids_for_tmdb("movie", []) == {}
+    assert db.library_ids_for_tmdb("bogus", [10]) == {}
+
+
+def test_library_ids_for_tmdb_scopes_by_server(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 10})
+    db.upsert_movie("jellyfin", {"server_id": "j1", "title": "A", "tmdb_id": 11})
+    got = db.library_ids_for_tmdb("movie", [10, 11], server_source="plex")
+    assert 10 in got and 11 not in got                     # the other server's copy doesn't count
+
+
+def test_stamp_owned_is_one_query_per_kind(db, monkeypatch):
+    # The whole rail must cost one ownership query per kind, not one per item.
+    db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+    calls = {"n": 0}
+    real = db.library_ids_for_tmdb
+    def counted(kind, ids, server_source=None):
+        calls["n"] += 1
+        return real(kind, ids, server_source)
+    monkeypatch.setattr(db, "library_ids_for_tmdb", counted)
+    eng = VideoEnrichmentEngine(db, {})
+    items = [{"kind": "movie", "tmdb_id": i, "title": "T%d" % i} for i in range(1, 21)]
+    items.append({"kind": "show", "tmdb_id": 99, "title": "Show"})
+    eng._stamp_owned(items)
+    assert calls["n"] == 2                                  # one movie query + one show query
+    assert items[0]["library_id"] is not None and items[1]["library_id"] is None
+
+
+def test_top_owned_genres_orders_by_count(db):
+    db.upsert_movie("plex", {"server_id": "m1", "title": "A", "tmdb_id": 1,
+                             "genres": ["Action", "Drama"], "file": {"relative_path": "a.mkv"}})
+    db.upsert_movie("plex", {"server_id": "m2", "title": "B", "tmdb_id": 2,
+                             "genres": ["Action"], "file": {"relative_path": "b.mkv"}})
+    db.upsert_movie("plex", {"server_id": "m3", "title": "C", "tmdb_id": 3,
+                             "genres": ["Comedy"]})           # no file → not owned → excluded
+    g = db.top_owned_genres("movie", server_source="plex", limit=5)
+    assert g[0] == "Action"                                  # owned twice → first
+    assert "Drama" in g and "Comedy" not in g                # Comedy movie isn't owned

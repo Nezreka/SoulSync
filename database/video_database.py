@@ -365,6 +365,66 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def library_ids_for_tmdb(self, kind: str, tmdb_ids, server_source=None) -> dict:
+        """{tmdb_id: library_row_id} for the owned subset of ``tmdb_ids`` on the
+        active server. Batched (chunked IN) so a whole Discover rail costs one
+        query per kind instead of one connection+query per item."""
+        table = {"movie": "movies", "show": "shows"}.get(kind)
+        out: dict = {}
+        if not table:
+            return out
+        ids = []
+        for x in (tmdb_ids or []):
+            try:
+                ids.append(int(x))
+            except (TypeError, ValueError):
+                pass
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):   # stay under SQLite's variable cap
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                sql = f"SELECT id, tmdb_id FROM {table} WHERE tmdb_id IN ({ph})"
+                args = list(chunk)
+                if server_source:
+                    sql += " AND server_source=?"
+                    args.append(server_source)
+                for row in conn.execute(sql, args):
+                    out.setdefault(row["tmdb_id"], row["id"])   # first match wins
+            return out
+        except sqlite3.Error:
+            return out
+        finally:
+            conn.close()
+
+    def top_owned_genres(self, kind: str, server_source=None, limit: int = 6) -> list:
+        """The user's most-owned genre names for movies/shows, busiest first —
+        drives Discover's personalized 'Because you like …' rails."""
+        if kind == "movie":
+            link, owner, tbl, owned = "movie_genres", "movie_id", "movies", "t.has_file=1"
+        elif kind == "show":
+            link, owner, tbl, owned = "show_genres", "show_id", "shows", "1=1"   # any library show counts
+        else:
+            return []
+        sql = (f"SELECT g.name AS name, COUNT(*) AS c FROM {link} lt "
+               f"JOIN genres g ON g.id = lt.genre_id "
+               f"JOIN {tbl} t ON t.id = lt.{owner} WHERE {owned}")
+        args: list = []
+        if server_source:
+            sql += " AND t.server_source=?"
+            args.append(server_source)
+        sql += " GROUP BY g.name ORDER BY c DESC, g.name LIMIT ?"
+        args.append(int(limit))
+        conn = self._get_connection()
+        try:
+            return [r["name"] for r in conn.execute(sql, args)]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
         """Store IMDb / RT / Metacritic scores (from OMDb) + mark ratings_synced.
         Ratings are dynamic, so these overwrite (unlike gap-only metadata)."""

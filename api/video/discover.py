@@ -34,6 +34,23 @@ def register_routes(bp):
             items = []
         return jsonify({"items": items})
 
+    @bp.route("/discover/taste", methods=["GET"])
+    def video_discover_taste():
+        """The user's most-owned genres (movies + shows) → personalized rails."""
+        from . import get_video_db
+        try:
+            from core.video.sources import resolve_video_server
+            srv = resolve_video_server()
+        except Exception:
+            srv = None
+        db = get_video_db()
+        try:
+            return jsonify({"movie": db.top_owned_genres("movie", srv, 6),
+                            "show": db.top_owned_genres("show", srv, 6)})
+        except Exception:
+            logger.exception("discover taste failed")
+            return jsonify({"movie": [], "show": []})
+
     @bp.route("/discover/genres", methods=["GET"])
     def video_discover_genres():
         """Genre id→name maps for both kinds (powers the genre rails + filter)."""

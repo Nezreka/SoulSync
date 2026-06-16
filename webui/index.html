@@ -868,7 +868,8 @@
                      a filter bar that flips into a paged grid. Built by
                      video/video-discover.js, styled by .vdsc-* in video-side.css. -->
                 <section class="video-subpage" data-video-subpage="video-discover" hidden>
-                    <div class="vdsc-page">
+                    <div class="vdsc-page" data-vdsc-page>
+                        <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
                         <div class="vdsc-filterbar">
                             <span class="vdsc-filter-label">Browse</span>
@@ -894,10 +895,17 @@
                                 <option value="vote_count.desc">Most voted</option>
                             </select>
                             <button class="vdsc-btn" type="button" data-vdsc-apply>Browse</button>
-                            <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-clear>Clear</button>
+                            <label class="vdsc-toggle">
+                                <input type="checkbox" data-vdsc-hideowned>
+                                <span>Hide owned</span>
+                            </label>
                         </div>
                         <div class="vdsc-shelves" data-vdsc-shelves></div>
                         <div class="vdsc-grid-wrap hidden" data-vdsc-grid-wrap>
+                            <div class="vdsc-grid-head">
+                                <button class="vdsc-btn vdsc-btn--ghost" type="button" data-vdsc-clear>&larr; Discover</button>
+                                <h2 class="vdsc-grid-title" data-vdsc-grid-title></h2>
+                            </div>
                             <div class="vsr-loading hidden" data-vdsc-grid-loading>
                                 <div class="loading-spinner"></div>
                                 <div class="loading-text">Loading&hellip;</div>
