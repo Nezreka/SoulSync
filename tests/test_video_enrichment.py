@@ -1070,16 +1070,26 @@ def test_engine_discover_filter_normalizes_kind_and_passes_filters(db):
 
     class Tmdb:
         enabled = True
-        def discover(self, kind, *, genre=None, year=None, decade=None,
-                     sort_by="popularity.desc", page=1):
-            captured.update(kind=kind, genre=genre, decade=decade, sort_by=sort_by)
+        def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
+                     sort_by="popularity.desc", page=1, region="US"):
+            captured.update(kind=kind, genre=genre, decade=decade, providers=providers, sort_by=sort_by)
             return [{"kind": "movie", "tmdb_id": 9, "title": "X"}]
     eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
-    res = eng.discover_filter("bogus", genre=28, decade=2010, sort_by="vote_average.desc")
+    res = eng.discover_filter("bogus", genre=28, decade=2010, providers=8, sort_by="vote_average.desc")
     assert captured["kind"] == "movie"                 # unknown kind normalised
-    assert captured["genre"] == 28 and captured["decade"] == 2010
+    assert captured["genre"] == 28 and captured["decade"] == 2010 and captured["providers"] == 8
     assert captured["sort_by"] == "vote_average.desc"
     assert res[0]["library_id"] is None                # not owned → None
+
+
+def test_tmdb_discover_provider_sets_watch_region(monkeypatch):
+    captured = {}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(
+        get=lambda u, **k: (captured.update(params=k.get("params")), _Resp({"results": []}))[1]))
+    TMDBClient("KEY").discover("movie", providers=8, region="GB")
+    p = captured["params"]
+    assert p["with_watch_providers"] == 8 and p["watch_region"] == "GB"
+    assert p["with_watch_monetization_types"] == "flatrate"
 
 
 def test_engine_genre_list_caches(db):

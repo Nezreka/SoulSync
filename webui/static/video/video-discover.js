@@ -21,9 +21,10 @@
         genres: { movie: [], show: [] }, taste: { movie: [], show: [] },
         io: null,
         hero: { items: [], idx: 0, timer: null },
-        cat: { title: '', q: '', page: 1, paginates: true, busy: false },
-        sel: { kind: 'movie', genre: '', decade: '', sort: 'popularity.desc' },   // Browse panel
+        cat: { title: '', q: '', page: 1, paginates: true, busy: false, hasMore: false },
+        sel: { kind: 'movie', genre: '', decade: '', providers: '', sort: 'popularity.desc' },   // Browse panel
     };
+    var AUTO = (typeof IntersectionObserver !== 'undefined');   // infinite-scroll capable
 
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
@@ -302,7 +303,7 @@
     // ── category / filter grid (paged) ────────────────────────────────────────
     function openCategory(title, q) {
         state.mode = 'grid';
-        state.cat = { title: title, q: q, page: 1, paginates: !/key=trending/.test(q), busy: false };
+        state.cat = { title: title, q: q, page: 1, paginates: !/key=trending/.test(q), busy: false, hasMore: false };
         $('[data-vdsc-shelves]').classList.add('hidden');
         var hero = $('[data-vdsc-hero]'); if (hero) hero.classList.add('hidden');
         var wrap = $('[data-vdsc-grid-wrap]'); wrap.classList.remove('hidden');
@@ -321,8 +322,9 @@
         var c = state.cat;
         if (c.busy) return;
         c.busy = true;
-        var more = $('[data-vdsc-more]'); if (more) { more.disabled = true; more.textContent = 'Loading…'; }
-        var ld = $('[data-vdsc-grid-loading]'); if (ld && reset) ld.classList.remove('hidden');
+        var more = $('[data-vdsc-more]'); if (more && !reset) { more.disabled = true; more.textContent = 'Loading…'; }
+        var ld = reset ? $('[data-vdsc-grid-loading]') : $('[data-vdsc-more-loading]');
+        if (ld) ld.classList.remove('hidden');
         fetch(LIST_URL + '?' + c.q + '&page=' + c.page, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -333,11 +335,10 @@
                 if (grid) { grid.insertAdjacentHTML('beforeend', items.map(card).join('')); hydrateGet(grid); }
                 var empty = $('[data-vdsc-grid-empty]');
                 if (empty) empty.classList.toggle('hidden', !(reset && !items.length));
-                if (more) {
-                    more.textContent = 'Load more';
-                    more.disabled = false;
-                    more.classList.toggle('hidden', !c.paginates || items.length < 18);
-                }
+                c.hasMore = c.paginates && items.length >= 18;
+                // With infinite scroll the sentinel pulls more — keep the button only
+                // as a no-IntersectionObserver fallback.
+                if (more) { more.textContent = 'Load more'; more.disabled = false; more.classList.toggle('hidden', AUTO || !c.hasMore); }
             })
             .catch(function () {
                 c.busy = false;
@@ -345,11 +346,16 @@
                 if (more) { more.textContent = 'Load more'; more.disabled = false; }
             });
     }
+    function activeChipText(chipset) {
+        var c = $('[data-vdsc-chipset="' + chipset + '"] .vdsc-chip--on');
+        return (c && c.getAttribute('data-val')) ? c.textContent : '';
+    }
     function applyFilter() {
         var s = state.sel;
         var q = ['kind=' + s.kind, 'sort=' + encodeURIComponent(s.sort)];
         var bits = [s.kind === 'show' ? 'Shows' : 'Movies'];
         if (s.genre) { q.push('genre=' + s.genre); var gn = genreName(s.kind, s.genre); if (gn) bits.push(gn); }
+        if (s.providers) { q.push('providers=' + s.providers); var pn = activeChipText('providers'); if (pn) bits.push('on ' + pn); }
         if (s.decade) { q.push('decade=' + s.decade); bits.push(s.decade + 's'); }
         openCategory(bits.join(' · '), q.join('&'));
     }
@@ -457,6 +463,28 @@
             });
         }
         window.addEventListener('resize', positionSegs);
+
+        // Infinite scroll: a sentinel near the grid bottom pulls the next page.
+        var sentinel = $('[data-vdsc-sentinel]');
+        if (sentinel && AUTO) {
+            new IntersectionObserver(function (entries) {
+                if (entries[0].isIntersecting && state.mode === 'grid' && state.cat.hasMore && !state.cat.busy) {
+                    state.cat.page++; loadGrid(false);
+                }
+            }, { rootMargin: '600px 0px' }).observe(sentinel);
+        }
+
+        // Hero keyboard nav (←/→) when Discover is the visible view.
+        document.addEventListener('keydown', function (e) {
+            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            if (trailerEl || state.mode !== 'shelves' || !state.hero.items.length) return;
+            if (!page || page.offsetParent === null) return;                 // Discover not visible
+            var tag = e.target && e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            e.preventDefault();
+            goHero(state.hero.idx + (e.key === 'ArrowRight' ? 1 : -1));
+            startHeroTimer();
+        });
     }
 
     function loadMeta() {

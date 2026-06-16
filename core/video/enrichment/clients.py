@@ -505,9 +505,10 @@ class TMDBClient:
         r.raise_for_status()
         return self._disc_map((r.json() or {}).get("results"), kind)
 
-    def discover(self, kind, *, genre=None, year=None, decade=None,
-                 sort_by="popularity.desc", page=1):
-        """Browse /discover/{movie,tv} filtered by genre / year / decade."""
+    def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
+                 sort_by="popularity.desc", page=1, region="US"):
+        """Browse /discover/{movie,tv} filtered by genre / year / decade / streaming
+        provider (``providers`` is a TMDB provider id; needs ``region``)."""
         if not self.api_key:
             return []
         import requests
@@ -517,6 +518,10 @@ class TMDBClient:
                   "include_adult": "false", "vote_count.gte": 40}
         if genre:
             params["with_genres"] = genre
+        if providers:
+            params["with_watch_providers"] = providers
+            params["watch_region"] = region or "US"
+            params["with_watch_monetization_types"] = "flatrate"   # streaming, not rent/buy
         if year:
             params["primary_release_year" if is_movie else "first_air_date_year"] = year
         if decade:
