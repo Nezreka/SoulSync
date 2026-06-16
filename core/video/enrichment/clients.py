@@ -442,29 +442,107 @@ class TMDBClient:
         return out
 
     def trending(self, window="week"):
-        """Trending movies + shows this week — fills the search page when idle."""
+        """Trending movies + shows this week — fills the search page when idle and
+        the Discover hero slideshow (hence backdrops via _disc_map)."""
         if not self.api_key:
             return []
         import requests
         r = requests.get(self.BASE + "/trending/all/" + window,
                          params={"api_key": self.api_key}, timeout=15)
         r.raise_for_status()
+        return self._disc_map((r.json() or {}).get("results"), None)[:20]
+
+    # ── discover (browse TMDB by curated list / genre / year / decade) ────────
+    def _disc_map(self, results, kind):
+        """Flatten a TMDB movie/tv list into SoulSync items. ``kind`` forces the
+        type for single-type endpoints; pass None to auto-detect each row's
+        media_type (mixed lists like trending). Carries backdrop + overview so the
+        Discover hero can render a rich slide."""
         out = []
-        for it in ((r.json() or {}).get("results") or []):
-            mt, tid = it.get("media_type"), it.get("id")
-            if not tid or mt not in ("movie", "tv"):
+        for it in results or []:
+            tid = it.get("id")
+            if not tid:
                 continue
-            if mt == "movie":
-                out.append({"kind": "movie", "tmdb_id": tid, "title": it.get("title"),
-                            "year": (it.get("release_date") or "")[:4] or None,
-                            "rating": it.get("vote_average") or None,
-                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
-            else:
-                out.append({"kind": "show", "tmdb_id": tid, "title": it.get("name"),
-                            "year": (it.get("first_air_date") or "")[:4] or None,
-                            "rating": it.get("vote_average") or None,
-                            "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None})
-        return out[:20]
+            k = kind
+            if k is None:
+                mt = it.get("media_type")
+                k = "movie" if mt == "movie" else "show" if mt == "tv" else None
+            if k not in ("movie", "show"):
+                continue
+            is_movie = k == "movie"
+            out.append({
+                "kind": k, "tmdb_id": tid,
+                "title": it.get("title") if is_movie else it.get("name"),
+                "year": ((it.get("release_date") if is_movie else it.get("first_air_date")) or "")[:4] or None,
+                "rating": it.get("vote_average") or None,
+                "overview": it.get("overview") or None,
+                "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None,
+                "backdrop": (self.BACKDROP_W + it["backdrop_path"]) if it.get("backdrop_path") else None,
+            })
+        return out
+
+    # canned TMDB lists → (path, forced kind)
+    _CURATED = {
+        "popular_movies": ("/movie/popular", "movie"),
+        "top_movies": ("/movie/top_rated", "movie"),
+        "now_playing": ("/movie/now_playing", "movie"),
+        "upcoming_movies": ("/movie/upcoming", "movie"),
+        "popular_shows": ("/tv/popular", "show"),
+        "top_shows": ("/tv/top_rated", "show"),
+        "on_the_air": ("/tv/on_the_air", "show"),
+        "airing_today": ("/tv/airing_today", "show"),
+    }
+
+    def curated(self, key, page=1):
+        """One of the canned TMDB lists (popular / top-rated / now-playing / …)."""
+        spec = self._CURATED.get(key)
+        if not spec or not self.api_key:
+            return []
+        import requests
+        path, kind = spec
+        r = requests.get(self.BASE + path,
+                         params={"api_key": self.api_key, "page": page}, timeout=15)
+        r.raise_for_status()
+        return self._disc_map((r.json() or {}).get("results"), kind)
+
+    def discover(self, kind, *, genre=None, year=None, decade=None,
+                 sort_by="popularity.desc", page=1):
+        """Browse /discover/{movie,tv} filtered by genre / year / decade."""
+        if not self.api_key:
+            return []
+        import requests
+        is_movie = kind == "movie"
+        path = "/discover/movie" if is_movie else "/discover/tv"
+        params = {"api_key": self.api_key, "sort_by": sort_by, "page": page,
+                  "include_adult": "false", "vote_count.gte": 40}
+        if genre:
+            params["with_genres"] = genre
+        if year:
+            params["primary_release_year" if is_movie else "first_air_date_year"] = year
+        if decade:
+            try:
+                d0 = int(decade)
+                gte, lte = "%d-01-01" % d0, "%d-12-31" % (d0 + 9)
+                if is_movie:
+                    params["primary_release_date.gte"], params["primary_release_date.lte"] = gte, lte
+                else:
+                    params["first_air_date.gte"], params["first_air_date.lte"] = gte, lte
+            except (TypeError, ValueError):
+                pass
+        r = requests.get(self.BASE + path, params=params, timeout=15)
+        r.raise_for_status()
+        return self._disc_map((r.json() or {}).get("results"), kind)
+
+    def genres(self, kind):
+        """TMDB genre id→name list for movies or shows."""
+        if not self.api_key:
+            return []
+        import requests
+        path = "/genre/movie/list" if kind == "movie" else "/genre/tv/list"
+        r = requests.get(self.BASE + path, params={"api_key": self.api_key}, timeout=15)
+        r.raise_for_status()
+        return [{"id": g["id"], "name": g["name"]}
+                for g in (r.json() or {}).get("genres") or [] if g.get("id")]
 
     def full_detail(self, kind, tmdb_id, region="US"):
         """Complete detail for a TMDB title NOT in the library — shaped like the

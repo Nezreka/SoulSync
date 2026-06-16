@@ -45,6 +45,7 @@ def create_video_blueprint() -> Blueprint:
     from .enrichment import register_routes as reg_enrichment
     from .detail import register_routes as reg_detail
     from .search import register_routes as reg_search
+    from .discover import register_routes as reg_discover
     from .calendar import register_routes as reg_calendar
     from .watchlist import register_routes as reg_watchlist
     reg_dashboard(bp)
@@ -55,6 +56,7 @@ def create_video_blueprint() -> Blueprint:
     reg_enrichment(bp)
     reg_detail(bp)
     reg_search(bp)
+    reg_discover(bp)
     reg_calendar(bp)
     reg_watchlist(bp)
 

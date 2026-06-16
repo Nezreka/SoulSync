@@ -305,6 +305,71 @@ class VideoEnrichmentEngine:
                 r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
         return cached
 
+    # ── discover (browse TMDB lists; owned titles annotated) ──────────────────
+    def _stamp_owned(self, items):
+        """Annotate each movie/show with its library_id for the active server —
+        stamped fresh (not cached with ownership) so 'In Library' tracks scans."""
+        srv = self._server()
+        for r in items or []:
+            if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
+                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
+        return items
+
+    def discover_curated(self, key, page=1) -> list:
+        """A canned TMDB list (popular / top-rated / now-playing / upcoming /
+        on-the-air / airing-today), cached then owned-annotated."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        ck = ("disc-cur", key, page)
+        items = self._cache_get(ck)
+        if items is None:
+            try:
+                items = w.client.curated(key, page=page) or []
+                self._cache_put(ck, items, ttl=3600)
+            except Exception:
+                logger.exception("discover curated failed (%s p%s)", key, page)
+                return []
+        return self._stamp_owned(items)
+
+    def discover_filter(self, kind, *, genre=None, year=None, decade=None,
+                        sort_by="popularity.desc", page=1) -> list:
+        """Browse /discover filtered by genre / year / decade, cached + annotated."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        if kind not in ("movie", "show"):
+            kind = "movie"
+        ck = ("disc-flt", kind, genre, year, decade, sort_by, page)
+        items = self._cache_get(ck)
+        if items is None:
+            try:
+                items = w.client.discover(kind, genre=genre, year=year, decade=decade,
+                                          sort_by=sort_by, page=page) or []
+                self._cache_put(ck, items, ttl=3600)
+            except Exception:
+                logger.exception("discover filter failed (%s g=%s y=%s d=%s)", kind, genre, year, decade)
+                return []
+        return self._stamp_owned(items)
+
+    def genre_list(self, kind) -> list:
+        """TMDB genre id→name list (long-cached — these barely change)."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return []
+        if kind not in ("movie", "show"):
+            kind = "movie"
+        ck = ("genres", kind)
+        items = self._cache_get(ck)
+        if items is None:
+            try:
+                items = w.client.genres(kind) or []
+                self._cache_put(ck, items, ttl=86400)
+            except Exception:
+                logger.exception("genre list failed (%s)", kind)
+                return []
+        return items
+
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
         """Full detail for a TMDB title not in the library — same shape as the
         library detail (source='tmdb', direct image URLs, nothing owned). If it IS
