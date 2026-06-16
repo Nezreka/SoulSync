@@ -1147,6 +1147,7 @@ class VideoDatabase:
                 "SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title, "
                 "e.overview, e.air_date, e.runtime_minutes, e.rating, e.has_file, e.monitored, "
                 "(e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
+                "s.tmdb_id AS show_tmdb_id, "
                 "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
@@ -1640,6 +1641,26 @@ class VideoDatabase:
         return {"items": items, "pagination": {
             "page": page, "total_pages": total_pages, "total_count": total,
             "has_prev": page > 1, "has_next": page < total_pages}}
+
+    def wishlist_keys_for_shows(self, show_tmdb_ids) -> dict:
+        """{show_tmdb_id: set('S_E')} of episodes already wishlisted — lets the
+        calendar's 'add missing' button skip what's already queued."""
+        out: dict = {}
+        ids = [int(x) for x in (show_tmdb_ids or []) if x]
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT tmdb_id, season_number, episode_number FROM video_wishlist "
+                        f"WHERE kind='episode' AND tmdb_id IN ({ph})", chunk):
+                    out.setdefault(r["tmdb_id"], set()).add("%s_%s" % (r["season_number"], r["episode_number"]))
+            return out
+        finally:
+            conn.close()
 
     def wishlist_state(self, *, movie_ids=None, show_tmdb_id=None) -> dict:
         """Hydration: which of ``movie_ids`` are wishlisted, and which episode

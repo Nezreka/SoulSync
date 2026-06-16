@@ -115,10 +115,15 @@ def register_routes(bp):
         from . import get_video_db
         body = request.get_json(silent=True) or {}
         try:
-            st = get_video_db().wishlist_state(
+            db = get_video_db()
+            st = db.wishlist_state(
                 movie_ids=body.get("movie_ids") or [], show_tmdb_id=body.get("show_tmdb_id"))
-            return jsonify({"success": True, "movies": sorted(st["movies"]),
-                            "episodes": sorted(st["episodes"])})
+            out = {"success": True, "movies": sorted(st["movies"]), "episodes": sorted(st["episodes"])}
+            shows = body.get("shows")   # multi-show membership for the calendar button
+            if shows:
+                keys = db.wishlist_keys_for_shows(shows)
+                out["by_show"] = {str(tid): sorted(ks) for tid, ks in keys.items()}
+            return jsonify(out)
         except Exception:
             logger.exception("Failed to check video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500

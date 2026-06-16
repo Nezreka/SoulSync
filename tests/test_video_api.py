@@ -487,3 +487,11 @@ def test_wishlist_routes_registered():
     for r in ("/api/video/wishlist", "/api/video/wishlist/add", "/api/video/wishlist/remove",
               "/api/video/wishlist/check", "/api/video/wishlist/counts"):
         assert r in rules
+
+
+def test_wishlist_check_by_show(tmp_path):
+    client, _ = _make_client(tmp_path)
+    client.post("/api/video/wishlist/add", json={
+        "show": {"tmdb_id": 1396, "title": "BB"}, "episodes": [{"season_number": 1, "episode_number": 1}]})
+    res = client.post("/api/video/wishlist/check", json={"shows": [1396, 1399]}).get_json()
+    assert res["by_show"]["1396"] == ["1_1"] and "1399" not in res["by_show"]
