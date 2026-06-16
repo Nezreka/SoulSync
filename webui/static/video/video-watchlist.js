@@ -12,7 +12,7 @@
 
     var PAGE_ID = 'video-watchlist';
     var LIMIT = 60;
-    var state = { loaded: false, tab: 'show', search: '', page: 1,
+    var state = { loaded: false, tab: 'show', search: '', sort: 'default', page: 1,
                   counts: { show: 0, person: 0 } };
     var searchTimer = null;
 
@@ -22,6 +22,18 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function wlBtn(opts) { return (window.VideoWatchlist) ? VideoWatchlist.btn(opts) : ''; }
+
+    function statusPill(status) {
+        var s = String(status == null ? '' : status).trim().toLowerCase();
+        if (!s) return '';
+        if (['ended', 'canceled', 'cancelled', 'completed'].indexOf(s) >= 0)
+            return '<span class="vwlp-pill vwlp-pill--ended">Ended</span>';
+        if (s.indexOf('return') >= 0 || s === 'continuing')
+            return '<span class="vwlp-pill vwlp-pill--airing">Airing</span>';
+        if (s === 'upcoming' || s.indexOf('production') >= 0 || s.indexOf('planned') >= 0 || s === 'pilot')
+            return '<span class="vwlp-pill vwlp-pill--soon">Upcoming</span>';
+        return '<span class="vwlp-pill">' + esc(status) + '</span>';
+    }
 
     function cardHTML(it, kind) {
         // SPA open target: library shows open by library id ('library' source);
@@ -36,11 +48,14 @@
             : '<div class="vwlp-card-ph">' + ph + '</div>';
         var btn = wlBtn({ kind: kind, tmdbId: it.tmdb_id, title: it.title,
                           poster: it.poster_url, libraryId: it.library_id });
+        var pill = kind === 'show' ? statusPill(it.status) : '';
+        var meta = (kind === 'show' && it.episode_count)
+            ? '<span class="vwlp-card-meta">' + (it.owned_count || 0) + '/' + it.episode_count + ' eps</span>' : '';
         return '<a class="vwlp-card' + (kind === 'person' ? ' vwlp-card--person' : '') + '" href="' + href + '" ' +
             'data-vwlp-open="' + kind + '" data-vwlp-source="' + source + '" data-vwlp-openid="' + esc(openId) + '">' +
-            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + btn + '</div>' +
+            '<div class="vwlp-card-art">' + art + '<div class="vwlp-card-scrim"></div>' + pill + btn + '</div>' +
             '<div class="vwlp-card-info"><span class="vwlp-card-title" title="' + esc(it.title) + '">' +
-            esc(it.title) + '</span></div></a>';
+            esc(it.title) + '</span>' + meta + '</div></a>';
     }
 
     function setCounts(counts) {
@@ -88,7 +103,7 @@
         state.loaded = true;
         var ld = $('[data-vwlp-loading]'); if (ld) ld.classList.remove('hidden');
         var params = new URLSearchParams({
-            kind: state.tab, search: state.search, page: state.page, limit: LIMIT });
+            kind: state.tab, search: state.search, sort: state.sort, page: state.page, limit: LIMIT });
         fetch('/api/video/watchlist?' + params.toString(), { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -135,6 +150,11 @@
             searchTimer = setTimeout(function () {
                 state.search = search.value.trim(); state.page = 1; load();
             }, 250);
+        });
+
+        var sortSel = $('[data-vwlp-sort]');
+        if (sortSel) sortSel.addEventListener('change', function () {
+            state.sort = sortSel.value; state.page = 1; load();
         });
 
         var prev = $('[data-vwlp-prev]');

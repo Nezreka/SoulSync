@@ -1952,3 +1952,19 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     box-shadow: 0 8px 24px rgba(var(--accent-rgb, 88 101 242), 0.4); }
 .vgm-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
 @media (max-width: 560px) { .vgm-actions { flex-direction: column-reverse; } .vgm-btn { width: 100%; } }
+
+/* Watchlist card richness — status pill + episode-count meta + sort select */
+.vwlp-pill { position: absolute; top: 8px; left: 8px; z-index: 3;
+    font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 3px 8px; border-radius: 7px; backdrop-filter: blur(6px);
+    background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.9); border: 1px solid rgba(255, 255, 255, 0.12); }
+.vwlp-pill--airing { background: rgba(108, 211, 145, 0.22); color: #8fe7af; border-color: rgba(108, 211, 145, 0.4); }
+.vwlp-pill--soon { background: rgba(var(--accent-rgb, 88 101 242), 0.24); color: #c4cbff; border-color: rgba(var(--accent-rgb, 88 101 242), 0.45); }
+.vwlp-pill--ended { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6); }
+.vwlp-card-meta { display: block; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.45); margin-top: 3px; }
+
+.vwlp-sort { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; outline: none; transition: border-color 0.15s ease; }
+.vwlp-sort:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vwlp-sort option { background: #16161d; color: #fff; }
