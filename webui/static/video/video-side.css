@@ -2024,3 +2024,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vgm-btn--text { background: transparent; border-color: transparent; color: rgba(255, 255, 255, 0.6); padding: 11px 8px; }
 .vgm-btn--text:hover { color: #fff; }
 .vgm-btn:disabled { opacity: 0.4; cursor: default; transform: none !important; filter: none !important; }
+
+/* "Add to watchlist" offer in the show get-modal (airing + not-yet-followed) */
+.vgm-follow { margin-top: 14px; }
+.vgm-follow[hidden] { display: none; }
+.vgm-follow-row { display: flex; align-items: center; gap: 11px; padding: 13px 14px; border-radius: 12px; cursor: pointer;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.1); border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.28); }
+.vgm-follow-row:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.14); }
+.vgm-follow-row input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 17px; height: 17px; cursor: pointer; flex-shrink: 0; }
+.vgm-follow-txt { font-size: 13px; color: rgba(255, 255, 255, 0.82); }
+.vgm-follow-txt strong { color: #fff; font-weight: 800; }

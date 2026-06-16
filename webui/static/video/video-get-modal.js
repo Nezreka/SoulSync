@@ -91,6 +91,7 @@
                 '<div class="vgm-body">' +
                     '<p class="vgm-overview" data-vgm-overview>Loading details…</p>' +
                     '<div class="vgm-eps" data-vgm-eps hidden></div>' +
+                    '<div class="vgm-follow" data-vgm-follow hidden></div>' +
                 '</div>' +
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
@@ -123,19 +124,22 @@
             if (e.target.closest('[data-vgm-wishlist]') || e.target.closest('[data-vgm-download]')) {
                 // v1: visual only — real wishlist/download is a later phase.
                 var n = modalState ? modalState.sel.size : 0;
-                var what = e.target.closest('[data-vgm-download]') ? 'Download' : 'Wishlist';
-                toast((modalState ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') + what + ' coming soon', 'info');
+                var isDl = !!e.target.closest('[data-vgm-download]');
+                var aw = ov.querySelector('[data-vgm-add-watch]');
+                var follow = (!isDl && aw && aw.checked) ? ' + Watchlist' : '';
+                toast((modalState ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') +
+                    (isDl ? 'Download' : 'Wishlist') + follow + ' coming soon', 'info');
             }
         });
         ov.addEventListener('change', function (e) {
             var sa = e.target.closest('[data-vgm-season-all]');
-            if (sa) {  // season select-all → toggle all its selectable episodes
+            if (sa) {  // season select-all → toggle its currently-actionable episodes
                 var sn = sa.getAttribute('data-vgm-season-all');
-                var boxes = ov.querySelectorAll('.vgm-ep-cb[data-vgm-ep^="' + sn + '_"]');
-                for (var i = 0; i < boxes.length; i++) {
-                    boxes[i].checked = sa.checked;
-                    toggleSel(boxes[i].getAttribute('data-vgm-ep'), sa.checked);
-                }
+                sa.indeterminate = false;
+                seasonBoxes(ov, sn).forEach(function (b) {
+                    b.checked = sa.checked;
+                    toggleSel(b.getAttribute('data-vgm-ep'), sa.checked);
+                });
                 updateFooter();
                 return;
             }
@@ -149,6 +153,9 @@
             if (e.target.closest('[data-vgm-missing-only]')) {
                 var wrap = ov.querySelector('[data-vgm-eps]');
                 if (wrap) wrap.classList.toggle('vgm-eps--missing-only', e.target.checked);
+                // the actionable set changed → re-derive every season checkbox
+                var sas = ov.querySelectorAll('[data-vgm-season-all]');
+                for (var k = 0; k < sas.length; k++) syncSeasonCheck(ov, sas[k].getAttribute('data-vgm-season-all'));
             }
         });
         keyHandler = function (e) { if (e.key === 'Escape') closeModal(); };
@@ -165,13 +172,26 @@
 
     function toggleSel(key, on) { if (!modalState) return; if (on) modalState.sel.add(key); else modalState.sel.delete(key); }
 
+    function missingOnlyOn(ov) { var m = ov.querySelector('[data-vgm-missing-only]'); return !m || m.checked; }
+    // Episode checkboxes for a season that the season-select-all should act on:
+    // when "Missing only" is on, owned episodes are hidden, so exclude them.
+    function seasonBoxes(ov, sn) {
+        var skipOwned = missingOnlyOn(ov);
+        var all = ov.querySelectorAll('.vgm-ep-cb[data-vgm-ep^="' + sn + '_"]'), out = [];
+        for (var i = 0; i < all.length; i++) {
+            if (skipOwned && all[i].closest('.vgm-ep--owned')) continue;
+            out.push(all[i]);
+        }
+        return out;
+    }
     function syncSeasonCheck(ov, sn) {
         var all = ov.querySelector('[data-vgm-season-all="' + sn + '"]'); if (!all) return;
-        var boxes = ov.querySelectorAll('.vgm-ep-cb[data-vgm-ep^="' + sn + '_"]');
+        var boxes = seasonBoxes(ov, sn);
         var checked = 0;
         for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) checked++;
-        all.checked = checked === boxes.length && boxes.length > 0;
+        all.checked = boxes.length > 0 && checked === boxes.length;
         all.indeterminate = checked > 0 && checked < boxes.length;
+        all.disabled = boxes.length === 0;
     }
 
     function updateFooter() {
@@ -195,9 +215,11 @@
         var st = epState(e, today);
         var key = snum + '_' + e.episode_number;
         var date = e.air_date ? fmtDate(e.air_date) : '';
-        var ctrl = (st === 'missing')
-            ? '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '" checked>'
-            : '<span class="vgm-ep-lock">' + (st === 'owned' ? '✓' : '◷') + '</span>';
+        // missing-aired -> pre-checked; owned -> selectable for re-download (not
+        // pre-checked); upcoming -> locked (can't grab what hasn't aired).
+        var ctrl = (st === 'upcoming')
+            ? '<span class="vgm-ep-lock">◷</span>'
+            : '<input type="checkbox" class="vgm-ep-cb" data-vgm-ep="' + esc(key) + '"' + (st === 'missing' ? ' checked' : '') + '>';
         var badge = st === 'owned' ? '<span class="vgm-ep-badge vgm-ep-badge--owned">In library</span>'
             : st === 'upcoming' ? '<span class="vgm-ep-badge vgm-ep-badge--soon">' + (date || 'Upcoming') + '</span>'
             : '<span class="vgm-ep-badge vgm-ep-badge--missing">Missing</span>';
@@ -223,8 +245,7 @@
             eps.forEach(function (e) { if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); } });
             html += '<div class="vgm-season">' +
                 '<div class="vgm-season-head" data-vgm-season-toggle>' +
-                    (missing ? '<span class="vgm-season-check"><input type="checkbox" data-vgm-season-all="' + s.season_number + '" checked></span>'
-                             : '<span class="vgm-season-check vgm-season-check--lock">✓</span>') +
+                    '<span class="vgm-season-check"><input type="checkbox" data-vgm-season-all="' + s.season_number + '"' + (missing && missing === eps.length ? ' checked' : '') + '></span>' +
                     '<span class="vgm-season-name">' + esc(s.title || ('Season ' + s.season_number)) + '</span>' +
                     '<span class="vgm-season-meta">' + (missing ? missing + ' missing · ' : '') + eps.length + ' eps</span>' +
                     '<span class="vgm-season-chev" aria-hidden="true">⌄</span>' +
@@ -236,6 +257,8 @@
         wrap.innerHTML = html;
         wrap.classList.add('vgm-eps--missing-only');
         wrap.hidden = false;
+        // initial season-checkbox states reflect the (missing-only) selection
+        d.seasons.forEach(function (s) { syncSeasonCheck(modalEl, s.season_number); });
     }
 
     function fill(d, o) {
@@ -270,8 +293,26 @@
             else { ov.textContent = 'No synopsis available yet.'; ov.classList.add('vgm-overview--none'); }
         }
 
-        if (o.kind === 'show') renderEpisodes(d);   // the season/episode selector
+        if (o.kind === 'show') { renderEpisodes(d); maybeFollow(d); }   // selector + follow offer
         updateFooter();
+    }
+
+    // Airing show you don't follow yet → offer to start watching it (default on),
+    // so grabbing episodes also keeps you current. Hidden for ended shows (can't
+    // "watch" for new) and shows you already follow.
+    function maybeFollow(d) {
+        var fw = modalEl.querySelector('[data-vgm-follow]'); if (!fw) return;
+        if (!d.tmdb_id || !isAiring(d.status)) { fw.hidden = true; return; }
+        fetch('/api/video/watchlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kind: 'show', tmdb_ids: [d.tmdb_id] }) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!modalEl) return;
+                if (res && res.results && res.results[String(d.tmdb_id)]) { fw.hidden = true; return; }
+                fw.innerHTML = '<label class="vgm-follow-row"><input type="checkbox" data-vgm-add-watch checked>' +
+                    '<span class="vgm-follow-txt"><strong>Add to watchlist</strong> — automatically get new episodes as they air</span></label>';
+                fw.hidden = false;
+            }).catch(function () { /* skip the row */ });
     }
 
     // One capture-phase handler — the get button sits inside a card <a>.
