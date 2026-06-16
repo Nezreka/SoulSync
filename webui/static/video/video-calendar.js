@@ -68,9 +68,10 @@
 
     function epCell(ep, idx) {
         var hue = showHue(ep.show_title || '');
-        var art = ep.has_still ? ('/api/video/poster/episode/' + ep.id)
-            : (ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id) : '');
-        var img = art ? '<img class="vcal-cell-img" src="' + art + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+        var art = ep.has_still ? ('/api/video/poster/episode/' + ep.id + '?w=500')
+            : (ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=500') : '');
+        var img = art ? '<img class="vcal-cell-img" src="' + art + '" alt="" loading="lazy" decoding="async" ' +
+            'onload="this.classList.add(\'vcal-loaded\')" onerror="this.style.display=\'none\'">' : '';
         var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
         var epTitle = ep.title || '';   // no redundant "Episode N" when untitled
         var tl = fmtMins(airMins(ep.airs_time));
@@ -127,6 +128,47 @@
         cols.innerHTML = html;
     }
 
+    // ── featured "next up" billboard ──────────────────────────────────────────
+    function featured(d) {
+        var eps = (d.episodes || []).slice();
+        eps.sort(function (a, b) {
+            if (a.air_date !== b.air_date) return a.air_date < b.air_date ? -1 : 1;
+            var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
+            if (ma == null && mb == null) return 0;
+            if (ma == null) return 1; if (mb == null) return -1;
+            return ma - mb;
+        });
+        return eps[0] || null;
+    }
+    function whenLabel(ep, today) {
+        var mins = airMins(ep.airs_time);
+        var diff = Math.round((parseISO(ep.air_date) - parseISO(today)) / 86400000);
+        var day = diff === 0 ? ((mins != null && mins >= 17 * 60) ? 'Tonight' : 'Today')
+            : diff === 1 ? 'Tomorrow' : WD_FULL[parseISO(ep.air_date).getDay()];
+        return day + (mins != null ? ', ' + fmtMins(mins) : '');
+    }
+    function renderHero(d) {
+        var host = $('[data-video-cal-hero]'); if (!host) return;
+        var ep = featured(d);
+        if (!ep) { host.innerHTML = ''; return; }
+        var hue = showHue(ep.show_title || '');
+        var bg = ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=1280') : '';
+        var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
+        var epTitle = ep.title || '';
+        var owned = ep.has_file ? '<span class="vcal-bb-badge">✓ In your library</span>' : '';
+        host.innerHTML =
+            '<div class="vcal-bb" style="--vcal-h:' + hue + '" data-cal-ep="' + ep.id + '" role="button" tabindex="0">' +
+                (bg ? '<div class="vcal-bb-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
+                '<div class="vcal-bb-scrim"></div>' +
+                '<div class="vcal-bb-content">' +
+                    '<div class="vcal-bb-eyebrow"><span class="vcal-bb-dot"></span>NEXT UP · ' + esc(whenLabel(ep, d.today)) + '</div>' +
+                    '<h2 class="vcal-bb-title">' + esc(ep.show_title) + '</h2>' +
+                    '<div class="vcal-bb-sub"><span class="vcal-bb-se">' + se + '</span>' + (epTitle ? ' · ' + esc(epTitle) : '') + '</div>' +
+                    '<div class="vcal-bb-actions"><span class="vcal-bb-btn">View details</span>' + owned + '</div>' +
+                '</div>' +
+            '</div>';
+    }
+
     function load() {
         state.loaded = true;
         showEmpty(false); showLoading(true);
@@ -138,21 +180,51 @@
                 if (!(d.episodes && d.episodes.length)) { showEmpty(true); return; }
                 state.eps = {};
                 d.episodes.forEach(function (e) { state.eps[e.id] = e; });
-                renderGrid(d); setSub(d);
+                renderHero(d); renderGrid(d); setSub(d);
             })
             .catch(function () { showLoading(false); showEmpty(true); });
     }
 
+    function openFrom(target) {
+        var el = target.closest('[data-cal-ep]');
+        if (!el) return false;
+        var ep = state.eps[el.getAttribute('data-cal-ep')];
+        if (ep) openModal(ep);
+        return true;
+    }
+    // Cursor-following 3D tilt (delegated, one element at a time).
+    function wireTilt(container, sel, deg) {
+        if (!container) return;
+        var last = null;
+        container.addEventListener('mousemove', function (e) {
+            var c = e.target.closest(sel);
+            if (c !== last && last) { last.style.removeProperty('--rx'); last.style.removeProperty('--ry'); }
+            last = c;
+            if (!c) return;
+            var r = c.getBoundingClientRect();
+            var px = (e.clientX - r.left) / r.width - 0.5, py = (e.clientY - r.top) / r.height - 0.5;
+            c.style.setProperty('--ry', (px * deg).toFixed(2) + 'deg');
+            c.style.setProperty('--rx', (-py * deg).toFixed(2) + 'deg');
+        });
+        container.addEventListener('mouseleave', function () {
+            if (last) { last.style.removeProperty('--rx'); last.style.removeProperty('--ry'); last = null; }
+        });
+    }
     function wire() {
         var cols = $('[data-video-cal-cols]');
         if (cols) cols.addEventListener('click', function (e) {
             if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-            var card = e.target.closest('[data-cal-ep]');
-            if (!card || !cols.contains(card)) return;
-            e.preventDefault();
-            var ep = state.eps[card.getAttribute('data-cal-ep')];
-            if (ep) openModal(ep);
+            if (e.target.closest('[data-cal-ep]') && cols.contains(e.target)) { e.preventDefault(); openFrom(e.target); }
         });
+        var hero = $('[data-video-cal-hero]');
+        if (hero) {
+            hero.addEventListener('click', function (e) { if (openFrom(e.target)) e.preventDefault(); });
+            hero.addEventListener('keydown', function (e) {
+                if ((e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-cal-ep]')) { e.preventDefault(); openFrom(e.target); }
+            });
+            wireTilt(hero, '.vcal-bb', 3);
+        }
+        wireTilt(cols, '.vcal-cell', 7);
     }
 
     // ── episode modal ─────────────────────────────────────────────────────────
@@ -171,9 +243,9 @@
     function openModal(ep) {
         closeModal();
         var hue = showHue(ep.show_title || '');
-        var backdrop = ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id) : '';
-        var still = ep.has_still ? ('/api/video/poster/episode/' + ep.id)
-            : (ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id) : '');
+        var backdrop = ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=1000') : '';
+        var still = ep.has_still ? ('/api/video/poster/episode/' + ep.id + '?w=600')
+            : (ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=600') : '');
         var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
         var epTitle = ep.title || ('Episode ' + ep.episode_number);
         var tl = fmtMins(airMins(ep.airs_time));
@@ -204,7 +276,8 @@
                 '<div class="vcm-body">' +
                     '<div class="vcm-ep">' +
                         '<div class="vcm-ep-still">' +
-                            (still ? '<img src="' + still + '" alt="" onerror="this.style.display=\'none\'">' : '') +
+                            (still ? '<img src="' + still + '" alt="" decoding="async" ' +
+                                'onload="this.classList.add(\'vcm-loaded\')" onerror="this.style.display=\'none\'">' : '') +
                             '<span class="vcm-ep-fb">▶</span></div>' +
                         '<div class="vcm-ep-main">' +
                             '<div class="vcm-ep-se">' + se + '</div>' +

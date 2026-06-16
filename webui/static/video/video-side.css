@@ -1532,7 +1532,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-grid { border-radius: 20px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.07);
     background: linear-gradient(180deg, #0d0d12, #0a0a0e); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
 .vcal-grid.hidden { display: none; }
-.vcal-cols { display: grid; grid-template-columns: repeat(7, minmax(150px, 1fr)); align-items: start; }
+.vcal-cols { display: grid; grid-template-columns: repeat(7, minmax(168px, 1fr)); align-items: start; }
 .vcal-col { border-left: 1px solid rgba(255, 255, 255, 0.06); min-width: 0; }
 .vcal-col:first-child { border-left: 0; }
 .vcal-col--today { background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.10), rgba(var(--vcal-accent), 0.02) 30%, transparent 60%); }
@@ -1556,19 +1556,31 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 
 /* Episode cell — one clean card (art + info), breathing colour halo behind it */
 .vcal-cell { --vcal-show: var(--vcal-h, 230); position: relative; display: block; text-decoration: none; color: inherit;
-    transition: transform 0.2s ease; }
+    transform: perspective(760px) translateY(var(--ty, 0px)) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--sc, 1));
+    transition: transform 0.16s ease; }
+/* Calm by default; the colour only comes alive on hover. */
 .vcal-glow { position: absolute; inset: -11px; z-index: 0; border-radius: 22px; pointer-events: none;
-    background: radial-gradient(closest-side, hsla(var(--vcal-show), 90%, 55%, 0.55), transparent 76%);
-    opacity: 0.18; animation: vcalBreathe 6.5s ease-in-out infinite; animation-delay: calc(var(--i) * -0.43s); }
-@keyframes vcalBreathe { 0%, 100% { opacity: 0.12; } 50% { opacity: 0.42; } }
+    background: radial-gradient(closest-side, hsla(var(--vcal-show), 90%, 55%, 0.6), transparent 76%);
+    opacity: 0.06; animation: vcalBreathe 7s ease-in-out infinite; animation-delay: calc(var(--i) * -0.5s);
+    transition: opacity 0.25s ease; }
+@keyframes vcalBreathe { 0%, 100% { opacity: 0.04; } 50% { opacity: 0.13; } }
 .vcal-card { position: relative; z-index: 1; display: block; border-radius: 14px; overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08); background: #14141a;
     transition: border-color 0.2s ease, box-shadow 0.2s ease; }
 .vcal-art { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden;
-    background: linear-gradient(135deg, hsl(var(--vcal-show), 48%, 26%), #0b0b0f 88%); }
-.vcal-cell-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vcal-art-scrim { position: absolute; inset: 0; background: linear-gradient(0deg, rgba(0, 0, 0, 0.45), transparent 55%); }
-.vcal-flag { position: absolute; top: 8px; right: 8px; z-index: 2; width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, hsl(var(--vcal-show), 42%, 22%), #0a0a0e 90%); }
+/* skeleton shimmer shown until the image fades in */
+.vcal-art::before { content: ''; position: absolute; inset: 0; z-index: 0;
+    background: linear-gradient(100deg, transparent 16%, rgba(255, 255, 255, 0.05) 38%,
+        rgba(255, 255, 255, 0.10) 50%, rgba(255, 255, 255, 0.05) 62%, transparent 84%);
+    background-size: 220% 100%; animation: vcalShimmer 1.5s ease-in-out infinite; }
+.vcal-cell-img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: cover; display: block;
+    opacity: 0; transition: opacity 0.5s ease; }
+.vcal-cell-img.vcal-loaded { opacity: 1; }
+@keyframes vcalShimmer { 0% { background-position: 200% 0; } 100% { background-position: -130% 0; } }
+@media (prefers-reduced-motion: reduce) { .vcal-art::before { animation: none; } .vcal-cell-img { transition: none; } }
+.vcal-art-scrim { position: absolute; inset: 0; z-index: 2; background: linear-gradient(0deg, rgba(0, 0, 0, 0.45), transparent 55%); }
+.vcal-flag { position: absolute; top: 8px; right: 8px; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 900;
     background: rgba(108, 211, 145, 0.94); color: #07130c; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
 .vcal-info { display: block; padding: 9px 11px 11px; }
@@ -1583,12 +1595,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vcal-se { font-weight: 800; color: rgba(255, 255, 255, 0.72); }
 .vcal-ep { margin-left: 6px; }
-.vcal-cell:hover { transform: translateY(-4px); }
+.vcal-cell:hover { --ty: -6px; --sc: 1.04; z-index: 3; }
 .vcal-cell:hover .vcal-glow { opacity: 0.6 !important; animation-play-state: paused; }
-.vcal-cell:hover .vcal-card { border-color: hsla(var(--vcal-show), 78%, 60%, 0.6);
-    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45), 0 0 22px hsla(var(--vcal-show), 75%, 55%, 0.25); }
+.vcal-cell:hover .vcal-card { border-color: hsla(var(--vcal-show), 78%, 62%, 0.7);
+    box-shadow: 0 22px 46px rgba(0, 0, 0, 0.55), 0 0 30px hsla(var(--vcal-show), 78%, 55%, 0.34); }
 
-@media (prefers-reduced-motion: reduce) { .vcal-glow { animation: none; opacity: 0.2; } }
+@media (prefers-reduced-motion: reduce) {
+    .vcal-glow { animation: none; opacity: 0.08; }
+    .vcal-cell { transform: none; } .vcal-cell:hover { --ty: 0px; --sc: 1; }
+}
 
 /* Empty state */
 .vcal-state { text-align: center; padding: 90px 20px; color: rgba(255, 255, 255, 0.6); }
@@ -1630,7 +1645,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcm-ep { display: grid; grid-template-columns: 176px 1fr; gap: 20px; }
 .vcm-ep-still { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
     background: linear-gradient(135deg, hsl(var(--vcm-h), 48%, 28%), #0b0b0f); }
-.vcm-ep-still img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vcm-ep-still img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1;
+    opacity: 0; transition: opacity 0.45s ease; }
+.vcm-ep-still img.vcm-loaded { opacity: 1; }
 .vcm-ep-fb { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 24px; color: rgba(255, 255, 255, 0.3); }
 .vcm-ep-main { min-width: 0; }
 .vcm-ep-se { font-size: 12px; font-weight: 800; color: hsl(var(--vcm-h), 82%, 78%); letter-spacing: 0.03em; }
@@ -1661,4 +1678,41 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vcm-ep-still { max-width: 240px; }
     .vcm-actions { flex-direction: column-reverse; }
     .vcm-btn { width: 100%; }
+}
+
+/* ── Calendar — featured "next up" billboard ──────────────────────────────── */
+.vcal-hero-wrap { padding: 4px 40px 8px; perspective: 1400px; }
+.vcal-hero-wrap:empty { display: none; }
+.vcal-bb { --vcal-h: 230; position: relative; display: flex; align-items: flex-end; min-height: 306px;
+    border-radius: 22px; overflow: hidden; cursor: pointer; border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 34px 90px rgba(0, 0, 0, 0.55);
+    transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) scale(var(--sc, 1));
+    transition: transform 0.18s ease, box-shadow 0.3s ease; will-change: transform; }
+.vcal-bb:hover { --sc: 1.012; box-shadow: 0 44px 110px rgba(0, 0, 0, 0.62), 0 0 60px hsla(var(--vcal-h), 72%, 50%, 0.22); }
+.vcal-bb-bg { position: absolute; inset: 0; background-size: cover; background-position: center 22%; transform: scale(1.08); }
+.vcal-bb-scrim { position: absolute; inset: 0;
+    background: linear-gradient(90deg, rgba(8, 8, 12, 0.94) 0%, rgba(8, 8, 12, 0.62) 42%, transparent 78%),
+        linear-gradient(0deg, rgba(8, 8, 12, 0.82), transparent 58%),
+        radial-gradient(120% 130% at 0% 100%, hsla(var(--vcal-h), 72%, 45%, 0.42), transparent 58%); }
+.vcal-bb-content { position: relative; z-index: 1; padding: 34px 42px 34px; max-width: 640px; }
+.vcal-bb-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800;
+    letter-spacing: 0.09em; text-transform: uppercase; color: hsl(var(--vcal-h), 88%, 80%); }
+.vcal-bb-dot { width: 7px; height: 7px; border-radius: 50%; background: hsl(var(--vcal-h), 88%, 62%);
+    box-shadow: 0 0 12px hsl(var(--vcal-h), 88%, 60%); animation: vcalPulse 2s ease-in-out infinite; }
+@keyframes vcalPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.45; transform: scale(0.6); } }
+.vcal-bb-title { font-size: 42px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.02; margin: 11px 0 0;
+    text-shadow: 0 2px 20px rgba(0, 0, 0, 0.6); }
+.vcal-bb-sub { font-size: 15px; color: rgba(255, 255, 255, 0.82); margin-top: 9px; font-weight: 600; }
+.vcal-bb-se { font-weight: 800; color: #fff; }
+.vcal-bb-actions { display: flex; align-items: center; gap: 14px; margin-top: 22px; }
+.vcal-bb-btn { display: inline-flex; align-items: center; font-size: 13.5px; font-weight: 800; padding: 12px 22px;
+    border-radius: 12px; background: #fff; color: #0a0a0e; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    transition: transform 0.15s ease; }
+.vcal-bb:hover .vcal-bb-btn { transform: translateY(-2px); }
+.vcal-bb-badge { font-size: 12px; font-weight: 800; padding: 6px 13px; border-radius: 999px;
+    background: rgba(108, 211, 145, 0.18); color: #6cd391; }
+@media (prefers-reduced-motion: reduce) { .vcal-bb { transform: none; } .vcal-bb-dot { animation: none; } }
+@media (max-width: 900px) {
+    .vcal-hero-wrap { padding-left: 18px; padding-right: 18px; }
+    .vcal-bb-title { font-size: 30px; } .vcal-bb { min-height: 240px; }
 }
