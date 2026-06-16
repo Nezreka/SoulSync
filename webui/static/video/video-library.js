@@ -65,15 +65,24 @@
               fallback + '</div>\'"></div>'
             : '<div class="library-artist-image"><div class="library-artist-image-fallback">' + fallback + '</div></div>';
 
-        // #watchlist: TV shows get a hover "follow" eye (movies don't — they're
-        // wishlist, not watchlist). Injected inside the positioned poster box.
-        if (kind === 'show' && it.tmdb_id && window.VideoWatchlist) {
-            var wlb = VideoWatchlist.btn({
-                kind: 'show', tmdbId: it.tmdb_id, title: it.title,
-                poster: it.has_poster ? ('/api/video/poster/show/' + it.id) : '', libraryId: it.id
-            });
-            if (wlb) img = img.replace(/<\/div>$/, wlb + '</div>');
+        // Contextual overlay control, injected inside the positioned poster box:
+        //   airing show -> watchlist eye (monitor for new episodes)
+        //   movie / ended show -> "get" download symbol (opens the detail modal)
+        var ctrl = '';
+        if (kind === 'movie') {
+            ctrl = window.VideoGet ? VideoGet.btn({ kind: 'movie', source: 'library', openId: it.id, title: it.title }) : '';
+        } else if (kind === 'show') {
+            var airing = !window.VideoGet || VideoGet.isAiring(it.status);
+            if (airing && it.tmdb_id && window.VideoWatchlist) {
+                ctrl = VideoWatchlist.btn({
+                    kind: 'show', tmdbId: it.tmdb_id, title: it.title,
+                    poster: it.has_poster ? ('/api/video/poster/show/' + it.id) : '', libraryId: it.id
+                });
+            } else if (window.VideoGet) {
+                ctrl = VideoGet.btn({ kind: 'show', source: 'library', openId: it.id, title: it.title });
+            }
         }
+        if (ctrl) img = img.replace(/<\/div>$/, ctrl + '</div>');
 
         var badge = '';
         if (kind === 'movie') {

@@ -1888,3 +1888,67 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwlp-page-info { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.6); min-width: 110px; text-align: center; }
 
 @media (max-width: 900px) { .vwlp-toolbar { padding-left: 18px; padding-right: 18px; } }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   "Get" button (.vget-btn) + detail/download modal (.vgm-*) — the terminal-
+   content counterpart to the watchlist eye (movies + ended shows).
+   ══════════════════════════════════════════════════════════════════════════ */
+.vget-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 4;
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.16); color: rgba(255, 255, 255, 0.88);
+    cursor: pointer; opacity: 0; transform: translateY(-2px);
+    transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease, border-color 0.18s ease; }
+.vget-btn:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.92); color: #fff;
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.92); }
+.library-artist-card:hover .vget-btn, .vwlp-card:hover .vget-btn,
+.vsr-card:hover .vget-btn, .vd-sim-card:hover .vget-btn { opacity: 1; transform: none; }
+@media (hover: none) { .vget-btn { opacity: 1; transform: none; } }
+
+/* modal */
+.vgm-overlay { position: fixed; inset: 0; z-index: 9100; display: flex; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(5, 5, 8, 0.72); backdrop-filter: blur(9px); opacity: 0; transition: opacity 0.2s ease; }
+.vgm-overlay.vgm-open { opacity: 1; }
+.vgm-modal { position: relative; width: min(680px, 100%); max-height: 90vh; overflow-y: auto;
+    border-radius: 22px; background: #101015; border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 50px 130px rgba(0, 0, 0, 0.72); transform: translateY(16px) scale(0.985);
+    transition: transform 0.26s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.vgm-overlay.vgm-open .vgm-modal { transform: none; }
+.vgm-modal::-webkit-scrollbar { width: 9px; }
+.vgm-modal::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 5px; }
+.vgm-close { position: absolute; top: 14px; right: 14px; z-index: 3; width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 22px;
+    cursor: pointer; backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center;
+    line-height: 1; transition: all 0.15s ease; }
+.vgm-close:hover { background: rgba(0, 0, 0, 0.72); border-color: rgba(255, 255, 255, 0.4); }
+.vgm-hero { position: relative; min-height: 260px; border-radius: 22px 22px 0 0; overflow: hidden;
+    display: flex; align-items: flex-end; background-size: cover; background-position: center 22%; background-color: #16161d; }
+.vgm-hero-scrim { position: absolute; inset: 0;
+    background: linear-gradient(0deg, #101015 4%, rgba(16, 16, 21, 0.5) 52%, rgba(16, 16, 21, 0.1)),
+        radial-gradient(130% 110% at 0% 100%, rgba(var(--accent-rgb, 88 101 242), 0.32), transparent 60%); }
+.vgm-hero-content { position: relative; z-index: 1; padding: 26px 28px 20px; width: 100%; }
+.vgm-eyebrow { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.6); }
+.vgm-eyebrow:empty { display: none; }
+.vgm-title { font-size: 30px; font-weight: 900; letter-spacing: -0.025em; line-height: 1.05; margin: 8px 0 0;
+    text-shadow: 0 2px 18px rgba(0, 0, 0, 0.55); }
+.vgm-meta { display: flex; gap: 16px; margin-top: 11px; flex-wrap: wrap; }
+.vgm-meta-item { font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.78); }
+.vgm-genres { display: flex; gap: 7px; margin-top: 12px; flex-wrap: wrap; }
+.vgm-genres:empty { display: none; }
+.vgm-genre { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.82); }
+.vgm-body { padding: 20px 28px 4px; }
+.vgm-overview { font-size: 14px; line-height: 1.65; color: rgba(255, 255, 255, 0.82); margin: 0; }
+.vgm-overview--none { color: rgba(255, 255, 255, 0.4); font-style: italic; }
+.vgm-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 20px 28px 26px; }
+.vgm-btn { font-size: 13px; font-weight: 800; padding: 11px 20px; border-radius: 12px; cursor: pointer;
+    border: 1px solid transparent; transition: all 0.15s ease; }
+.vgm-btn--ghost { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.82); }
+.vgm-btn--ghost:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.vgm-btn--primary { background: rgb(var(--accent-rgb, 88 101 242)); color: #fff;
+    box-shadow: 0 8px 24px rgba(var(--accent-rgb, 88 101 242), 0.4); }
+.vgm-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+@media (max-width: 560px) { .vgm-actions { flex-direction: column-reverse; } .vgm-btn { width: 100%; } }

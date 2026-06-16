@@ -1456,7 +1456,7 @@ class VideoDatabase:
         }.get(sort, title_key)
 
         if is_shows:
-            select = ("SELECT s.id, s.title, s.year, s.tmdb_id, "
+            select = ("SELECT s.id, s.title, s.year, s.tmdb_id, s.status, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "
