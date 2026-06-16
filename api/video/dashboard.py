@@ -17,13 +17,11 @@ def register_routes(bp):
     @bp.route("/dashboard", methods=["GET"])
     def video_dashboard():
         from . import get_video_db
+        from core.video.sources import resolve_video_server
         try:
-            stats = get_video_db().dashboard_stats()
-            try:
-                from core.video.sources import resolve_video_server
-                stats["server"] = resolve_video_server()  # the VIDEO server, not music's active
-            except Exception:
-                stats["server"] = None
+            server = resolve_video_server()                 # the VIDEO server, not music's active
+            stats = get_video_db().dashboard_stats(server_source=server)
+            stats["server"] = server
             return jsonify(stats)
         except Exception:
             logger.exception("Failed to build video dashboard stats")

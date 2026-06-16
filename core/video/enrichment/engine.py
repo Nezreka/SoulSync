@@ -279,9 +279,10 @@ class VideoEnrichmentEngine:
             except Exception:
                 logger.exception("video search failed for %r", query)
                 return []
+        srv = self._server()
         for r in results:
             if r.get("kind") in ("movie", "show") and r.get("tmdb_id"):
-                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
+                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
         return results
 
     def trending(self) -> list:
@@ -298,9 +299,10 @@ class VideoEnrichmentEngine:
                 logger.exception("video trending failed")
                 return []
         # Re-annotate ownership fresh each call (cheap) so it tracks the library.
+        srv = self._server()
         for r in cached:
             if r.get("tmdb_id"):
-                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"])
+                r["library_id"] = self.db.library_id_for_tmdb(r["kind"], r["tmdb_id"], srv)
         return cached
 
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
@@ -310,7 +312,7 @@ class VideoEnrichmentEngine:
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return None
-        lib_id = self.db.library_id_for_tmdb(kind, tmdb_id)
+        lib_id = self.db.library_id_for_tmdb(kind, tmdb_id, self._server())
         if lib_id:
             return {"redirect": {"source": "library", "kind": kind, "id": lib_id}}
         region = self._region()
@@ -426,10 +428,20 @@ class VideoEnrichmentEngine:
                 return None
             self._cache_put(("person", tmdb_id), p)
         # Re-annotate ownership fresh each call (cheap) so it tracks the library.
+        srv = self._server()
         for c in p.get("credits") or []:
             if c.get("tmdb_id"):
-                c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"])
+                c["library_id"] = self.db.library_id_for_tmdb(c["kind"], c["tmdb_id"], srv)
         return p
+
+    def _server(self):
+        """Active video server — scopes ownership lookups so an item owned only on
+        the inactive server doesn't read as owned (Plex/Jellyfin stay separate)."""
+        try:
+            from core.video.sources import resolve_video_server
+            return resolve_video_server(self.db)
+        except Exception:
+            return None
 
     def worker(self, service):
         return self.workers.get(service)

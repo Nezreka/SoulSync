@@ -730,3 +730,40 @@ def test_video_db_uses_distinct_default_path_and_env():
     assert "video_library.db" in src
     assert "VIDEO_DATABASE_PATH" in src      # distinct env var from music's DATABASE_PATH
     assert "music_library.db" not in src
+
+
+def test_servers_do_not_commingle_in_reads(db):
+    """Per-server isolation (mirrors the music side): the SAME movie/show on Plex
+    and Jellyfin are separate rows, and scoped reads only ever return the active
+    server's data — so a Jellyfin scan never shows up alongside Plex."""
+    # Same title on both servers → two distinct rows.
+    db.upsert_movie("plex", {"server_id": "p1", "title": "Dune", "tmdb_id": 438631, "year": 2021})
+    db.upsert_movie("jellyfin", {"server_id": "j1", "title": "Dune", "tmdb_id": 438631, "year": 2021})
+    db.upsert_show_tree("plex", {"server_id": "ps", "title": "Severance", "tmdb_id": 95396, "seasons": []})
+    db.upsert_show_tree("jellyfin", {"server_id": "js", "title": "Severance", "tmdb_id": 95396, "seasons": []})
+
+    # query_library is scoped per server (and unscoped == all).
+    assert db.query_library("movies", server_source="plex")["pagination"]["total_count"] == 1
+    assert db.query_library("movies", server_source="jellyfin")["pagination"]["total_count"] == 1
+    assert db.query_library("movies")["pagination"]["total_count"] == 2
+    assert db.query_library("shows", server_source="plex")["pagination"]["total_count"] == 1
+
+    # dashboard counts are scoped; None counts everything.
+    assert db.dashboard_stats("plex")["library"]["movies"] == 1
+    assert db.dashboard_stats("jellyfin")["library"]["movies"] == 1
+    assert db.dashboard_stats()["library"]["movies"] == 2
+
+    # ownership lookup resolves to the row on the ACTIVE server, not the other.
+    plex_id = db.library_id_for_tmdb("movie", 438631, "plex")
+    jelly_id = db.library_id_for_tmdb("movie", 438631, "jellyfin")
+    assert plex_id is not None and jelly_id is not None and plex_id != jelly_id
+
+
+def test_prune_is_scoped_to_one_server(db):
+    """A deep scan of one server must never prune the other server's rows."""
+    db.upsert_movie("plex", {"server_id": "p1", "title": "Dune"})
+    db.upsert_movie("jellyfin", {"server_id": "j1", "title": "Arrival"})
+    # Deep-scan Plex sees nothing → prunes only Plex rows, leaves Jellyfin intact.
+    db.prune_missing("movies", "plex", seen_ids=[])
+    assert db.query_library("movies", server_source="plex")["pagination"]["total_count"] == 0
+    assert db.query_library("movies", server_source="jellyfin")["pagination"]["total_count"] == 1
