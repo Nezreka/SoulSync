@@ -20,6 +20,15 @@
     function toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type); }
     // A stable per-title hue so each modal glows in its own colour (the "vibe").
     function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
+    function resLabel(res) {
+        if (!res) return '';
+        res = String(res).toLowerCase();
+        if (res.indexOf('2160') > -1 || res === '4k') return '4K';
+        if (res.indexOf('1080') > -1) return '1080p';
+        if (res.indexOf('720') > -1) return '720p';
+        if (res.indexOf('480') > -1 || res.indexOf('576') > -1) return 'SD';
+        return res.toUpperCase();
+    }
 
     // A show is "airing" (eye) unless its status says it's finished (get-symbol).
     function isAiring(status) {
@@ -84,6 +93,7 @@
                 '<button class="vgm-close" type="button" data-vgm-close aria-label="Close">&times;</button>' +
                 '<div class="vgm-hero" data-vgm-hero>' +
                     '<div class="vgm-hero-scrim"></div>' +
+                    '<img class="vgm-poster" data-vgm-poster alt="" hidden>' +
                     '<div class="vgm-hero-content">' +
                         '<div class="vgm-eyebrow" data-vgm-eyebrow></div>' +
                         '<h2 class="vgm-title" data-vgm-title>' + esc(o.title || 'Loading…') + '</h2>' +
@@ -92,7 +102,10 @@
                     '</div>' +
                 '</div>' +
                 '<div class="vgm-body">' +
+                    '<div class="vgm-ratings" data-vgm-ratings hidden></div>' +
                     '<p class="vgm-overview" data-vgm-overview>Loading details…</p>' +
+                    '<div class="vgm-owned" data-vgm-owned hidden></div>' +
+                    '<div class="vgm-next" data-vgm-next hidden></div>' +
                     '<div class="vgm-eps" data-vgm-eps hidden></div>' +
                     '<div class="vgm-follow" data-vgm-follow hidden></div>' +
                 '</div>' +
@@ -129,11 +142,13 @@
             if (e.target.closest('[data-vgm-wishlist]')) {
                 // v1: visual only — everything funnels through the wishlist; the
                 // real write + download-from-wishlist come later.
-                var n = modalState ? modalState.sel.size : 0;
+                var n = (modalState && modalState.sel) ? modalState.sel.size : 0;
                 var aw = ov.querySelector('[data-vgm-add-watch]');
                 var follow = (aw && aw.checked) ? ' + Watchlist' : '';
-                toast((modalState ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') +
-                    'Wishlist' + follow + ' coming soon', 'info');
+                var ownedMovie = modalState && modalState.kind === 'movie' && modalState.owned;
+                var verb = ownedMovie ? 'Re-download' : 'Wishlist';
+                toast(((modalState && modalState.sel) ? (n + ' episode' + (n === 1 ? '' : 's') + ' — ') : '') +
+                    verb + follow + ' coming soon', 'info');
             }
         });
         ov.addEventListener('change', function (e) {
@@ -209,6 +224,11 @@
             if (cnt) cnt.textContent = n + ' episode' + (n === 1 ? '' : 's') + ' selected';
             if (addLbl) addLbl.textContent = '+ Add ' + n + ' to Wishlist';
             if (add) add.disabled = n === 0;
+        } else if (modalState && modalState.kind === 'movie' && modalState.owned) {
+            // Already owned — the action is a re-grab, not a new want.
+            if (cnt) cnt.textContent = '';
+            if (addLbl) addLbl.textContent = 'Re-download';
+            if (add) add.disabled = false;
         } else {
             if (cnt) cnt.textContent = '';
             if (addLbl) addLbl.textContent = '+ Add to Wishlist';
@@ -283,6 +303,17 @@
             : (d.backdrop_url || d.backdrop || '');
         if (hero && bg) hero.style.backgroundImage = "url('" + bg + "')";
 
+        // Poster thumbnail floating over the hero (the premium "card" feel).
+        var poster = q('[data-vgm-poster]');
+        var pUrl = (o.source !== 'tmdb' && d.has_poster)
+            ? '/api/video/poster/' + o.kind + '/' + id
+            : (d.poster_url || d.poster || '');
+        if (poster && pUrl) {
+            poster.onload = function () { if (hero) hero.classList.add('vgm-has-poster'); poster.hidden = false; };
+            poster.onerror = function () { poster.hidden = true; if (hero) hero.classList.remove('vgm-has-poster'); };
+            poster.src = pUrl;
+        }
+
         var t = q('[data-vgm-title]'); if (t && d.title) t.textContent = d.title;
         if (d.title) modalEl.style.setProperty('--vgm-h', hueOf(d.title));   // refine vibe from the real title
         var eyebrow = [d.network, d.studio, d.year, d.status, d.content_rating].filter(Boolean).map(esc).join('  ·  ');
@@ -307,8 +338,65 @@
             else { ov.textContent = 'No synopsis available yet.'; ov.classList.add('vgm-overview--none'); }
         }
 
-        if (o.kind === 'show') { renderEpisodes(d); maybeFollow(d); }   // selector + follow offer
+        renderRatings(d);   // IMDb / Rotten Tomatoes / Metacritic chips (both kinds)
+        if (o.kind === 'show') {
+            modalState = modalState || { kind: 'show', sel: new Set() };
+            renderEpisodes(d); renderNext(d); maybeFollow(d);   // selector + next-up + follow offer
+        } else {
+            modalState = { kind: 'movie', owned: !!d.owned };   // owned movies → re-download, not wishlist
+            renderOwned(d);
+        }
         updateFooter();
+    }
+
+    // Ratings strip: branded chips for whichever scores the payload carries.
+    function renderRatings(d) {
+        var box = modalEl && modalEl.querySelector('[data-vgm-ratings]'); if (!box) return;
+        function chip(cls, src, val) {
+            return '<span class="vgm-rating vgm-rating--' + cls + '">' +
+                '<span class="vgm-rating-src">' + src + '</span>' +
+                '<span class="vgm-rating-val">' + esc(val) + '</span></span>';
+        }
+        var chips = [];
+        if (d.imdb_rating) chips.push(chip('imdb', 'IMDb', (Math.round(d.imdb_rating * 10) / 10)));
+        if (d.rt_rating) chips.push(chip('rt', 'Rotten Tomatoes', d.rt_rating + '%'));
+        if (d.metacritic) chips.push(chip('mc', 'Metacritic', d.metacritic));
+        if (!chips.length) { box.hidden = true; return; }
+        box.innerHTML = chips.join('');
+        box.hidden = false;
+    }
+
+    // Owned movie → an "in your library" note (with the best version's quality)
+    // instead of pretending it's a fresh wishlist want.
+    function renderOwned(d) {
+        var box = modalEl && modalEl.querySelector('[data-vgm-owned]'); if (!box) return;
+        if (!d.owned) { box.hidden = true; return; }
+        var f = d.file || {};
+        var bits = [resLabel(f.resolution), f.quality, (f.audio_codec || '').toUpperCase()].filter(Boolean);
+        box.innerHTML = '<span class="vgm-owned-ic">✓</span>' +
+            '<span class="vgm-owned-txt"><strong>In your library</strong>' +
+            (bits.length ? ' · ' + esc(bits.join(' · ')) : '') + '</span>';
+        box.hidden = false;
+    }
+
+    // Airing show → the soonest not-yet-aired episode, so "what's next" is right
+    // up front (ties the modal to the watchlist's whole reason for existing).
+    function renderNext(d) {
+        var box = modalEl && modalEl.querySelector('[data-vgm-next]'); if (!box) return;
+        if (!isAiring(d.status)) { box.hidden = true; return; }
+        var today = isoToday(), best = null;
+        (d.seasons || []).forEach(function (s) {
+            (s.episodes || []).forEach(function (e) {
+                if (e.air_date && e.air_date > today && (!best || e.air_date < best.air_date))
+                    best = { s: s.season_number, e: e.episode_number, air_date: e.air_date, title: e.title };
+            });
+        });
+        if (!best) { box.hidden = true; return; }
+        box.innerHTML = '<span class="vgm-next-ic">▶</span>' +
+            '<span class="vgm-next-txt"><strong>Next episode</strong> · S' + best.s + ' · E' + best.e +
+            (best.title ? ' — ' + esc(best.title) : '') + '</span>' +
+            '<span class="vgm-next-date">' + esc(fmtDate(best.air_date)) + '</span>';
+        box.hidden = false;
     }
 
     // Airing show you don't follow yet → offer to start watching it (default on),

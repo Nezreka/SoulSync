@@ -1953,6 +1953,49 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vgm-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
 @media (max-width: 560px) { .vgm-actions { flex-direction: column-reverse; } .vgm-btn { width: 100%; } }
 
+/* ── Get-modal: poster + ratings + owned-note + next-up ───────────────────── */
+/* Poster floats over the hero bottom-left; content shifts right to clear it. */
+.vgm-poster { position: absolute; left: 28px; bottom: 18px; z-index: 2; width: 104px; aspect-ratio: 2 / 3;
+    object-fit: cover; border-radius: 10px; background: #16161d;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.4); }
+.vgm-poster[hidden] { display: none; }
+.vgm-hero.vgm-has-poster .vgm-hero-content { padding-left: 152px; }
+@media (max-width: 560px) { .vgm-poster { width: 78px; left: 20px; }
+    .vgm-hero.vgm-has-poster .vgm-hero-content { padding-left: 112px; } }
+
+/* Ratings strip — branded source chips (IMDb / RT / Metacritic). */
+.vgm-ratings { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.vgm-ratings[hidden] { display: none; }
+.vgm-rating { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 11px; border-radius: 9px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.09); }
+.vgm-rating-src { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.5); }
+.vgm-rating-val { font-size: 14px; font-weight: 900; color: #fff; letter-spacing: -0.01em; }
+.vgm-rating--imdb { background: rgba(245, 197, 24, 0.1); border-color: rgba(245, 197, 24, 0.32); }
+.vgm-rating--imdb .vgm-rating-src { color: #f5c518; }
+.vgm-rating--rt { background: rgba(250, 50, 11, 0.1); border-color: rgba(250, 50, 11, 0.3); }
+.vgm-rating--rt .vgm-rating-src { color: #ff6446; }
+.vgm-rating--mc { background: rgba(108, 211, 145, 0.1); border-color: rgba(108, 211, 145, 0.3); }
+.vgm-rating--mc .vgm-rating-src { color: #6cd391; }
+
+/* Owned-movie note — "in your library" with the best version's quality. */
+.vgm-owned { display: flex; align-items: center; gap: 9px; margin-top: 16px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(108, 211, 145, 0.08); border: 1px solid rgba(108, 211, 145, 0.26); }
+.vgm-owned[hidden] { display: none; }
+.vgm-owned-ic { font-size: 14px; font-weight: 900; color: #6cd391; flex-shrink: 0; }
+.vgm-owned-txt { font-size: 13px; color: rgba(255, 255, 255, 0.7); }
+.vgm-owned-txt strong { color: #8fe7af; font-weight: 800; }
+
+/* Next-episode line — the soonest upcoming episode for an airing show. */
+.vgm-next { display: flex; align-items: center; gap: 11px; margin-top: 16px; padding: 12px 14px; border-radius: 12px;
+    background: rgba(var(--accent-rgb, 88 101 242), 0.09); border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.26); }
+.vgm-next[hidden] { display: none; }
+.vgm-next-ic { font-size: 11px; color: rgb(var(--accent-rgb, 88 101 242)); flex-shrink: 0; }
+.vgm-next-txt { font-size: 13px; color: rgba(255, 255, 255, 0.78); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vgm-next-txt strong { color: #fff; font-weight: 800; }
+.vgm-next-date { margin-left: auto; flex-shrink: 0; font-size: 12px; font-weight: 800; color: #c4cbff; }
+
 /* Watchlist card richness — status pill + episode-count meta + sort select */
 .vwlp-pill { position: absolute; top: 8px; left: 8px; z-index: 3;
     font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
@@ -2077,6 +2120,11 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @keyframes vgmRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 .vgm-title { text-shadow: 0 2px 24px rgba(0, 0, 0, 0.65), 0 0 42px hsla(var(--vgm-h, 230), 80%, 55%, 0.28); }
 
+/* poster — hue-aware halo + its own rise (it sits outside hero-content) */
+.vgm-poster { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 0 28px -6px hsla(var(--vgm-h, 230), 80%, 58%, 0.5); }
+.vgm-overlay.vgm-open .vgm-poster { animation: vgmRise 0.6s cubic-bezier(0.2, 0.7, 0.2, 1) 0.12s both; }
+
 /* primary CTA — hue-aware gradient + glow + lift */
 .vgm-btn--primary {
     background: linear-gradient(135deg, hsl(var(--vgm-h, 230), 70%, 58%), hsl(var(--vgm-h, 230), 72%, 47%));
@@ -2105,7 +2153,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .vgm-hero, .vgm-hero::after, .vgm-follow-row,
+    .vgm-hero, .vgm-hero::after, .vgm-follow-row, .vgm-overlay.vgm-open .vgm-poster,
     .vgm-overlay.vgm-open .vgm-hero-content > * { animation: none; }
     .vgm-modal { transition: opacity 0.2s ease; }
 }
