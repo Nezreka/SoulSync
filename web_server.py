@@ -7556,6 +7556,18 @@ def approve_quarantine_item(entry_id):
             docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
             'Transfer',
         )
+        _req = request.get_json(silent=True) or {}
+        # #876: capture the sibling alternatives BEFORE approving — the approve
+        # restores (moves) this entry's file out of quarantine, after which its
+        # own group_key can no longer be looked up by id. Read-only here; the
+        # actual deletion happens only after the re-import is safely kicked off.
+        _sibling_ids = []
+        if _req.get('remove_siblings'):
+            from core.imports.quarantine import find_quarantine_siblings
+            try:
+                _sibling_ids = find_quarantine_siblings(_get_quarantine_dir(), entry_id)
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling lookup for {entry_id} failed: {sib_exc}")
         result = approve_quarantine_entry(_get_quarantine_dir(), entry_id, restore_dir)
         if result is None:
             return jsonify({
@@ -7574,7 +7586,6 @@ def approve_quarantine_item(entry_id):
         # context lost task_id/batch_id (the wrapper pops them before quarantine),
         # so we re-supply them here. Manager-tab approvals (no task_id) keep the
         # original inner-pipeline path.
-        _req = request.get_json(silent=True) or {}
         _task_id = (_req.get('task_id') or '').strip() or None
         _batch_id = None
         if _task_id:
@@ -7594,7 +7605,28 @@ def approve_quarantine_item(entry_id):
             _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
-        return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
+        # #876: once one alternative for a song is accepted, the other
+        # quarantined attempts at the SAME intended target are redundant
+        # failed downloads of a track the user now owns. Delete the siblings
+        # captured above (scoped to the quarantine manager via `remove_siblings`
+        # — the download-modal chooser passes no flag and is unaffected).
+        removed_siblings = []
+        if _sibling_ids:
+            from core.imports.quarantine import delete_quarantine_entry
+            try:
+                for sib_id in _sibling_ids:
+                    if delete_quarantine_entry(_get_quarantine_dir(), sib_id):
+                        removed_siblings.append(sib_id)
+                if removed_siblings:
+                    logger.info(f"[Quarantine] Auto-removed {len(removed_siblings)} sibling alternative(s) of {entry_id}: {removed_siblings}")
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling cleanup for {entry_id} failed: {sib_exc}")
+        return jsonify({
+            "success": True,
+            "trigger_bypassed": "all",
+            "original_trigger": trigger,
+            "removed_siblings": removed_siblings,
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500

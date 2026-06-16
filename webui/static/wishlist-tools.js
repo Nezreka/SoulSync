@@ -3300,11 +3300,64 @@ async function loadQuarantineList() {
             list.innerHTML = '<div class="library-history-empty">🛡️<br><br>No quarantined files. Nice and clean.</div>';
             return;
         }
-        list.innerHTML = entries.map(renderQuarantineEntry).join('');
+        list.innerHTML = _groupQuarantineEntries(entries).map(renderQuarantineGroupOrEntry).join('');
     } catch (err) {
         console.error('Error loading quarantine entries:', err);
         list.innerHTML = '<div class="library-history-empty">Error loading quarantine</div>';
     }
+}
+
+// #876: bucket entries that are alternatives for the SAME intended target
+// (same backend group_key — derived from expected_artist/expected_track, the
+// track SoulSync was trying to fetch, not the bad file's own tags). Entries
+// with a null group_key (legacy/orphan, ungroupable) each stand alone.
+// Preserves the newest-first order the backend already sorted by.
+function _groupQuarantineEntries(entries) {
+    const groups = [];
+    const byKey = new Map();
+    for (const entry of entries) {
+        const key = entry.group_key;
+        if (!key) { groups.push({ key: null, members: [entry] }); continue; }
+        let g = byKey.get(key);
+        if (!g) { g = { key, members: [] }; byKey.set(key, g); groups.push(g); }
+        g.members.push(entry);
+    }
+    return groups;
+}
+
+function renderQuarantineGroupOrEntry(group) {
+    if (group.members.length === 1) return renderQuarantineEntry(group.members[0]);
+    return renderQuarantineGroup(group);
+}
+
+// A collapsible parent row for multiple alternatives of one song. Header shows
+// the shared track/artist + an alternatives count; members reuse the standard
+// entry markup so per-row Approve/Recover/Delete keep working unchanged.
+function renderQuarantineGroup(group) {
+    const first = group.members[0] || {};
+    const title = first.expected_track || first.original_filename || 'Unknown';
+    const artist = first.expected_artist || '';
+    const n = group.members.length;
+    const sub = artist ? escapeHtml(artist) : '';
+    // Reuse the album art the sidecar context carried, when any member has it.
+    const thumb = (group.members.find(m => m.thumb_url) || {}).thumb_url || '';
+    const thumbHtml = thumb
+        ? `<img class="library-history-thumb" src="${escapeHtml(thumb)}" alt="" onerror="this.style.display='none'">`
+        : '<div class="library-history-thumb-placeholder">🛡️</div>';
+    return `<div class="lh-quarantine-group lh-qgroup-collapsed">
+        <div class="lh-quarantine-group-header" onclick="this.parentElement.classList.toggle('lh-qgroup-collapsed')">
+            ${thumbHtml}
+            <div class="lh-quarantine-group-text">
+                <div class="library-history-entry-title">${escapeHtml(title)}</div>
+                <div class="library-history-entry-meta">${sub}</div>
+            </div>
+            <span class="lh-quarantine-group-count">${n} alternatives</span>
+            <span class="lh-expand-btn">&#x25BE;</span>
+        </div>
+        <div class="lh-quarantine-group-members">
+            ${group.members.map(renderQuarantineEntry).join('')}
+        </div>
+    </div>`;
 }
 
 function renderQuarantineEntry(entry) {
@@ -3388,12 +3441,20 @@ async function approveQuarantineEntry(entryId) {
     });
     if (!ok) return;
     try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, { method: 'POST' });
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(entryId)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // #876: clear the other quarantined alternatives for this same song
+            // once one is accepted — they're redundant failed attempts now.
+            body: JSON.stringify({ remove_siblings: true }),
+        });
         const data = await r.json();
         if (!data.success) {
             showToast(`Approve failed: ${data.error}`, 'error');
         } else {
-            showToast(`Approved — skipped ${data.trigger_bypassed} check, re-running pipeline.`, 'success');
+            const removed = (data.removed_siblings || []).length;
+            const extra = removed ? ` — removed ${removed} other option${removed === 1 ? '' : 's'}.` : '';
+            showToast(`Approved — skipped ${data.trigger_bypassed} check, re-running pipeline.${extra}`, 'success');
         }
     } catch (err) {
         showToast(`Approve failed: ${err.message}`, 'error');
