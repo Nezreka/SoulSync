@@ -349,6 +349,7 @@
                 <a class="nav-button" data-video-page="video-wishlist" href="#">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span>
                     <span class="nav-text">Wishlist</span>
+                    <span class="dl-nav-badge hidden" data-video-wishlist-badge>0</span>
                 </a>
                 <a class="nav-button" data-video-page="video-downloads" href="#">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span>
@@ -1034,6 +1035,53 @@
                                 <button class="vwlp-page-btn" type="button" data-vwlp-prev>&lsaquo; Prev</button>
                                 <span class="vwlp-page-info" data-vwlp-pageinfo></span>
                                 <button class="vwlp-page-btn" type="button" data-vwlp-next>Next &rsaquo;</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <!-- Wishlist (nav page): movies + wanted episodes, split by a
+                     Movies/TV tab. TV groups show -> season -> episode. Built by
+                     video/video-wishlist.js, styled by .vwsh-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-wishlist" hidden>
+                    <div class="vwsh-page">
+                        <div class="vwsh-head">
+                            <div class="vwsh-head-glow" aria-hidden="true"></div>
+                            <div class="vwsh-head-row">
+                                <div class="vwsh-head-titles">
+                                    <h1 class="vwsh-title">Wishlist</h1>
+                                    <p class="vwsh-sub">Movies &amp; episodes you want to grab</p>
+                                </div>
+                                <div class="vwsh-tabs" role="tablist">
+                                    <button class="vwsh-tab vwsh-tab--on" type="button" role="tab" data-vwsh-tab="movie">
+                                        Movies <span class="vwsh-tab-n" data-vwsh-count-movie>0</span>
+                                    </button>
+                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="show">
+                                        TV <span class="vwsh-tab-n" data-vwsh-count-show>0</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="vwsh-toolbar">
+                            <div class="vwsh-search">
+                                <svg class="vwsh-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                                <input type="text" class="vwsh-search-input" data-vwsh-search placeholder="Search wishlist&hellip;" autocomplete="off" spellcheck="false">
+                            </div>
+                        </div>
+                        <div class="vwsh-body">
+                            <div class="vwsh-loading hidden" data-vwsh-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Loading wishlist&hellip;</div>
+                            </div>
+                            <div class="vwsh-grid" data-vwsh-grid></div>
+                            <div class="vwsh-state hidden" data-vwsh-empty>
+                                <div class="vwsh-state-ic">&#128229;</div>
+                                <div class="vwsh-state-title" data-vwsh-empty-title>Your wishlist is empty</div>
+                                <div class="vwsh-state-sub">Add a movie or episodes from any title&rsquo;s get button &mdash; they queue up here to grab.</div>
+                            </div>
+                            <div class="vwsh-pagination hidden" data-vwsh-pagination>
+                                <button class="vwsh-page-btn" type="button" data-vwsh-prev>&lsaquo; Prev</button>
+                                <span class="vwsh-page-info" data-vwsh-pageinfo></span>
+                                <button class="vwsh-page-btn" type="button" data-vwsh-next>Next &rsaquo;</button>
                             </div>
                         </div>
                     </div>
@@ -9658,6 +9706,8 @@
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
     <!-- Video watchlist page (isolated; tabbed shows / people you follow) -->
     <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
+    <!-- Video wishlist page (isolated; tabbed movies / TV, grouped show tree) -->
+    <script src="{{ url_for('static', filename='video/video-wishlist.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>
