@@ -2044,6 +2044,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vgm-season--open .vgm-season-chev { transform: rotate(180deg); }
 .vgm-season-eps { display: none; padding: 2px 6px 8px; }
 .vgm-season--open .vgm-season-eps { display: block; }
+.vgm-season-loading { padding: 14px 12px; font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.4); text-align: center; }
 
 .vgm-ep { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border-radius: 9px; cursor: pointer; transition: background 0.12s ease; }
 .vgm-ep:hover { background: rgba(255, 255, 255, 0.04); }
