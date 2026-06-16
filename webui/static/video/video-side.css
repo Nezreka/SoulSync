@@ -2250,11 +2250,11 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 }
 
 /* ── Discover v2: ambient glow + see-all + grid head + hide-owned + polish ─── */
-.vdsc-page { position: relative; }
+.vdsc-page { position: relative; overflow-x: clip; }
 .vdsc-hero, .vdsc-browse, .vdsc-shelves, .vdsc-grid-wrap { position: relative; z-index: 1; }
 /* a faint page-top color bleed that follows the current hero slide's hue */
-.vdsc-amb { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); z-index: 0;
-    width: 130%; height: 580px; pointer-events: none; opacity: 0.5; transition: opacity 0.7s ease;
+.vdsc-amb { position: absolute; top: -40px; left: 0; z-index: 0;
+    width: 100%; height: 580px; pointer-events: none; opacity: 0.5; transition: opacity 0.7s ease;
     background: radial-gradient(58% 80% at 50% 0%, hsla(var(--vdsc-amb, 230), 82%, 55%, 0.22), transparent 70%); }
 
 /* "See all" → opens the rail as a paged grid */
@@ -2396,3 +2396,22 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-btn:focus-visible, .vdsc-hero-trailer:focus-visible, .vdsc-dot:focus-visible, .vdsc-toggle:focus-within,
 .vdsc-page .vsr-card:focus-visible {
     outline: 2px solid rgba(var(--accent-rgb, 88 101 242), 0.9); outline-offset: 2px; }
+
+/* ── small screens ────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+    .vdsc-browse { padding: 13px 13px 15px; margin-bottom: 22px; }
+    .vdsc-browse-top { gap: 10px; }
+    .vdsc-shelf { margin-bottom: 24px; }
+    .vdsc-shelf-title { font-size: 16px; }
+    .vdsc-grid-head { flex-wrap: wrap; gap: 10px; }
+    .vdsc-grid-title { font-size: 18px; }
+    .vdsc-hero { height: 300px; margin-bottom: 20px; }
+    .vdsc-hero-body { left: 18px; right: 18px; bottom: 18px; }
+    .vdsc-hero-title { font-size: 23px; }
+    .vdsc-hero-ov { -webkit-line-clamp: 3; }
+    .vdsc-hero-actions { gap: 9px; }
+    .vdsc-hero-actions .discog-submit-btn, .vdsc-hero-trailer { flex: 1 1 auto; justify-content: center; }
+    .vdsc-dots { right: 16px; bottom: 16px; }
+    /* keep the trailer close button on-screen (it sits above the frame on desktop) */
+    .vdsc-tr-close { top: 6px; right: 6px; background: rgba(0, 0, 0, 0.65); }
+}
