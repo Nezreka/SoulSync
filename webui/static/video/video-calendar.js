@@ -62,8 +62,16 @@
         var el = $('[data-video-cal-sub]'); if (!el) return;
         var a = parseISO(d.start), b = parseISO(d.end);
         var range = MO[a.getMonth()] + ' ' + a.getDate() + ' – ' + MO[b.getMonth()] + ' ' + b.getDate();
-        var n = d.total || 0;
-        el.textContent = range + (n ? '  ·  ' + n + (n === 1 ? ' episode' : ' episodes') : '  ·  nothing scheduled');
+        var eps = d.episodes || [], n = eps.length;
+        var owned = 0; for (var i = 0; i < n; i++) if (eps[i].has_file) owned++;
+        var miss = n - owned;
+        var parts = [range];
+        if (n) {
+            parts.push(n + (n === 1 ? ' episode' : ' episodes'));
+            if (owned) parts.push(owned + ' in library');
+            if (miss) parts.push(miss + ' missing');
+        } else { parts.push('nothing scheduled'); }
+        el.textContent = parts.join('  ·  ');
     }
 
     function epCell(ep, idx) {
@@ -96,35 +104,93 @@
             '</a>';
     }
 
+    // Time-of-day bands — the rows of the guide. A real shared time axis so
+    // you can scan ACROSS the week ("what's on in Prime Time") instead of
+    // reading seven disconnected stacks. Untimed streaming drops land in
+    // "Anytime". Each card still carries its exact time.
+    var BANDS = [
+        { key: 'morning', label: 'Morning', range: '5a–12p', lo: 300, hi: 720 },
+        { key: 'afternoon', label: 'Afternoon', range: '12–5p', lo: 720, hi: 1020 },
+        { key: 'prime', label: 'Prime Time', range: '5–9p', lo: 1020, hi: 1260 },
+        { key: 'late', label: 'Late Night', range: '9p–5a', lo: 1260, hi: 1740 },  // wraps past midnight
+        { key: 'anytime', label: 'Anytime', range: 'Streaming', lo: null, hi: null }
+    ];
+    function bandKeyFor(mins) {
+        if (mins == null) return 'anytime';
+        // Late night wraps: 21:00–04:59 (treat early-AM as +24h for the range test).
+        var m = mins < 300 ? mins + 1440 : mins;
+        for (var i = 0; i < BANDS.length; i++) {
+            var b = BANDS[i];
+            if (b.lo == null) continue;
+            if (m >= b.lo && m < b.hi) return b.key;
+        }
+        return 'anytime';
+    }
+
     function renderGrid(d) {
         var cols = $('[data-video-cal-cols]'); if (!cols) return;
-        var byDate = {};
-        (d.episodes || []).forEach(function (ep) { (byDate[ep.air_date] = byDate[ep.air_date] || []).push(ep); });
-
         var start = parseISO(d.start);
-        var html = '';
+        var days = [];
+        for (var i = 0; i < COLS; i++) { var dt = new Date(start); dt.setDate(start.getDate() + i); days.push(dt); }
+
+        // grid[bandKey][dayIndex] = [episodes]
+        var grid = {};
+        BANDS.forEach(function (b) { grid[b.key] = []; for (var i = 0; i < COLS; i++) grid[b.key].push([]); });
+        var dayCount = [];
+        for (var i = 0; i < COLS; i++) dayCount.push(0);
+        (d.episodes || []).forEach(function (ep) {
+            for (var i = 0; i < COLS; i++) {
+                if (ep.air_date === isoOf(days[i])) {
+                    grid[bandKeyFor(airMins(ep.airs_time))][i].push(ep);
+                    dayCount[i]++;
+                    break;
+                }
+            }
+        });
+        var byTime = function (a, b) {
+            var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
+            if (ma == null && mb == null) return 0;
+            if (ma == null) return 1; if (mb == null) return -1;
+            return ma - mb;
+        };
+
+        // header row: corner + 7 day heads
+        var html = '<div class="vcal-guide-corner"></div>';
         for (var i = 0; i < COLS; i++) {
-            var dt = new Date(start); dt.setDate(start.getDate() + i);
-            var eps = (byDate[isoOf(dt)] || []).slice();
-            eps.sort(function (a, b) {
-                var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
-                if (ma == null && mb == null) return 0;
-                if (ma == null) return 1; if (mb == null) return -1;
-                return ma - mb;
-            });
-            var today = isoOf(dt) === d.today;
-            var cells = eps.length
-                ? eps.map(epCell).join('')
-                : '<div class="vcal-col-empty">No episodes</div>';
-            html += '<section class="vcal-col' + (today ? ' vcal-col--today' : '') + '">' +
-                '<header class="vcal-col-head">' +
-                    '<span class="vcal-col-wd">' + (today ? 'Today' : WD_FULL[dt.getDay()]) + '</span>' +
-                    '<span class="vcal-col-date">' + WD[dt.getDay()] + ' ' + dt.getDate() + '</span>' +
-                    (eps.length ? '<span class="vcal-col-n">' + eps.length + '</span>' : '') +
-                '</header>' +
-                '<div class="vcal-col-stack">' + cells + '</div>' +
-                '</section>';
+            var dt = days[i], today = isoOf(dt) === d.today;
+            html += '<div class="vcal-dayhead' + (today ? ' vcal-dayhead--today' : '') + '">' +
+                '<span class="vcal-dayhead-wd">' + (today ? 'Today' : WD_FULL[dt.getDay()]) + '</span>' +
+                '<span class="vcal-dayhead-date">' + WD[dt.getDay()] + ' ' + dt.getDate() + '</span>' +
+                (dayCount[i] ? '<span class="vcal-dayhead-n">' + dayCount[i] + '</span>' : '') +
+                '</div>';
         }
+
+        // one row per active band (skip bands empty across the whole week)
+        var stagger = 0;
+        // "Now" cue — the band the wall-clock is currently in. Only the today
+        // column carries it (other weeks have no today column), so it lights up
+        // the live time-of-day intersection like a TV guide.
+        var nowD = new Date();
+        var nowBand = bandKeyFor(nowD.getHours() * 60 + nowD.getMinutes());
+        BANDS.forEach(function (b) {
+            var anyEps = false;
+            for (var i = 0; i < COLS; i++) if (grid[b.key][i].length) { anyEps = true; break; }
+            if (!anyEps) return;
+            html += '<div class="vcal-rail vcal-rail--' + b.key + '">' +
+                '<span class="vcal-rail-label">' + b.label + '</span>' +
+                '<small>' + b.range + '</small></div>';
+            for (var i = 0; i < COLS; i++) {
+                var cell = grid[b.key][i].slice().sort(byTime);
+                var today = isoOf(days[i]) === d.today;
+                var isNow = today && b.key === nowBand;
+                var inner = cell.length
+                    ? cell.map(function (ep) { return epCell(ep, stagger++); }).join('')
+                    : '<span class="vcal-slot-dot" aria-hidden="true"></span>';
+                html += '<div class="vcal-slot' + (today ? ' vcal-slot--today' : '') +
+                    (isNow ? ' vcal-slot--now' : '') +
+                    (cell.length ? '' : ' vcal-slot--empty') + '">' + inner + '</div>';
+            }
+        });
         cols.innerHTML = html;
     }
 
@@ -196,12 +262,24 @@
         var view = { episodes: eps, total: eps.length, today: d.today, start: d.start, end: d.end, days: d.days };
         var has = eps.length > 0;
         showEmpty(!has);
-        if (has) { renderHero(view); renderGrid(view); }
-        else { if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; }
+        if (has) {
+            renderHero(view); renderGrid(view);
+            // Card entrance only on a fresh load/week-change — NOT on filter
+            // re-renders (those would re-stagger every click and feel busy).
+            if (state.fresh && cols) {
+                cols.classList.add('vcal-animate-in');
+                setTimeout(function () { cols.classList.remove('vcal-animate-in'); }, 900);
+            }
+        } else { if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; }
+        state.fresh = false;
+        var grid = $('[data-video-cal-grid]'); if (grid) grid.classList.remove('vcal-fading');
         setSub(view);
     }
     function load() {
-        state.loaded = true;
+        state.loaded = true; state.fresh = true;
+        // Crossfade the grid out while the next week loads (only when we already
+        // have something on screen — first load uses the entrance instead).
+        var grid = $('[data-video-cal-grid]'); if (grid && state.data) grid.classList.add('vcal-fading');
         showEmpty(false); showLoading(true);
         var base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + state.offset * 7);
         fetch(URL + '?days=7&start=' + isoOf(base), { headers: { 'Accept': 'application/json' } })
@@ -266,6 +344,20 @@
         for (var i = 0; i < fbs.length; i++) (function (b) {
             b.addEventListener('click', function () { state.filter = b.getAttribute('data-video-cal-filter'); render(); });
         })(fbs[i]);
+
+        // Keyboard nav for a page users live in: ← / → step weeks, T jumps to
+        // today. Only when the calendar is the visible page, no modal is open,
+        // and the user isn't typing in a field.
+        document.addEventListener('keydown', function (e) {
+            if (modalEl || e.metaKey || e.ctrlKey || e.altKey) return;
+            var tag = (e.target && e.target.tagName) || '';
+            if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
+            var g = $('[data-video-cal-cols]');
+            if (!g || g.offsetParent === null) return;   // calendar page not visible
+            if (e.key === 'ArrowLeft') { e.preventDefault(); state.offset--; load(); }
+            else if (e.key === 'ArrowRight') { e.preventDefault(); state.offset++; load(); }
+            else if (e.key === 't' || e.key === 'T') { if (state.offset !== 0) { e.preventDefault(); state.offset = 0; load(); } }
+        });
     }
 
     // ── episode modal ─────────────────────────────────────────────────────────

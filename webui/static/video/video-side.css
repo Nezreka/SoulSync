@@ -1532,27 +1532,65 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-grid { border-radius: 20px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.07);
     background: linear-gradient(180deg, #0d0d12, #0a0a0e); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
 .vcal-grid.hidden { display: none; }
-.vcal-cols { display: grid; grid-template-columns: repeat(7, minmax(168px, 1fr)); align-items: start; }
-.vcal-col { border-left: 1px solid rgba(255, 255, 255, 0.06); min-width: 0; }
-.vcal-col:first-child { border-left: 0; }
-.vcal-col--today { background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.10), rgba(var(--vcal-accent), 0.02) 30%, transparent 60%); }
+/* EPG guide — a frozen time-rail (rows = time-of-day) × 7 day columns with a
+   frozen header row, so the whole week reads on ONE shared time axis. */
+.vcal-cols { display: grid; grid-template-columns: 84px repeat(7, minmax(150px, 1fr)); align-items: stretch; }
 
-/* Day header — sticky */
-.vcal-col-head { position: sticky; top: 0; z-index: 4; padding: 15px 15px 13px;
-    background: linear-gradient(180deg, rgba(15, 15, 20, 0.96), rgba(13, 13, 18, 0.85));
+/* sticky top-left corner */
+.vcal-guide-corner { position: sticky; top: 0; left: 0; z-index: 6;
+    background: linear-gradient(180deg, rgba(15, 15, 20, 0.97), rgba(13, 13, 18, 0.88));
     backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, 0.07); }
-.vcal-col-wd { display: block; font-size: 14px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
-.vcal-col-date { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-    color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
-.vcal-col-n { position: absolute; top: 14px; right: 14px; font-size: 11px; font-weight: 800; color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.08); padding: 3px 9px; border-radius: 999px; }
-.vcal-col--today .vcal-col-wd { color: hsl(232, 100%, 82%); }
-.vcal-col--today .vcal-col-head { border-bottom-color: rgba(var(--vcal-accent), 0.5);
-    box-shadow: 0 1px 0 rgba(var(--vcal-accent), 0.5), 0 10px 26px -12px rgba(var(--vcal-accent), 0.5); }
-.vcal-col--today .vcal-col-n { background: rgba(var(--vcal-accent), 0.88); color: #fff; }
 
-.vcal-col-stack { display: flex; flex-direction: column; gap: 16px; padding: 16px 14px 20px; }
-.vcal-col-empty { padding: 26px 8px; text-align: center; font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.22); }
+/* day header — sticky top */
+.vcal-dayhead { position: sticky; top: 0; z-index: 4; padding: 15px 14px 13px;
+    background: linear-gradient(180deg, rgba(15, 15, 20, 0.96), rgba(13, 13, 18, 0.85));
+    backdrop-filter: blur(12px); border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    border-left: 1px solid rgba(255, 255, 255, 0.05); }
+.vcal-dayhead-wd { display: block; font-size: 14px; font-weight: 800; letter-spacing: -0.01em; color: #fff; }
+.vcal-dayhead-date { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4); margin-top: 2px; }
+.vcal-dayhead-n { position: absolute; top: 14px; right: 13px; font-size: 11px; font-weight: 800; color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.08); padding: 3px 9px; border-radius: 999px; }
+.vcal-dayhead--today { background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.24), rgba(13, 13, 18, 0.86));
+    border-bottom-color: rgba(var(--vcal-accent), 0.55);
+    box-shadow: 0 1px 0 rgba(var(--vcal-accent), 0.55), 0 12px 28px -14px rgba(var(--vcal-accent), 0.6); }
+.vcal-dayhead--today .vcal-dayhead-wd { color: hsl(232, 100%, 84%); }
+.vcal-dayhead--today .vcal-dayhead-n { background: rgba(var(--vcal-accent), 0.9); color: #fff; }
+
+/* time rail — sticky left, labels the band */
+.vcal-rail { position: sticky; left: 0; z-index: 2; display: flex; flex-direction: column; gap: 2px;
+    padding: 17px 12px; border-top: 1px solid rgba(255, 255, 255, 0.05);
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.004)); }
+.vcal-rail-label { font-size: 12.5px; font-weight: 800; letter-spacing: -0.01em; color: rgba(255, 255, 255, 0.8); }
+.vcal-rail small { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.3); }
+.vcal-rail--prime .vcal-rail-label { color: hsl(44, 100%, 72%); }
+.vcal-rail--prime small { color: hsla(44, 90%, 60%, 0.6); }
+
+/* one day×band cell */
+.vcal-slot { display: flex; flex-direction: column; gap: 15px; padding: 17px 13px; min-width: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.05); border-left: 1px solid rgba(255, 255, 255, 0.05); }
+.vcal-slot--today { background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.07), rgba(var(--vcal-accent), 0.015)); }
+.vcal-slot--empty { align-items: center; justify-content: center; padding: 0; }
+.vcal-slot-dot { width: 4px; height: 4px; border-radius: 50%; background: rgba(255, 255, 255, 0.07); }
+/* live "now" intersection — today column × current time-of-day band */
+.vcal-slot--now { box-shadow: inset 3px 0 0 rgba(var(--vcal-accent), 0.95), inset 0 0 34px -12px rgba(var(--vcal-accent), 0.5);
+    background: linear-gradient(180deg, rgba(var(--vcal-accent), 0.12), rgba(var(--vcal-accent), 0.03)); }
+
+/* staggered entrance — only on a fresh load/week-change (class added by JS),
+   keyed off the per-card --i (cycles every 24). Filter re-renders don't get it. */
+.vcal-cols.vcal-animate-in .vcal-card { animation: vcalCardIn 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    animation-delay: calc(var(--i, 0) * 0.022s); }
+@keyframes vcalCardIn { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .vcal-cols.vcal-animate-in .vcal-card { animation: none; } }
+
+/* week-change crossfade */
+.vcal-grid { transition: opacity 0.22s ease; }
+.vcal-grid.vcal-fading { opacity: 0.32; }
+
+/* keyboard focus — mirrors hover + a clear ring (cards are real <a>s) */
+.vcal-cell:focus-visible { outline: none; --ty: -6px; --sc: 1.04; z-index: 3; }
+.vcal-cell:focus-visible .vcal-card { border-color: hsla(var(--vcal-show), 80%, 64%, 0.85);
+    box-shadow: 0 0 0 2px hsla(var(--vcal-show), 82%, 62%, 0.9), 0 18px 40px rgba(0, 0, 0, 0.5); }
 
 /* Episode cell — one clean card (art + info), breathing colour halo behind it */
 .vcal-cell { --vcal-show: var(--vcal-h, 230); position: relative; display: block; text-decoration: none; color: inherit;
