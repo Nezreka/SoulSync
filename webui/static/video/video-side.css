@@ -2039,3 +2039,73 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vgm-eps--missing-only .vgm-season--owned { display: none; }
 .vgm-eps-allowned { display: none; padding: 22px 14px; text-align: center; font-size: 13.5px; font-weight: 600; color: rgba(108, 211, 145, 0.85); }
 .vgm-eps--missing-only .vgm-eps-allowned { display: block; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Get-modal — premium vibe pass: per-title hue glows + motion (--vgm-h set by JS)
+   ══════════════════════════════════════════════════════════════════════════ */
+.vgm-overlay { background: rgba(4, 4, 7, 0.78); }
+.vgm-modal {
+    box-shadow: 0 60px 140px rgba(0, 0, 0, 0.75),
+        0 0 90px hsla(var(--vgm-h, 230), 75%, 55%, 0.20),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    transform: translateY(22px) scale(0.96);
+    transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+.vgm-overlay.vgm-open .vgm-modal { transform: none; }
+
+/* hero — slow Ken Burns drift, hue-tinted scrim, and a drifting light sweep */
+.vgm-hero { animation: vgmKen 22s ease-in-out infinite alternate; }
+@keyframes vgmKen { from { background-position: center 18%; } to { background-position: center 34%; } }
+.vgm-hero-scrim {
+    background: linear-gradient(0deg, #101015 3%, rgba(16, 16, 21, 0.55) 50%, rgba(16, 16, 21, 0.05)),
+        radial-gradient(140% 120% at 0% 100%, hsla(var(--vgm-h, 230), 78%, 48%, 0.42), transparent 60%),
+        radial-gradient(120% 100% at 100% 0%, hsla(var(--vgm-h, 230), 80%, 62%, 0.18), transparent 55%);
+}
+.vgm-hero::after {
+    content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: linear-gradient(115deg, transparent 34%, hsla(var(--vgm-h, 230), 92%, 78%, 0.07) 49%, transparent 60%);
+    background-size: 250% 100%; animation: vgmSheen 9s ease-in-out infinite;
+}
+@keyframes vgmSheen { 0% { background-position: 170% 0; } 55%, 100% { background-position: -70% 0; } }
+
+/* staggered content rise on open */
+.vgm-overlay.vgm-open .vgm-hero-content > * { animation: vgmRise 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.vgm-hero-content > *:nth-child(1) { animation-delay: 0.05s; }
+.vgm-hero-content > *:nth-child(2) { animation-delay: 0.11s; }
+.vgm-hero-content > *:nth-child(3) { animation-delay: 0.17s; }
+.vgm-hero-content > *:nth-child(4) { animation-delay: 0.23s; }
+@keyframes vgmRise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.vgm-title { text-shadow: 0 2px 24px rgba(0, 0, 0, 0.65), 0 0 42px hsla(var(--vgm-h, 230), 80%, 55%, 0.28); }
+
+/* primary CTA — hue-aware gradient + glow + lift */
+.vgm-btn--primary {
+    background: linear-gradient(135deg, hsl(var(--vgm-h, 230), 70%, 58%), hsl(var(--vgm-h, 230), 72%, 47%));
+    box-shadow: 0 10px 30px hsla(var(--vgm-h, 230), 70%, 45%, 0.45);
+}
+.vgm-btn--primary:hover:not(:disabled) { transform: translateY(-2px); filter: brightness(1.07);
+    box-shadow: 0 16px 42px hsla(var(--vgm-h, 230), 75%, 50%, 0.6); }
+.vgm-btn--primary:active:not(:disabled) { transform: translateY(0); }
+
+/* close button spins on hover */
+.vgm-close { transition: transform 0.25s ease, background 0.2s ease, border-color 0.2s ease; }
+.vgm-close:hover { transform: rotate(90deg); }
+
+/* episode rows — accent edge slides in on hover */
+.vgm-ep { position: relative; transition: background 0.14s ease, padding-left 0.14s ease; }
+.vgm-ep:hover { padding-left: 14px; }
+.vgm-ep::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; border-radius: 2px;
+    background: hsl(var(--vgm-h, 230), 82%, 62%); opacity: 0; transition: opacity 0.14s ease; }
+.vgm-ep:hover::before { opacity: 0.75; }
+
+/* the watchlist offer — gentle breathing glow so it invites the tick */
+.vgm-follow-row { animation: vgmFollowPulse 3.6s ease-in-out infinite; }
+@keyframes vgmFollowPulse {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 88 101 242), 0.28), 0 0 16px -7px rgba(var(--accent-rgb, 88 101 242), 0.45); }
+    50% { box-shadow: 0 0 0 1px rgba(var(--accent-rgb, 88 101 242), 0.55), 0 0 28px -4px rgba(var(--accent-rgb, 88 101 242), 0.65); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vgm-hero, .vgm-hero::after, .vgm-follow-row,
+    .vgm-overlay.vgm-open .vgm-hero-content > * { animation: none; }
+    .vgm-modal { transition: opacity 0.2s ease; }
+}

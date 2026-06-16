@@ -18,6 +18,8 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function toast(msg, type) { if (typeof showToast === 'function') showToast(msg, type); }
+    // A stable per-title hue so each modal glows in its own colour (the "vibe").
+    function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
 
     // A show is "airing" (eye) unless its status says it's finished (get-symbol).
     function isAiring(status) {
@@ -76,6 +78,7 @@
         closeModal();
         var ov = document.createElement('div');
         ov.className = 'vgm-overlay';
+        ov.style.setProperty('--vgm-h', hueOf(o.title || ''));   // vibe colour (refined in fill)
         ov.innerHTML =
             '<div class="vgm-modal" role="dialog" aria-modal="true">' +
                 '<button class="vgm-close" type="button" data-vgm-close aria-label="Close">&times;</button>' +
@@ -275,6 +278,7 @@
         if (hero && bg) hero.style.backgroundImage = "url('" + bg + "')";
 
         var t = q('[data-vgm-title]'); if (t && d.title) t.textContent = d.title;
+        if (d.title) modalEl.style.setProperty('--vgm-h', hueOf(d.title));   // refine vibe from the real title
         var eyebrow = [d.network, d.studio, d.year, d.status, d.content_rating].filter(Boolean).map(esc).join('  ·  ');
         var eb = q('[data-vgm-eyebrow]'); if (eb) eb.textContent = eyebrow;
 
