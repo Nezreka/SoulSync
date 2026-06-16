@@ -10530,6 +10530,63 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 4px;
 }
 
+/* #876: quarantine "alternatives for one song" group — a collapsible parent
+   row wrapping the standard entry rows for each failed source attempt. */
+.lh-quarantine-group {
+    border-left: 3px solid rgba(var(--accent-rgb), 0.35);
+    border-radius: 8px;
+    margin-bottom: 4px;
+    background: rgba(var(--accent-rgb), 0.03);
+}
+
+.lh-quarantine-group-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.15s ease;
+}
+
+.lh-quarantine-group-header:hover {
+    background: rgba(var(--accent-rgb), 0.06);
+}
+
+.lh-quarantine-group-text {
+    flex: 1;
+    min-width: 0;
+}
+
+.lh-quarantine-group-count {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(var(--accent-rgb), 0.95);
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+}
+
+.lh-quarantine-group-header .lh-expand-btn {
+    transition: transform 0.18s ease;
+}
+
+.lh-quarantine-group:not(.lh-qgroup-collapsed) .lh-quarantine-group-header .lh-expand-btn {
+    transform: rotate(180deg);
+}
+
+.lh-quarantine-group-members {
+    padding: 0 8px 8px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.lh-quarantine-group.lh-qgroup-collapsed .lh-quarantine-group-members {
+    display: none;
+}
+
 .library-history-entry-row1 {
     display: flex;
     align-items: flex-start;

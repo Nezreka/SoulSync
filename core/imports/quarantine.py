@@ -153,6 +153,83 @@ def get_quarantined_source_keys(quarantine_dir: str) -> set:
     return keys
 
 
+def quarantine_group_key(
+    expected_artist: Any, expected_track: Any, context: Any = None
+) -> Optional[str]:
+    """Grouping key for "the same intended download target".
+
+    #876: when several sources are downloaded for one wishlist/queue
+    track they each fail verification and land in quarantine as separate
+    entries. They are *alternatives for the same song*, so they should
+    group together — and once the user accepts one, the rest are
+    redundant failed attempts at a song they now own.
+
+    The key identifies the *intended* target — what SoulSync was trying to
+    fetch — NOT the downloaded file's own tags. That matters: the file's
+    metadata is frequently *wrong* (that's why it failed acoustid /
+    integrity), whereas the target is fixed and identical across every
+    alternative for one song (they're all Soulseek uploads of the *same*
+    source track), so grouping by it is an exact relationship, not a fuzzy
+    metadata guess.
+
+    Prefers a stable target-track id from the sidecar `context.track_info`
+    when present — isrc, then source id, then uri — since those are exact
+    and constant across siblings. Falls back to the normalized
+    artist|track name only for legacy/thin sidecars that carry no context.
+    Keys are kind-prefixed so an id-based key never collides with a
+    name-based one.
+
+    Returns ``None`` when nothing identifies the target (no usable id and
+    both name fields empty). Callers treat a ``None`` key as "its own
+    singleton group" — ungroupable entries must never collapse together.
+    """
+    ti = {}
+    if isinstance(context, dict):
+        maybe_ti = context.get("track_info")
+        if isinstance(maybe_ti, dict):
+            ti = maybe_ti
+    isrc = str(ti.get("isrc") or "").strip().lower()
+    if isrc:
+        return f"isrc:{isrc}"
+    tid = str(ti.get("id") or "").strip()
+    if tid:
+        return f"id:{tid}"
+    uri = str(ti.get("uri") or "").strip()
+    if uri:
+        return f"uri:{uri}"
+    artist = " ".join(str(expected_artist or "").split()).lower()
+    track = " ".join(str(expected_track or "").split()).lower()
+    if not artist and not track:
+        return None
+    return f"nm:{artist}|{track}"
+
+
+def find_quarantine_siblings(quarantine_dir: str, entry_id: str) -> List[str]:
+    """Other entry ids that share ``entry_id``'s intended-target group key.
+
+    Returns the ids of every *other* quarantine entry whose
+    `expected_artist`/`expected_track` normalize to the same key as
+    ``entry_id`` (see :func:`quarantine_group_key`). Excludes ``entry_id``
+    itself. Returns ``[]`` when the entry is missing, has an ungroupable
+    (``None``) key, or has no siblings. Never raises.
+    """
+    if not entry_id:
+        return []
+    entries = list_quarantine_entries(quarantine_dir)
+    target_key = None
+    for e in entries:
+        if e.get("id") == entry_id:
+            target_key = e.get("group_key")
+            break
+    if target_key is None:
+        return []
+    return [
+        e["id"]
+        for e in entries
+        if e.get("id") != entry_id and e.get("group_key") == target_key
+    ]
+
+
 def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
     """Enumerate quarantined files paired with their sidecars.
 
@@ -213,6 +290,11 @@ def list_quarantine_entries(quarantine_dir: str) -> List[Dict[str, Any]]:
                 "reason": sidecar.get("quarantine_reason", "Unknown reason"),
                 "expected_track": sidecar.get("expected_track", ""),
                 "expected_artist": sidecar.get("expected_artist", ""),
+                "group_key": quarantine_group_key(
+                    sidecar.get("expected_artist", ""),
+                    sidecar.get("expected_track", ""),
+                    ctx,
+                ),
                 "timestamp": sidecar.get("timestamp", ""),
                 "size_bytes": size_bytes,
                 "has_full_context": isinstance(sidecar.get("context"), dict),
