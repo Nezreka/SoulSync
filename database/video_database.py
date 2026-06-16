@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1208,6 +1208,95 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── User watchlist (curated follow-list: shows + people) ──────────────────
+    # Mirrors the music watchlist_artists model: an explicit follow-list that may
+    # include shows/people not in the library yet. Keyed on (kind, tmdb_id). The
+    # monitoring/discovery engine is a later phase — these just manage membership.
+    def add_to_watchlist(self, kind: str, tmdb_id: int, title: str,
+                         poster_url: str | None = None, library_id: int | None = None) -> bool:
+        """Add a show or person. Idempotent upsert on (kind, tmdb_id) — re-adding
+        refreshes title/poster/library_id without duplicating. Returns True on success."""
+        if kind not in ("show", "person") or not tmdb_id or not title:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, library_id)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(kind, tmdb_id) DO UPDATE SET
+                       title=excluded.title,
+                       poster_url=COALESCE(excluded.poster_url, video_watchlist.poster_url),
+                       library_id=COALESCE(excluded.library_id, video_watchlist.library_id)""",
+                (kind, int(tmdb_id), title, poster_url, library_id))
+            conn.commit()
+            return True
+        except Exception:
+            logger.exception("add_to_watchlist failed (%s %s)", kind, tmdb_id)
+            return False
+        finally:
+            conn.close()
+
+    def remove_from_watchlist(self, kind: str, tmdb_id: int) -> bool:
+        """Drop a show/person from the watchlist. Returns True if a row went."""
+        if kind not in ("show", "person") or not tmdb_id:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_watchlist WHERE kind=? AND tmdb_id=?",
+                               (kind, int(tmdb_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def list_watchlist(self, kind: str | None = None) -> list[dict]:
+        """Watchlist entries newest-first; optionally filtered to one kind."""
+        conn = self._get_connection()
+        try:
+            sql = ("SELECT kind, tmdb_id, title, poster_url, library_id, date_added "
+                   "FROM video_watchlist")
+            args: list = []
+            if kind in ("show", "person"):
+                sql += " WHERE kind=?"
+                args.append(kind)
+            sql += " ORDER BY date_added DESC, id DESC"
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        finally:
+            conn.close()
+
+    def watchlist_state(self, kind: str, tmdb_ids) -> dict:
+        """{tmdb_id: True} for the given ids that are on the watchlist — used to
+        hydrate card buttons. Ids not on the list are simply absent."""
+        out: dict = {}
+        ids = [int(x) for x in (tmdb_ids or []) if x]
+        if kind not in ("show", "person") or not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):  # stay under SQLite's variable cap
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                rows = conn.execute(
+                    f"SELECT tmdb_id FROM video_watchlist WHERE kind=? AND tmdb_id IN ({ph})",
+                    [kind] + chunk).fetchall()
+                for r in rows:
+                    out[r["tmdb_id"]] = True
+            return out
+        finally:
+            conn.close()
+
+    def watchlist_counts(self) -> dict:
+        """{'show': n, 'person': n, 'total': n} for badges/headers."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT kind, COUNT(*) AS n FROM video_watchlist GROUP BY kind").fetchall()
+            counts = {r["kind"]: r["n"] for r in rows}
+            return {"show": counts.get("show", 0), "person": counts.get("person", 0),
+                    "total": sum(counts.values())}
+        finally:
+            conn.close()
+
     def movie_detail(self, movie_id: int) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)
         video movie-detail page."""
@@ -1290,7 +1379,7 @@ class VideoDatabase:
         }.get(sort, title_key)
 
         if is_shows:
-            select = ("SELECT s.id, s.title, s.year, "
+            select = ("SELECT s.id, s.title, s.year, s.tmdb_id, "
                       "(s.poster_url IS NOT NULL AND s.poster_url <> '') AS has_poster, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id) AS episode_count, "
                       "(SELECT COUNT(*) FROM episodes e WHERE e.show_id=s.id AND e.has_file=1) AS owned_count "

@@ -905,6 +905,43 @@
                         </div>
                     </div>
                 </section>
+                <!-- Watchlist (nav page): the shows + people you follow, split by
+                     a tab switcher. Built by video/video-watchlist.js, styled by
+                     .vwlp-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-watchlist" hidden>
+                    <div class="vwlp-page">
+                        <div class="vwlp-head">
+                            <div class="vwlp-head-glow" aria-hidden="true"></div>
+                            <div class="vwlp-head-row">
+                                <div class="vwlp-head-titles">
+                                    <h1 class="vwlp-title">Watchlist</h1>
+                                    <p class="vwlp-sub" data-vwlp-sub>Shows and people you follow</p>
+                                </div>
+                                <div class="vwlp-tabs" role="tablist">
+                                    <button class="vwlp-tab vwlp-tab--on" type="button" role="tab" data-vwlp-tab="show">
+                                        Shows <span class="vwlp-tab-n" data-vwlp-count-show>0</span>
+                                    </button>
+                                    <button class="vwlp-tab" type="button" role="tab" data-vwlp-tab="person">
+                                        People <span class="vwlp-tab-n" data-vwlp-count-person>0</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="vwlp-body">
+                            <div class="vwlp-loading hidden" data-vwlp-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Loading watchlist&hellip;</div>
+                            </div>
+                            <div class="vwlp-grid" data-vwlp-grid="show"></div>
+                            <div class="vwlp-grid hidden" data-vwlp-grid="person"></div>
+                            <div class="vwlp-state hidden" data-vwlp-empty>
+                                <div class="vwlp-state-ic">&#128065;</div>
+                                <div class="vwlp-state-title" data-vwlp-empty-title>Nothing on your watchlist yet</div>
+                                <div class="vwlp-state-sub">Hover any show or person card and hit the eye to follow them — new content lands here.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <!-- TV-show detail (drill-in from a show card; not a nav page).
                      Isolated: built by video/video-detail.js, styled by .vd-* in
                      video-side.css. Inspired by the music artist-detail vibe. -->
@@ -9507,6 +9544,9 @@
     <script src="{{ url_for('static', filename='video/video-enrichment-manager.js', v=static_v) }}"></script>
     <!-- Video dashboard data layer (isolated; populates the dashboard from the video DB) -->
     <script src="{{ url_for('static', filename='video/video-dashboard.js', v=static_v) }}"></script>
+    <!-- Video watchlist button (shared; the add-to-watchlist control used by every
+         show-poster + person card — must load before the card renderers) -->
+    <script src="{{ url_for('static', filename='video/video-watchlist-btn.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
@@ -9516,6 +9556,8 @@
     <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
+    <!-- Video watchlist page (isolated; tabbed shows / people you follow) -->
+    <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>

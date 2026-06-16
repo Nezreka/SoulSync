@@ -1774,3 +1774,94 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-filter-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 .vcal-filter-btn--on { color: #fff; background: rgba(var(--vcal-accent), 0.9); box-shadow: 0 4px 14px rgba(var(--vcal-accent), 0.32); }
 @media (max-width: 720px) { .vcal-head-row { flex-direction: column; align-items: stretch; } .vcal-controls { justify-content: space-between; } }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Watchlist — shared "add to watchlist" button (.vwl-btn) + the Watchlist page
+   (.vwlp-*). The button is the video mirror of the music ya-watchlist-btn.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Shared eye button — overlaid top-right on a show poster / person photo. */
+.vwl-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 4;
+    width: 30px; height: 30px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.82);
+    cursor: pointer; opacity: 0; transform: translateY(-2px);
+    transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease,
+        color 0.18s ease, border-color 0.18s ease; }
+.vwl-btn:hover { background: rgba(0, 0, 0, 0.78); color: #fff; border-color: rgba(255, 255, 255, 0.3); }
+.vwl-btn.active { opacity: 1; transform: none;
+    color: rgb(var(--accent-rgb, 88 101 242));
+    background: rgba(var(--accent-rgb, 88 101 242), 0.18);
+    border-color: rgba(var(--accent-rgb, 88 101 242), 0.55); }
+.vwl-btn:disabled { opacity: 0.5; cursor: default; }
+/* hover-reveal on the cards that host it (always shown once active / on touch) */
+.library-artist-card:hover .vwl-btn, .vwlp-card:hover .vwl-btn,
+.vd-cast-card:hover .vwl-btn, .vsr-card:hover .vwl-btn, .vd-sim-card:hover .vwl-btn {
+    opacity: 1; transform: none; }
+@media (hover: none) { .vwl-btn { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .vwl-btn { transition: opacity 0.18s ease; transform: none; } }
+
+/* ── Watchlist page ───────────────────────────────────────────────────────── */
+.vwlp-page { color: var(--text-primary, #fff); padding: 0 0 70px; }
+.vwlp-head { position: relative; padding: 30px 40px 0; overflow: hidden; }
+.vwlp-head-glow { position: absolute; top: -190px; left: 50%; transform: translateX(-50%);
+    width: 860px; height: 390px; pointer-events: none; z-index: 0;
+    background: radial-gradient(56% 70% at 50% 0%, rgba(var(--accent-rgb, 88 101 242), 0.22), transparent 70%); filter: blur(10px); }
+.vwlp-head-row { position: relative; z-index: 1; display: flex; align-items: flex-end;
+    justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.vwlp-title { font-size: 36px; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
+.vwlp-sub { margin: 7px 0 0; color: rgba(255, 255, 255, 0.55); font-size: 14px; font-weight: 600; }
+
+.vwlp-tabs { display: inline-flex; gap: 3px; padding: 4px; border-radius: 13px;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
+.vwlp-tab { border: 0; background: transparent; color: rgba(255, 255, 255, 0.7);
+    font-size: 13px; font-weight: 800; padding: 8px 16px; border-radius: 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 8px; transition: all 0.15s ease; }
+.vwlp-tab:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
+.vwlp-tab--on { color: #fff; background: rgba(var(--accent-rgb, 88 101 242), 0.9);
+    box-shadow: 0 4px 14px rgba(var(--accent-rgb, 88 101 242), 0.32); }
+.vwlp-tab-n { font-size: 11px; font-weight: 800; min-width: 20px; text-align: center;
+    padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); color: inherit; }
+.vwlp-tab--on .vwlp-tab-n { background: rgba(0, 0, 0, 0.28); }
+
+.vwlp-body { padding: 26px 40px 0; }
+.vwlp-loading { padding: 80px 0; text-align: center; }
+.vwlp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(158px, 1fr)); gap: 22px 20px; }
+.vwlp-grid.hidden { display: none; }
+
+.vwlp-card { position: relative; display: block; text-decoration: none; color: inherit;
+    transition: transform 0.16s ease; }
+.vwlp-card:hover { transform: translateY(-5px); }
+.vwlp-card-art { position: relative; aspect-ratio: 2 / 3; border-radius: 14px; overflow: hidden;
+    background: linear-gradient(140deg, #1a1a22, #0c0c10); border: 1px solid rgba(255, 255, 255, 0.07);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4); transition: border-color 0.18s ease, box-shadow 0.18s ease; }
+.vwlp-card:hover .vwlp-card-art { border-color: rgba(var(--accent-rgb, 88 101 242), 0.5);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.55), 0 0 24px rgba(var(--accent-rgb, 88 101 242), 0.22); }
+.vwlp-card--person .vwlp-card-art { border-radius: 16px; }
+.vwlp-card-img { width: 100%; height: 100%; object-fit: cover; display: block;
+    opacity: 0; transition: opacity 0.45s ease; }
+.vwlp-card-img.vwlp-loaded { opacity: 1; }
+.vwlp-card-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 40px; opacity: 0.5; }
+.vwlp-card-scrim { position: absolute; inset: 0; pointer-events: none;
+    background: linear-gradient(0deg, rgba(0, 0, 0, 0.4), transparent 42%); }
+.vwlp-card-info { padding: 9px 4px 0; }
+.vwlp-card-title { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.vwlp-state { text-align: center; padding: 90px 20px; color: rgba(255, 255, 255, 0.6); }
+.vwlp-state.hidden { display: none; }
+.vwlp-state-ic { font-size: 46px; opacity: 0.5; }
+.vwlp-state-title { font-size: 20px; font-weight: 800; color: #fff; margin-top: 12px; }
+.vwlp-state-sub { font-size: 14px; margin-top: 6px; max-width: 420px; margin-left: auto; margin-right: auto; }
+
+@media (max-width: 900px) {
+    .vwlp-head, .vwlp-body { padding-left: 18px; padding-right: 18px; }
+    .vwlp-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
+}
+
+/* Ensure the show poster box is a positioning context for its .vwl-btn
+   (scoped to VIDEO cards so the shared music .library-artist-image is untouched). */
+.video-card--clickable .library-artist-image { position: relative; }
