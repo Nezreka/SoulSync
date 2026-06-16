@@ -236,6 +236,7 @@
         if (!d.seasons || !d.seasons.length) { wrap.hidden = true; return; }
         var today = isoToday();
         modalState = { kind: 'show', sel: new Set() };
+        var totalMissing = 0;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
             '<label class="vgm-eps-toggle"><input type="checkbox" data-vgm-missing-only checked>' +
             '<span>Missing only</span></label></div><div class="vgm-eps-list">';
@@ -243,17 +244,24 @@
             var eps = s.episodes || [];
             var missing = 0;
             eps.forEach(function (e) { if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); } });
-            html += '<div class="vgm-season">' +
+            totalMissing += missing;
+            // Fully-owned seasons are hidden while "Missing only" is on (turn it off
+            // to re-download); otherwise an owned season expanded to nothing.
+            html += '<div class="vgm-season' + (missing ? '' : ' vgm-season--owned') + '">' +
                 '<div class="vgm-season-head" data-vgm-season-toggle>' +
                     '<span class="vgm-season-check"><input type="checkbox" data-vgm-season-all="' + s.season_number + '"' + (missing && missing === eps.length ? ' checked' : '') + '></span>' +
                     '<span class="vgm-season-name">' + esc(s.title || ('Season ' + s.season_number)) + '</span>' +
-                    '<span class="vgm-season-meta">' + (missing ? missing + ' missing · ' : '') + eps.length + ' eps</span>' +
+                    '<span class="vgm-season-meta">' + (missing ? missing + ' missing · ' : 'owned · ') + eps.length + ' eps</span>' +
                     '<span class="vgm-season-chev" aria-hidden="true">⌄</span>' +
                 '</div>' +
                 '<div class="vgm-season-eps">' + eps.map(function (e) { return epRow(s.season_number, e, today); }).join('') + '</div>' +
                 '</div>';
         });
         html += '</div>';
+        // When you own everything, the missing-only view would be blank — say so.
+        if (totalMissing === 0) {
+            html += '<div class="vgm-eps-allowned">✓ You have every episode. Turn off “Missing only” to re-download.</div>';
+        }
         wrap.innerHTML = html;
         wrap.classList.add('vgm-eps--missing-only');
         wrap.hidden = false;
