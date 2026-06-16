@@ -780,7 +780,30 @@ def test_watchlist_add_list_remove(db):
     assert {r["kind"] for r in rows} == {"show", "person"}
     assert db.list_watchlist("person")[0]["title"] == "Brad Pitt"
     assert db.remove_from_watchlist("show", 1399) is True
-    assert db.remove_from_watchlist("show", 1399) is False           # already gone
+    assert db.remove_from_watchlist("show", 1399) is True            # idempotent (mute tombstone)
+    assert all(r["tmdb_id"] != 1399 for r in db.list_watchlist("show"))  # gone from the list
+
+
+def test_watchlist_airing_library_shows_are_watched_by_default(db):
+    # Two library shows: one still airing, one ended. No explicit watchlist rows.
+    with db.connect() as conn:
+        conn.execute("INSERT INTO shows(id,title,tmdb_id,status) VALUES (1,'Severance',95396,'continuing')")
+        conn.execute("INSERT INTO shows(id,title,tmdb_id,status) VALUES (2,'The Wire',1438,'ended')")
+        conn.commit()
+    # The airing show is on the watchlist by default; the ended one is not.
+    shows = db.list_watchlist("show")
+    assert [s["tmdb_id"] for s in shows] == [95396]
+    assert shows[0].get("auto") is True and shows[0]["library_id"] == 1
+    assert db.watchlist_state("show", [95396, 1438]) == {95396: True}  # ended one absent
+
+    # Un-following the airing show (mute tombstone) drops it from the default…
+    db.remove_from_watchlist("show", 95396)
+    assert db.list_watchlist("show") == []
+    assert db.watchlist_state("show", [95396]) == {}
+
+    # …and explicitly re-following brings it back (clears the mute).
+    db.add_to_watchlist("show", 95396, "Severance")
+    assert db.watchlist_state("show", [95396]) == {95396: True}
 
 
 def test_watchlist_reAdd_is_upsert_and_coalesces_library_id(db):

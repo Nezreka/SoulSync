@@ -343,6 +343,11 @@ CREATE TABLE IF NOT EXISTS video_watchlist (
     title       TEXT NOT NULL,             -- show title / person name
     poster_url  TEXT,                      -- poster (show) / photo (person)
     library_id  INTEGER,                   -- shows.id when owned (else NULL)
+    -- 'follow' = explicit user follow. 'mute' = a TOMBSTONE: the user
+    -- un-followed something that is on the watchlist by default (an actively
+    -- airing library show), so the default must not re-add it. Library shows
+    -- that are still airing are watched by default WITHOUT a row here.
+    state       TEXT NOT NULL DEFAULT 'follow',
     date_added  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(kind, tmdb_id)
 );

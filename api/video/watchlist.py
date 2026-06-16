@@ -17,18 +17,31 @@ logger = get_logger("video_api.watchlist")
 _KINDS = ("show", "person")
 
 
+def _server():
+    """Active video server_source (scopes the airing-show default). None on error."""
+    try:
+        from core.video.sources import resolve_video_server
+        return resolve_video_server()
+    except Exception:
+        return None
+
+
 def register_routes(bp):
     @bp.route("/watchlist", methods=["GET"])
     def video_watchlist_list():
-        """All watchlist entries grouped by kind (for the tabbed page)."""
+        """All watchlist entries grouped by kind (for the tabbed page).
+
+        Shows include actively-airing library shows by default, scoped to the
+        active video server so Plex/Jellyfin libraries don't commingle."""
         from . import get_video_db
         try:
             db = get_video_db()
+            server = _server()
             kind = request.args.get("kind")
             if kind in _KINDS:
-                items = db.list_watchlist(kind)
+                items = db.list_watchlist(kind, server_source=server)
                 return jsonify({"success": True, "kind": kind, "items": items})
-            rows = db.list_watchlist()
+            rows = db.list_watchlist(server_source=server)
             shows = [r for r in rows if r.get("kind") == "show"]
             people = [r for r in rows if r.get("kind") == "person"]
             return jsonify({"success": True, "shows": shows, "people": people,
@@ -42,7 +55,7 @@ def register_routes(bp):
     def video_watchlist_counts():
         from . import get_video_db
         try:
-            return jsonify({"success": True, **get_video_db().watchlist_counts()})
+            return jsonify({"success": True, **get_video_db().watchlist_counts(server_source=_server())})
         except Exception:
             logger.exception("Failed to count video watchlist")
             return jsonify({"success": False, "error": "Failed"}), 500
@@ -96,7 +109,7 @@ def register_routes(bp):
         if kind not in _KINDS:
             return jsonify({"success": False, "error": "kind is required"}), 400
         try:
-            state = get_video_db().watchlist_state(kind, ids)
+            state = get_video_db().watchlist_state(kind, ids, server_source=_server())
             # JSON object keys must be strings.
             return jsonify({"success": True, "results": {str(k): True for k in state}})
         except Exception:
