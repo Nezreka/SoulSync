@@ -317,7 +317,21 @@
     function renderActions(d) {
         var a = q('[data-vd-actions]');
         if (!a) return;
-        var watching = !!d.monitored;
+        // The watchlist eye applies only to airing shows (movies + ended shows are
+        // terminal — they get acquisition, not a "watch for new" follow).
+        var isAiringShow = d.kind === 'show' && d.tmdb_id && (!window.VideoGet || VideoGet.isAiring(d.status));
+        var watching = !!d._vw_watched;
+        // Lazily resolve the real watched state once (airing library shows are on
+        // by default), then re-render — see the new curated watchlist system.
+        if (isAiringShow && d.source !== 'tmdb' && !d._vw_checked && window.VideoWatchlist) {
+            d._vw_checked = true;
+            fetch('/api/video/watchlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'show', tmdb_ids: [d.tmdb_id] }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.results) { d._vw_watched = !!res.results[String(d.tmdb_id)]; if (data === d) renderActions(d); }
+                }).catch(function () { /* keep default state */ });
+        }
         var html = '';
         // Primary CTA: play it on your media server (owned items; arrives with
         // extras). The logo IS the brand name — "Play on <logo>" (no redundant word).
@@ -338,11 +352,13 @@
         // Preview (tmdb, un-owned) items have no library row to monitor — acquisition
         // (add-to-watchlist / get-missing) lands with the downloads phase.
         if (d.source === 'tmdb') { a.innerHTML = html; return; }
-        html +=
-            '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
-            '" type="button" data-vd-act="watchlist">' +
-            '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
-            '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
+        if (isAiringShow) {
+            html +=
+                '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
+                '" type="button" data-vd-act="watchlist">' +
+                '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
+                '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
+        }
         if (d.kind === 'show') {     // "Get Missing" filters the episode list (show-only)
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
@@ -1026,17 +1042,34 @@
 
     function showLoading(on) { var l = q('[data-vd-loading]'); if (l) l.hidden = !on; }
 
-    // ── watchlist (real monitor toggle) ───────────────────────────────────────
+    // ── watchlist (new curated system; airing shows only) ─────────────────────
     function toggleWatchlist() {
-        if (!data) return;
-        var next = data.monitored ? 0 : 1;
-        fetch('/api/video/monitor', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ kind: data.kind, id: data.id, monitored: next }),
-        }).then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (res) {
-                if (res && !res.error) { data.monitored = !!next; renderActions(data); }
-            }).catch(function () { /* ignore */ });
+        if (!data || data.kind !== 'show' || !data.tmdb_id) return;
+        var watching = !!data._vw_watched;
+        var apply = function () {
+            var url = watching ? '/api/video/watchlist/remove' : '/api/video/watchlist/add';
+            var body = watching
+                ? { kind: 'show', tmdb_id: data.tmdb_id }
+                : { kind: 'show', tmdb_id: data.tmdb_id, title: data.title,
+                    library_id: data.id, poster_url: '/api/video/poster/show/' + data.id };
+            fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (!res || !res.success) return;
+                    data._vw_watched = !watching;
+                    renderActions(data);
+                    if (typeof showToast === 'function')
+                        showToast(!watching ? 'Added to watchlist' : 'Removed from watchlist', !watching ? 'success' : 'info');
+                    document.dispatchEvent(new CustomEvent('soulsync:video-watchlist-changed',
+                        { detail: { kind: 'show', id: String(data.tmdb_id), watched: !watching } }));
+                }).catch(function () { if (typeof showToast === 'function') showToast('Watchlist update failed', 'error'); });
+        };
+        if (watching && typeof showConfirmDialog === 'function') {
+            showConfirmDialog({ title: 'Remove from Watchlist',
+                message: 'Remove “' + (data.title || 'this show') + '” from your watchlist?',
+                confirmText: 'Remove', cancelText: 'Cancel', destructive: true })
+                .then(function (ok) { if (ok) apply(); });
+        } else { apply(); }
     }
 
     // ── movie detail (flat) ───────────────────────────────────────────────────
