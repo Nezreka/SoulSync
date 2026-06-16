@@ -376,18 +376,6 @@
         var all = box.querySelectorAll(selector);
         for (var i = 0; i < all.length; i++) all[i].classList.toggle(onClass, all[i] === el);
     }
-    // Slide the segmented-control highlight under the active button.
-    function moveSeg(box) {
-        if (!box) return;
-        var on = box.querySelector('.vdsc-seg-btn--on');
-        if (!on || !on.offsetWidth) return;            // hidden / not laid out yet
-        box.style.setProperty('--seg-x', on.offsetLeft + 'px');
-        box.style.setProperty('--seg-w', on.offsetWidth + 'px');
-    }
-    function positionSegs() {
-        var segs = document.querySelectorAll('[data-video-subpage="' + PAGE_ID + '"] .vdsc-seg');
-        for (var i = 0; i < segs.length; i++) moveSeg(segs[i]);
-    }
 
     // ── wiring ────────────────────────────────────────────────────────────────
     function wire() {
@@ -424,7 +412,6 @@
                 var sbox = seg.closest('[data-vdsc-seg]');
                 var which = sbox.getAttribute('data-vdsc-seg');
                 setActive(sbox, seg, '.vdsc-seg-btn', 'vdsc-seg-btn--on');
-                moveSeg(sbox);
                 state.sel[which] = seg.getAttribute('data-val');
                 if (which === 'kind') renderGenreChips();   // genres differ by kind
                 return;
@@ -462,8 +449,6 @@
                 try { localStorage.setItem('vdsc_hideowned', hide.checked ? '1' : '0'); } catch (e) { /* ignore */ }
             });
         }
-        window.addEventListener('resize', positionSegs);
-
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
         var sentinel = $('[data-vdsc-sentinel]');
         if (sentinel && AUTO) {
@@ -500,7 +485,6 @@
                 renderGenreChips();
                 renderShelves();
                 loadMoreLike();   // prepend personalized 'More like…' rails when ready
-                requestAnimationFrame(positionSegs);
             });
     }
     function showEmpty() {
@@ -518,7 +502,7 @@
 
     function onShown(e) {
         if (!e) return;
-        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); requestAnimationFrame(positionSegs); }
+        if (e.detail === PAGE_ID) { wire(); load(); startHeroTimer(); }
         else stopHeroTimer();   // left the page → stop the slideshow
     }
     function init() { document.addEventListener('soulsync:video-page-shown', onShown); }
