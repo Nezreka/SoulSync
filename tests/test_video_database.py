@@ -149,7 +149,8 @@ def test_dashboard_stats_empty_is_all_zero(db):
 def test_dashboard_stats_counts_content_and_downloads(db):
     with db.connect() as conn:
         conn.execute("INSERT INTO movies(id,title,monitored,has_file) VALUES (1,'M',1,0)")
-        conn.execute("INSERT INTO shows(id,title,monitored) VALUES (1,'S',1)")
+        # airing library show → on the curated watchlist by default
+        conn.execute("INSERT INTO shows(id,title,monitored,tmdb_id,status) VALUES (1,'S',1,555,'continuing')")
         conn.execute("INSERT INTO seasons(id,show_id,season_number) VALUES (1,1,1)")
         conn.execute("INSERT INTO episodes(id,show_id,season_id,season_number,episode_number) "
                      "VALUES (1,1,1,1,1)")
@@ -160,7 +161,8 @@ def test_dashboard_stats_counts_content_and_downloads(db):
     s = db.dashboard_stats()
     assert s["library"] == {"movies": 1, "shows": 1, "episodes": 1, "size_bytes": 1000}
     assert s["downloads"]["active"] == 1 and s["downloads"]["speed_bps"] == 500
-    assert s["watchlist"] == 1 and s["wishlist"] == 1
+    # watchlist = the airing show (curated default); wishlist is cleared for now
+    assert s["watchlist"] == 1 and s["wishlist"] == 0
 
 
 def test_library_selection_roundtrip(db):
