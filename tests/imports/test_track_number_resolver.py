@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from core.imports.track_number import resolve_track_number
+from core.imports.track_number import read_embedded_track_number, resolve_track_number
 
 
 # ---------------------------------------------------------------------------
@@ -226,3 +226,113 @@ def test_non_dict_track_info_treated_as_empty():
     """Defensive — non-dict track_info won't crash the resolver."""
     result = resolve_track_number({}, 'not a dict', '/dir/file.flac')
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# "Track 01" bug (Deezer single tracks): embedded file-tag source.
+# ---------------------------------------------------------------------------
+
+
+def test_embedded_tag_used_when_metadata_missing():
+    """The Deezer single-track case: context carried no position (search
+    endpoint omits track_position), but the downloaded file did. With the
+    metadata-context de-poisoned to 0/None, the embedded tag is consulted
+    BEFORE the filename guess."""
+    result = resolve_track_number(
+        album_info={'track_number': 0},        # de-poisoned "unknown"
+        track_info={'track_number': 0},
+        file_path='/dl/Lenny Kravitz - Fly Away.flac',  # no number prefix
+        embedded_track_number=2,
+    )
+    assert result == 2
+
+
+def test_real_metadata_still_beats_embedded_tag():
+    """No regression for album downloads: an authoritative album_info
+    position wins over the file tag (they normally agree, but the
+    context is the source of truth when present)."""
+    result = resolve_track_number(
+        album_info={'track_number': 5},
+        track_info={},
+        file_path='/dl/file.flac',
+        embedded_track_number=2,
+    )
+    assert result == 5
+
+
+def test_filename_beats_embedded_tag_no_regression():
+    """SAFETY: embedded tag is consulted LAST, so a correctly-named ripped
+    file ('05 - Song') with a stale/wrong embedded tag is NOT regressed —
+    the filename still wins, exactly as before the fix."""
+    result = resolve_track_number(
+        album_info={},
+        track_info={},
+        file_path='/dl/09 - Mislabelled.flac',
+        embedded_track_number=2,   # wrong/stale tag must NOT win
+    )
+    assert result == 9
+
+
+def test_embedded_only_fills_the_floor_gap():
+    """When metadata AND filename are both empty (the Deezer case), the
+    embedded tag fills what would otherwise be the blind default-1 floor."""
+    result = resolve_track_number(
+        album_info={}, track_info={},
+        file_path='/dl/Lenny Kravitz - Fly Away.flac',  # no number prefix
+        embedded_track_number=2,
+    )
+    assert result == 2
+
+
+def test_resolver_without_embedded_arg_is_backwards_compatible():
+    """The new parameter is optional — existing 3-arg callers unaffected."""
+    assert resolve_track_number({}, {'track_number': 4}, '/x.flac') == 4
+
+
+# read_embedded_track_number — mutagen-backed file tag reader.
+
+def _fake_mutagen(tag_value):
+    """Patch target factory: returns a callable standing in for
+    ``mutagen.File`` that yields an object whose .get('tracknumber')
+    returns tag_value (mimicking easy=True list-valued tags)."""
+    class _Audio(dict):
+        pass
+    def _factory(path, easy=False):
+        a = _Audio()
+        if tag_value is not None:
+            a['tracknumber'] = tag_value
+        return a
+    return _factory
+
+
+def test_read_embedded_handles_number_slash_total():
+    with patch('mutagen.File', _fake_mutagen(['2/15'])):
+        assert read_embedded_track_number('/x.flac') == 2
+
+
+def test_read_embedded_handles_bare_number():
+    with patch('mutagen.File', _fake_mutagen(['7'])):
+        assert read_embedded_track_number('/x.flac') == 7
+
+
+def test_read_embedded_none_when_tag_absent():
+    with patch('mutagen.File', _fake_mutagen(None)):
+        assert read_embedded_track_number('/x.flac') is None
+
+
+def test_read_embedded_none_when_file_unreadable():
+    def _factory(path, easy=False):
+        return None
+    with patch('mutagen.File', _factory):
+        assert read_embedded_track_number('/x.flac') is None
+
+
+def test_read_embedded_never_raises():
+    def _boom(path, easy=False):
+        raise RuntimeError('corrupt')
+    with patch('mutagen.File', _boom):
+        assert read_embedded_track_number('/x.flac') is None
+
+
+def test_read_embedded_empty_path_returns_none():
+    assert read_embedded_track_number('') is None

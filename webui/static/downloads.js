@@ -1186,6 +1186,9 @@ async function openWishlistOverviewModal() {
                         <button class="playlist-modal-btn playlist-modal-btn-warning" onclick="cleanupWishlistOverview()">
                             🧹 Cleanup Wishlist
                         </button>
+                        <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire">
+                            🚫 Ignored
+                        </button>
                     </div>
                     <div class="playlist-modal-footer-right">
                         <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistOverviewModal()">Close</button>
@@ -1310,6 +1313,117 @@ function closeWishlistOverviewModal() {
     }
     window.selectedWishlistCategory = null;
     console.log('✅ Modal closed');
+}
+
+// ── #874: Wishlist ignore-list ("Ignored") modal ────────────────────────
+// Tracks the user removed from the wishlist or cancelled mid-download are
+// auto-skipped (not re-queued) until they expire. This modal lets the user
+// see what's currently ignored and lift the skip (un-ignore / clear all).
+
+async function openWishlistIgnoreModal() {
+    let modal = document.getElementById('wishlist-ignore-modal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'wishlist-ignore-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:10050;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);';
+    modal.innerHTML = `
+        <div class="playlist-modal-content" style="max-width:560px;width:90%;max-height:80vh;display:flex;flex-direction:column;">
+            <div class="playlist-modal-header">
+                <h2 style="margin:0;">🚫 Ignored Tracks</h2>
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWishlistIgnoreModal()">Close</button>
+            </div>
+            <p style="opacity:0.7;font-size:13px;margin:8px 16px 0;">Removed or cancelled tracks are skipped by auto-download until they expire. Un-ignore to allow auto-download again (you can always download manually).</p>
+            <div id="wishlist-ignore-list" class="playlist-tracks-scroll" style="flex:1;overflow-y:auto;padding:12px 16px;">
+                <div class="loading-indicator">Loading...</div>
+            </div>
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left">
+                    <button id="wishlist-ignore-clear-btn" class="playlist-modal-btn playlist-modal-btn-danger" onclick="clearWishlistIgnoreList()" style="display:none;">Clear All</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeWishlistIgnoreModal(); });
+    await loadWishlistIgnoreList();
+}
+
+function closeWishlistIgnoreModal() {
+    const modal = document.getElementById('wishlist-ignore-modal');
+    if (modal) modal.remove();
+}
+
+async function loadWishlistIgnoreList() {
+    const list = document.getElementById('wishlist-ignore-list');
+    const clearBtn = document.getElementById('wishlist-ignore-clear-btn');
+    if (!list) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list');
+        const data = await resp.json();
+        const entries = (data && data.entries) || [];
+        if (clearBtn) clearBtn.style.display = entries.length ? '' : 'none';
+        if (!entries.length) {
+            list.innerHTML = '<div class="playlist-empty-state" style="text-align:center;opacity:0.6;padding:30px 0;">🎉<br><br>Nothing ignored.</div>';
+            return;
+        }
+        const ttl = (data && data.ttl_days) || 30;
+        list.innerHTML = entries.map(e => {
+            const title = escapeHtml(e.track_name || e.track_id || 'Unknown');
+            const artist = escapeHtml(e.artist_name || '');
+            const reason = e.reason === 'cancelled' ? 'Cancelled' : 'Removed';
+            const tid = escapeHtml(String(e.track_id || ''));
+            return `<div class="wishlist-ignore-row" style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${title}</div>
+                    <div style="opacity:0.6;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${artist}${artist ? ' · ' : ''}${reason} · skips ${ttl}d</div>
+                </div>
+                <button class="playlist-modal-btn playlist-modal-btn-secondary" style="flex-shrink:0;" data-track-id="${tid}" onclick="unignoreWishlistTrack(this.dataset.trackId)">Un-ignore</button>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        list.innerHTML = '<div class="playlist-empty-state" style="text-align:center;opacity:0.6;padding:30px 0;">Error loading ignored tracks</div>';
+    }
+}
+
+async function unignoreWishlistTrack(trackId) {
+    if (!trackId) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ track_id: trackId }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            showToast('Track un-ignored — it can be auto-downloaded again.', 'success');
+            await loadWishlistIgnoreList();
+        } else {
+            showToast(`Un-ignore failed: ${(data && data.error) || 'unknown'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Un-ignore failed: ${err.message}`, 'error');
+    }
+}
+
+async function clearWishlistIgnoreList() {
+    if (!await showConfirmDialog({
+        title: 'Clear Ignored List',
+        message: 'Allow all currently-ignored tracks to be auto-downloaded again?',
+        confirmText: 'Clear All',
+        cancelText: 'Cancel',
+    })) return;
+    try {
+        const resp = await fetch('/api/wishlist/ignore-list/clear', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            showToast(`Cleared ${data.cleared || 0} ignored track(s).`, 'success');
+            await loadWishlistIgnoreList();
+        } else {
+            showToast(`Clear failed: ${(data && data.error) || 'unknown'}`, 'error');
+        }
+    } catch (err) {
+        showToast(`Clear failed: ${err.message}`, 'error');
+    }
 }
 
 async function cleanupWishlistOverview() {

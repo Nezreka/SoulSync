@@ -310,12 +310,30 @@ def remove_track_from_wishlist(
         if not spotify_track_id:
             return {"success": False, "error": "No spotify_track_id provided"}, 400
 
-        success = get_wishlist_service().remove_track_from_wishlist(
+        service = get_wishlist_service()
+        _db = getattr(service, "database", None)
+        # #874: capture the track's display info BEFORE removal (the row is
+        # gone afterwards) so the ignore-list entry carries a human label.
+        _ignore_data = None
+        try:
+            if _db is not None:
+                _ignore_data = _db.get_wishlist_spotify_data(
+                    spotify_track_id, profile_id=runtime.profile_id)
+        except Exception:
+            _ignore_data = None
+
+        success = service.remove_track_from_wishlist(
             spotify_track_id,
             profile_id=runtime.profile_id,
         )
 
         if success:
+            # #874: a user-initiated remove means "stop auto-requeuing this".
+            # Record a TTL'd ignore so the watchlist/auto-processor doesn't
+            # re-add it. Best-effort — never fails the remove.
+            from core.wishlist.ignore import ignore_wishlist_track, REASON_REMOVED
+            ignore_wishlist_track(_db, runtime.profile_id,
+                                  spotify_track_id, REASON_REMOVED, spotify_data=_ignore_data)
             runtime.logger.info("Successfully removed track from wishlist: %s", spotify_track_id)
             return {"success": True, "message": "Track removed from wishlist"}, 200
 
@@ -358,13 +376,20 @@ def remove_album_from_wishlist(
             if matched:
                 spotify_track_id = track.get("track_id") or track.get("spotify_track_id") or track.get("id")
                 if spotify_track_id:
-                    tracks_to_remove.append(spotify_track_id)
+                    # Keep the loaded spotify_data alongside the id so the #874
+                    # ignore entry can be labelled without a second DB read.
+                    tracks_to_remove.append((spotify_track_id, spotify_data))
 
+        from core.wishlist.ignore import ignore_wishlist_track, REASON_REMOVED
+        _db = getattr(wishlist_service, "database", None)
         removed_count = 0
         album_remove_pid = runtime.profile_id
-        for spotify_track_id in tracks_to_remove:
+        for spotify_track_id, track_spotify_data in tracks_to_remove:
             if wishlist_service.remove_track_from_wishlist(spotify_track_id, profile_id=album_remove_pid):
                 removed_count += 1
+                # #874: user removed the whole album → ignore each track.
+                ignore_wishlist_track(_db, album_remove_pid,
+                                      spotify_track_id, REASON_REMOVED, spotify_data=track_spotify_data)
 
         if removed_count > 0:
             runtime.logger.info("Successfully removed %s tracks from album %s", removed_count, album_id)
@@ -390,11 +415,22 @@ def remove_batch_from_wishlist(
         if not spotify_track_ids or not isinstance(spotify_track_ids, list):
             return {"success": False, "error": "Missing or invalid spotify_track_ids"}, 400
 
+        from core.wishlist.ignore import ignore_wishlist_track, REASON_REMOVED
+        service = get_wishlist_service()
+        _db = getattr(service, "database", None)
         removed = 0
         pid = runtime.profile_id
         for track_id in spotify_track_ids:
-            if get_wishlist_service().remove_track_from_wishlist(track_id, profile_id=pid):
+            # Capture label before the row is deleted (#874).
+            _data = None
+            try:
+                if _db is not None:
+                    _data = _db.get_wishlist_spotify_data(track_id, profile_id=pid)
+            except Exception:
+                _data = None
+            if service.remove_track_from_wishlist(track_id, profile_id=pid):
                 removed += 1
+                ignore_wishlist_track(_db, pid, track_id, REASON_REMOVED, spotify_data=_data)
 
         runtime.logger.info("Batch removed %s track(s) from wishlist", removed)
         return {
