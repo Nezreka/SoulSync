@@ -978,3 +978,141 @@ def test_enrichment_package_imports_nothing_from_music():
             s = line.strip()
             if s.startswith("import ") or s.startswith("from "):
                 assert "music" not in s.lower(), f"{py.name}: music import leaked: {s!r}"
+
+
+# ── Discover (browse TMDB by curated list / genre / year / decade) ────────────
+
+def test_tmdb_curated_parses_with_forced_kind(monkeypatch):
+    # A canned TV list → every row forced to kind 'show' (no media_type in body),
+    # carrying the backdrop the Discover hero needs.
+    captured = {}
+    body = {"results": [
+        {"id": 7, "name": "Show", "first_air_date": "2022-03-03", "poster_path": "/p.jpg",
+         "backdrop_path": "/b.jpg", "vote_average": 8.1, "overview": "O"}]}
+
+    def fake_get(url, **kw):
+        captured["url"] = url
+        return _Resp(body)
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get))
+    res = TMDBClient("KEY").curated("popular_shows")
+    assert "/tv/popular" in captured["url"]
+    assert res[0]["kind"] == "show" and res[0]["title"] == "Show" and res[0]["year"] == "2022"
+    assert res[0]["backdrop"] == "https://image.tmdb.org/t/p/w780/b.jpg"
+    assert res[0]["poster"] == "https://image.tmdb.org/t/p/w300/p.jpg"
+
+
+def test_tmdb_curated_unknown_key_returns_empty():
+    # An unrecognised list key never hits the network.
+    assert TMDBClient("KEY").curated("not_a_real_list") == []
+
+
+def test_tmdb_discover_builds_filtered_params(monkeypatch):
+    # genre + decade → with_genres + a date *range*; sort passes through.
+    captured = {}
+    body = {"results": [
+        {"id": 1, "title": "A", "release_date": "2015-01-01", "poster_path": "/a.jpg",
+         "backdrop_path": "/b.jpg", "vote_average": 7.5, "overview": "O"}]}
+
+    def fake_get(url, **kw):
+        captured["url"] = url
+        captured["params"] = kw.get("params")
+        return _Resp(body)
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get))
+    res = TMDBClient("KEY").discover("movie", genre=28, decade=2010, sort_by="vote_average.desc")
+    assert "/discover/movie" in captured["url"]
+    p = captured["params"]
+    assert p["with_genres"] == 28 and p["sort_by"] == "vote_average.desc"
+    assert p["primary_release_date.gte"] == "2010-01-01" and p["primary_release_date.lte"] == "2019-12-31"
+    assert res[0] == {"kind": "movie", "tmdb_id": 1, "title": "A", "year": "2015",
+                      "rating": 7.5, "overview": "O",
+                      "poster": "https://image.tmdb.org/t/p/w300/a.jpg",
+                      "backdrop": "https://image.tmdb.org/t/p/w780/b.jpg"}
+
+
+def test_tmdb_discover_tv_uses_first_air_date_year(monkeypatch):
+    # The TV side filters on first_air_date_year, not primary_release_year.
+    captured = {}
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(
+        get=lambda u, **k: (captured.update(url=u, params=k.get("params")), _Resp({"results": []}))[1]))
+    TMDBClient("KEY").discover("show", year=2020)
+    assert "/discover/tv" in captured["url"]
+    assert captured["params"]["first_air_date_year"] == 2020
+    assert "primary_release_year" not in captured["params"]
+
+
+def test_tmdb_genres_parses(monkeypatch):
+    body = {"genres": [{"id": 28, "name": "Action"}, {"id": 12, "name": "Adventure"},
+                       {"name": "NoId"}]}     # rows without an id are dropped
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=lambda u, **k: _Resp(body)))
+    assert TMDBClient("KEY").genres("movie") == [{"id": 28, "name": "Action"},
+                                                 {"id": 12, "name": "Adventure"}]
+
+
+def test_engine_discover_curated_annotates_and_caches(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Owned", "tmdb_id": 1})
+    calls = []
+
+    class Tmdb:
+        enabled = True
+        def curated(self, key, page=1):
+            calls.append((key, page))
+            return [{"kind": "movie", "tmdb_id": 1, "title": "Owned"},
+                    {"kind": "movie", "tmdb_id": 2, "title": "Nope"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    res = eng.discover_curated("popular_movies")
+    assert res[0]["library_id"] == mid and res[1]["library_id"] is None
+    eng.discover_curated("popular_movies")
+    assert calls == [("popular_movies", 1)]            # second call served from cache
+
+
+def test_engine_discover_filter_normalizes_kind_and_passes_filters(db):
+    captured = {}
+
+    class Tmdb:
+        enabled = True
+        def discover(self, kind, *, genre=None, year=None, decade=None,
+                     sort_by="popularity.desc", page=1):
+            captured.update(kind=kind, genre=genre, decade=decade, sort_by=sort_by)
+            return [{"kind": "movie", "tmdb_id": 9, "title": "X"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    res = eng.discover_filter("bogus", genre=28, decade=2010, sort_by="vote_average.desc")
+    assert captured["kind"] == "movie"                 # unknown kind normalised
+    assert captured["genre"] == 28 and captured["decade"] == 2010
+    assert captured["sort_by"] == "vote_average.desc"
+    assert res[0]["library_id"] is None                # not owned → None
+
+
+def test_engine_genre_list_caches(db):
+    calls = []
+
+    class Tmdb:
+        enabled = True
+        def genres(self, kind):
+            calls.append(kind)
+            return [{"id": 28, "name": "Action"}]
+    eng = VideoEnrichmentEngine(db, {"tmdb": Tmdb()})
+    assert eng.genre_list("movie")[0]["name"] == "Action"
+    eng.genre_list("movie")
+    assert calls == ["movie"]                           # long-cached → one call
+
+
+def test_engine_discover_disabled_worker_returns_empty(db):
+    class Off:
+        enabled = False
+    eng = VideoEnrichmentEngine(db, {"tmdb": Off()})
+    assert eng.discover_curated("popular_movies") == []
+    assert eng.discover_filter("movie", genre=1) == []
+    assert eng.genre_list("movie") == []
+
+
+def test_engine_discover_swallows_client_errors(db):
+    # A TMDB blip must yield an empty shelf, never crash the page.
+    class Boom:
+        enabled = True
+        def curated(self, key, page=1): raise RuntimeError("tmdb down")
+        def discover(self, *a, **k): raise RuntimeError("tmdb down")
+        def genres(self, kind): raise RuntimeError("tmdb down")
+    eng = VideoEnrichmentEngine(db, {"tmdb": Boom()})
+    assert eng.discover_curated("popular_movies") == []
+    assert eng.discover_filter("movie", genre=1) == []
+    assert eng.genre_list("movie") == []
