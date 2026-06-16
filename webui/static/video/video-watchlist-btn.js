@@ -73,12 +73,29 @@
         b.disabled = true;
         var done = function () { b.disabled = false; };
         if (on) {
-            fetch('/api/video/watchlist/remove', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ kind: kind, tmdb_id: Number(id) })
-            }).then(function (r) { return r.json(); }).then(function (d) {
-                if (d && d.success) { syncAll(kind, id, false); toast('Removed from watchlist', 'info'); }
-            }).catch(function () { toast('Watchlist update failed', 'error'); }).then(done);
+            // Removal is confirmed (the standard music yes/no dialog) — the eye is
+            // small + easy to mis-click and the card vanishes on the watchlist
+            // page. Adding stays instant.
+            var name = b.getAttribute('data-vwl-title') || '';
+            var label = name ? '“' + name + '”' : (kind === 'person' ? 'this person' : 'this show');
+            var doRemove = function () {
+                fetch('/api/video/watchlist/remove', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ kind: kind, tmdb_id: Number(id) })
+                }).then(function (r) { return r.json(); }).then(function (d) {
+                    if (d && d.success) { syncAll(kind, id, false); toast('Removed from watchlist', 'info'); }
+                }).catch(function () { toast('Watchlist update failed', 'error'); }).then(done);
+            };
+            var confirm = (typeof showConfirmDialog === 'function')
+                ? showConfirmDialog({
+                    title: 'Remove from Watchlist',
+                    message: 'Remove ' + label + ' from your watchlist?',
+                    confirmText: 'Remove', cancelText: 'Cancel', destructive: true })
+                : Promise.resolve(true);
+            Promise.resolve(confirm).then(function (ok) {
+                if (ok) doRemove();
+                else done();   // cancelled — re-enable, no change
+            });
         } else {
             var body = {
                 kind: kind, tmdb_id: Number(id),
