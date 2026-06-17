@@ -2977,3 +2977,12 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vyt-skel-line { height: 11px; border-radius: 5px; width: 78px; }
 .vyt-skel-line--sm { height: 9px; width: 52px; }
 @media (prefers-reduced-motion: reduce) { .vyt-skel, .vsr-yt-loading::after { animation: none; } }
+
+/* YouTube Dates worker — simple panel in the Manage Workers modal (no match queue) */
+.vem-yt-about { margin: 4px 2px 20px; font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.6); }
+.vem-yt-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.vem-yt-stat { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+    padding: 18px 14px; text-align: center; }
+.vem-yt-num { display: block; font-size: 28px; font-weight: 900; color: #fff; line-height: 1; }
+.vem-yt-lbl { display: block; margin-top: 7px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
+    color: rgba(255,255,255,0.45); }

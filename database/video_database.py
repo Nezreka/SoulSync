@@ -2055,13 +2055,17 @@ class VideoDatabase:
             conn.close()
 
     def channel_dates_enriched_recently(self, channel_id, within_hours=24) -> bool:
-        """True if the channel was date-enriched within the window (don't re-sweep)."""
+        """True if the channel was date-enriched within the window (don't re-sweep).
+        Coverage-aware: a run that produced FEW dates (proxies were down) retries
+        soon instead of being locked out for the full window — so the catalog
+        actually fills in once a source works."""
         if not channel_id:
             return False
         conn = self._get_connection()
         try:
-            row = conn.execute("SELECT enriched_at FROM youtube_channel_enrichment WHERE channel_id=?",
-                               (str(channel_id),)).fetchone()
+            row = conn.execute(
+                "SELECT enriched_at, date_count FROM youtube_channel_enrichment WHERE channel_id=?",
+                (str(channel_id),)).fetchone()
             if not row or not row["enriched_at"]:
                 return False
             try:
@@ -2069,7 +2073,9 @@ class VideoDatabase:
             except (ValueError, TypeError):
                 return False
             now = datetime.now(timezone.utc).replace(tzinfo=None)   # naive UTC, matches CURRENT_TIMESTAMP
-            return (now - when) < timedelta(hours=within_hours)
+            # Good coverage → skip for the full window; thin result → retry in 15 min.
+            window = within_hours if (row["date_count"] or 0) >= 15 else 0.25
+            return (now - when) < timedelta(hours=window)
         finally:
             conn.close()
 

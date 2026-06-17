@@ -18,6 +18,8 @@
         { id: 'tmdb', name: 'TMDB', color: '#38bdf8', rgb: '56, 189, 248', kinds: ['movie', 'show'] },
         { id: 'tvdb', name: 'TVDB', color: '#a855f7', rgb: '168, 85, 247', kinds: ['show'] },
         { id: 'omdb', name: 'OMDb', color: '#f5c518', rgb: '245, 197, 24', kinds: ['movie', 'show'] },
+        // The YouTube date enricher — no per-kind match queue; its own simple panel.
+        { id: 'youtube', name: 'YouTube Dates', color: '#ff3b3b', rgb: '255, 59, 59', kinds: [], glyph: '▶' },
     ];
 
     function workerDef(id) {
@@ -64,8 +66,13 @@
         }
         return t ? Math.round(m / t * 100) : 0;
     }
-    function railSub(s) {
+    function railSub(s, id) {
         if (!s || !s.enabled) return 'Not configured';
+        if (id === 'youtube') {
+            if (s.running && s.current_item && s.current_item.name) return s.current_item.name;
+            if (s.queued) return s.queued + ' queued';
+            return (s.dates_cached || 0) + ' dates cached';
+        }
         if (s.idle) return 'All matched';
         if (s.running && !s.paused && s.current_item && s.current_item.name) return s.current_item.name;
         return (s.stats ? (s.stats.pending || 0) : 0) + ' pending';
@@ -119,17 +126,36 @@
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
             var icon = LOGOS[w.id]
                 ? '<img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt="">'
-                : '<span class="vem-glyph" style="color:' + w.color + '">★</span>';
+                : '<span class="vem-glyph" style="color:' + w.color + '">' + (w.glyph || '★') + '</span>';
             return '<button class="em-worker-row" data-em-select="' + w.id + '" style="--row-accent: ' + w.rgb + '">' +
                 '<span class="em-worker-icon">' + icon + '</span>' +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
-                '<span class="em-worker-sub">' + esc(railSub(s)) + '</span>' + cov + '</span>' +
+                '<span class="em-worker-sub">' + esc(railSub(s, w.id)) + '</span>' + cov + '</span>' +
                 '<span class="em-dot em-dot--' + info.cls + '" title="' + info.label + '"></span></button>';
         }).join('');
         WORKERS.forEach(function (w) {
             var row = rail.querySelector('[data-em-select="' + w.id + '"]');
             if (row) row.classList.toggle('active', w.id === state.selected);
         });
+    }
+
+    function renderYoutubePanel(panel) {
+        var s = state.statuses.youtube || {};
+        var info = statusInfo(s);
+        var prog = (s.progress && s.progress.channels) || {};
+        var current = (s.current_item && s.current_item.name)
+            ? '<span class="em-ph-current">channel: ' + esc(s.current_item.name) + '</span>' : '';
+        panel.innerHTML =
+            '<div class="em-panel-header">' +
+                '<div class="em-ph-main"><span class="em-dot em-dot--' + info.cls + '"></span>' +
+                '<strong>YouTube Dates</strong><span class="em-ph-status">' + info.label + '</span>' + current + '</div>' +
+                '<button class="em-pause-btn" data-em-pause>' + (s.paused ? '▶ Resume' : '⏸ Pause') + '</button></div>' +
+            '<div class="vem-yt-about">Fetches real upload dates for the YouTube channels you follow, so the channel page can group videos into year-seasons. Runs in the background when you follow or open a channel — bulk via a no-key proxy, falling back to per-video; cached so it\'s a one-time pass per channel.</div>' +
+            '<div class="vem-yt-stats">' +
+                '<div class="vem-yt-stat"><span class="vem-yt-num">' + (prog.matched || 0) + '</span><span class="vem-yt-lbl">channels enriched</span></div>' +
+                '<div class="vem-yt-stat"><span class="vem-yt-num">' + (s.dates_cached || 0) + '</span><span class="vem-yt-lbl">dates cached</span></div>' +
+                '<div class="vem-yt-stat"><span class="vem-yt-num">' + (s.queued || 0) + '</span><span class="vem-yt-lbl">queued</span></div>' +
+            '</div>';
     }
 
     function renderPanel() {
@@ -139,6 +165,7 @@
         var w = WORKERS.find(function (x) { return x.id === state.selected; }) || WORKERS[0];
         panel.style.setProperty('--em-accent', w.color);
         panel.style.setProperty('--em-accent-rgb', w.rgb);
+        if (state.selected === 'youtube') { renderYoutubePanel(panel); return; }
         panel.innerHTML =
             '<div class="em-panel-header" id="vem-panel-header"></div>' +
             '<div class="em-section-label em-section-label--row"><span>Coverage</span>' +
@@ -276,6 +303,7 @@
         state.selected = id; state.breakdown = null; state.unmatched = null;
         state.kind = defaultKind(id); state.page = 0; state.search = '';
         renderRail(); renderPanel();
+        if (id === 'youtube') return;   // date worker has no breakdown/unmatched
         Promise.all([loadBreakdown(id), loadUnmatched()]).then(function () { renderPanel(); });
     }
     function switchKind(kind) {
@@ -416,7 +444,11 @@
         state.pollTimer = setInterval(function () {
             if (!state.open) return;
             getJSON('/api/video/enrichment/' + state.selected + '/status').then(function (d) {
-                if (d) { state.statuses[state.selected] = d; renderHeader(); renderRail(); }
+                if (d) {
+                    state.statuses[state.selected] = d;
+                    if (state.selected === 'youtube') renderPanel(); else renderHeader();
+                    renderRail();
+                }
             });
         }, 3000);
     }
