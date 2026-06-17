@@ -246,3 +246,42 @@ def test_video_detail_accepts_watch_url_and_handles_failure():
             raise RuntimeError("unavailable")
     assert yt.video_detail("x", ydl_factory=_Boom) is None
     assert yt.video_detail("", ydl_factory=_FakeVideoYDL) is None
+
+
+# ── channel tags + playlists ─────────────────────────────────────────────────
+
+def test_shape_channel_includes_tags_and_views():
+    info = dict(_flat_info()); info["tags"] = ["gaming", "ps5"]; info["view_count"] = 9_000_000
+    out = yt.shape_channel(info)
+    assert out["tags"] == ["gaming", "ps5"] and out["view_count"] == 9_000_000
+
+
+class _PlaylistsYDL:
+    def __init__(self, opts): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def extract_info(self, url, download=False):
+        return {"entries": [
+            {"id": "PL1", "title": "Trailers", "playlist_count": 12,
+             "thumbnails": [{"url": "http://t/pl1.jpg", "width": 320, "height": 180}]},
+            {"id": "PL2", "title": "Interviews", "video_count": 5},
+            None, {"title": "no id"},
+        ]}
+
+
+def test_channel_playlists_shapes_and_filters():
+    pls = yt.channel_playlists("UCx", ydl_factory=_PlaylistsYDL)
+    assert [p["playlist_id"] for p in pls] == ["PL1", "PL2"]
+    assert pls[0]["title"] == "Trailers" and pls[0]["video_count"] == 12
+    assert pls[0]["thumbnail_url"] == "http://t/pl1.jpg"
+
+
+def test_playlist_videos_reuses_entry_shape():
+    vids = yt.playlist_videos("PL1", ydl_factory=_FakeYDL)   # _FakeYDL returns _flat_info()
+    assert [v["youtube_id"] for v in vids] == ["vid1", "vid2", "vid3"]
+    assert vids[0]["published_at"] == "2023-11-14"
+
+
+def test_channel_playlists_empty_on_no_id():
+    assert yt.channel_playlists("", ydl_factory=_PlaylistsYDL) == []
+    assert yt.playlist_videos("", ydl_factory=_FakeYDL) == []
