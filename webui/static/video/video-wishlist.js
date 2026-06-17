@@ -168,15 +168,36 @@
         var synEl = group && group.querySelector('[data-vwsh-syn]');
         var castEl = group && group.querySelector('[data-vwsh-cast]');
         if (!synEl || !castEl) return;
-        // YouTube: a video carries its own description; there's no cast and no
-        // tmdb episode endpoint, so just paint the selected video's synopsis.
+        // YouTube: no cast. A selected video shows its FULL metadata — description,
+        // duration, views — fetched lazily from yt-dlp on first select (like the
+        // TV nebula lazy-loads guest stars), then cached on the episode object.
         if (group.getAttribute('data-vwsh-source') === 'youtube') {
-            if (sel) {
-                var yd = fmtDate(sel.air_date);
-                synEl.innerHTML = (yd ? '<span class="vwsh-info-eyebrow">' + esc(yd) + '</span>' : '') +
-                    esc(sel.overview || 'No description for this video.');
-            } else { synEl.innerHTML = ''; }
             castEl.innerHTML = '';
+            if (!sel) { synEl.innerHTML = ''; return; }
+            var vd = sel._ytd;   // undefined = not fetched, null = fetched/empty
+            var bits = [];
+            var yd = fmtDate((vd && vd.published_at) || sel.air_date); if (yd) bits.push(esc(yd));
+            if (vd && window.VideoYoutube) {
+                var du = VideoYoutube.fmtDuration(vd.duration_seconds); if (du) bits.push(esc(du));
+                var vc = VideoYoutube.compactCount(vd.view_count); if (vc) bits.push(esc(vc) + ' views');
+            }
+            var desc = (vd && vd.description) || sel.overview || '';
+            var watch = 'https://www.youtube.com/watch?v=' + encodeURIComponent(sel.source_id);
+            synEl.innerHTML =
+                (bits.length ? '<span class="vwsh-info-eyebrow">' + bits.join(' · ') + '</span>' : '') +
+                (desc ? esc(desc) : (sel._ytd === undefined ? 'Loading details…' : 'No description for this video.')) +
+                '<a class="vwsh-yt-watch" href="' + watch + '" target="_blank" rel="noopener">Watch on YouTube &#8599;</a>';
+            if (sel._ytd === undefined) {
+                sel._ytd = null;   // mark in-flight so we fetch once
+                fetch('/api/video/youtube/video/' + encodeURIComponent(sel.source_id), { headers: { Accept: 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        sel._ytd = (d && d.video) || null;
+                        var cur = group.querySelector('.vwsh-epc--sel');
+                        if (cur && cur.getAttribute('data-src-id') === sel.source_id) renderInfoBar(group, tmdb, sel);
+                    })
+                    .catch(function () { sel._ytd = null; });
+            }
             return;
         }
         var si = state.showInfo[tmdb] || {};

@@ -156,6 +156,27 @@ def register_routes(bp):
             logger.exception("youtube channel detail failed for %r", channel_id)
             return jsonify({"success": False, "error": "Could not load channel"}), 500
 
+    @bp.route("/youtube/video/<video_id>", methods=["GET"])
+    def video_youtube_video_detail(video_id):
+        """Full metadata for one video (description, views, likes, duration, tags) —
+        fetched lazily when a video is selected. Persists the description onto its
+        wishlist row so re-opening is instant."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        try:
+            v = yt.video_detail(video_id)
+            if not v or not v.get("youtube_id"):
+                return jsonify({"success": False, "error": "Video not found"}), 404
+            if v.get("description"):
+                try:
+                    get_video_db().set_wishlist_video_overview(v["youtube_id"], v["description"])
+                except Exception:
+                    pass   # persistence is best-effort; the detail still returns
+            return jsonify({"success": True, "video": v})
+        except Exception:
+            logger.exception("youtube video detail failed for %r", video_id)
+            return jsonify({"success": False, "error": "Could not load video"}), 500
+
     @bp.route("/youtube/wishlist/add", methods=["POST"])
     def video_youtube_wishlist_add():
         """Wish specific videos (per-video add from the channel page). Body:
