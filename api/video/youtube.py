@@ -147,6 +147,12 @@ def register_routes(bp):
                 return jsonify({"success": False, "error": "Channel not found"}), 404
             cid = channel["youtube_id"]
             following = bool(db.channel_watch_state([cid]))
+            # backfill the real avatar onto wished rows (flat listing often omits it)
+            if channel.get("avatar_url"):
+                try:
+                    db.set_wishlist_channel_poster(cid, channel["avatar_url"])
+                except Exception:
+                    pass
             wished = db.youtube_video_wish_state([v.get("youtube_id") for v in channel.get("videos") or []])
             for v in channel.get("videos") or []:
                 v["wished"] = v.get("youtube_id") in wished
