@@ -285,3 +285,34 @@ def test_playlist_videos_reuses_entry_shape():
 def test_channel_playlists_empty_on_no_id():
     assert yt.channel_playlists("", ydl_factory=_PlaylistsYDL) == []
     assert yt.playlist_videos("", ydl_factory=_FakeYDL) == []
+
+
+# ── search_channels (channel results for the search page) ────────────────────
+
+class _SearchYDL:
+    def __init__(self, opts): pass
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+    def extract_info(self, url, download=False):
+        return {"entries": [
+            {"channel_id": "UCaaa", "channel": "Good Mythical Morning", "uploader_id": "@goodmythicalmorning",
+             "channel_follower_count": 18_000_000,
+             "thumbnails": [{"url": "http://a/gmm.jpg", "width": 800, "height": 800}]},
+            {"id": "UCbbb", "title": "Rhett & Link", "thumbnails": []},          # id is the channel id
+            {"url": "https://www.youtube.com/channel/UCccc", "title": "Mythical"},  # id from url
+            {"id": "dQw4", "title": "a video, not a channel"},                    # skipped (not UC)
+            None,
+        ]}
+
+
+def test_search_channels_extracts_channel_results():
+    out = yt.search_channels("good mythical morning", ydl_factory=_SearchYDL)
+    assert [c["youtube_id"] for c in out] == ["UCaaa", "UCbbb", "UCccc"]
+    assert out[0]["title"] == "Good Mythical Morning"
+    assert out[0]["handle"] == "@goodmythicalmorning"
+    assert out[0]["subscriber_count"] == 18_000_000
+    assert out[0]["avatar_url"] == "http://a/gmm.jpg"
+
+
+def test_search_channels_empty_query():
+    assert yt.search_channels("  ", ydl_factory=_SearchYDL) == []

@@ -250,6 +250,45 @@ def resolve_channel(raw, limit=30, ydl_factory=None, db=None):
     return shaped if shaped.get("youtube_id") else None
 
 
+def search_channels(query, limit=6, ydl_factory=None):
+    """Search YouTube for CHANNELS (the results page filtered to channels) → a few
+    {youtube_id, title, handle, avatar_url, subscriber_count} for the search page.
+    Best-effort; entries that aren't channels are skipped."""
+    from urllib.parse import quote
+    q = (query or "").strip()
+    if not q:
+        return []
+    # sp=EgIQAg%3D%3D is YouTube's "Type: Channel" search filter.
+    url = "https://www.youtube.com/results?search_query=" + quote(q) + "&sp=EgIQAg%3D%3D"
+    info = _extract(url, _ydl_opts(limit * 3), ydl_factory)   # over-fetch; some entries may be videos
+    out = []
+    for e in [x for x in ((info or {}).get("entries") or []) if isinstance(x, dict)]:
+        cid = e.get("channel_id")
+        if not cid and str(e.get("id", "")).startswith("UC"):
+            cid = e.get("id")
+        if not cid:
+            m = re.search(r"/channel/(UC[\w-]+)", e.get("url") or "")
+            if m:
+                cid = m.group(1)
+        if not cid or not str(cid).startswith("UC"):
+            continue
+        title = e.get("channel") or e.get("title") or e.get("uploader") or ""
+        if not title:
+            continue
+        uid = e.get("uploader_id")
+        out.append({
+            "youtube_id": cid,
+            "title": title,
+            "handle": uid if str(uid or "").startswith("@") else None,
+            "avatar_url": _best_thumb(e.get("thumbnails")),
+            "subscriber_count": e.get("channel_follower_count"),
+            "video_count": e.get("playlist_count"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
 def channel_playlists(channel_id, limit=50, ydl_factory=None):
     """The channel's playlists (flat) → [{playlist_id, title, video_count,
     thumbnail_url}] — rendered as "seasons" on the channel page. Lazy-loaded."""

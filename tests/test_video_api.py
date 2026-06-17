@@ -701,3 +701,15 @@ def test_youtube_playlists_and_playlist_videos(tmp_path, monkeypatch):
     pv = client.get("/api/video/youtube/playlist/PL1").get_json()
     wished = {v["youtube_id"]: v["wished"] for v in pv["videos"]}
     assert wished == {"a": True, "b": False}
+
+
+def test_youtube_search_endpoint_hydrates_following(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "search_channels", lambda q: [
+        {"youtube_id": "UCaaa", "title": "GMM"}, {"youtube_id": "UCbbb", "title": "Other"}])
+    videoapi._video_db.add_channel_to_watchlist({"youtube_id": "UCaaa", "title": "GMM"})
+    d = client.get("/api/video/youtube/search?q=gmm").get_json()
+    flags = {c["youtube_id"]: c["following"] for c in d["channels"]}
+    assert flags == {"UCaaa": True, "UCbbb": False}
+    assert client.get("/api/video/youtube/search?q=").get_json()["channels"] == []

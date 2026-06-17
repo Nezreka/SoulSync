@@ -78,17 +78,14 @@
             esc(it.title) + '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
 
-    function render(results) {
+    // TMDB groups (movies/shows/people) + a YouTube channels group, each painted
+    // as soon as its source resolves (they're fetched in parallel).
+    function render(results, ytChannels) {
         var host = $('[data-video-search-results]');
         if (!host) return;
-        var any = results && results.length;
-        show('[data-video-search-hint]', false);
-        show('[data-video-search-empty]', !any);
-        if (!any) { host.innerHTML = ''; return; }
-
         var html = '';
         GROUPS.forEach(function (g) {
-            var items = results.filter(function (r) { return r.kind === g.kind; });
+            var items = (results || []).filter(function (r) { return r.kind === g.kind; });
             if (!items.length) return;
             html += '<div class="vsr-group"><h2 class="vsr-group-title">' +
                 '<span class="vsr-group-ic" aria-hidden="true">' + g.icon + '</span>' + g.label +
@@ -97,8 +94,19 @@
                 items.map(g.kind === 'person' ? personCard : titleCard).join('') +
                 '</div></div>';
         });
-        host.innerHTML = html;
-        if (window.VideoWatchlist) VideoWatchlist.hydrate(host);
+        if (ytChannels && ytChannels.length && window.VideoYoutube) {
+            html += '<div class="vsr-group"><h2 class="vsr-group-title">' +
+                '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
+                '<span class="vsr-group-count">' + ytChannels.length + '</span></h2>' +
+                '<div class="vsr-grid vyt-result-grid">' +
+                ytChannels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') +
+                '</div></div>';
+        }
+        var any = html.length > 0;
+        show('[data-video-search-hint]', false);
+        show('[data-video-search-empty]', !any);
+        host.innerHTML = any ? html : '';
+        if (any && window.VideoWatchlist) VideoWatchlist.hydrate(host);
     }
 
     // Idle state: a "Trending this week" rail so the page isn't a blank box.
@@ -130,21 +138,35 @@
         loadTrending();
     }
 
+    var curResults = null, curYt = null;   // TMDB + YouTube halves of the active query
+    function paint(seq) {
+        if (seq !== reqSeq) return;
+        render(curResults || [], curYt || []);
+    }
     function runSearch(q) {
         var seq = ++reqSeq;
+        curResults = null; curYt = null;
         show('[data-video-search-loading]', true);
         fetch(SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (seq !== reqSeq) return;           // a newer query superseded this one
                 show('[data-video-search-loading]', false);
-                render(d && d.results ? d.results : []);
+                curResults = (d && d.results) ? d.results : [];
+                paint(seq);
             })
             .catch(function () {
                 if (seq !== reqSeq) return;
                 show('[data-video-search-loading]', false);
-                render([]);
+                curResults = [];
+                paint(seq);
             });
+        // YouTube channels in parallel (best-effort) — appended as their own group.
+        if (window.VideoYoutube && q.length >= 2) {
+            VideoYoutube.searchChannels(q)
+                .then(function (d) { if (seq !== reqSeq) return; curYt = (d && d.channels) || []; paint(seq); })
+                .catch(function () { if (seq !== reqSeq) return; curYt = []; paint(seq); });
+        }
     }
 
     // A pasted YouTube channel link → resolve + render a Follow chip instead of
@@ -239,6 +261,13 @@
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 var fb = e.target.closest('[data-vyt-follow]');
                 if (fb && results.contains(fb)) { e.preventDefault(); toggleFollow(fb); return; }
+                var ytc = e.target.closest('[data-vyt-open-channel]');
+                if (ytc && results.contains(ytc)) {
+                    e.preventDefault();
+                    document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                        { detail: { kind: 'channel', source: 'youtube', id: ytc.getAttribute('data-vyt-open-channel') } }));
+                    return;
+                }
                 var card = e.target.closest('[data-vsr-open]');
                 if (!card || !results.contains(card)) return;
                 e.preventDefault();
