@@ -133,7 +133,13 @@ def register_routes(bp):
             abort(404)
         try:
             import requests
-            upstream = requests.get(url, timeout=15, stream=True)
+            # A browser UA — Google's image CDN (yt3/googleusercontent) 403s some
+            # avatars when fetched with no User-Agent, which blanked search results.
+            upstream = requests.get(url, timeout=15, stream=True, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                              "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+            })
             if upstream.status_code != 200:
                 abort(404)
             resp = Response(upstream.iter_content(8192),

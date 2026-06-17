@@ -37,18 +37,21 @@
     // policy can't blank them out. Non-YouTube / already-proxied urls pass through.
     function img(url) {
         if (!url) return url;
-        if (/^https:\/\/([\w-]+\.)?(ytimg\.com|ggpht\.com|googleusercontent\.com)\//i.test(url))
+        if (url.indexOf('//') === 0) url = 'https:' + url;   // protocol-relative
+        if (/^https:\/\/([\w-]+\.)*(ytimg\.com|ggpht\.com|googleusercontent\.com)\//i.test(url))
             return '/api/video/img?u=' + encodeURIComponent(url);
         return url;
     }
 
     function avatar(ch, cls) {
         var url = ch && (ch.poster_url || ch.avatar_url);
+        var ini = esc(initials(ch && ch.title));
         if (url) {
-            return '<img class="' + cls + '" src="' + esc(img(url)) +
-                '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
+            // If the image can't load, swap to the initials chip (never an empty circle).
+            return '<img class="' + cls + '" src="' + esc(img(url)) + '" alt="" loading="lazy" ' +
+                'onerror="this.outerHTML=\'<span class=&quot;' + cls + ' vyt-avatar--ph&quot;>' + ini + '</span>\'">';
         }
-        return '<span class="' + cls + ' vyt-avatar--ph">' + esc(initials(ch && ch.title)) + '</span>';
+        return '<span class="' + cls + ' vyt-avatar--ph">' + ini + '</span>';
     }
 
     // A single wished video tile (thumbnail, title, date, remove).
