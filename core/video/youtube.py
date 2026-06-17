@@ -96,6 +96,14 @@ def _best_thumb(thumbs):
     return best
 
 
+def _thumb_by_id(thumbs, keyword):
+    """The highest-res thumbnail whose yt-dlp id mentions ``keyword`` (e.g.
+    'avatar' / 'banner'), or None — channels expose both in one thumbnails list."""
+    hits = [t for t in (thumbs or []) if isinstance(t, dict) and t.get("url")
+            and keyword in str(t.get("id", "")).lower()]
+    return _best_thumb(hits)
+
+
 def _entry_date(e):
     """ISO date (YYYY-MM-DD) for a flat entry, or None — flat mode often omits it."""
     ts = e.get("timestamp")
@@ -133,11 +141,13 @@ def shape_channel(info, limit=30):
     handle = info.get("uploader_id") or info.get("channel_id_handle")
     if handle and not str(handle).startswith("@"):
         handle = None  # uploader_id is sometimes the UC id, not a handle
+    thumbs = info.get("thumbnails")
     return {
         "youtube_id": info.get("channel_id") or info.get("id"),
         "title": info.get("channel") or info.get("uploader") or info.get("title") or "",
         "handle": handle,
-        "avatar_url": _best_thumb(info.get("thumbnails")),
+        "avatar_url": _thumb_by_id(thumbs, "avatar") or _best_thumb(thumbs),
+        "banner_url": _thumb_by_id(thumbs, "banner"),
         "description": info.get("description"),
         "subscriber_count": info.get("channel_follower_count"),
         "video_count": info.get("playlist_count") or len(videos),

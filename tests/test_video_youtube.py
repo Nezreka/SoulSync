@@ -56,7 +56,8 @@ def _flat_info():
         "playlist_count": 1200,
         "thumbnails": [
             {"url": "http://img/small.jpg", "width": 88, "height": 88},
-            {"url": "http://img/big.jpg", "width": 800, "height": 800},
+            {"url": "http://img/avatar.jpg", "id": "avatar_uncropped", "width": 800, "height": 800},
+            {"url": "http://img/banner.jpg", "id": "banner_uncropped", "width": 2048, "height": 1152},
         ],
         "entries": [
             {"id": "vid1", "title": "State of Play", "timestamp": 1_700_000_000,
@@ -76,7 +77,8 @@ def test_shape_channel_maps_channel_fields():
     assert out["youtube_id"] == "UCPlayStation"
     assert out["title"] == "PlayStation"
     assert out["handle"] == "@PlayStation"
-    assert out["avatar_url"] == "http://img/big.jpg"   # highest-res thumb wins
+    assert out["avatar_url"] == "http://img/avatar.jpg"   # picked by id, not just size
+    assert out["banner_url"] == "http://img/banner.jpg"   # banner separated from avatar
     assert out["subscriber_count"] == 14_000_000
     assert out["video_count"] == 1200                  # playlist_count, not len(videos)
 

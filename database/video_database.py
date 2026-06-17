@@ -1934,6 +1934,31 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_video_wish_state(self, video_ids) -> set:
+        """Which of ``video_ids`` (youtube ids) are already wished — hydrates the
+        per-video buttons on the channel detail page."""
+        out: set = set()
+        ids = [str(x) for x in (video_ids or []) if x]
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT source_id FROM video_wishlist WHERE kind='video' "
+                        f"AND source_id IN ({ph})", chunk):
+                    out.add(r["source_id"])
+            return out
+        finally:
+            conn.close()
+
+    def remove_one_video_from_wishlist(self, video_id) -> int:
+        """Remove a single wished video by its youtube id. (Thin alias kept explicit
+        for the detail page's per-video toggle.)"""
+        return self.remove_youtube_from_wishlist("video", video_id)
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()
@@ -1946,9 +1971,10 @@ class VideoDatabase:
             conn.close()
 
     def query_youtube_wishlist(self, *, search=None, sort="added", page=1, limit=60) -> dict:
-        """Wished YouTube videos grouped by channel (channel = orb, videos = flat
-        newest-first feed). ``sort`` ∈ added | oldest | title | wanted. Mirrors the
-        {items, pagination} shape of query_wishlist."""
+        """Wished YouTube videos shaped exactly like the TV nebula: channel = show,
+        YEAR = season, video = episode. Each channel returns ``seasons`` grouped by
+        upload year (newest first), videos as episodes (newest first within a year).
+        ``sort`` ∈ added | oldest | title | wanted. {items, pagination} like query_wishlist."""
         try:
             page = max(1, int(page or 1))
             limit = max(1, min(200, int(limit or 60)))
@@ -1967,8 +1993,8 @@ class VideoDatabase:
             order = {"title": "title COLLATE NOCASE", "wanted": "video_count DESC, last_added DESC",
                      "oldest": "last_added ASC", "added": "last_added DESC"}.get(sort, "last_added DESC")
             chan_rows = conn.execute(
-                "SELECT parent_source_id, MAX(title) AS title, MAX(poster_url) AS poster_url, "
-                "COUNT(*) AS video_count, "
+                "SELECT parent_source_id, MAX(tmdb_id) AS surrogate, MAX(title) AS title, "
+                "MAX(poster_url) AS poster_url, COUNT(*) AS video_count, "
                 "SUM(CASE WHEN status='downloaded' THEN 1 ELSE 0 END) AS done, "
                 "MAX(date_added) AS last_added "
                 "FROM video_wishlist" + wsql +
@@ -1980,13 +2006,27 @@ class VideoDatabase:
                     "SELECT source_id, episode_title, still_url, episode_overview, air_date, status "
                     "FROM video_wishlist WHERE kind='video' AND parent_source_id=? "
                     "ORDER BY (air_date IS NULL), air_date DESC, id DESC", (cr["parent_source_id"],)).fetchall()
+                # group by upload year → "seasons"; newest video in a year = episode 1
+                by_year: dict = {}
+                for v in vids:
+                    ad = v["air_date"]
+                    yr = int(ad[:4]) if ad and len(ad) >= 4 and ad[:4].isdigit() else 0
+                    by_year.setdefault(yr, []).append(v)
+                seasons = []
+                for yr in sorted(by_year, reverse=True):   # newest year first
+                    eps = []
+                    for i, v in enumerate(by_year[yr]):
+                        eps.append({"episode_number": i + 1, "title": v["episode_title"],
+                                    "still_url": v["still_url"], "overview": v["episode_overview"],
+                                    "air_date": v["air_date"], "status": v["status"],
+                                    "source_id": v["source_id"]})
+                    poster = next((e["still_url"] for e in eps if e["still_url"]), cr["poster_url"])
+                    seasons.append({"season_number": yr, "year": yr, "poster_url": poster, "episodes": eps})
                 items.append({
-                    "kind": "channel", "youtube_id": cr["parent_source_id"], "title": cr["title"],
-                    "poster_url": cr["poster_url"], "video_count": cr["video_count"],
-                    "done": cr["done"] or 0,
-                    "videos": [{"youtube_id": v["source_id"], "title": v["episode_title"],
-                                "still_url": v["still_url"], "overview": v["episode_overview"],
-                                "published_at": v["air_date"], "status": v["status"]} for v in vids]})
+                    "kind": "channel", "source": "youtube",
+                    "tmdb_id": cr["surrogate"], "youtube_id": cr["parent_source_id"],
+                    "title": cr["title"], "poster_url": cr["poster_url"],
+                    "wanted": cr["video_count"], "done": cr["done"] or 0, "seasons": seasons})
         finally:
             conn.close()
         total_pages = max(1, (total + limit - 1) // limit)
