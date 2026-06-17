@@ -1368,6 +1368,7 @@
                                 <h1 class="vc-name" data-vc-name></h1>
                                 <div class="vc-meta" data-vc-meta></div>
                                 <p class="vc-desc" data-vc-desc></p>
+                                <div class="vc-tags" data-vc-tags></div>
                                 <div class="vc-actions">
                                     <button class="vc-follow" type="button" data-vc-follow>+ Follow</button>
                                     <a class="vc-yt-link" data-vc-yt target="_blank" rel="noopener">Open on YouTube &#8599;</a>
@@ -1375,11 +1376,24 @@
                             </div>
                         </div>
                         <div class="vc-body">
+                            <div class="vc-pl-section" data-vc-pl-section hidden>
+                                <h2 class="vc-section-title">Playlists</h2>
+                                <div class="vc-playlists" data-vc-playlists></div>
+                            </div>
                             <div class="vc-videos-head">
                                 <h2 class="vc-videos-title">Videos</h2>
                                 <span class="vc-videos-count" data-vc-count></span>
+                                <div class="vc-tools">
+                                    <button class="vc-tool-btn" type="button" data-vc-wished-toggle>Wished only</button>
+                                    <select class="vc-sort" data-vc-sort aria-label="Sort videos">
+                                        <option value="newest">Newest</option>
+                                        <option value="oldest">Oldest</option>
+                                        <option value="views">Most viewed</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="vc-videos" data-vc-videos></div>
+                            <button class="vc-more" type="button" data-vc-more hidden>Load more</button>
                             <div class="vc-empty" data-vc-empty hidden>No videos found for this channel.</div>
                         </div>
                     </div>
