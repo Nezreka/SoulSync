@@ -502,8 +502,22 @@
         var orb = e.target.closest('[data-vwsh-orb]');
         if (orb) {   // show → reveal seasons + lazily load the synopsis/cast info bar
             var g = orb.closest('.wl-orb-group');
-            if (g && g.classList.toggle('expanded')) loadShowInfo(g);
+            if (!g) return;
+            // expand → load info bar; collapse → clear it (the synopsis/cast live in
+            // the always-present header, so they must be wiped or they linger).
+            if (g.classList.toggle('expanded')) loadShowInfo(g);
+            else clearInfoBar(g);
         }
+    }
+
+    // Empty the info bar + drop any episode selection (so the :empty side columns
+    // collapse). Used when an orb closes.
+    function clearInfoBar(group) {
+        if (!group) return;
+        var syn = group.querySelector('[data-vwsh-syn]'); if (syn) syn.innerHTML = '';
+        var cast = group.querySelector('[data-vwsh-cast]'); if (cast) cast.innerHTML = '';
+        var sel = group.querySelectorAll('.vwsh-epc--sel');
+        for (var i = 0; i < sel.length; i++) sel[i].classList.remove('vwsh-epc--sel');
     }
 
     function wire() {
