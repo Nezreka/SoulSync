@@ -2868,3 +2868,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vc-hero { flex-direction: column; align-items: flex-start; gap: 16px; padding-top: 90px; }
     .vc-name { font-size: 28px; }
 }
+
+/* "Watch on YouTube" link inside the wishlist info-bar synopsis (YouTube videos) */
+.vwsh-nebula .vwsh-yt-watch { display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 800;
+    color: #ff6b6b; text-decoration: none; padding: 6px 13px; border-radius: 999px;
+    border: 1px solid rgba(255, 59, 59, 0.35); transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-yt-watch:hover { background: rgba(255, 59, 59, 0.14); color: #fff; }

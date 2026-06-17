@@ -155,6 +155,18 @@ def shape_channel(info, limit=30):
     }
 
 
+def _cookie_opts():
+    """The music client's cookie convention so age/region-gated content works."""
+    try:
+        from config.settings import config_manager
+        cb = config_manager.get("youtube.cookies_browser", "")
+        if cb:
+            return {"cookiesfrombrowser": (cb,)}
+    except Exception:
+        pass
+    return {}
+
+
 def _ydl_opts(limit, db=None):
     opts = {
         "quiet": True,
@@ -164,15 +176,44 @@ def _ydl_opts(limit, db=None):
         "playlistend": int(limit),
         "user_agent": _UA,
     }
-    # Reuse the music client's cookie convention so age/region-gated channels work.
-    try:
-        from config.settings import config_manager
-        cb = config_manager.get("youtube.cookies_browser", "")
-        if cb:
-            opts["cookiesfrombrowser"] = (cb,)
-    except Exception:
-        pass
+    opts.update(_cookie_opts())
     return opts
+
+
+def shape_video(info):
+    """Map yt-dlp's FULL single-video info dict to our rich video shape (the data
+    flat-listing can't give: description, views, likes, duration, tags)."""
+    info = info or {}
+    dur = info.get("duration")
+    return {
+        "youtube_id": info.get("id"),
+        "title": info.get("title") or "",
+        "description": info.get("description"),
+        "duration_seconds": int(dur) if isinstance(dur, (int, float)) else None,
+        "view_count": info.get("view_count"),
+        "like_count": info.get("like_count"),
+        "published_at": _entry_date(info),
+        "thumbnail_url": _best_thumb(info.get("thumbnails")) or info.get("thumbnail"),
+        "channel_title": info.get("channel") or info.get("uploader"),
+        "channel_id": info.get("channel_id"),
+        "webpage_url": info.get("webpage_url") or ("https://www.youtube.com/watch?v=" + (info.get("id") or "")),
+        "tags": info.get("tags") or [],
+    }
+
+
+def video_detail(video_id, ydl_factory=None):
+    """Full metadata for ONE video (non-flat extract) — done lazily on click, the
+    way the TV nebula lazy-loads guest stars. Accepts a raw id or a watch URL."""
+    if not video_id:
+        return None
+    vid = str(video_id).strip()
+    url = vid if vid.startswith("http") else "https://www.youtube.com/watch?v=" + vid
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "user_agent": _UA}
+    opts.update(_cookie_opts())
+    info = _extract(url, opts, ydl_factory)
+    if not info or not info.get("id"):
+        return None
+    return shape_video(info)
 
 
 def _extract(url, opts, ydl_factory=None):

@@ -1959,6 +1959,22 @@ class VideoDatabase:
         for the detail page's per-video toggle.)"""
         return self.remove_youtube_from_wishlist("video", video_id)
 
+    def set_wishlist_video_overview(self, video_id, overview) -> bool:
+        """Persist a video's lazily-fetched description onto its wishlist row (only
+        if it doesn't already have one) so re-opening is instant — mirrors the
+        episode-overview backfill. Returns True if a row was updated."""
+        if not overview or not video_id:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET episode_overview=? WHERE kind='video' AND source_id=? "
+                "AND (episode_overview IS NULL OR episode_overview='')", (overview, str(video_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()

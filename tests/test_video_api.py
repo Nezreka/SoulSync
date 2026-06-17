@@ -642,3 +642,28 @@ def test_youtube_wishlist_add_single_video(tmp_path):
     assert r.get_json()["counts"] == {"channel": 1, "video": 1}
     r = client.post("/api/video/youtube/wishlist/remove", json={"scope": "video", "source_id": "solo1"})
     assert r.get_json()["counts"] == {"channel": 0, "video": 0}
+
+
+def test_youtube_video_detail_endpoint_persists_description(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    full = {"youtube_id": "v1", "title": "State of Play", "description": "Full synopsis here.",
+            "duration_seconds": 600, "view_count": 5000, "like_count": 100,
+            "published_at": "2024-06-01", "webpage_url": "https://youtu.be/v1", "tags": []}
+    monkeypatch.setattr(ytmod, "video_detail", lambda vid: dict(full))
+    # wish the video first (empty overview), then the detail call should backfill it
+    videoapi._video_db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"},
+                                              [{"youtube_id": "v1", "title": "SoP"}])
+    d = client.get("/api/video/youtube/video/v1").get_json()
+    assert d["success"] is True and d["video"]["description"] == "Full synopsis here."
+    # persisted onto the wishlist row
+    grp = videoapi._video_db.query_youtube_wishlist()["items"][0]
+    ov = grp["seasons"][0]["episodes"][0]["overview"]
+    assert ov == "Full synopsis here."
+
+
+def test_youtube_video_detail_404(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "video_detail", lambda vid: None)
+    assert client.get("/api/video/youtube/video/nope").status_code == 404

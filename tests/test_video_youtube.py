@@ -188,3 +188,61 @@ def test_resolve_channel_none_when_info_has_no_channel_id():
             return {"entries": [{"id": "v", "title": "t"}]}  # no channel_id/id
 
     assert yt.resolve_channel("@x", ydl_factory=_NoId) is None
+
+
+# ── video_detail (full single-video metadata) ────────────────────────────────
+
+def _video_info():
+    return {
+        "id": "vid1", "title": "State of Play", "description": "Everything announced.",
+        "duration": 3725, "view_count": 1_250_000, "like_count": 42_000,
+        "timestamp": 1_700_000_000, "channel": "PlayStation", "channel_id": "UCPlay",
+        "webpage_url": "https://www.youtube.com/watch?v=vid1",
+        "tags": ["ps5", "trailer"],
+        "thumbnails": [{"url": "http://t/hi.jpg", "width": 1280, "height": 720}],
+    }
+
+
+class _FakeVideoYDL:
+    last_url = None
+
+    def __init__(self, opts):
+        self.opts = opts
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def extract_info(self, url, download=False):
+        _FakeVideoYDL.last_url = url
+        assert download is False
+        # full (non-flat) extraction: extract_flat must NOT be set
+        assert "extract_flat" not in self.opts
+        return _video_info()
+
+
+def test_video_detail_pulls_full_metadata():
+    out = yt.video_detail("vid1", ydl_factory=_FakeVideoYDL)
+    assert out["youtube_id"] == "vid1"
+    assert out["description"] == "Everything announced."
+    assert out["duration_seconds"] == 3725
+    assert out["view_count"] == 1_250_000 and out["like_count"] == 42_000
+    assert out["published_at"] == "2023-11-14"
+    assert out["channel_title"] == "PlayStation" and out["channel_id"] == "UCPlay"
+    assert out["webpage_url"] == "https://www.youtube.com/watch?v=vid1"
+    assert out["tags"] == ["ps5", "trailer"]
+    # a raw id is turned into a watch URL
+    assert _FakeVideoYDL.last_url == "https://www.youtube.com/watch?v=vid1"
+
+
+def test_video_detail_accepts_watch_url_and_handles_failure():
+    yt.video_detail("https://www.youtube.com/watch?v=abc", ydl_factory=_FakeVideoYDL)
+    assert _FakeVideoYDL.last_url == "https://www.youtube.com/watch?v=abc"
+
+    class _Boom(_FakeVideoYDL):
+        def extract_info(self, url, download=False):
+            raise RuntimeError("unavailable")
+    assert yt.video_detail("x", ydl_factory=_Boom) is None
+    assert yt.video_detail("", ydl_factory=_FakeVideoYDL) is None
