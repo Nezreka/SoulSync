@@ -250,6 +250,41 @@ def resolve_channel(raw, limit=30, ydl_factory=None, db=None):
     return shaped if shaped.get("youtube_id") else None
 
 
+def parse_rss_dates(xml_text):
+    """{video_id: 'YYYY-MM-DD'} from a YouTube channel RSS feed (pure, testable)."""
+    import xml.etree.ElementTree as ET
+    out = {}
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return out
+    ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+    for entry in root.findall("a:entry", ns):
+        vid = entry.find("yt:videoId", ns)
+        pub = entry.find("a:published", ns)
+        if vid is not None and vid.text and pub is not None and pub.text:
+            out[vid.text.strip()] = pub.text.strip()[:10]   # ISO datetime → YYYY-MM-DD
+    return out
+
+
+def channel_recent_dates(channel_id, fetch=None):
+    """Real upload dates for a channel's ~15 most-recent videos via its public RSS
+    feed — one cheap GET, no yt-dlp, no bot risk. {video_id: 'YYYY-MM-DD'}."""
+    cid = str(channel_id or "").strip()
+    if not cid:
+        return {}
+    url = "https://www.youtube.com/feeds/videos.xml?channel_id=" + cid
+    try:
+        if fetch is not None:
+            return parse_rss_dates(fetch(url) or "")
+        import requests
+        r = requests.get(url, timeout=10, headers={"User-Agent": _UA})
+        return parse_rss_dates(r.text) if r.status_code == 200 else {}
+    except Exception as e:
+        logger.info("YouTube RSS dates failed for %s: %s", cid, e)
+        return {}
+
+
 def search_channels(query, limit=6, ydl_factory=None):
     """Search YouTube for CHANNELS (the results page filtered to channels) → a few
     {youtube_id, title, handle, avatar_url, subscriber_count} for the search page.

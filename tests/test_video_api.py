@@ -617,6 +617,7 @@ def test_youtube_channel_detail_hydrates_follow_and_wished(tmp_path, monkeypatch
     client, videoapi = _make_client(tmp_path)
     import core.video.youtube as ytmod
     monkeypatch.setattr(ytmod, "resolve_channel", lambda url, limit=60: dict(_CHANNEL))
+    monkeypatch.setattr(ytmod, "channel_recent_dates", lambda cid: {})   # no network in tests
     # follow first so detail reports following + one wished video
     client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
     videoapi._video_db.remove_one_video_from_wishlist("v2")   # leave only v1 wished
@@ -624,6 +625,8 @@ def test_youtube_channel_detail_hydrates_follow_and_wished(tmp_path, monkeypatch
     assert d["success"] is True and d["kind"] == "channel" and d["following"] is True
     wished = {v["youtube_id"]: v["wished"] for v in d["channel"]["videos"]}
     assert wished == {"v1": True, "v2": False}
+    # the videos' dates got cached for year-seasons
+    assert videoapi._video_db.get_video_dates(["v1"]) == {"v1": "2024-06-01"}
 
 
 def test_youtube_channel_detail_404_on_unresolvable(tmp_path, monkeypatch):

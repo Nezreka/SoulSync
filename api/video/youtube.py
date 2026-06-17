@@ -153,9 +153,27 @@ def register_routes(bp):
                     db.set_wishlist_channel_poster(cid, channel["avatar_url"])
                 except Exception:
                     pass
-            wished = db.youtube_video_wish_state([v.get("youtube_id") for v in channel.get("videos") or []])
-            for v in channel.get("videos") or []:
+            vids = channel.get("videos") or []
+            ids = [v.get("youtube_id") for v in vids]
+            wished = db.youtube_video_wish_state(ids)
+            # Upload dates → real year-seasons. Merge the persistent cache with a
+            # fresh RSS fetch (recent ~15); cache anything new so it fills in over time.
+            dates = db.get_video_dates(ids)
+            try:
+                rss = yt.channel_recent_dates(cid)
+            except Exception:
+                rss = {}
+            if rss:
+                dates.update(rss)
+            for v in vids:
                 v["wished"] = v.get("youtube_id") in wished
+                if not v.get("published_at") and dates.get(v.get("youtube_id")):
+                    v["published_at"] = dates[v["youtube_id"]]
+            try:
+                db.cache_video_dates([{"youtube_id": v["youtube_id"], "published_at": v.get("published_at")}
+                                      for v in vids if v.get("published_at")])
+            except Exception:
+                pass
             return jsonify({"success": True, "kind": "channel", "source": "youtube",
                             "channel": channel, "following": following})
         except Exception:
@@ -173,11 +191,17 @@ def register_routes(bp):
             v = yt.video_detail(video_id)
             if not v or not v.get("youtube_id"):
                 return jsonify({"success": False, "error": "Video not found"}), 404
+            db = get_video_db()
             if v.get("description"):
                 try:
-                    get_video_db().set_wishlist_video_overview(v["youtube_id"], v["description"])
+                    db.set_wishlist_video_overview(v["youtube_id"], v["description"])
                 except Exception:
                     pass   # persistence is best-effort; the detail still returns
+            if v.get("published_at"):   # learned a real date → cache it for year-seasons
+                try:
+                    db.cache_video_dates([{"youtube_id": v["youtube_id"], "published_at": v["published_at"]}])
+                except Exception:
+                    pass
             return jsonify({"success": True, "video": v})
         except Exception:
             logger.exception("youtube video detail failed for %r", video_id)

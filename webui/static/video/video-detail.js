@@ -1326,7 +1326,7 @@
             var wishedN = eps.filter(function (e) { return e.owned; }).length;
             // No upload dates (flat listing omits them) → a single "All Videos"
             // season instead of a lone "Undated"; mixed → label the dateless bucket.
-            var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Unknown date');
+            var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Earlier videos');
             return { season_number: yr, title: label, poster_url: poster || ytProx(ch.avatar_url),
                 episode_owned: wishedN, episode_total: eps.length, episodes: eps };
         });
