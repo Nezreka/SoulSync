@@ -205,7 +205,9 @@ class YoutubeDateEnricher:
                         filled += 1
         self._channels_done += 1
         self._dates_total += len(dates) + filled
-        db.mark_channel_dates_enriched(cid, len(dates) + filled)
+        # Tag the source so legacy (pre-InnerTube) rows are recognisable and upgrade.
+        method = "innertube" if dates else "fallback"
+        db.mark_channel_dates_enriched(cid, len(dates) + filled, method=method)
         # Terse per-channel summary (like the worker's "Synced full episode list…").
         logger.info("Dated %d videos for %s (%d bulk + %d per-video)",
                     len(dates) + filled, self._current, len(dates), filled)

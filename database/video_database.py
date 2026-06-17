@@ -109,6 +109,9 @@ _COLUMN_MIGRATIONS = [
     ("video_wishlist", "source", "TEXT NOT NULL DEFAULT 'tmdb'"),
     ("video_wishlist", "source_id", "TEXT"),
     ("video_wishlist", "parent_source_id", "TEXT"),   # owning channel youtube id (video rows)
+    # which source produced a channel's dates — NULL on legacy (pre-InnerTube) rows
+    # so they re-enrich once and upgrade to the full InnerTube catalog.
+    ("youtube_channel_enrichment", "method", "TEXT"),
 ]
 
 
@@ -2039,17 +2042,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def mark_channel_dates_enriched(self, channel_id, date_count=0) -> None:
-        """Record that the background enricher swept this channel (skip re-sweeps)."""
+    def mark_channel_dates_enriched(self, channel_id, date_count=0, method="innertube") -> None:
+        """Record that the background enricher swept this channel (skip re-sweeps).
+        ``method`` tags which source produced the dates; legacy rows have NULL and
+        get re-enriched once so they upgrade to the InnerTube catalog."""
         if not channel_id:
             return
         conn = self._get_connection()
         try:
             conn.execute(
-                "INSERT INTO youtube_channel_enrichment (channel_id, enriched_at, date_count) "
-                "VALUES (?, CURRENT_TIMESTAMP, ?) ON CONFLICT(channel_id) DO UPDATE SET "
-                "enriched_at=CURRENT_TIMESTAMP, date_count=excluded.date_count",
-                (str(channel_id), int(date_count or 0)))
+                "INSERT INTO youtube_channel_enrichment (channel_id, enriched_at, date_count, method) "
+                "VALUES (?, CURRENT_TIMESTAMP, ?, ?) ON CONFLICT(channel_id) DO UPDATE SET "
+                "enriched_at=CURRENT_TIMESTAMP, date_count=excluded.date_count, method=excluded.method",
+                (str(channel_id), int(date_count or 0), method or None))
             conn.commit()
         finally:
             conn.close()
@@ -2064,9 +2069,13 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             row = conn.execute(
-                "SELECT enriched_at, date_count FROM youtube_channel_enrichment WHERE channel_id=?",
+                "SELECT enriched_at, date_count, method FROM youtube_channel_enrichment WHERE channel_id=?",
                 (str(channel_id),)).fetchone()
             if not row or not row["enriched_at"]:
+                return False
+            # Legacy rows (enriched before InnerTube, method NULL) → always re-enrich
+            # once so they upgrade to the full catalog, then settle under the window.
+            if not row["method"]:
                 return False
             try:
                 when = datetime.strptime(row["enriched_at"], "%Y-%m-%d %H:%M:%S")
