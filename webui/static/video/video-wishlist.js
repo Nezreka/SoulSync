@@ -133,7 +133,9 @@
     function findEpisode(tmdb, sNum, eNum) {
         var sh = state.showData[tmdb], ep = null;
         if (sh) (sh.seasons || []).forEach(function (se) {
-            if (se.season_number === sNum) (se.episodes || []).forEach(function (x) { if (x.episode_number === eNum) ep = x; });
+            if (se.season_number === sNum) (se.episodes || []).forEach(function (x) {
+                if (x.episode_number === eNum) { ep = x; ep.season_number = sNum; }   // episodes don't carry their season #
+            });
         });
         return ep;
     }
