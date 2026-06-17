@@ -167,7 +167,8 @@
             meta.push('<span class="vd-status vd-status--yt">YouTube</span>');
             var yc = window.VideoYoutube;
             var subs = yc && yc.compactCount(d.subscriber_count); if (subs) meta.push('<span>' + subs + ' subscribers</span>');
-            if (d.video_count != null) meta.push('<span>' + esc(d.video_count) + ' videos</span>');
+            // NB: no "N videos" — YouTube doesn't expose a reliable total, and what we
+            // fetch is just the recent page (the cap), so showing it would mislead.
             var views = yc && yc.compactCount(d.view_count); if (views) meta.push('<span>' + views + ' views</span>');
             if (d.handle) meta.push('<span>' + esc(d.handle) + '</span>');
             var mm = q('[data-vd-meta]'); if (mm) mm.innerHTML = meta.join('');
@@ -1461,7 +1462,7 @@
         else yc.follow({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url }).then(function (d) {
             if (d && d.success) {
                 data.following = true; renderActions(data);   // toggle in place — no page reload
-                if (typeof showToast === 'function') showToast('Following · ' + (d.added_videos || 0) + ' videos added', 'success');
+                if (typeof showToast === 'function') showToast('Added to watchlist', 'success');
                 document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
             }
         }).catch(function () { /* ignore */ });

@@ -248,7 +248,7 @@
                 if (d && d.success) {
                     btn.classList.add('vyt-follow--on'); btn.innerHTML = '✓ Following';
                     if (typeof showToast === 'function')
-                        showToast('Following ' + lastChannel.title + ' · ' + (d.added_videos || 0) + ' videos added', 'success');
+                        showToast('Added ' + lastChannel.title + ' to watchlist', 'success');
                 }
                 done();
             }).catch(function () { btn.disabled = false; });
