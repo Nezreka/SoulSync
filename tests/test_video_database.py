@@ -930,3 +930,18 @@ def test_wishlist_keys_for_shows(db):
     keys = db.wishlist_keys_for_shows([1396, 1399, 9999])
     assert keys[1396] == {"1_1", "2_3"} and keys[1399] == {"1_1"} and 9999 not in keys
     assert db.wishlist_keys_for_shows([]) == {}
+
+
+def test_wishlist_query_sort(db):
+    db.add_episodes_to_wishlist(1, "Alpha", [{"season_number": 1, "episode_number": 1}])               # 1 ep
+    db.add_episodes_to_wishlist(2, "Zeta", [{"season_number": 1, "episode_number": i} for i in range(5)])  # 5 eps
+    # most-wanted first
+    w = [s["title"] for s in db.query_wishlist("show", sort="wanted")["items"]]
+    assert w[0] == "Zeta"
+    # A–Z
+    az = [s["title"] for s in db.query_wishlist("show", sort="title")["items"]]
+    assert az == ["Alpha", "Zeta"]
+    # movies A–Z
+    db.add_movie_to_wishlist(10, "Banana"); db.add_movie_to_wishlist(11, "Apple")
+    m = [x["title"] for x in db.query_wishlist("movie", sort="title")["items"]]
+    assert m == ["Apple", "Banana"]

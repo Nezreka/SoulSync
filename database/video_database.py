@@ -1578,9 +1578,10 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def query_wishlist(self, kind: str, *, search=None, page=1, limit=60) -> dict:
+    def query_wishlist(self, kind: str, *, search=None, sort="added", page=1, limit=60) -> dict:
         """One paged slice of the wishlist. kind='movie' → movie cards; kind='show'
-        → shows grouped show→season→episode with wanted/done roll-ups. {items,
+        → shows grouped show→season→episode with wanted/done roll-ups. ``sort`` ∈
+        added | title | wanted (wanted = most episodes, shows only). {items,
         pagination} like the other paged queries."""
         try:
             page = max(1, int(page or 1))
@@ -1595,10 +1596,12 @@ class VideoDatabase:
                 if s:
                     where.append("title LIKE ? COLLATE NOCASE"); args.append("%" + s + "%")
                 wsql = " WHERE " + " AND ".join(where)
+                order = {"title": "title COLLATE NOCASE",
+                         "added": "date_added DESC, id DESC"}.get(sort, "date_added DESC, id DESC")
                 total = conn.execute("SELECT COUNT(*) c FROM video_wishlist" + wsql, args).fetchone()["c"]
                 rows = conn.execute(
                     "SELECT tmdb_id, title, poster_url, year, status, library_id, date_added "
-                    "FROM video_wishlist" + wsql + " ORDER BY date_added DESC, id DESC LIMIT ? OFFSET ?",
+                    "FROM video_wishlist" + wsql + " ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = [{"kind": "movie", "tmdb_id": r["tmdb_id"], "title": r["title"],
                           "poster_url": r["poster_url"], "year": r["year"], "status": r["status"],
@@ -1610,13 +1613,15 @@ class VideoDatabase:
                 wsql = " WHERE " + " AND ".join(where)
                 total = conn.execute(
                     "SELECT COUNT(DISTINCT tmdb_id) c FROM video_wishlist" + wsql, args).fetchone()["c"]
+                order = {"title": "title COLLATE NOCASE", "wanted": "wanted DESC, last_added DESC",
+                         "added": "last_added DESC"}.get(sort, "last_added DESC")
                 show_rows = conn.execute(
                     "SELECT tmdb_id, MAX(title) AS title, MAX(poster_url) AS poster_url, "
                     "MAX(library_id) AS library_id, COUNT(*) AS wanted, "
                     "SUM(CASE WHEN status='downloaded' THEN 1 ELSE 0 END) AS done, "
                     "MAX(date_added) AS last_added "
                     "FROM video_wishlist" + wsql +
-                    " GROUP BY tmdb_id ORDER BY last_added DESC LIMIT ? OFFSET ?",
+                    " GROUP BY tmdb_id ORDER BY " + order + " LIMIT ? OFFSET ?",
                     args + [limit, (page - 1) * limit]).fetchall()
                 items = []
                 for sr in show_rows:

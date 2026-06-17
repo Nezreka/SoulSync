@@ -12,7 +12,8 @@
 
     var PAGE_ID = 'video-wishlist';
     var LIMIT = 60;
-    var state = { loaded: false, tab: 'movie', search: '', page: 1, counts: { movie: 0, show: 0 } };
+    var state = { loaded: false, tab: 'movie', search: '', sort: 'added', page: 1,
+                  counts: { movie: 0, show: 0, episode: 0 } };
     var searchTimer = null;
 
     function $(s, r) { return (r || document).querySelector(s); }
@@ -21,6 +22,12 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function hueOf(s) { var h = 0, t = String(s || ''); for (var i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) >>> 0; return h % 360; }
+    var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    function fmtDate(iso) {
+        var p = String(iso || '').split('-');
+        if (p.length < 3) return '';
+        return MO[(+p[1] || 1) - 1] + ' ' + (+p[2] || 1);
+    }
 
     var STATUS = {
         wanted: ['Wanted', 'vwsh-st--wanted'], searching: ['Searching', 'vwsh-st--searching'],
@@ -72,13 +79,18 @@
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         var tiles = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
-            var art = sh.poster_url
-                ? '<div class="wl-album-tile-art"><img src="' + esc(sh.poster_url) + '" alt=""></div>'
-                : '<div class="wl-album-tile-art"><div class="wl-album-tile-fallback">S' + se.season_number + '</div></div>';
+            // #2: stamp the season number over the art so tiles read as distinct seasons
+            var inner = sh.poster_url ? '<img src="' + esc(sh.poster_url) + '" alt="">' : '<div class="wl-album-tile-fallback">📺</div>';
+            var art = '<div class="wl-album-tile-art">' + inner + '<span class="vwsh-season-tag">S' + se.season_number + '</span></div>';
             var tracks = (se.episodes || []).map(function (e) {
                 var t = e.title || ('Episode ' + e.episode_number);
+                var st = STATUS[e.status] ? e.status : 'wanted';
+                var date = fmtDate(e.air_date);
+                // #3: status dot + air date make the episode line actually informative
                 return '<div class="wl-tile-track">' +
+                    '<span class="vwsh-ep-dot vwsh-ep-dot--' + st + '" title="' + STATUS[st][0] + '"></span>' +
                     '<span class="wl-tile-track-name">E' + e.episode_number + ' · ' + esc(t) + '</span>' +
+                    (date ? '<span class="vwsh-ep-date">' + esc(date) + '</span>' : '') +
                     '<button class="wl-tile-track-remove" type="button" data-vwsh-rm="episode" ' +
                     'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
                     '</div>';
@@ -95,10 +107,14 @@
             '</div>';
         }).join('');
         var eps = total + ' episode' + (total === 1 ? '' : 's');
-        return '<div class="wl-orb-group" data-vwsh-group style="animation-delay:' + Math.min(idx * 45, 700) + 'ms">' +
+        // --orb-hue on the GROUP so the music orb styles + my cinematic-expand
+        // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
+        var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
+            (sh.poster_url ? ";--vwsh-poster:url('" + esc(sh.poster_url) + "')" : '');
+        return '<div class="wl-orb-group" data-vwsh-group style="' + gstyle + '">' +
             '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
             '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
-            '<div class="wl-orb ' + orbSize(total) + '" style="--orb-hue:' + hue + '" data-vwsh-orb>' +
+            '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb>' +
                 '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
             '</div>' +
             '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
@@ -111,6 +127,7 @@
         var grid = $('[data-vwsh-grid]'); if (!grid) return;
         var shows = state.tab === 'show';
         grid.classList.toggle('wl-nebula-field', shows);
+        grid.classList.toggle('vwsh-nebula', shows);   // video-only scope so music wl-* is untouched
         grid.classList.toggle('vwsh-grid--movies', !shows);
         grid.innerHTML = shows
             ? items.map(function (sh, i) { return nebulaOrb(sh, i); }).join('')
@@ -119,10 +136,19 @@
 
     // ── counts / badges / pager ───────────────────────────────────────────────
     function setCounts(counts) {
-        state.counts = { movie: (counts && counts.movie) || 0, show: (counts && counts.show) || 0 };
+        state.counts = { movie: (counts && counts.movie) || 0, show: (counts && counts.show) || 0,
+                         episode: (counts && counts.episode) || 0 };
         var cm = $('[data-vwsh-count-movie]'); if (cm) cm.textContent = state.counts.movie;
         var cs = $('[data-vwsh-count-show]'); if (cs) cs.textContent = state.counts.show;
-        updateBadges(counts && counts.total != null ? counts.total : (state.counts.movie + state.counts.show));
+        updateBadges(counts && counts.total != null ? counts.total : (state.counts.movie + state.counts.episode));
+        updateSub();
+    }
+    function updateSub() {
+        var el = $('[data-vwsh-sub]'); if (!el) return;
+        var c = state.counts;
+        el.textContent = state.tab === 'show'
+            ? c.show + ' show' + (c.show === 1 ? '' : 's') + ' · ' + c.episode + ' episode' + (c.episode === 1 ? '' : 's')
+            : c.movie + ' movie' + (c.movie === 1 ? '' : 's');
     }
     function updateBadges(total) {
         var n = total || 0;
@@ -160,7 +186,7 @@
     function load() {
         state.loaded = true;
         var ld = $('[data-vwsh-loading]'); if (ld) ld.classList.remove('hidden');
-        var params = new URLSearchParams({ kind: state.tab, search: state.search, page: state.page, limit: LIMIT });
+        var params = new URLSearchParams({ kind: state.tab, search: state.search, sort: state.sort, page: state.page, limit: LIMIT });
         fetch('/api/video/wishlist?' + params.toString(), { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
@@ -234,6 +260,8 @@
             if (searchTimer) clearTimeout(searchTimer);
             searchTimer = setTimeout(function () { state.search = search.value.trim(); state.page = 1; load(); }, 250);
         });
+        var sortSel = $('[data-vwsh-sort]');
+        if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
         var prev = $('[data-vwsh-prev]');
         if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
         var next = $('[data-vwsh-next]');

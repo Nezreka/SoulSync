@@ -1054,7 +1054,7 @@
                             <div class="vwsh-head-row">
                                 <div class="vwsh-head-titles">
                                     <h1 class="vwsh-title">Wishlist</h1>
-                                    <p class="vwsh-sub">Movies &amp; episodes you want to grab</p>
+                                    <p class="vwsh-sub" data-vwsh-sub>Movies &amp; episodes you want to grab</p>
                                 </div>
                                 <div class="vwsh-tabs" role="tablist">
                                     <button class="vwsh-tab vwsh-tab--on" type="button" role="tab" data-vwsh-tab="movie">
@@ -1071,6 +1071,11 @@
                                 <svg class="vwsh-search-ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
                                 <input type="text" class="vwsh-search-input" data-vwsh-search placeholder="Search wishlist&hellip;" autocomplete="off" spellcheck="false">
                             </div>
+                            <select class="vwsh-sort" data-vwsh-sort aria-label="Sort">
+                                <option value="added">Recently added</option>
+                                <option value="wanted">Most wanted</option>
+                                <option value="title">A&ndash;Z</option>
+                            </select>
                         </div>
                         <div class="vwsh-body">
                             <div class="vwsh-loading hidden" data-vwsh-loading>

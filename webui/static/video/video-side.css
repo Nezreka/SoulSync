@@ -2485,15 +2485,50 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-movie-title { display: block; font-size: 13.5px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vwsh-movie-meta { display: block; font-size: 11.5px; color: rgba(255, 255, 255, 0.45); margin-top: 2px; }
 
-/* shows = the "Nebula" (reuses the music wl-* orb/album/track design).
-   Only the show-remove button is video-specific. */
-.wl-nebula-field .wl-orb-remove { position: absolute; top: 0; right: 0; z-index: 6; width: 22px; height: 22px;
+/* shows = the "Nebula" (reuses the music wl-* orb/album/track design). EVERY
+   video enhancement is scoped under .vwsh-nebula (a class only the video field
+   gets) so the music wishlist's wl-* styling is never affected. */
+.vwsh-nebula .wl-orb-remove { position: absolute; top: 0; right: 0; z-index: 6; width: 22px; height: 22px;
     border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(0, 0, 0, 0.62);
     color: rgba(255, 255, 255, 0.7); font-size: 11px; line-height: 1; cursor: pointer;
     display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
-.wl-nebula-field .wl-orb-group:hover .wl-orb-remove,
-.wl-nebula-field .wl-orb-group.expanded .wl-orb-remove { opacity: 1; }
-.wl-nebula-field .wl-orb-remove:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
+.vwsh-nebula .wl-orb-group:hover .wl-orb-remove,
+.vwsh-nebula .wl-orb-group.expanded .wl-orb-remove { opacity: 1; }
+.vwsh-nebula .wl-orb-remove:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
+
+/* #1 cinematic expand — blurred poster backdrop + hue glow behind the season fan */
+.vwsh-nebula .wl-orb-group.expanded { overflow: hidden;
+    box-shadow: 0 14px 50px -12px hsla(var(--orb-hue, 230), 70%, 45%, 0.45);
+    border: 1px solid hsla(var(--orb-hue, 230), 70%, 55%, 0.25); }
+.vwsh-nebula .wl-orb-group.expanded::before { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background-image: var(--vwsh-poster, none); background-size: cover; background-position: center;
+    filter: blur(28px) saturate(1.25); opacity: 0.4; transform: scale(1.25); }
+.vwsh-nebula .wl-orb-group.expanded::after { content: ''; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: linear-gradient(180deg, hsla(var(--orb-hue, 230), 55%, 12%, 0.55), rgba(12, 12, 16, 0.92)); }
+.vwsh-nebula .wl-orb-group.expanded > * { position: relative; z-index: 1; }
+
+/* #2 season number stamped on the tile art (so seasons read as distinct) */
+.vwsh-nebula .wl-album-tile-art { position: relative; }
+.vwsh-nebula .vwsh-season-tag { position: absolute; top: 5px; left: 5px; z-index: 2; font-size: 12px; font-weight: 900;
+    color: #fff; padding: 2px 7px; border-radius: 6px; letter-spacing: 0.02em; backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.58); border: 1px solid rgba(255, 255, 255, 0.18); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); }
+
+/* #3 richer episode tracks — status dot + air date */
+.vwsh-nebula .wl-tile-track { gap: 8px; }
+.vwsh-nebula .vwsh-ep-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+    background: rgb(var(--accent-rgb, 29, 185, 84)); box-shadow: 0 0 6px rgba(var(--accent-rgb, 29, 185, 84), 0.6); }
+.vwsh-nebula .vwsh-ep-dot--searching { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
+.vwsh-nebula .vwsh-ep-dot--downloading { background: #8ab0ff; box-shadow: 0 0 6px rgba(100, 149, 237, 0.6); }
+.vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
+.vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
+.vwsh-nebula .vwsh-ep-date { flex-shrink: 0; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.35); }
+
+/* #5 sort select (toolbar) */
+.vwsh-sort { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13.5px; font-weight: 600;
+    cursor: pointer; outline: none; transition: border-color 0.15s ease; }
+.vwsh-sort:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
+.vwsh-sort option { background: #16161d; color: #fff; }
 
 /* status pills + remove button */
 .vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
