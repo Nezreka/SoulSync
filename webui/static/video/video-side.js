@@ -145,6 +145,7 @@
         { id: 'video-show-detail', label: 'Show' },
         { id: 'video-movie-detail', label: 'Movie' },
         { id: 'video-person-detail', label: 'Person' },
+        { id: 'video-channel-detail', label: 'Channel' },
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
