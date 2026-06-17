@@ -1157,3 +1157,13 @@ def test_set_wishlist_channel_poster_backfills_avatar(db):
     assert db.set_wishlist_channel_poster("UCx", "http://yt/avatar.jpg") == 2
     grp = db.query_youtube_wishlist()["items"][0]
     assert grp["poster_url"] == "http://yt/avatar.jpg"
+
+
+def test_video_date_cache_roundtrip(db):
+    assert db.cache_video_dates([{"youtube_id": "a", "published_at": "2024-06-01"},
+                                 {"youtube_id": "b", "published_at": "2023-01-01"},
+                                 {"youtube_id": "c", "published_at": ""}]) == 2   # blank skipped
+    assert db.get_video_dates(["a", "b", "c", "d"]) == {"a": "2024-06-01", "b": "2023-01-01"}
+    # upsert refreshes
+    db.cache_video_dates([{"youtube_id": "a", "published_at": "2025-12-31"}])
+    assert db.get_video_dates(["a"]) == {"a": "2025-12-31"}

@@ -261,6 +261,16 @@ CREATE INDEX IF NOT EXISTS idx_channel_videos_channel   ON channel_videos(channe
 CREATE INDEX IF NOT EXISTS idx_channel_videos_published ON channel_videos(published_at);
 CREATE INDEX IF NOT EXISTS idx_channel_videos_wanted    ON channel_videos(monitored, has_file);
 
+-- Cheap persistent cache of YouTube video upload dates (the flat listing omits
+-- them). Filled from the channel RSS feed + any per-video metadata fetch, so the
+-- channel page's year-seasons fill in over time without re-fetching. Standalone
+-- (no channels FK) since the bridge stores channels in video_watchlist.
+CREATE TABLE IF NOT EXISTS youtube_video_dates (
+    youtube_id   TEXT PRIMARY KEY,
+    published_at TEXT,
+    cached_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── Owned media files (the Library = content that has a file) ────────────────
 -- Exactly one owner FK is set (no polymorphic id). 1 row per physical file;
 -- usually 1:1 with its content, but the table allows history/extras.

@@ -1991,6 +1991,42 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def cache_video_dates(self, pairs) -> int:
+        """Persist learned YouTube upload dates ([{youtube_id, published_at}, …]).
+        Idempotent; only stores non-empty dates. Returns rows written."""
+        rows = [(p.get("youtube_id"), p.get("published_at")) for p in (pairs or [])
+                if p.get("youtube_id") and p.get("published_at")]
+        if not rows:
+            return 0
+        conn = self._get_connection()
+        try:
+            conn.executemany(
+                "INSERT INTO youtube_video_dates (youtube_id, published_at) VALUES (?, ?) "
+                "ON CONFLICT(youtube_id) DO UPDATE SET published_at=excluded.published_at", rows)
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def get_video_dates(self, video_ids) -> dict:
+        """{youtube_id: published_at} for cached ids — hydrates channel year-seasons."""
+        out: dict = {}
+        ids = [str(x) for x in (video_ids or []) if x]
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT youtube_id, published_at FROM youtube_video_dates WHERE youtube_id IN ({ph})", chunk):
+                    if r["published_at"]:
+                        out[r["youtube_id"]] = r["published_at"]
+            return out
+        finally:
+            conn.close()
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()

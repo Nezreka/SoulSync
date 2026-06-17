@@ -316,3 +316,25 @@ def test_search_channels_extracts_channel_results():
 
 def test_search_channels_empty_query():
     assert yt.search_channels("  ", ydl_factory=_SearchYDL) == []
+
+
+# ── RSS upload-date enrichment ───────────────────────────────────────────────
+
+_RSS = """<?xml version="1.0"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015" xmlns="http://www.w3.org/2005/Atom">
+  <entry><yt:videoId>v1</yt:videoId><published>2024-06-01T10:00:00+00:00</published></entry>
+  <entry><yt:videoId>v2</yt:videoId><published>2023-02-15T08:30:00+00:00</published></entry>
+  <entry><title>no id or date</title></entry>
+</feed>"""
+
+
+def test_parse_rss_dates():
+    out = yt.parse_rss_dates(_RSS)
+    assert out == {"v1": "2024-06-01", "v2": "2023-02-15"}
+    assert yt.parse_rss_dates("not xml") == {}
+
+
+def test_channel_recent_dates_via_injected_fetch():
+    out = yt.channel_recent_dates("UCx", fetch=lambda url: _RSS)
+    assert out["v1"] == "2024-06-01"
+    assert yt.channel_recent_dates("", fetch=lambda url: _RSS) == {}
