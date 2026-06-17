@@ -95,7 +95,8 @@
         modalState.sel.forEach(function (key) {
             var p = key.split('_'), m = (modalState.epMeta || {})[key] || {};
             eps.push({ season_number: parseInt(p[0], 10), episode_number: parseInt(p[1], 10),
-                title: m.title, air_date: m.air_date, still_url: m.still });
+                title: m.title, air_date: m.air_date, still_url: m.still,
+                season_poster_url: (modalState.seasonPoster || {})[p[0]] });
         });
         if (!eps.length) { if (btn) btn.disabled = false; toast('Select at least one episode', 'info'); return; }
 
@@ -313,12 +314,16 @@
         // they load per-season on expand (like the full detail page). Stash the tv
         // id so the lazy loader can fetch them.
         var tvId = (o && o.source === 'tmdb') ? parseInt(o.id, 10) : null;
-        modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today, epMeta: {} };
+        modalState = { kind: 'show', sel: new Set(), tvId: tvId, today: today, epMeta: {}, seasonPoster: {} };
         var totalMissing = 0, anyLazy = false;
         var html = '<div class="vgm-eps-head"><span class="vgm-eps-h">Episodes</span>' +
             '<label class="vgm-eps-toggle"><input type="checkbox" data-vgm-missing-only checked>' +
             '<span>Missing only</span></label></div><div class="vgm-eps-list">';
         d.seasons.forEach(function (s) {
+            // Capture this season's poster (owned → proxy by season id, tmdb → direct).
+            modalState.seasonPoster[String(s.season_number)] = (o && o.source === 'library')
+                ? (s.has_poster && s.id != null ? '/api/video/poster/season/' + s.id : null)
+                : (s.poster_url || null);
             var eps = s.episodes || [];
             // Lazy: a tmdb season with a known count but no episodes shipped yet.
             if (!eps.length && (s.episode_total || 0) > 0 && tvId) {
