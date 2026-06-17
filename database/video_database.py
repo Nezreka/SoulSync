@@ -1669,6 +1669,35 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlist_still_backfill_targets(self) -> list:
+        """Distinct (show_tmdb_id, season) with episode rows missing a still — one
+        tmdb_season fetch per group fills them all (cheap backfill for rows added
+        before still-capture existed)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT DISTINCT tmdb_id, season_number FROM video_wishlist "
+                "WHERE kind='episode' AND (still_url IS NULL OR still_url='') "
+                "AND tmdb_id IS NOT NULL AND season_number IS NOT NULL").fetchall()
+            return [{"tmdb_id": r["tmdb_id"], "season_number": r["season_number"]} for r in rows]
+        finally:
+            conn.close()
+
+    def set_wishlist_still(self, show_tmdb_id, season_number, episode_number, still_url) -> bool:
+        """Fill a single episode's still (only if it doesn't already have one)."""
+        if not still_url:
+            return False
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET still_url=? WHERE kind='episode' AND tmdb_id=? "
+                "AND season_number=? AND episode_number=? AND (still_url IS NULL OR still_url='')",
+                (still_url, int(show_tmdb_id), int(season_number), int(episode_number)))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
     def wishlist_state(self, *, movie_ids=None, show_tmdb_id=None) -> dict:
         """Hydration: which of ``movie_ids`` are wishlisted, and which episode
         keys ('S_E') of ``show_tmdb_id`` are. Returns {movies:set, episodes:set}."""

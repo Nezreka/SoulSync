@@ -108,6 +108,31 @@ def register_routes(bp):
             logger.exception("Failed to remove from video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/wishlist/backfill-stills", methods=["POST"])
+    def video_wishlist_backfill_stills():
+        """Fill episode stills for rows that predate still-capture. One tmdb_season
+        call per (show, season); best-effort. Returns how many rows were filled."""
+        from . import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        db = get_video_db()
+        eng = get_video_enrichment_engine()
+        updated = 0
+        try:
+            for grp in db.wishlist_still_backfill_targets():
+                try:
+                    se = eng.tmdb_season(grp["tmdb_id"], grp["season_number"]) or {}
+                except Exception:
+                    continue
+                for ep in (se.get("episodes") or []):
+                    if ep.get("still_url") and ep.get("episode_number") is not None:
+                        if db.set_wishlist_still(grp["tmdb_id"], grp["season_number"],
+                                                 ep["episode_number"], ep["still_url"]):
+                            updated += 1
+            return jsonify({"success": True, "updated": updated})
+        except Exception:
+            logger.exception("wishlist still backfill failed")
+            return jsonify({"success": False, "updated": updated})
+
     @bp.route("/wishlist/check", methods=["POST"])
     def video_wishlist_check():
         """Hydrate cards/modal. Body: {movie_ids: [...], show_tmdb_id?} →

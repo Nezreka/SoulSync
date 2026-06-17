@@ -954,3 +954,16 @@ def test_wishlist_episode_still_roundtrips(db):
     eps = db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"]
     by = {e["episode_number"]: e for e in eps}
     assert by[1]["still_url"] == "https://img/e1.jpg" and by[2]["still_url"] is None
+
+
+def test_wishlist_still_backfill_targets_and_set(db):
+    db.add_episodes_to_wishlist(1396, "BB", [
+        {"season_number": 1, "episode_number": 1, "still_url": "/have.jpg"},
+        {"season_number": 1, "episode_number": 2},
+        {"season_number": 2, "episode_number": 1}])
+    tset = {(t["tmdb_id"], t["season_number"]) for t in db.wishlist_still_backfill_targets()}
+    assert (1396, 1) in tset and (1396, 2) in tset
+    assert db.set_wishlist_still(1396, 1, 2, "/new.jpg") is True
+    assert db.set_wishlist_still(1396, 1, 1, "/x.jpg") is False   # won't clobber an existing still
+    eps = {e["episode_number"]: e for e in db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"]}
+    assert eps[1]["still_url"] == "/have.jpg" and eps[2]["still_url"] == "/new.jpg"

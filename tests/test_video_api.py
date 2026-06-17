@@ -495,3 +495,18 @@ def test_wishlist_check_by_show(tmp_path):
         "show": {"tmdb_id": 1396, "title": "BB"}, "episodes": [{"season_number": 1, "episode_number": 1}]})
     res = client.post("/api/video/wishlist/check", json={"shows": [1396, 1399]}).get_json()
     assert res["by_show"]["1396"] == ["1_1"] and "1399" not in res["by_show"]
+
+
+def test_wishlist_backfill_stills_endpoint(tmp_path, monkeypatch):
+    client, vapi = _make_client(tmp_path)
+    db = vapi._video_db
+    db.add_episodes_to_wishlist(1396, "BB", [{"season_number": 1, "episode_number": 1}])   # no still
+    import core.video.enrichment.engine as eng_mod
+
+    class FakeEng:
+        def tmdb_season(self, tv, sn): return {"episodes": [{"episode_number": 1, "still_url": "/s.jpg"}]}
+    monkeypatch.setattr(eng_mod, "get_video_enrichment_engine", lambda: FakeEng())
+    r = client.post("/api/video/wishlist/backfill-stills").get_json()
+    assert r["success"] and r["updated"] == 1
+    ep = db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"][0]
+    assert ep["still_url"] == "/s.jpg"

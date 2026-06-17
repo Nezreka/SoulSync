@@ -204,8 +204,27 @@
                 render(d.items || []);
                 updatePagination(p);
                 updateEmpty(p.total_count);
+                maybeBackfillStills(d.items || []);
             })
             .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updatePagination(null); updateEmpty(0); });
+    }
+
+    // Episodes added before still-capture have no image — fetch them once (cheap:
+    // one tmdb_season call per show/season server-side), then reload to show them.
+    var stillsBackfilled = false;
+    function maybeBackfillStills(items) {
+        if (state.tab !== 'show' || stillsBackfilled) return;
+        var missing = (items || []).some(function (sh) {
+            return (sh.seasons || []).some(function (se) {
+                return (se.episodes || []).some(function (e) { return !e.still_url; });
+            });
+        });
+        if (!missing) return;
+        stillsBackfilled = true;
+        fetch('/api/video/wishlist/backfill-stills', { method: 'POST', headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) { if (res && res.updated > 0) load(); })
+            .catch(function () { /* best-effort */ });
     }
 
     function setTab(tab) {
