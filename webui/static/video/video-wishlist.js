@@ -79,17 +79,19 @@
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
         // show page); each episode card SELECTS the episode (drives the info bar).
+        // Season = a poster panel on the LEFT (→ show page) with the episode grid
+        // flowing to its RIGHT, so the horizontal space is actually used.
         var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
             var thumb = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
             var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
             return '<div class="vwsh-szn">' +
-                '<div class="vwsh-szn-hd" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="Open show page">' +
-                    '<span class="vwsh-szn-thumb">' + thumb + '</span>' +
-                    '<span class="vwsh-szn-name">Season ' + se.season_number + '</span>' +
-                    '<span class="vwsh-szn-count">' + n + ' ep</span>' +
-                    '<span class="vwsh-szn-go" aria-hidden="true">&rarr;</span>' +
+                '<div class="vwsh-szn-side" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="Open show page">' +
+                    '<div class="vwsh-szn-poster">' + thumb + '</div>' +
+                    '<div class="vwsh-szn-name">Season ' + se.season_number + '</div>' +
+                    '<div class="vwsh-szn-count">' + n + ' episode' + (n === 1 ? '' : 's') + '</div>' +
+                    '<div class="vwsh-szn-go">View show &rarr;</div>' +
                     '<button class="vwsh-szn-rm" type="button" data-vwsh-rm="season" ' +
                     'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Remove season">&#10005;</button>' +
                 '</div>' +
