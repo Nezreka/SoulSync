@@ -31,8 +31,7 @@
     // reload / Back / Forward / open-in-new-tab all work. ``source`` is 'library'
     // (a video.db id) today; 'tmdb' (a search result not yet in the library) later.
     var DETAIL_BASE = '/video-detail/';
-    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1,
-                         'video-channel-detail': 1 };
+    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1 };
 
     function buildDetailPath(source, kind, id) {
         return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + encodeURIComponent(id);
@@ -69,10 +68,6 @@
         if (pageId === 'video-person-detail') {
             var n = document.querySelector('[data-video-person] [data-vp-name]');
             return n ? (n.textContent || '').trim() : '';
-        }
-        if (pageId === 'video-channel-detail') {
-            var cn = document.querySelector('[data-video-channel] [data-vc-name]');
-            return cn ? (cn.textContent || '').trim() : '';
         }
         var host = pageId === 'video-movie-detail' ? '[data-video-detail="movie"]' : '[data-video-detail="show"]';
         var t = document.querySelector(host + ' [data-vd-title]');
@@ -145,7 +140,6 @@
         { id: 'video-show-detail', label: 'Show' },
         { id: 'video-movie-detail', label: 'Movie' },
         { id: 'video-person-detail', label: 'Person' },
-        { id: 'video-channel-detail', label: 'Channel' },
     ];
 
     // "Shared" video pages reuse the REAL music page (shown identically on the
@@ -313,7 +307,7 @@
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
-            else if (d.kind === 'channel') navigate('video-channel-detail');
+            else if (d.kind === 'channel') navigate('video-show-detail');   // channels reuse the show detail page
             else return;
             if (d._replace) {
                 // A redirect (e.g. a tmdb link that's actually owned) → replace the
