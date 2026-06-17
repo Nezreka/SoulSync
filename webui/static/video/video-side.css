@@ -1660,10 +1660,10 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    widths — never changes the hero's height and shoves the page around */
 .vcal-bb-multi { position: relative; display: flex; height: 306px; border-radius: 22px; overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 34px 90px rgba(0, 0, 0, 0.55); background: #08080c; }
-.vcal-bb-panel { --vcal-h: 230; position: relative; flex: 1 1 0; flex-grow: 1; min-width: 10%; overflow: hidden;
+.vcal-bb-panel { --vcal-h: 230; position: relative; flex: 1 1 0; flex-grow: 1; min-width: 25%; overflow: hidden;
     display: flex; align-items: flex-end; cursor: pointer;
     clip-path: polygon(34px 0, 100% 0, calc(100% - 34px) 100%, 0 100%); margin-left: -34px;
-    transition: flex-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1); }
+    transition: flex-grow 0.66s cubic-bezier(0.45, 0, 0.2, 1); }
 /* outer edges of the strip stay straight; only the interior seams are diagonal */
 .vcal-bb-panel:first-child { clip-path: polygon(0 0, 100% 0, calc(100% - 34px) 100%, 0 100%); margin-left: 0; }
 .vcal-bb-panel:last-child { clip-path: polygon(34px 0, 100% 0, 100% 100%, 0 100%); }
@@ -1672,13 +1672,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vcal-bb-multi:hover .vcal-bb-panel { flex-grow: 0.16; }
 .vcal-bb-multi .vcal-bb-panel:hover { flex-grow: 9; }
 .vcal-bb-panel::after { content: ''; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.32);
-    opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
+    opacity: 0; transition: opacity 0.55s ease; pointer-events: none; }
 .vcal-bb-multi:hover .vcal-bb-panel:not(:hover)::after { opacity: 1; }
 .vcal-bb-panel .vcal-bb-content { padding: 28px 30px 30px 50px; max-width: 540px; }
 .vcal-bb-panel .vcal-bb-title { font-size: 28px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* secondary panels tease just the title; sub + actions fade in on expand */
-.vcal-bb-panel .vcal-bb-sub, .vcal-bb-panel .vcal-bb-actions { opacity: 0; transition: opacity 0.3s ease; }
+.vcal-bb-panel .vcal-bb-sub, .vcal-bb-panel .vcal-bb-actions { opacity: 0; transition: opacity 0.45s ease; }
 .vcal-bb-panel--lead .vcal-bb-sub, .vcal-bb-panel--lead .vcal-bb-actions { opacity: 1; }
 .vcal-bb-multi:hover .vcal-bb-panel--lead .vcal-bb-sub,
 .vcal-bb-multi:hover .vcal-bb-panel--lead .vcal-bb-actions { opacity: 0; }
