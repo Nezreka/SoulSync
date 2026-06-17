@@ -2799,3 +2799,72 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vyt-wcard-title { font-size: 13.5px; font-weight: 800; color: #fff; line-height: 1.2;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vyt-wcard-meta { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
+
+/* ══ YouTube channel detail page (.vc-*) — opens like a show/movie ════════════ */
+.vc-page { position: relative; max-width: 1240px; margin: 0 auto; padding: 0 30px 60px; }
+.vc-banner { position: absolute; top: 0; left: 0; right: 0; height: 260px; z-index: 0;
+    background-size: cover; background-position: center; }
+.vc-banner::after { content: ''; position: absolute; inset: 0;
+    background: linear-gradient(180deg, rgba(10,10,14,0.35), rgba(10,10,14,0.85) 70%, var(--bg, #0b0b0f)); }
+.vc-page[data-has-banner="0"] .vc-banner {
+    background: radial-gradient(120% 150% at 20% 0%, rgba(255,59,59,0.22), transparent 60%); }
+.vc-page .vd-back { position: relative; z-index: 2; margin: 18px 0 0; }
+.vc-hero { position: relative; z-index: 1; display: flex; align-items: flex-end; gap: 26px;
+    padding-top: 120px; }
+.vc-avatar-wrap { flex-shrink: 0; width: 132px; height: 132px; border-radius: 50%; overflow: hidden;
+    border: 4px solid rgba(255,59,59,0.55); box-shadow: 0 16px 40px rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center; background: #16161d; }
+.vc-avatar { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vc-avatar-ph { font-size: 46px; color: rgba(255,59,59,0.7); }
+.vc-hero-info { flex: 1; min-width: 0; padding-bottom: 6px; }
+.vc-eyebrow { font-size: 11.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #ff6b6b; }
+.vc-name { font-size: 40px; font-weight: 900; letter-spacing: -0.02em; color: #fff; margin: 6px 0 0; line-height: 1.05; }
+.vc-meta { margin-top: 9px; font-size: 13.5px; font-weight: 600; color: rgba(255,255,255,0.62); }
+.vc-meta .vc-dot { margin: 0 8px; opacity: 0.5; }
+.vc-desc { margin: 14px 0 0; max-width: 760px; font-size: 13.5px; line-height: 1.55; color: rgba(255,255,255,0.62);
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.vc-actions { display: flex; align-items: center; gap: 14px; margin-top: 18px; }
+.vc-follow { border: 0; cursor: pointer; border-radius: 999px; padding: 11px 24px; font-size: 13.5px; font-weight: 800;
+    background: #ff3b3b; color: #fff; box-shadow: 0 8px 22px rgba(255,59,59,0.4); transition: all 0.15s ease; }
+.vc-follow:hover { transform: translateY(-1px); background: #ff5252; }
+.vc-follow:disabled { opacity: 0.6; cursor: default; }
+.vc-follow--on { background: rgba(255,255,255,0.1); color: #6cd391; box-shadow: none; }
+.vc-yt-link { font-size: 13px; font-weight: 800; color: #ff6b6b; text-decoration: none; padding: 10px 16px;
+    border-radius: 999px; border: 1px solid rgba(255,59,59,0.35); }
+.vc-yt-link:hover { background: rgba(255,59,59,0.12); }
+
+.vc-body { position: relative; z-index: 1; margin-top: 40px; }
+.vc-videos-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+.vc-videos-title { font-size: 20px; font-weight: 800; color: #fff; margin: 0; }
+.vc-videos-count { font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.4); }
+.vc-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(264px, 1fr)); gap: 20px 16px; }
+.vc-vid { display: flex; flex-direction: column; }
+.vc-vid-thumb { position: relative; display: block; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden;
+    background: #16161d; border: 1px solid rgba(255,255,255,0.07); }
+.vc-vid-img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform 0.25s ease; }
+.vc-vid-thumb:hover .vc-vid-img { transform: scale(1.05); }
+.vc-vid-thumb--none { background: rgba(255,255,255,0.04); }
+.vc-vid-thumb--none .vc-vid-img { display: none; }
+.vc-vid-thumb--none::after { content: '▶'; position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 26px; color: rgba(255,59,59,0.4); }
+.vc-vid-dur { position: absolute; right: 7px; bottom: 7px; background: rgba(0,0,0,0.82); color: #fff;
+    font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 5px; }
+.vc-vid-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 30px; color: #fff; opacity: 0; transition: opacity 0.2s ease; text-shadow: 0 2px 14px rgba(0,0,0,0.7); }
+.vc-vid-thumb:hover .vc-vid-play { opacity: 0.92; }
+.vc-vid-body { margin-top: 9px; flex: 1; }
+.vc-vid-title { font-size: 13.5px; font-weight: 700; color: #fff; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vc-vid-meta { margin-top: 4px; font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.42); }
+.vc-wish { margin-top: 9px; align-self: flex-start; border: 1px solid rgba(255,255,255,0.14); cursor: pointer;
+    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.78); font-size: 12px; font-weight: 800;
+    padding: 7px 14px; border-radius: 999px; transition: all 0.15s ease; }
+.vc-wish:hover { background: rgba(255,59,59,0.18); border-color: rgba(255,59,59,0.5); color: #fff; }
+.vc-wish:disabled { opacity: 0.6; cursor: default; }
+.vc-wish--on { background: rgba(108,211,145,0.16); border-color: rgba(108,211,145,0.4); color: #6cd391; }
+.vc-empty { padding: 40px; text-align: center; color: rgba(255,255,255,0.5); font-size: 14px; }
+@media (max-width: 720px) {
+    .vc-page { padding: 0 16px 50px; }
+    .vc-hero { flex-direction: column; align-items: flex-start; gap: 16px; padding-top: 90px; }
+    .vc-name { font-size: 28px; }
+}

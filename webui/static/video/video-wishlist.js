@@ -16,26 +16,6 @@
                   counts: { movie: 0, show: 0, episode: 0 }, ytChannel: 0, ytVideo: 0,
                   showData: {}, showInfo: {} };
 
-    // ── YouTube channel block (channel = header, videos = flat feed) ───────────
-    function ytChannelBlock(ch) {
-        var av = window.VideoYoutube ? VideoYoutube.avatar(ch, 'vyt-chan-avatar') : '';
-        var vids = (window.VideoYoutube && (ch.videos || []).map(VideoYoutube.videoCard).join('')) || '';
-        var n = ch.video_count || (ch.videos || []).length;
-        return '<div class="vyt-chan" data-vyt-chan="' + esc(ch.youtube_id) + '">' +
-            '<div class="vyt-chan-hd" data-vyt-toggle>' + av +
-                '<div class="vyt-chan-meta">' +
-                    '<span class="vyt-chan-title">' + esc(ch.title) + '</span>' +
-                    '<span class="vyt-chan-sub">' + n + ' video' + (n === 1 ? '' : 's') + '</span>' +
-                '</div>' +
-                '<a class="vyt-chan-link" href="https://www.youtube.com/channel/' + esc(ch.youtube_id) +
-                    '" target="_blank" rel="noopener" title="Open on YouTube" data-vyt-ext>YouTube ↗</a>' +
-                '<button class="vyt-chan-unfollow" type="button" data-vyt-rm="channel" data-id="' +
-                    esc(ch.youtube_id) + '" title="Unfollow and clear its videos">Unfollow</button>' +
-                '<span class="vyt-chan-chev" aria-hidden="true">▾</span>' +
-            '</div>' +
-            '<div class="vyt-vids">' + vids + '</div>' +
-        '</div>';
-    }
     var searchTimer = null;
 
     function $(s, r) { return (r || document).querySelector(s); }
@@ -91,8 +71,15 @@
     function orbSize(n) { return n >= 10 ? 'orb-lg' : n >= 4 ? 'orb-md' : 'orb-sm'; }
 
     function nebulaOrb(sh, idx) {
+        // Source-aware: a TMDB show opens its show page; a YouTube channel (source
+        // 'youtube') opens the in-app channel page. YEAR is the "season", video the
+        // "episode" — the data is already shaped that way, so the same render runs.
+        var yt = sh.source === 'youtube';
         var src = sh.library_id != null ? 'library' : 'tmdb';
         var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
+        var openAttrs = yt
+            ? 'data-vwsh-open-channel data-yt="' + esc(sh.youtube_id) + '"'
+            : 'data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '"';
         var hue = hueOf(sh.title);
         var total = sh.wanted || 0;
         var img = sh.poster_url
@@ -100,27 +87,29 @@
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
-        // show page); each episode card SELECTS the episode (drives the info bar).
-        // Season = a poster panel on the LEFT (→ show page) with the episode grid
-        // flowing to its RIGHT, so the horizontal space is actually used.
+        // show/channel page); each episode card SELECTS it (drives the info bar).
+        // Season = a poster panel on the LEFT with the episode grid to its RIGHT.
         var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
             var thumb = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
             var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
+            var sName = yt ? (se.season_number ? se.season_number : 'Undated') : ('Season ' + se.season_number);
+            var sRm = yt
+                ? 'data-vwsh-rm="yt-season" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"'
+                : 'data-vwsh-rm="season" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"';
             return '<div class="vwsh-szn">' +
-                '<div class="vwsh-szn-side" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="Open show page">' +
+                '<div class="vwsh-szn-side" ' + openAttrs + ' title="' + (yt ? 'Open channel page' : 'Open show page') + '">' +
                     '<div class="vwsh-szn-poster">' + thumb + '</div>' +
-                    '<div class="vwsh-szn-name">Season ' + se.season_number + '</div>' +
-                    '<div class="vwsh-szn-count">' + n + ' episode' + (n === 1 ? '' : 's') + '</div>' +
-                    '<div class="vwsh-szn-go">View show &rarr;</div>' +
-                    '<button class="vwsh-szn-rm" type="button" data-vwsh-rm="season" ' +
-                    'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Remove season">&#10005;</button>' +
+                    '<div class="vwsh-szn-name">' + esc(sName) + '</div>' +
+                    '<div class="vwsh-szn-count">' + n + (yt ? ' video' : ' episode') + (n === 1 ? '' : 's') + '</div>' +
+                    '<div class="vwsh-szn-go">' + (yt ? 'View channel' : 'View show') + ' &rarr;</div>' +
+                    '<button class="vwsh-szn-rm" type="button" ' + sRm + ' title="Remove">&#10005;</button>' +
                 '</div>' +
                 '<div class="vwsh-ep-grid">' + cards + '</div>' +
             '</div>';
         }).join('');
-        var eps = total + ' episode' + (total === 1 ? '' : 's');
+        var eps = total + (yt ? ' video' : ' episode') + (total === 1 ? '' : 's');
         // --orb-hue on the GROUP so the music orb styles + my cinematic-expand
         // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
@@ -129,8 +118,12 @@
         // Header is a 3-column row that FLANKS the poster: synopsis (left) · poster
         // (middle) · cast (right). When collapsed (or no data) the side columns are
         // empty → hidden → just the centered bubble, so the nebula grid is unchanged.
-        return '<div class="wl-orb-group" data-vwsh-group data-vwsh-tmdb="' + esc(sh.tmdb_id) + '" style="' + gstyle + '">' +
-            '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
+        var showRm = yt
+            ? 'data-vwsh-rm="yt-channel" data-yt="' + esc(sh.youtube_id) + '"'
+            : 'data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '"';
+        return '<div class="wl-orb-group" data-vwsh-group data-vwsh-tmdb="' + esc(sh.tmdb_id) + '" ' +
+            'data-vwsh-source="' + (yt ? 'youtube' : 'tmdb') + '" style="' + gstyle + '">' +
+            '<button class="wl-orb-remove" type="button" ' + showRm + ' title="Remove">&#10005;</button>' +
             '<div class="vwsh-xhead">' +
                 '<div class="vwsh-info-syn" data-vwsh-syn></div>' +
                 '<div class="vwsh-xhead-mid">' +
@@ -139,7 +132,7 @@
                         '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
                         '<div class="vwsh-prog"></div>' +
                     '</div>' +
-                    '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
+                    '<div class="wl-orb-label" ' + openAttrs + ' title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
                     '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
                 '</div>' +
                 '<div class="vwsh-info-cast" data-vwsh-cast></div>' +
@@ -175,6 +168,17 @@
         var synEl = group && group.querySelector('[data-vwsh-syn]');
         var castEl = group && group.querySelector('[data-vwsh-cast]');
         if (!synEl || !castEl) return;
+        // YouTube: a video carries its own description; there's no cast and no
+        // tmdb episode endpoint, so just paint the selected video's synopsis.
+        if (group.getAttribute('data-vwsh-source') === 'youtube') {
+            if (sel) {
+                var yd = fmtDate(sel.air_date);
+                synEl.innerHTML = (yd ? '<span class="vwsh-info-eyebrow">' + esc(yd) + '</span>' : '') +
+                    esc(sel.overview || 'No description for this video.');
+            } else { synEl.innerHTML = ''; }
+            castEl.innerHTML = '';
+            return;
+        }
         var si = state.showInfo[tmdb] || {};
         var eyebrow, overview, castArr;
         if (sel) {
@@ -212,6 +216,7 @@
         if (!group) return;
         var tmdb = parseInt(group.getAttribute('data-vwsh-tmdb'), 10);
         renderInfoBar(group, tmdb, null);   // paint the View-show button immediately
+        if (group.getAttribute('data-vwsh-source') === 'youtube') return;   // no tmdb detail for channels
         if (group.getAttribute('data-vwsh-info-loaded')) return;
         group.setAttribute('data-vwsh-info-loaded', '1');
         var sh = state.showData[tmdb]; if (!sh) return;
@@ -229,38 +234,41 @@
     // A single episode card. Clicking it SELECTS the episode (drives the info bar);
     // the "View show" button in the info bar is what navigates.
     function epCard(sh, se, e) {
-        var t = e.title || ('Episode ' + e.episode_number);
+        var yt = sh.source === 'youtube';
+        var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
         var st = STATUS[e.status] ? e.status : 'wanted';
         var date = fmtDate(e.air_date);
+        // TMDB shows the SxEx label; a YouTube video shows just its upload date.
+        var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : ''));
         var thumb = e.still_url
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(e.still_url) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
-        return '<div class="vwsh-epc" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '">' + thumb +
+        var rm = yt
+            ? 'data-vwsh-rm="yt-video" data-id="' + esc(e.source_id) + '"'
+            : 'data-vwsh-rm="episode" data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"';
+        return '<div class="vwsh-epc" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"' +
+            (yt ? ' data-src-id="' + esc(e.source_id) + '"' : '') + '>' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
-                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' +
-                'S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') + '</div>' +
+                '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' + (yt ? esc(metaTxt) : metaTxt) + '</div>' +
             '</div>' +
-            '<button class="vwsh-epc-rm" type="button" data-vwsh-rm="episode" ' +
-            'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
+            '<button class="vwsh-epc-rm" type="button" ' + rm + ' title="Remove">&#10005;</button>' +
         '</div>';
     }
 
     function render(items) {
         var grid = $('[data-vwsh-grid]'); if (!grid) return;
-        var shows = state.tab === 'show';
-        var yt = state.tab === 'youtube';
-        grid.classList.toggle('wl-nebula-field', shows);
-        grid.classList.toggle('vwsh-nebula', shows);   // video-only scope so music wl-* is untouched
+        // YouTube uses the SAME nebula as TV (channel=show, year=season, video=episode).
+        var nebula = state.tab === 'show' || state.tab === 'youtube';
+        grid.classList.toggle('wl-nebula-field', nebula);
+        grid.classList.toggle('vwsh-nebula', nebula);   // video-only scope so music wl-* is untouched
         grid.classList.toggle('vwsh-grid--movies', state.tab === 'movie');
-        grid.classList.toggle('vyt-field', yt);
         state.showData = {};
-        if (shows) items.forEach(function (sh) { state.showData[sh.tmdb_id] = sh; });   // for the episode area
-        grid.innerHTML = yt
-            ? items.map(ytChannelBlock).join('')
-            : shows ? items.map(function (sh, i) { return nebulaOrb(sh, i); }).join('')
-                    : items.map(movieCard).join('');
+        if (nebula) items.forEach(function (sh) { state.showData[sh.tmdb_id] = sh; });   // for the episode area
+        grid.innerHTML = nebula
+            ? items.map(function (sh, i) { return nebulaOrb(sh, i); }).join('')
+            : items.map(movieCard).join('');
     }
 
     // ── counts / badges / pager ───────────────────────────────────────────────
@@ -399,50 +407,56 @@
         load();
     }
 
-    // ── remove ────────────────────────────────────────────────────────────────
+    // ── remove (TMDB scopes via /wishlist/remove; YouTube scopes via youtube) ──
     function doRemove(btn) {
         var scope = btn.getAttribute('data-vwsh-rm');
+        btn.disabled = true;
+        var after = function () {
+            if (typeof showToast === 'function') showToast('Removed from wishlist', 'info');
+            load();
+        };
+        var afterYt = function () { after(); document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); };
+        var fail = function () { btn.disabled = false; };
+
+        if (scope === 'yt-video') {
+            VideoYoutube.removeWish('video', btn.getAttribute('data-id')).then(afterYt).catch(fail); return;
+        }
+        if (scope === 'yt-channel') {   // remove the channel's videos AND unfollow it
+            var cid = btn.getAttribute('data-yt');
+            VideoYoutube.unfollow(cid).then(function () { return VideoYoutube.removeWish('channel', cid); })
+                .then(afterYt).catch(fail); return;
+        }
+        if (scope === 'yt-season') {    // a "year" = remove every wished video in it
+            var sh = state.showData[parseInt(btn.getAttribute('data-tmdb'), 10)];
+            var yr = parseInt(btn.getAttribute('data-s'), 10), ids = [];
+            if (sh) (sh.seasons || []).forEach(function (se) {
+                if (se.season_number === yr) (se.episodes || []).forEach(function (ep) { if (ep.source_id) ids.push(ep.source_id); });
+            });
+            if (!ids.length) { fail(); return; }
+            Promise.all(ids.map(function (id) { return VideoYoutube.removeWish('video', id); })).then(afterYt).catch(fail);
+            return;
+        }
+
         var body = { scope: scope, tmdb_id: parseInt(btn.getAttribute('data-tmdb'), 10) };
         if (btn.hasAttribute('data-s')) body.season_number = parseInt(btn.getAttribute('data-s'), 10);
         if (btn.hasAttribute('data-e')) body.episode_number = parseInt(btn.getAttribute('data-e'), 10);
-        btn.disabled = true;
         fetch('/api/video/wishlist/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body) })
             .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                if (!d || !d.success) { btn.disabled = false; return; }
-                if (typeof showToast === 'function') showToast('Removed from wishlist', 'info');
-                load();   // re-render + counts + pager stay correct
-            })
-            .catch(function () { btn.disabled = false; });
-    }
-
-    // YouTube remove: a single video, or unfollow a channel (which also clears it).
-    function doYtRemove(btn) {
-        if (!window.VideoYoutube) return;
-        var scope = btn.getAttribute('data-vyt-rm'), id = btn.getAttribute('data-id');
-        btn.disabled = true;
-        var after = function () {
-            if (typeof showToast === 'function') showToast(scope === 'channel' ? 'Unfollowed' : 'Removed', 'info');
-            load(); document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
-        };
-        var p = scope === 'channel'
-            ? VideoYoutube.unfollow(id).then(function () { return VideoYoutube.removeWish('channel', id); })
-            : VideoYoutube.removeWish('video', id);
-        p.then(after).catch(function () { btn.disabled = false; });
+            .then(function (d) { if (!d || !d.success) { fail(); return; } after(); })
+            .catch(fail);
     }
 
     function onGridClick(e) {
-        var ytRm = e.target.closest('[data-vyt-rm]');
-        if (ytRm) { e.preventDefault(); e.stopPropagation(); doYtRemove(ytRm); return; }
-        var ytTog = e.target.closest('[data-vyt-toggle]');
-        if (ytTog && !e.target.closest('[data-vyt-ext]')) {
-            var blk = ytTog.closest('.vyt-chan'); if (blk) blk.classList.toggle('vyt-chan--collapsed'); return;
-        }
-        if (e.target.closest('[data-vyt-ext]')) return;   // let the YouTube link open
         var rm = e.target.closest('[data-vwsh-rm]');
         if (rm) { e.preventDefault(); e.stopPropagation(); doRemove(rm); return; }
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var openCh = e.target.closest('[data-vwsh-open-channel]');
+        if (openCh) {   // YouTube channel → in-app channel page
+            document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                detail: { kind: 'channel', source: 'youtube', id: openCh.getAttribute('data-yt') } }));
+            return;
+        }
         var open = e.target.closest('[data-vwsh-open-show], [data-vwsh-open-movie], [data-vwsh-open-person]');
         if (open) {
             var person = open.hasAttribute('data-vwsh-open-person');

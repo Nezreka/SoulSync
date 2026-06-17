@@ -1346,6 +1346,45 @@
                 <!-- Person detail (drill-in from a cast/crew member; not a nav page).
                      Bio + filmography, every credit links back into SoulSync. Built
                      by video/video-person.js, styled by .vp-* in video-side.css. -->
+                <!-- YouTube channel detail (isolated; opens like a show/movie via
+                     soulsync:video-open-detail {kind:'channel'}). Built by
+                     video/video-channel.js, styled by .vc-* in video-side.css. -->
+                <section class="video-subpage" data-video-subpage="video-channel-detail" hidden>
+                    <div class="vc-page" data-video-channel>
+                        <div class="vc-banner" data-vc-banner aria-hidden="true"></div>
+                        <button class="vd-back" type="button" data-video-detail-back>
+                            <span aria-hidden="true">&larr;</span> <span data-vd-back-label>Back</span>
+                        </button>
+                        <div class="vd-loading" data-vc-loading hidden>
+                            <div class="loading-spinner"></div><div class="loading-text">Loading channel&hellip;</div>
+                        </div>
+                        <div class="vc-hero">
+                            <div class="vc-avatar-wrap">
+                                <img class="vc-avatar" data-vc-avatar alt="" hidden>
+                                <span class="vc-avatar-ph" data-vc-avatar-ph aria-hidden="true">&#9654;</span>
+                            </div>
+                            <div class="vc-hero-info">
+                                <div class="vc-eyebrow">YouTube channel</div>
+                                <h1 class="vc-name" data-vc-name></h1>
+                                <div class="vc-meta" data-vc-meta></div>
+                                <p class="vc-desc" data-vc-desc></p>
+                                <div class="vc-actions">
+                                    <button class="vc-follow" type="button" data-vc-follow>+ Follow</button>
+                                    <a class="vc-yt-link" data-vc-yt target="_blank" rel="noopener">Open on YouTube &#8599;</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="vc-body">
+                            <div class="vc-videos-head">
+                                <h2 class="vc-videos-title">Videos</h2>
+                                <span class="vc-videos-count" data-vc-count></span>
+                            </div>
+                            <div class="vc-videos" data-vc-videos></div>
+                            <div class="vc-empty" data-vc-empty hidden>No videos found for this channel.</div>
+                        </div>
+                    </div>
+                </section>
+
                 <section class="video-subpage" data-video-subpage="video-person-detail" hidden>
                     <div class="vp-page" data-video-person data-has-bg="0">
                         <div class="vp-ambient" data-vp-ambient aria-hidden="true"></div>
@@ -9734,6 +9773,8 @@
     <script src="{{ url_for('static', filename='video/video-calendar.js', v=static_v) }}"></script>
     <!-- Video person page (isolated; cast/crew drill-in → filmography) -->
     <script src="{{ url_for('static', filename='video/video-person.js', v=static_v) }}"></script>
+    <!-- Video YouTube channel page (isolated; opens like a show via open-detail) -->
+    <script src="{{ url_for('static', filename='video/video-channel.js', v=static_v) }}"></script>
     <!-- Video watchlist page (isolated; tabbed shows / people you follow) -->
     <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
     <!-- Video wishlist page (isolated; tabbed movies / TV, grouped show tree) -->
