@@ -2136,7 +2136,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-page { padding: 0 0 60px; }
 
 /* ── hero slideshow ───────────────────────────────────────────────────────── */
-.vdsc-hero { position: relative; height: 420px; border-radius: 20px; overflow: hidden;
+.vdsc-hero { position: relative; height: 520px; border-radius: 20px; overflow: hidden;
     margin: 4px 0 26px; background: #0d0d12; isolation: isolate; }
 .vdsc-hero.hidden { display: none; }
 .vdsc-slides { position: absolute; inset: 0; }
@@ -2209,7 +2209,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-more.hidden { display: none; }
 
 @media (max-width: 720px) {
-    .vdsc-hero { height: 340px; }
+    .vdsc-hero { height: 420px; }
     .vdsc-hero-body { left: 22px; bottom: 22px; right: 22px; }
     .vdsc-hero-title { font-size: 27px; }
     .vdsc-rail .vsr-card, .vdsc-skel-card { flex-basis: 132px; width: 132px; }
