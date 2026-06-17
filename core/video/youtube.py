@@ -280,7 +280,7 @@ def search_channels(query, limit=6, ydl_factory=None):
             "youtube_id": cid,
             "title": title,
             "handle": uid if str(uid or "").startswith("@") else None,
-            "avatar_url": _best_thumb(e.get("thumbnails")),
+            "avatar_url": _best_thumb(e.get("thumbnails")) or e.get("thumbnail"),
             "subscriber_count": e.get("channel_follower_count"),
             "video_count": e.get("playlist_count"),
         })

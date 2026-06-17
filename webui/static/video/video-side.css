@@ -2960,3 +2960,18 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vd-yt-plvid-title { font-size: 12px; font-weight: 700; color: #fff; line-height: 1.3; margin-top: 7px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .vd-yt-plvid .vd-yt-wish { align-self: flex-start; margin-top: 7px; }
+
+/* YouTube search-results loading state (skeleton cards + "searching…" label) */
+.vsr-yt-loading { margin-left: 10px; font-size: 12px; font-weight: 600; color: #ff8a8a; opacity: 0.85; }
+.vsr-yt-loading::after { content: ''; display: inline-block; width: 10px; height: 10px; margin-left: 7px;
+    vertical-align: -1px; border: 2px solid rgba(255,107,107,0.35); border-top-color: #ff6b6b; border-radius: 50%;
+    animation: vytSpin 0.7s linear infinite; }
+@keyframes vytSpin { to { transform: rotate(360deg); } }
+.vyt-skel { background: linear-gradient(100deg, rgba(255,255,255,0.05) 30%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 70%);
+    background-size: 200% 100%; animation: vytShimmer 1.3s ease-in-out infinite; }
+@keyframes vytShimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.vyt-result--skel { pointer-events: none; }
+.vyt-result--skel .vyt-result-art { border-color: rgba(255,255,255,0.08); }
+.vyt-skel-line { height: 11px; border-radius: 5px; width: 78px; }
+.vyt-skel-line--sm { height: 9px; width: 52px; }
+@media (prefers-reduced-motion: reduce) { .vyt-skel, .vsr-yt-loading::after { animation: none; } }
