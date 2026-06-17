@@ -316,7 +316,9 @@ def _proxy_get(url, fetch):
 
 
 def _harvest(kind, base, cid, pages, fetch):
-    """Walk one instance's channel pages, accumulating {video_id: date}."""
+    """Walk one instance's channel pages, accumulating {video_id: date}. Follows
+    pagination even when an early page is empty-but-has-a-next-token (some Piped
+    instances return an empty first page), stopping when there's no token left."""
     from urllib.parse import quote
     out, token = {}, None
     for i in range(max(1, pages)):
@@ -327,11 +329,10 @@ def _harvest(kind, base, cid, pages, fetch):
             url = base + "/api/v1/channels/" + cid + "/videos" + \
                 (("?continuation=" + quote(token, safe="")) if token else "")
         obj = _proxy_get(url, fetch)
-        page = parse_proxy_dates(obj if isinstance(obj, dict) else {})
-        if not page and i == 0:
-            return {}                                # instance gave nothing → caller tries next
-        out.update(page)
-        token = (obj.get("nextpage") if kind == "piped" else obj.get("continuation")) if isinstance(obj, dict) else None
+        if not isinstance(obj, dict):
+            break
+        out.update(parse_proxy_dates(obj))
+        token = obj.get("nextpage") if kind == "piped" else obj.get("continuation")
         if not token:
             break
     return out

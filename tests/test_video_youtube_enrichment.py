@@ -19,6 +19,7 @@ def test_enrich_caches_proxy_dates_and_marks_done(db, monkeypatch):
                         lambda cid, *a, **k: {"v1": "2024-06-01", "v2": "2023-02-02"})
     # if proxy covers everything, the per-video fallback must NOT run
     monkeypatch.setattr(yt, "video_detail", lambda vid: (_ for _ in ()).throw(AssertionError("no fallback")))
+    db.set_setting("youtube_proxy_instances", "piped|https://example.test")   # proxy is opt-in
     db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "v1", "title": "A"}])
 
     e = YoutubeDateEnricher(db_factory=lambda: db)
@@ -62,3 +63,15 @@ def test_enricher_stats_shape_and_pause():
     assert s["current_item"] is None and "progress" in s
     e.pause(); assert e.stats()["paused"] is True
     e.resume(); assert e.stats()["paused"] is False
+
+
+def test_proxy_instances_setting_parsing(db):
+    e = YoutubeDateEnricher(db_factory=lambda: db)
+    assert e._proxy_instances(db) == []                       # unset → proxy off by default
+    db.set_setting("youtube_proxy_instances",
+                   "piped|https://a.test, https://invidious.b.test/, junk, https://c.test")
+    got = e._proxy_instances(db)
+    assert ("piped", "https://a.test") in got
+    assert ("invidious", "https://invidious.b.test") in got   # kind inferred + trailing / stripped
+    assert ("piped", "https://c.test") in got
+    assert all(u.startswith("http") for _, u in got)          # 'junk' dropped

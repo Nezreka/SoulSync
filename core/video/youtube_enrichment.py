@@ -46,6 +46,30 @@ class YoutubeDateEnricher:
         from database.video_database import VideoDatabase
         return VideoDatabase()
 
+    @staticmethod
+    def _proxy_instances(db):
+        """Parse the optional youtube_proxy_instances setting into [(kind, url), …].
+        Empty (the default) → proxy skipped entirely. Format is comma/newline
+        separated 'kind|url' (kind inferred from the url if omitted)."""
+        try:
+            raw = db.get_setting("youtube_proxy_instances") or ""
+        except Exception:
+            return []
+        out = []
+        for part in raw.replace("\n", ",").split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "|" in part:
+                kind, url = part.split("|", 1)
+                kind, url = kind.strip().lower(), url.strip()
+            else:
+                url = part
+                kind = "invidious" if "invidious" in url or "/api/v1" in url else "piped"
+            if url.startswith("http"):
+                out.append((kind, url.rstrip("/")))
+        return out
+
     def enqueue(self, channel_id, title=None):
         """Queue a followed channel for full date enrichment (deduped; starts the
         worker thread on first use)."""
@@ -119,12 +143,18 @@ class YoutubeDateEnricher:
         self._current = self._titles.get(cid) or cid
         logger.debug("Enriching dates for %s (%s)", self._current, cid)
 
+        # Bulk no-key proxy (Piped/Invidious) is OPT-IN via a setting — the public
+        # instances are unreliable/API-disabled, so by default we skip straight to
+        # the yt-dlp path. Power users can point youtube_proxy_instances at a live
+        # instance ("piped|https://…, invidious|https://…").
         dates = {}
-        try:
-            dates = yt.proxy_channel_dates(cid) or {}
-        except Exception:
-            logger.debug("proxy date fetch failed for %s", cid, exc_info=True)
-        logger.debug("proxy returned %d dates for %s", len(dates), cid)
+        instances = self._proxy_instances(db)
+        if instances:
+            try:
+                dates = yt.proxy_channel_dates(cid, instances=instances) or {}
+            except Exception:
+                logger.debug("proxy date fetch failed for %s", cid, exc_info=True)
+            logger.debug("proxy returned %d dates for %s", len(dates), cid)
         if dates:
             db.cache_video_dates([{"youtube_id": k, "published_at": v} for k, v in dates.items()])
             for k, v in dates.items():   # per-item INFO, like the other workers
