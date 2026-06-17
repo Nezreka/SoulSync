@@ -2945,6 +2945,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vd-yt-link:hover { background: rgba(255,59,59,0.12); }
 .vd-section-h { font-size: 20px; font-weight: 800; color: #fff; margin: 0 0 16px; }
 .vd-yt-pl-section { margin-top: 34px; }
+/* YouTube episode rows have no index/badge → 4 columns (thumb · info · wish · chev) */
+.vd-ep--yt { grid-template-columns: 150px 1fr auto auto; }
 /* per-video Wish button inside an episode row */
 .vd-yt-wish { flex-shrink: 0; align-self: center; border: 1px solid rgba(255,255,255,0.14); cursor: pointer;
     background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.78); font-size: 11.5px; font-weight: 800;
