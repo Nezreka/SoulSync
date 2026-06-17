@@ -84,7 +84,7 @@ def register_routes(bp):
             if followed:   # followed channels get their full upload-date catalog in the background
                 try:
                     from core.video.youtube_enrichment import get_youtube_date_enricher
-                    get_youtube_date_enricher().enqueue(channel.get("youtube_id"))
+                    get_youtube_date_enricher().enqueue(channel.get("youtube_id"), channel.get("title"))
                 except Exception:
                     pass
             return jsonify({"success": followed, "following": followed, "added_videos": added,
@@ -156,7 +156,7 @@ def register_routes(bp):
             if following:   # opening a followed channel → ensure its dates get enriched
                 try:
                     from core.video.youtube_enrichment import get_youtube_date_enricher
-                    get_youtube_date_enricher().enqueue(cid)
+                    get_youtube_date_enricher().enqueue(cid, channel.get("title"))
                 except Exception:
                     pass
             # backfill the real avatar onto wished rows (flat listing often omits it)

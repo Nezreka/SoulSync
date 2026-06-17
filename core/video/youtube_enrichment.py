@@ -31,21 +31,28 @@ class YoutubeDateEnricher:
         self._db_factory = db_factory or self._default_db
         self._q: "queue.Queue[str]" = queue.Queue()
         self._inflight = set()
+        self._titles = {}
         self._thread = None
         self._lock = threading.Lock()
+        self._current = None          # channel being enriched right now (for the orb)
+        self._paused = False
+        self._channels_done = 0
+        self._dates_total = 0
 
     @staticmethod
     def _default_db():
         from database.video_database import VideoDatabase
         return VideoDatabase()
 
-    def enqueue(self, channel_id):
+    def enqueue(self, channel_id, title=None):
         """Queue a followed channel for full date enrichment (deduped; starts the
         worker thread on first use)."""
         cid = str(channel_id or "").strip()
         if not cid:
             return
         with self._lock:
+            if title:
+                self._titles[cid] = title
             if cid in self._inflight:
                 return
             self._inflight.add(cid)
@@ -54,8 +61,34 @@ class YoutubeDateEnricher:
                 self._thread = threading.Thread(target=self._run, name="yt-date-enricher", daemon=True)
                 self._thread.start()
 
+    def pause(self):
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
+
+    def stats(self):
+        """Dashboard-orb telemetry — same shape the enrichment workers report."""
+        queued = self._q.qsize()
+        running = bool(self._current) and not self._paused
+        cur = self._current
+        return {
+            "enabled": True,
+            "idle": False,                       # this worker idles, it never "completes"
+            "running": running,
+            "paused": self._paused,
+            "current_item": {"type": "channel", "name": cur} if cur else None,
+            "progress": {"channels": {"matched": self._channels_done,
+                                      "total": self._channels_done + queued + (1 if cur else 0)}},
+            "queued": queued,
+            "dates_cached": self._dates_total,
+        }
+
     def _run(self):
         while True:
+            if self._paused:
+                time.sleep(0.5)
+                continue
             try:
                 cid = self._q.get(timeout=45)
             except queue.Empty:
@@ -65,6 +98,7 @@ class YoutubeDateEnricher:
             except Exception:
                 logger.exception("YouTube date enrichment failed for %s", cid)
             finally:
+                self._current = None
                 with self._lock:
                     self._inflight.discard(cid)
                 self._q.task_done()
@@ -76,6 +110,7 @@ class YoutubeDateEnricher:
         cid = str(channel_id or "").strip()
         if not cid or db.channel_dates_enriched_recently(cid):
             return
+        self._current = self._titles.get(cid) or cid
 
         dates = {}
         try:
@@ -103,6 +138,8 @@ class YoutubeDateEnricher:
         if filled:
             logger.info("YouTube dates: %d cached for %s (per-video fallback)", filled, cid)
 
+        self._channels_done += 1
+        self._dates_total += len(dates) + filled
         db.mark_channel_dates_enriched(cid, len(dates) + filled)
 
 
