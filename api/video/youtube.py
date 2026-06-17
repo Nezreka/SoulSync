@@ -164,12 +164,13 @@ def register_routes(bp):
                 return jsonify({"success": False, "error": "Channel not found"}), 404
             cid = channel["youtube_id"]
             following = bool(db.channel_watch_state([cid]))
-            if following:   # opening a followed channel → ensure its dates get enriched
-                try:
-                    from core.video.youtube_enrichment import get_youtube_date_enricher
-                    get_youtube_date_enricher().enqueue(cid, channel.get("title"))
-                except Exception:
-                    pass
+            # Opening a channel page → enrich its upload dates in the background
+            # (followed or not — you're looking at it, so you want the years).
+            try:
+                from core.video.youtube_enrichment import get_youtube_date_enricher
+                get_youtube_date_enricher().enqueue(cid, channel.get("title"))
+            except Exception:
+                pass
             # backfill the real avatar onto wished rows (flat listing often omits it)
             if channel.get("avatar_url"):
                 try:
