@@ -989,3 +989,102 @@ def test_wishlist_episode_overview_roundtrips_and_backfills(db):
     assert (1396, 1) in {(t["tmdb_id"], t["season_number"]) for t in db.wishlist_art_backfill_targets()}
     assert db.set_wishlist_episode_overview(1396, 1, 2, "Filled in.") is True
     assert db.set_wishlist_episode_overview(1396, 1, 1, "nope") is False   # won't clobber
+
+
+# ── YouTube channels (bridged onto watchlist/wishlist) ───────────────────────
+
+from database.video_database import youtube_surrogate_id
+
+
+def test_youtube_surrogate_id_is_stable_and_distinct():
+    a = youtube_surrogate_id("UCPlayStation")
+    assert a == youtube_surrogate_id("UCPlayStation")     # deterministic
+    assert a > 0 and a < (1 << 63)                        # fits SQLite INTEGER
+    assert a != youtube_surrogate_id("UCGoodMythical")    # distinct ids → distinct
+
+
+def test_follow_channel_lists_and_hydrates(db):
+    ch = {"youtube_id": "UCPlay", "title": "PlayStation", "avatar_url": "http://a/p.jpg"}
+    assert db.add_channel_to_watchlist(ch) is True
+    chans = db.list_watchlist_channels()
+    assert len(chans) == 1
+    assert chans[0]["youtube_id"] == "UCPlay" and chans[0]["title"] == "PlayStation"
+    assert chans[0]["poster_url"] == "http://a/p.jpg" and chans[0]["video_count"] == 0
+    # hydration
+    assert db.channel_watch_state(["UCPlay", "UCnope"]) == {"UCPlay": True}
+    # idempotent re-follow refreshes title, no duplicate
+    db.add_channel_to_watchlist({"youtube_id": "UCPlay", "title": "PlayStation US"})
+    chans = db.list_watchlist_channels()
+    assert len(chans) == 1 and chans[0]["title"] == "PlayStation US"
+
+
+def test_unfollow_channel_removes_row(db):
+    db.add_channel_to_watchlist({"youtube_id": "UCPlay", "title": "PlayStation"})
+    assert db.remove_channel_from_watchlist("UCPlay") is True
+    assert db.list_watchlist_channels() == []
+    assert db.channel_watch_state(["UCPlay"]) == {}
+
+
+def test_add_videos_groups_under_channel_newest_first(db):
+    ch = {"youtube_id": "UCPlay", "title": "PlayStation", "avatar_url": "http://a/p.jpg"}
+    vids = [
+        {"youtube_id": "v1", "title": "Old Trailer", "published_at": "2023-01-01",
+         "thumbnail_url": "http://t/1.jpg", "description": "older"},
+        {"youtube_id": "v2", "title": "New State of Play", "published_at": "2024-06-01",
+         "thumbnail_url": "http://t/2.jpg", "description": "newer"},
+        {"youtube_id": "v3", "title": "Undated", "thumbnail_url": "http://t/3.jpg"},
+    ]
+    assert db.add_videos_to_wishlist(ch, vids) == 3
+    res = db.query_youtube_wishlist()
+    assert res["pagination"]["total_count"] == 1
+    grp = res["items"][0]
+    assert grp["youtube_id"] == "UCPlay" and grp["title"] == "PlayStation"
+    assert grp["poster_url"] == "http://a/p.jpg" and grp["video_count"] == 3
+    # newest-first; dated before undated
+    assert [v["youtube_id"] for v in grp["videos"]] == ["v2", "v1", "v3"]
+    v2 = grp["videos"][0]
+    assert v2["title"] == "New State of Play" and v2["still_url"] == "http://t/2.jpg"
+    assert v2["overview"] == "newer" and v2["published_at"] == "2024-06-01"
+    assert v2["status"] == "wanted"
+
+
+def test_add_videos_is_idempotent_per_video(db):
+    ch = {"youtube_id": "UCPlay", "title": "PlayStation"}
+    db.add_videos_to_wishlist(ch, [{"youtube_id": "v1", "title": "A"}])
+    db.add_videos_to_wishlist(ch, [{"youtube_id": "v1", "title": "A (updated)"},
+                                   {"youtube_id": "v2", "title": "B"}])
+    grp = db.query_youtube_wishlist()["items"][0]
+    assert grp["video_count"] == 2
+    titles = {v["youtube_id"]: v["title"] for v in grp["videos"]}
+    assert titles == {"v1": "A (updated)", "v2": "B"}
+
+
+def test_youtube_counts_and_removal_scopes(db):
+    a = {"youtube_id": "UCa", "title": "Chan A"}
+    b = {"youtube_id": "UCb", "title": "Chan B"}
+    db.add_videos_to_wishlist(a, [{"youtube_id": "a1", "title": "A1"},
+                                  {"youtube_id": "a2", "title": "A2"}])
+    db.add_videos_to_wishlist(b, [{"youtube_id": "b1", "title": "B1"}])
+    assert db.youtube_wishlist_counts() == {"channel": 2, "video": 3}
+    # remove one video
+    assert db.remove_youtube_from_wishlist("video", "a1") == 1
+    assert db.youtube_wishlist_counts() == {"channel": 2, "video": 2}
+    # remove a whole channel
+    assert db.remove_youtube_from_wishlist("channel", "UCa") == 1   # only a2 left
+    assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
+
+
+def test_youtube_rows_do_not_disturb_tmdb_counts(db):
+    """The bridge must not leak into the existing movie/episode + show/person counts."""
+    db.add_movie_to_wishlist(101, "A Movie", year=2020)
+    db.add_episodes_to_wishlist(202, "A Show", [{"season_number": 1, "episode_number": 1}])
+    db.add_to_watchlist("show", 303, "Watched Show")
+    db.add_channel_to_watchlist({"youtube_id": "UCx", "title": "Chan"})
+    db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "Chan"},
+                              [{"youtube_id": "x1", "title": "X1"}])
+    # existing shapes unchanged
+    assert db.wishlist_counts() == {"movie": 1, "show": 1, "episode": 1, "total": 2}
+    assert db.watchlist_counts() == {"show": 1, "person": 0, "total": 1}
+    # youtube counts live on their own surface
+    assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
+    assert db.list_watchlist_channels()[0]["video_count"] == 1
