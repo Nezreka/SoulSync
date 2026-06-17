@@ -71,21 +71,23 @@
         return null;
     }
     function seasonArt(s) {
-        if (data && data.source === 'tmdb') return s.poster_url || data.poster_url || '';
+        // tmdb + youtube carry direct (already-proxied for yt) art urls on the payload.
+        if (data && (data.source === 'tmdb' || data.source === 'youtube')) return s.poster_url || data.poster_url || '';
         return (s.has_poster && s.id != null) ? '/api/video/poster/season/' + s.id
             : (data && data.has_poster ? '/api/video/poster/show/' + data.id : '');
     }
     // Source-aware billboard art: library items proxy through /api/video; tmdb
-    // (preview) items use the direct image URLs in the payload.
+    // (preview) + youtube items use the (proxied) image URLs in the payload.
     function bbBackdrop(d) {
-        if (d.source === 'tmdb') return d.backdrop_url || d.poster_url || '';
+        if (d.source === 'tmdb' || d.source === 'youtube') return d.backdrop_url || d.poster_url || '';
         var art = '/' + d.kind + '/' + d.id;
         return d.has_backdrop ? '/api/video/backdrop' + art : (d.has_poster ? '/api/video/poster' + art : '');
     }
     function bbPoster(d) {
         // The offscreen poster is canvas-sampled for the accent — must be
-        // same-origin, so tmdb (preview) posters go through our image proxy.
+        // same-origin, so tmdb posters proxy; youtube urls are already proxied.
         if (d.source === 'tmdb') return d.poster_url ? proxied(d.poster_url) : '';
+        if (d.source === 'youtube') return d.poster_url || '';
         return d.has_poster ? '/api/video/poster/' + d.kind + '/' + d.id : '';
     }
     function proxied(url) {
@@ -161,6 +163,21 @@
         if (tl) { tl.textContent = d.tagline || ''; tl.hidden = !d.tagline; }
 
         var meta = [];
+        if (d.source === 'youtube') {
+            meta.push('<span class="vd-status vd-status--yt">YouTube</span>');
+            var yc = window.VideoYoutube;
+            var subs = yc && yc.compactCount(d.subscriber_count); if (subs) meta.push('<span>' + subs + ' subscribers</span>');
+            if (d.video_count != null) meta.push('<span>' + esc(d.video_count) + ' videos</span>');
+            var views = yc && yc.compactCount(d.view_count); if (views) meta.push('<span>' + views + ' views</span>');
+            if (d.handle) meta.push('<span>' + esc(d.handle) + '</span>');
+            var mm = q('[data-vd-meta]'); if (mm) mm.innerHTML = meta.join('');
+            renderActions(d);
+            var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
+            var gg = q('[data-vd-genres]');
+            if (gg) gg.innerHTML = (d.genres || []).slice(0, 8).map(function (gn) { return '<span class="vd-genre">' + esc(gn) + '</span>'; }).join('');
+            renderRatings(d); renderCrewLine(d); renderNextEpisode(d); renderCast(d);
+            return;
+        }
         if (d.source === 'tmdb') {
             meta.push('<span class="vd-status vd-status--preview">Preview</span>');
         } else if (d.kind === 'show') {
@@ -317,6 +334,15 @@
     function renderActions(d) {
         var a = q('[data-vd-actions]');
         if (!a) return;
+        if (d.source === 'youtube') {
+            var on = !!d.following;
+            a.innerHTML =
+                '<button class="vd-yt-follow' + (on ? ' vd-yt-follow--on' : '') + '" type="button" data-vd-act="yt-follow">' +
+                    (on ? '✓ Following' : '+ Follow') + '</button>' +
+                '<a class="vd-yt-link" href="https://www.youtube.com/channel/' + esc(d.id) +
+                    '" target="_blank" rel="noopener">Open on YouTube ↗</a>';
+            return;
+        }
         // The watchlist eye applies only to airing shows (movies + ended shows are
         // terminal — they get acquisition, not a "watch for new" follow).
         var isAiringShow = d.kind === 'show' && d.tmdb_id && (!window.VideoGet || VideoGet.isAiring(d.status));
@@ -905,7 +931,30 @@
     }
 
     // ── episodes ──────────────────────────────────────────────────────────────
+    // A YouTube video as an "episode": still + title + date, a Wish toggle instead
+    // of owned/missing, expand → full description (lazy).
+    function ytEpisodeRow(ep) {
+        var key = selectedSeason + '_' + ep.episode_number;
+        var still = ep.still_url
+            ? '<img class="vd-ep-still" src="' + esc(ep.still_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
+            : '';
+        var meta = [];
+        if (ep.air_date) meta.push(fmtDate(ep.air_date));
+        var wished = !!ep.owned;
+        return '<div class="vd-ep vd-ep--yt" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
+            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
+            '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
+            esc(ep.title || 'Untitled') + '</span>' +
+            (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
+            (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
+            '<button class="vd-yt-wish' + (wished ? ' vd-yt-wish--on' : '') + '" type="button" data-vd-yt-wish="' +
+            esc(ep.youtube_id) + '">' + (wished ? '✓ Wished' : '+ Wish') + '</button>' +
+            '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
+            '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
+    }
+
     function episodeRow(ep) {
+        if (data && data.source === 'youtube') return ytEpisodeRow(ep);
         var owned = ep.owned ? 'vd-ep--owned' : 'vd-ep--missing';
         var meta = [];
         var rt = runtimeLabel(ep.runtime_minutes); if (rt) meta.push(rt);
@@ -943,6 +992,26 @@
         }
     }
     function loadEpisodeExtra(key, panel) {
+        // YouTube: the row carries the video id → fetch its full metadata.
+        if (data && data.source === 'youtube') {
+            var row = q('[data-vd-ep-key="' + key + '"]');
+            var vid = row && row.getAttribute('data-vd-yt-vid');
+            if (!vid) { panel.innerHTML = '<div class="vd-ep-extra-empty">No details.</div>'; return; }
+            panel.innerHTML = '<div class="vd-ep-extra-empty">Loading…</div>';
+            fetch('/api/video/youtube/video/' + encodeURIComponent(vid), { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var v = (d && d.video) || {};
+                    var yc = window.VideoYoutube, stats = [];
+                    var lk = yc && yc.compactCount(v.like_count); if (lk) stats.push(lk + ' likes');
+                    var vw = yc && yc.compactCount(v.view_count); if (vw) stats.push(vw + ' views');
+                    panel.innerHTML = '<div class="vd-ep-extra-body">' +
+                        (stats.length ? '<div class="vd-ep-extra-gh">' + esc(stats.join(' · ')) + '</div>' : '') +
+                        '<p class="vd-ep-extra-ov">' + esc(v.description || 'No description.') + '</p></div>';
+                })
+                .catch(function () { panel.innerHTML = '<div class="vd-ep-extra-empty">No details.</div>'; });
+            return;
+        }
         var tmdb = data && data.tmdb_id;
         var parts = key.split('_');
         if (!tmdb) { panel.innerHTML = '<div class="vd-ep-extra-empty">No extra info.</div>'; return; }
@@ -1227,12 +1296,188 @@
             .catch(function () { showEpSyncing(false); });
     }
 
+    // ── YouTube channel (rendered through the show pipeline) ──────────────────
+    // A channel = a "show": upload YEAR is a season, video an episode. Renders
+    // into the SHOW container (currentKind='show') with d.kind='channel' +
+    // d.source='youtube' driving every branch above. All TMDB-only sections
+    // auto-hide on empty channel data.
+    var ytVideoMap = {};   // youtube_id -> raw video (for wish add, main grid + playlists)
+
+    function ytProx(u) { return (window.VideoYoutube && u) ? VideoYoutube.img(u) : (u || ''); }
+
+    function ytToShow(resp) {
+        var ch = resp.channel || {};
+        var byYear = {};
+        ytVideoMap = {};
+        (ch.videos || []).forEach(function (v) {
+            ytVideoMap[v.youtube_id] = v;
+            var yr = (v.published_at && /^\d{4}/.test(v.published_at)) ? parseInt(v.published_at.slice(0, 4), 10) : 0;
+            (byYear[yr] = byYear[yr] || []).push(v);
+        });
+        var years = Object.keys(byYear).map(Number).sort(function (a, b) { return b - a; });
+        var seasons = years.map(function (yr) {
+            var vids = byYear[yr], poster = '';
+            for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { poster = ytProx(vids[k].thumbnail_url); break; } }
+            var eps = vids.map(function (v, i) {
+                return { episode_number: i + 1, title: v.title, overview: v.description || '',
+                    air_date: v.published_at, owned: !!v.wished, has_still: false,
+                    still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id };
+            });
+            var wishedN = eps.filter(function (e) { return e.owned; }).length;
+            return { season_number: yr, title: yr ? String(yr) : 'Undated', poster_url: poster || ytProx(ch.avatar_url),
+                episode_owned: wishedN, episode_total: eps.length, episodes: eps };
+        });
+        return { kind: 'channel', source: 'youtube', id: ch.youtube_id, title: ch.title || 'Channel',
+            overview: ch.description || '', backdrop_url: ytProx(ch.banner_url), has_backdrop: !!ch.banner_url,
+            poster_url: ytProx(ch.avatar_url), has_poster: !!ch.avatar_url, genres: ch.tags || [], handle: ch.handle,
+            subscriber_count: ch.subscriber_count, video_count: ch.video_count, view_count: ch.view_count,
+            following: !!resp.following, _channel: ch, seasons: seasons, season_count: seasons.length,
+            episode_total: (ch.videos || []).length, episode_owned: 0 };
+    }
+
+    function loadChannel(id) {
+        currentKind = 'show'; currentSource = 'youtube';   // render into the show container
+        if (currentId !== id) artAttemptedFor = null;
+        currentId = id;
+        if (!root()) return;
+        showLoading(true); resetExtras(); showEpSyncing(false);
+        ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
+        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        ytResetPlaylists();
+        fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '?limit=90', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (resp) {
+                showLoading(false);
+                if (!resp || !resp.success) { setText('[data-vd-title]', 'Channel unavailable'); return; }
+                if (currentId !== id) return;
+                data = ytToShow(resp); menuOpen = false; missingOnly = false;
+                selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
+                var mt = q('[data-vd-missing-toggle]');
+                if (mt) { mt.hidden = !data.seasons.length; mt.classList.remove('vd-missing-toggle--on'); }
+                renderBillboard(data); renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
+                var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
+                if (sub) sub.scrollTop = 0;
+                ytLoadPlaylists(id);
+            })
+            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
+    }
+
+    function ytFindEp(id) {
+        if (!data || !data.seasons) return null;
+        for (var i = 0; i < data.seasons.length; i++) {
+            var es = data.seasons[i].episodes;
+            for (var j = 0; j < es.length; j++) if (es[j].youtube_id === id) return es[j];
+        }
+        return null;
+    }
+
+    function toggleYtWish(btn) {
+        var yc = window.VideoYoutube; if (!yc) return;
+        var id = btn.getAttribute('data-vd-yt-wish');
+        var on = btn.classList.contains('vd-yt-wish--on');
+        btn.disabled = true;
+        var setOn = function (val) {
+            btn.disabled = false;
+            if (ytVideoMap[id]) ytVideoMap[id].wished = val;
+            var r0 = root(), btns = r0 ? r0.querySelectorAll('[data-vd-yt-wish="' + id + '"]') : [];
+            for (var i = 0; i < btns.length; i++) {
+                btns[i].classList.toggle('vd-yt-wish--on', val);
+                btns[i].textContent = val ? '✓ Wished' : '+ Wish';
+            }
+            var ep = ytFindEp(id); if (ep) { ep.owned = val; renderSeasonNav(); }
+            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+        };
+        if (on) yc.removeWish('video', id).then(function (d) { setOn(!(d && d.success)); }).catch(function () { btn.disabled = false; });
+        else {
+            var ch = (data && data._channel) || {};
+            yc.addVideos({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url },
+                [ytVideoMap[id] || { youtube_id: id, title: '' }])
+                .then(function (d) { setOn(!!(d && d.success)); if (d && d.success && typeof showToast === 'function') showToast('Added to wishlist', 'success'); })
+                .catch(function () { btn.disabled = false; });
+        }
+    }
+
+    function toggleYtFollow() {
+        var yc = window.VideoYoutube; if (!yc || !data) return;
+        var ch = data._channel || {}, on = data.following;
+        if (on) yc.unfollow(data.id).then(function () { data.following = false; renderActions(data);
+            document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); }).catch(function () { /* ignore */ });
+        else yc.follow({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url }).then(function (d) {
+            if (d && d.success) {
+                if (typeof showToast === 'function') showToast('Following · ' + (d.added_videos || 0) + ' videos added', 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
+                loadChannel(data.id);   // reload so the now-wished videos reflect
+            }
+        }).catch(function () { /* ignore */ });
+    }
+
+    // playlists as collapsible rows below the episodes (channel-only section)
+    function ytResetPlaylists() {
+        var sec = q('[data-vd-yt-pl-section]'), host = q('[data-vd-yt-playlists]');
+        if (host) host.innerHTML = '';
+        if (sec) sec.hidden = true;
+    }
+    function ytPlaylistRow(p) {
+        var thumb = p.thumbnail_url
+            ? '<img class="vc-pl-thumb" src="' + esc(ytProx(p.thumbnail_url)) + '" alt="" loading="lazy">'
+            : '<span class="vc-pl-thumb vc-pl-thumb--none">▶</span>';
+        var n = p.video_count != null ? p.video_count + ' video' + (p.video_count === 1 ? '' : 's') : '';
+        return '<div class="vc-pl vc-pl--collapsed" data-vc-pl="' + esc(p.playlist_id) + '">' +
+            '<div class="vc-pl-hd" data-vd-yt-pl-toggle="' + esc(p.playlist_id) + '">' + thumb +
+                '<div class="vc-pl-meta"><span class="vc-pl-title">' + esc(p.title) + '</span>' +
+                (n ? '<span class="vc-pl-count">' + n + '</span>' : '') + '</div>' +
+                '<span class="vc-pl-chev" aria-hidden="true">▾</span></div>' +
+            '<div class="vc-pl-vids" data-vd-yt-pl-vids="' + esc(p.playlist_id) + '"></div></div>';
+    }
+    function ytLoadPlaylists(cid) {
+        var sec = q('[data-vd-yt-pl-section]'), host = q('[data-vd-yt-playlists]');
+        if (!host) return;
+        fetch('/api/video/youtube/playlists/' + encodeURIComponent(cid), { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var pls = (d && d.playlists) || [];
+                if (!pls.length || currentId !== cid) return;
+                host.innerHTML = pls.map(ytPlaylistRow).join('');
+                if (sec) sec.hidden = false;
+            })
+            .catch(function () { /* best-effort */ });
+    }
+    function ytPlVideoCard(v) {
+        ytVideoMap[v.youtube_id] = v;
+        var thumb = v.thumbnail_url
+            ? '<img src="' + esc(ytProx(v.thumbnail_url)) + '" alt="" loading="lazy">' : '';
+        return '<div class="vd-yt-plvid">' +
+            '<a class="vd-yt-plvid-thumb" href="https://www.youtube.com/watch?v=' + esc(v.youtube_id) +
+                '" target="_blank" rel="noopener" data-vd-ext>' + thumb + '<span class="vd-yt-plvid-play">▶</span></a>' +
+            '<div class="vd-yt-plvid-title" title="' + esc(v.title) + '">' + esc(v.title || 'Untitled') + '</div>' +
+            '<button class="vd-yt-wish' + (v.wished ? ' vd-yt-wish--on' : '') + '" type="button" data-vd-yt-wish="' +
+                esc(v.youtube_id) + '">' + (v.wished ? '✓' : '+') + '</button></div>';
+    }
+    function toggleYtPlaylist(el) {
+        var pid = el.getAttribute('data-vd-yt-pl-toggle');
+        var blk = el.closest('.vc-pl'); if (!blk) return;
+        var opened = blk.classList.toggle('vc-pl--collapsed') === false;
+        if (!opened) return;
+        var host = q('[data-vd-yt-pl-vids="' + pid + '"]');
+        if (!host || host.getAttribute('data-loaded')) return;
+        host.setAttribute('data-loaded', '1');
+        host.innerHTML = '<div class="vc-pl-loading">Loading…</div>';
+        fetch('/api/video/youtube/playlist/' + encodeURIComponent(pid), { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var vids = (d && d.videos) || [];
+                host.innerHTML = vids.length ? vids.map(ytPlVideoCard).join('') : '<div class="vc-pl-loading">No videos.</div>';
+            })
+            .catch(function () { host.removeAttribute('data-loaded'); host.innerHTML = ''; });
+    }
+
     // ── events ────────────────────────────────────────────────────────────────
     function onOpen(e) {
         if (!e || !e.detail) return;
         var src = e.detail.source || 'library';
         if (e.detail.kind === 'movie') loadMovie(e.detail.id, src);
         else if (e.detail.kind === 'show') loadShow(e.detail.id, src);
+        else if (e.detail.kind === 'channel') loadChannel(e.detail.id);
         // 'person' is handled by video-person.js (same event).
     }
 
@@ -1277,6 +1522,12 @@
             if (body) { var open = body.classList.toggle('vd-review-body--open'); revMore.textContent = open ? 'Read less' : 'Read more'; }
             return;
         }
+        // YouTube channel interactions (rendered in the show container)
+        if (e.target.closest('[data-vd-ext]')) return;   // let watch links open
+        var ytWish = e.target.closest('[data-vd-yt-wish]');
+        if (ytWish && r.contains(ytWish)) { e.preventDefault(); toggleYtWish(ytWish); return; }
+        var ytPl = e.target.closest('[data-vd-yt-pl-toggle]');
+        if (ytPl && r.contains(ytPl)) { toggleYtPlaylist(ytPl); return; }
         var epRow = e.target.closest('[data-vd-ep-key]');
         if (epRow && r.contains(epRow)) { toggleEpisode(epRow); return; }
         var seasonBtn = e.target.closest('[data-vd-season]');
@@ -1290,6 +1541,7 @@
             var which = act.getAttribute('data-vd-act');
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'missing') toggleMissing();
+            else if (which === 'yt-follow') toggleYtFollow();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
             return;
         }
