@@ -82,8 +82,11 @@
             : 'data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '"';
         var hue = hueOf(sh.title);
         var total = sh.wanted || 0;
-        var img = sh.poster_url
-            ? '<img class="wl-orb-img" src="' + esc(sh.poster_url) + '" alt="" ' +
+        // Channel avatar can be missing (flat listing doesn't always surface it) —
+        // fall back to the newest video's thumbnail so the orb is never blank.
+        var poster = sh.poster_url || (yt && (sh.seasons || [])[0] ? sh.seasons[0].poster_url : null);
+        var img = poster
+            ? '<img class="wl-orb-img" src="' + esc(poster) + '" alt="" ' +
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
@@ -113,7 +116,7 @@
         // --orb-hue on the GROUP so the music orb styles + my cinematic-expand
         // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
-            (sh.poster_url ? ";--vwsh-poster:url('" + esc(sh.poster_url) + "')" : '');
+            (poster ? ";--vwsh-poster:url('" + esc(poster) + "')" : '');
         var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
         // Header is a 3-column row that FLANKS the poster: synopsis (left) · poster
         // (middle) · cast (right). When collapsed (or no data) the side columns are

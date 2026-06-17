@@ -1975,6 +1975,22 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def set_wishlist_channel_poster(self, channel_id, poster_url) -> int:
+        """Refresh the channel avatar on all of a channel's wished video rows — used
+        to backfill avatars that flat listing didn't surface (channel page resolves
+        the real avatar). Returns rows updated."""
+        if not poster_url or not channel_id:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET poster_url=? WHERE kind='video' AND parent_source_id=?",
+                (poster_url, str(channel_id)))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()

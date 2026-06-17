@@ -1144,3 +1144,16 @@ def test_upgrade_from_pre_source_schema(tmp_path):
     assert db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "Chan"},
                                      [{"youtube_id": "x1", "title": "X1"}]) == 1
     assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
+
+
+def test_set_wishlist_channel_poster_backfills_avatar(db):
+    # videos added without an avatar (flat listing omitted it) → poster_url null
+    db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"},
+                              [{"youtube_id": "a", "title": "A", "published_at": "2024-01-01"},
+                               {"youtube_id": "b", "title": "B", "published_at": "2024-02-01"}])
+    grp = db.query_youtube_wishlist()["items"][0]
+    assert not grp["poster_url"]
+    # backfilling the resolved avatar fills every row → the orb gets its poster
+    assert db.set_wishlist_channel_poster("UCx", "http://yt/avatar.jpg") == 2
+    grp = db.query_youtube_wishlist()["items"][0]
+    assert grp["poster_url"] == "http://yt/avatar.jpg"
