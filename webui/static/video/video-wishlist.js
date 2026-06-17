@@ -86,8 +86,12 @@
                 var t = e.title || ('Episode ' + e.episode_number);
                 var st = STATUS[e.status] ? e.status : 'wanted';
                 var date = fmtDate(e.air_date);
-                // #3: status dot + air date make the episode line actually informative
-                return '<div class="wl-tile-track">' +
+                // richer episode row: still thumbnail + status dot + air date
+                var thumb = e.still_url
+                    ? '<span class="vwsh-ep-thumb"><img src="' + esc(e.still_url) + '" alt="" loading="lazy" ' +
+                      'onerror="this.parentNode.classList.add(\'vwsh-ep-thumb--none\')"></span>'
+                    : '<span class="vwsh-ep-thumb vwsh-ep-thumb--none"></span>';
+                return '<div class="wl-tile-track">' + thumb +
                     '<span class="vwsh-ep-dot vwsh-ep-dot--' + st + '" title="' + STATUS[st][0] + '"></span>' +
                     '<span class="wl-tile-track-name">E' + e.episode_number + ' · ' + esc(t) + '</span>' +
                     (date ? '<span class="vwsh-ep-date">' + esc(date) + '</span>' : '') +
@@ -111,11 +115,13 @@
         // backdrop (--vwsh-poster) both resolve; poster bleeds in only when expanded.
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
             (sh.poster_url ? ";--vwsh-poster:url('" + esc(sh.poster_url) + "')" : '');
+        var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
         return '<div class="wl-orb-group" data-vwsh-group style="' + gstyle + '">' +
             '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
             '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
-            '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb>' +
+            '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb style="--vwsh-prog:' + prog + '">' +
                 '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
+                '<div class="vwsh-prog"></div>' +
             '</div>' +
             '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
             '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +

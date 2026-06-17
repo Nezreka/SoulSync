@@ -2530,6 +2530,27 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-sort:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
 .vwsh-sort option { background: #16161d; color: #fff; }
 
+/* video-only: square-ish bubbles (the music orbs are circles) */
+.vwsh-nebula .wl-orb, .vwsh-nebula .wl-orb-glow, .vwsh-nebula .wl-orb-img,
+.vwsh-nebula .wl-orb-initials, .vwsh-nebula .wl-orb-ring { border-radius: 24%; }
+
+/* #4 acquisition progress — a thin bar across the bubble bottom (done ÷ wanted) */
+.vwsh-nebula .vwsh-prog { position: absolute; left: 9%; right: 9%; bottom: 6px; height: 4px; z-index: 3;
+    border-radius: 3px; pointer-events: none;
+    background: linear-gradient(90deg, rgb(var(--accent-rgb, 29, 185, 84)) calc(var(--vwsh-prog, 0) * 100%),
+        rgba(255, 255, 255, 0.16) calc(var(--vwsh-prog, 0) * 100%));
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
+
+/* richer episode rows: still thumbnail + roomier expanded tile */
+.vwsh-nebula .wl-album-tile.tile-expanded { width: 320px; }
+.vwsh-nebula .wl-tile-track { gap: 8px; padding: 5px 8px; }
+.vwsh-nebula .vwsh-ep-thumb { flex-shrink: 0; width: 52px; height: 30px; border-radius: 4px; overflow: hidden;
+    background: #16161d; border: 1px solid rgba(255, 255, 255, 0.08); }
+.vwsh-nebula .vwsh-ep-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vwsh-nebula .vwsh-ep-thumb--none { background: repeating-linear-gradient(135deg,
+    rgba(255, 255, 255, 0.04) 0 6px, rgba(255, 255, 255, 0.07) 6px 12px); }
+.vwsh-nebula .vwsh-ep-thumb--none img { display: none; }
+
 /* status pills + remove button */
 .vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
 .vwsh-st--wanted { background: rgba(var(--accent-rgb, 29, 185, 84), 0.16); color: rgb(var(--accent-rgb, 29, 185, 84)); }

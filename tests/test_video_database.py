@@ -945,3 +945,12 @@ def test_wishlist_query_sort(db):
     db.add_movie_to_wishlist(10, "Banana"); db.add_movie_to_wishlist(11, "Apple")
     m = [x["title"] for x in db.query_wishlist("movie", sort="title")["items"]]
     assert m == ["Apple", "Banana"]
+
+
+def test_wishlist_episode_still_roundtrips(db):
+    db.add_episodes_to_wishlist(1396, "BB", [
+        {"season_number": 1, "episode_number": 1, "title": "Pilot", "still_url": "https://img/e1.jpg"},
+        {"season_number": 1, "episode_number": 2}])              # no still
+    eps = db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"]
+    by = {e["episode_number"]: e for e in eps}
+    assert by[1]["still_url"] == "https://img/e1.jpg" and by[2]["still_url"] is None
