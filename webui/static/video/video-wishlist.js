@@ -53,53 +53,68 @@
             '</div></div>';
     }
 
-    // ── show reel (poster + per-season film strips of episode cells) ──────────
-    function reelCard(sh) {
+    // ── show orb (the "Nebula": show→artist, season→album, episode→track) ─────
+    function initials(s) {
+        var w = String(s || '').replace(/[^A-Za-z0-9 ]/g, '').split(' ').filter(Boolean);
+        var i = w.slice(0, 2).map(function (x) { return x[0]; }).join('');
+        return (i || String(s || '?').slice(0, 2)).toUpperCase();
+    }
+    function orbSize(n) { return n >= 10 ? 'orb-lg' : n >= 4 ? 'orb-md' : 'orb-sm'; }
+
+    function nebulaOrb(sh, idx) {
         var src = sh.library_id != null ? 'library' : 'tmdb';
         var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
-        var hook = ' data-vwsh-open-show="1" data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '"';
-        var poster = sh.poster_url
-            ? '<img class="vwsh-reel-img" src="' + esc(sh.poster_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
-            : '<div class="vwsh-reel-ph">📺</div>';
-        var done = sh.done ? ' · ' + sh.done + ' done' : '';
-        var strips = (sh.seasons || []).map(function (se) {
-            var cells = (se.episodes || []).map(function (e) {
-                var st = STATUS[e.status] ? e.status : 'wanted';
+        var hue = hueOf(sh.title);
+        var total = sh.wanted || 0;
+        var img = sh.poster_url
+            ? '<img class="wl-orb-img" src="' + esc(sh.poster_url) + '" alt="" ' +
+              'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
+            : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
+        var tiles = (sh.seasons || []).map(function (se) {
+            var n = se.episodes.length;
+            var art = sh.poster_url
+                ? '<div class="wl-album-tile-art"><img src="' + esc(sh.poster_url) + '" alt=""></div>'
+                : '<div class="wl-album-tile-art"><div class="wl-album-tile-fallback">S' + se.season_number + '</div></div>';
+            var tracks = (se.episodes || []).map(function (e) {
                 var t = e.title || ('Episode ' + e.episode_number);
-                return '<div class="vwsh-cell vwsh-cell--' + st + '" title="S' + se.season_number + '·E' + e.episode_number + ' — ' + esc(t) + '">' +
-                    '<span class="vwsh-cell-num">E' + e.episode_number + '</span>' +
-                    '<span class="vwsh-cell-title">' + esc(t) + '</span>' +
-                    rmBtn('episode', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '"') +
+                return '<div class="wl-tile-track">' +
+                    '<span class="wl-tile-track-name">E' + e.episode_number + ' · ' + esc(t) + '</span>' +
+                    '<button class="wl-tile-track-remove" type="button" data-vwsh-rm="episode" ' +
+                    'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
                     '</div>';
             }).join('');
-            return '<div class="vwsh-strip">' +
-                '<div class="vwsh-strip-label">S' + se.season_number +
-                    rmBtn('season', ' data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '"') +
+            return '<div class="wl-album-tile" data-vwsh-tile>' + art +
+                '<div class="wl-album-tile-info">' +
+                    '<div class="wl-album-tile-name">Season ' + se.season_number + '</div>' +
+                    '<div class="wl-album-tile-count">' + n + ' episode' + (n === 1 ? '' : 's') + '</div>' +
                 '</div>' +
-                '<div class="vwsh-strip-track">' + cells + '</div>' +
+                '<span class="wl-album-tile-badge">' + n + '</span>' +
+                '<button class="wl-album-tile-remove" type="button" data-vwsh-rm="season" ' +
+                'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Remove season">&#10005;</button>' +
+                '<div class="wl-tile-tracks">' + tracks + '</div>' +
             '</div>';
         }).join('');
-        return '<div class="vwsh-reel" style="--vwsh-h:' + hueOf(sh.title) + '">' +
-            '<div class="vwsh-reel-poster"' + hook + '>' + poster + '</div>' +
-            '<div class="vwsh-reel-body">' +
-                '<div class="vwsh-reel-head">' +
-                    '<div class="vwsh-reel-titles"' + hook + '>' +
-                        '<span class="vwsh-reel-title" title="' + esc(sh.title) + '">' + esc(sh.title) + '</span>' +
-                        '<span class="vwsh-reel-meta">' + sh.wanted + ' wanted' + done + '</span>' +
-                    '</div>' +
-                    rmBtn('show', ' data-tmdb="' + esc(sh.tmdb_id) + '"') +
-                '</div>' +
-                '<div class="vwsh-strips">' + strips + '</div>' +
+        var eps = total + ' episode' + (total === 1 ? '' : 's');
+        return '<div class="wl-orb-group" data-vwsh-group style="animation-delay:' + Math.min(idx * 45, 700) + 'ms">' +
+            '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
+            '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
+            '<div class="wl-orb ' + orbSize(total) + '" style="--orb-hue:' + hue + '" data-vwsh-orb>' +
+                '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
             '</div>' +
+            '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
+            '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
+            '<div class="wl-orb-expanded"><div class="wl-album-fan">' + tiles + '</div></div>' +
         '</div>';
     }
 
     function render(items) {
         var grid = $('[data-vwsh-grid]'); if (!grid) return;
         var shows = state.tab === 'show';
-        grid.classList.toggle('vwsh-grid--shows', shows);
+        grid.classList.toggle('wl-nebula-field', shows);
         grid.classList.toggle('vwsh-grid--movies', !shows);
-        grid.innerHTML = items.map(shows ? reelCard : movieCard).join('');
+        grid.innerHTML = shows
+            ? items.map(function (sh, i) { return nebulaOrb(sh, i); }).join('')
+            : items.map(movieCard).join('');
     }
 
     // ── counts / badges / pager ───────────────────────────────────────────────
@@ -200,7 +215,12 @@
                           id: parseInt(open.getAttribute('data-vwsh-id'), 10),
                           source: open.getAttribute('data-vwsh-src') || 'tmdb' },
             }));
+            return;
         }
+        var tile = e.target.closest('[data-vwsh-tile]');
+        if (tile) { tile.classList.toggle('tile-expanded'); return; }   // season → episodes
+        var orb = e.target.closest('[data-vwsh-orb]');
+        if (orb) { var g = orb.closest('.wl-orb-group'); if (g) g.classList.toggle('expanded'); }   // show → seasons
     }
 
     function wire() {

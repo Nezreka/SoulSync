@@ -2485,61 +2485,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-movie-title { display: block; font-size: 13.5px; font-weight: 700; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vwsh-movie-meta { display: block; font-size: 11.5px; color: rgba(255, 255, 255, 0.45); margin-top: 2px; }
 
-/* shows = filmstrip reels: poster + per-season film strips of episode cells */
-.vwsh-grid--shows { display: flex; flex-direction: column; gap: 14px; }
-.vwsh-reel { position: relative; display: flex; gap: 16px; padding: 16px; border-radius: 16px; overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.07); background: rgba(255, 255, 255, 0.02); }
-.vwsh-reel::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
-    background: radial-gradient(120% 110% at 0% 0%, hsl(var(--vwsh-h, 230) 70% 45% / 0.12), transparent 55%); }
-.vwsh-reel > * { position: relative; z-index: 1; }
-.vwsh-reel-poster { width: 92px; flex-shrink: 0; aspect-ratio: 2 / 3; border-radius: 10px; overflow: hidden; cursor: pointer;
-    background: #16161d; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
-    transition: transform 0.18s ease, box-shadow 0.18s ease; }
-.vwsh-reel-poster:hover { transform: translateY(-3px); box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55), 0 0 22px hsl(var(--vwsh-h, 230) 70% 50% / 0.4); }
-.vwsh-reel-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-reel-ph { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 30px; opacity: 0.4; }
-.vwsh-reel-body { flex: 1; min-width: 0; }
-.vwsh-reel-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-.vwsh-reel-titles { min-width: 0; cursor: pointer; }
-.vwsh-reel-title { display: block; font-size: 17px; font-weight: 800; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vwsh-reel-titles:hover .vwsh-reel-title { color: hsl(var(--vwsh-h, 230) 80% 76%); }
-.vwsh-reel-meta { display: block; font-size: 12.5px; color: rgba(255, 255, 255, 0.45); margin-top: 3px; }
-.vwsh-reel-head .vwsh-rm { margin-left: auto; }
-
-.vwsh-strips { display: flex; flex-direction: column; gap: 12px; }
-.vwsh-strip { display: flex; align-items: stretch; gap: 10px; }
-.vwsh-strip-label { flex-shrink: 0; align-self: center; display: inline-flex; align-items: center; gap: 4px;
-    min-width: 30px; font-size: 12px; font-weight: 800; color: rgba(255, 255, 255, 0.6); }
-.vwsh-strip-label .vwsh-rm { width: 20px; height: 20px; font-size: 13px; opacity: 0; }
-.vwsh-strip:hover .vwsh-strip-label .vwsh-rm { opacity: 1; }
-
-/* the film band — dark with sprocket-hole borders top + bottom */
-.vwsh-strip-track { position: relative; flex: 1; min-width: 0; display: flex; gap: 5px; overflow-x: auto;
-    padding: 12px 10px; border-radius: 7px; background: #0b0b0e; border: 1px solid rgba(255, 255, 255, 0.06); scrollbar-width: thin; }
-.vwsh-strip-track::before, .vwsh-strip-track::after { content: ''; position: absolute; left: 8px; right: 8px; height: 6px;
-    pointer-events: none; background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.16) 0 6px, transparent 6px 13px); }
-.vwsh-strip-track::before { top: 3px; }
-.vwsh-strip-track::after { bottom: 3px; }
-.vwsh-strip-track::-webkit-scrollbar { height: 6px; }
-.vwsh-strip-track::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 3px; }
-
-/* episode = a film cell; hover widens it to reveal the title */
-.vwsh-cell { position: relative; flex: 0 0 auto; width: 46px; height: 64px; border-radius: 4px;
-    display: flex; align-items: center; gap: 7px; padding: 0 9px; overflow: hidden;
-    background: linear-gradient(160deg, hsl(var(--vwsh-h, 230) 58% 30%), hsl(var(--vwsh-h, 230) 52% 15%));
-    border: 1px solid hsl(var(--vwsh-h, 230) 60% 50% / 0.35);
-    transition: width 0.22s cubic-bezier(0.2, 0.7, 0.2, 1), transform 0.15s ease, box-shadow 0.15s ease; }
-.vwsh-cell:hover { width: 170px; transform: translateY(-2px); z-index: 3; box-shadow: 0 10px 24px hsl(var(--vwsh-h, 230) 70% 40% / 0.5); }
-.vwsh-cell-num { flex-shrink: 0; font-size: 13px; font-weight: 900; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
-.vwsh-cell-title { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.92); white-space: nowrap;
-    opacity: 0; overflow: hidden; text-overflow: ellipsis; transition: opacity 0.18s ease 0.05s; }
-.vwsh-cell:hover .vwsh-cell-title { opacity: 1; }
-.vwsh-cell .vwsh-rm { position: absolute; top: 3px; right: 3px; width: 18px; height: 18px; font-size: 13px;
-    opacity: 0; background: rgba(0, 0, 0, 0.5); }
-.vwsh-cell:hover .vwsh-rm { opacity: 1; }
-.vwsh-cell--downloading { background: linear-gradient(160deg, #2a4a8f, #16243f); border-color: rgba(100, 149, 237, 0.5); }
-.vwsh-cell--downloaded { background: linear-gradient(160deg, #1d6b3f, #0e3320); border-color: rgba(34, 197, 94, 0.5); }
-.vwsh-cell--failed { background: linear-gradient(160deg, #7a2b2b, #3a1414); border-color: rgba(248, 113, 113, 0.5); }
+/* shows = the "Nebula" (reuses the music wl-* orb/album/track design).
+   Only the show-remove button is video-specific. */
+.wl-nebula-field .wl-orb-remove { position: absolute; top: 0; right: 0; z-index: 6; width: 22px; height: 22px;
+    border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(0, 0, 0, 0.62);
+    color: rgba(255, 255, 255, 0.7); font-size: 11px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.wl-nebula-field .wl-orb-group:hover .wl-orb-remove,
+.wl-nebula-field .wl-orb-group.expanded .wl-orb-remove { opacity: 1; }
+.wl-nebula-field .wl-orb-remove:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
 
 /* status pills + remove button */
 .vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
@@ -2563,12 +2517,4 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @media (max-width: 900px) {
     .vwsh-head, .vwsh-toolbar, .vwsh-body { padding-left: 18px; padding-right: 18px; }
     .vwsh-grid--movies { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
-    .vwsh-reel { gap: 12px; padding: 12px; }
-    .vwsh-reel-poster { width: 64px; }
-    .vwsh-cell:hover { width: 144px; }
-}
-@media (hover: none) {
-    .vwsh-cell { width: 150px; }
-    .vwsh-cell-title { opacity: 1; }
-    .vwsh-cell .vwsh-rm, .vwsh-strip-label .vwsh-rm { opacity: 1; }
 }
