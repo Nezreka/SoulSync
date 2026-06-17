@@ -195,16 +195,28 @@
     }
 
     // ── featured "next up" billboard ──────────────────────────────────────────
-    function featured(d) {
-        var eps = (d.episodes || []).slice();
-        eps.sort(function (a, b) {
-            if (a.air_date !== b.air_date) return a.air_date < b.air_date ? -1 : 1;
-            var ma = airMins(a.airs_time), mb = airMins(b.airs_time);
-            if (ma == null && mb == null) return 0;
-            if (ma == null) return 1; if (mb == null) return -1;
-            return ma - mb;
-        });
-        return eps[0] || null;
+    // Air datetime in ms. No airs_time → treat as "anytime today" (end of day)
+    // so streaming/undated shows stay featured all day instead of expiring at 00:00.
+    function epDT(ep) {
+        var base = parseISO(ep.air_date).getTime();
+        var mins = airMins(ep.airs_time);
+        return base + (mins != null ? mins * 60000 : (23 * 60 + 59) * 60000);
+    }
+    // Up to 3 "next up" episodes, soonest first. On the CURRENT week this is
+    // time-of-day aware: the next episodes that haven't finished airing yet
+    // (90-min grace so a show that's on right now stays up), advancing as the
+    // day goes. Once the whole week has aired it falls back to the most recent.
+    // Other weeks just feature the first few of the week.
+    function featuredList(d) {
+        var eps = (d.episodes || []).slice().sort(function (a, b) { return epDT(a) - epDT(b); });
+        if (!eps.length) return [];
+        if (state.offset === 0) {
+            var now = new Date().getTime(), GRACE = 90 * 60000;
+            var up = eps.filter(function (ep) { return epDT(ep) + GRACE >= now; });
+            var pool = up.length ? up : eps.slice().reverse();
+            return pool.slice(0, 3);
+        }
+        return eps.slice(0, 3);
     }
     function whenLabel(ep, today) {
         var mins = airMins(ep.airs_time);
@@ -213,17 +225,16 @@
             : diff === 1 ? 'Tomorrow' : WD_FULL[parseISO(ep.air_date).getDay()];
         return day + (mins != null ? ', ' + fmtMins(mins) : '');
     }
-    function renderHero(d) {
-        var host = $('[data-video-cal-hero]'); if (!host) return;
-        var ep = featured(d);
-        if (!ep) { host.innerHTML = ''; return; }
+    // One billboard panel (used solo, or as one slice of the diagonal multi-hero)
+    function heroPanel(ep, d, opts) {
+        var multi = opts && opts.multi, lead = opts && opts.lead;
         var hue = showHue(ep.show_title || '');
         var bg = ep.show_has_backdrop ? ('/api/video/backdrop/show/' + ep.show_id + '?w=1280') : '';
         var se = 'S' + ep.season_number + ' · E' + ep.episode_number;
         var epTitle = ep.title || '';
         var owned = ep.has_file ? '<span class="vcal-bb-badge">✓ In your library</span>' : '';
-        host.innerHTML =
-            '<div class="vcal-bb" style="--vcal-h:' + hue + '" data-cal-ep="' + ep.id + '" role="button" tabindex="0">' +
+        var cls = multi ? ('vcal-bb-panel' + (lead ? ' vcal-bb-panel--lead' : '')) : 'vcal-bb';
+        return '<div class="' + cls + '" style="--vcal-h:' + hue + '" data-cal-ep="' + ep.id + '" role="button" tabindex="0">' +
                 (bg ? '<div class="vcal-bb-bg" style="background-image:url(\'' + bg + '\')"></div>' : '') +
                 '<div class="vcal-bb-scrim"></div>' +
                 '<div class="vcal-bb-content">' +
@@ -234,6 +245,16 @@
                     '<div class="vcal-bb-actions"><span class="vcal-bb-btn">View details</span>' + owned + '</div>' +
                 '</div>' +
             '</div>';
+    }
+    function renderHero(d) {
+        var host = $('[data-video-cal-hero]'); if (!host) return;
+        var list = featuredList(d);
+        if (!list.length) { host.innerHTML = ''; return; }
+        if (list.length === 1) { host.innerHTML = heroPanel(list[0], d, { multi: false }); return; }
+        // 2-3 episodes → diagonal split panels; the soonest leads, hovering any
+        // expands it full-width and collapses the rest.
+        var panels = list.map(function (ep, i) { return heroPanel(ep, d, { multi: true, lead: i === 0 }); }).join('');
+        host.innerHTML = '<div class="vcal-bb-multi" data-count="' + list.length + '">' + panels + '</div>';
     }
 
     function filterEps(eps) {
@@ -271,9 +292,28 @@
                 setTimeout(function () { cols.classList.remove('vcal-animate-in'); }, 900);
             }
         } else { if (hero) hero.innerHTML = ''; if (cols) cols.innerHTML = ''; }
+        if (has && state.scrollToNow) scrollToNow();
+        state.scrollToNow = false;
         state.fresh = false;
         var grid = $('[data-video-cal-grid]'); if (grid) grid.classList.remove('vcal-fading');
         setSub(view);
+    }
+    // Scroll the band the wall-clock is currently in into view, so opening the
+    // calendar lands on "now" instead of pre-dawn. Current week only.
+    function scrollToNow() {
+        if (state.offset !== 0) return;
+        var cols = $('[data-video-cal-cols]'); if (!cols) return;
+        var now = new Date();
+        var nowKey = bandKeyFor(now.getHours() * 60 + now.getMinutes());
+        var idx = 0; for (var k = 0; k < BANDS.length; k++) if (BANDS[k].key === nowKey) { idx = k; break; }
+        var smooth = !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+        requestAnimationFrame(function () {
+            var el = cols.querySelector('.vcal-slot--now') || cols.querySelector('.vcal-rail--' + nowKey);
+            // now band has nothing all week → nearest rendered band, scanning down then up
+            for (var i = idx; i < BANDS.length && !el; i++) el = cols.querySelector('.vcal-rail--' + BANDS[i].key);
+            for (var j = idx - 1; j >= 0 && !el; j--) el = cols.querySelector('.vcal-rail--' + BANDS[j].key);
+            if (el && el.scrollIntoView) el.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'center' });
+        });
     }
     function load() {
         state.loaded = true; state.fresh = true;
@@ -400,7 +440,10 @@
         var prev = $('[data-video-cal-prev]'); if (prev) prev.addEventListener('click', function () { state.offset--; load(); });
         var next = $('[data-video-cal-next]'); if (next) next.addEventListener('click', function () { state.offset++; load(); });
         var today = $('[data-video-cal-today]');
-        if (today) today.addEventListener('click', function () { if (state.offset !== 0) { state.offset = 0; load(); } });
+        if (today) today.addEventListener('click', function () {
+            state.scrollToNow = true;
+            if (state.offset !== 0) { state.offset = 0; load(); } else scrollToNow();
+        });
         var fbs = document.querySelectorAll('[data-video-cal-filter]');
         for (var i = 0; i < fbs.length; i++) (function (b) {
             b.addEventListener('click', function () { state.filter = b.getAttribute('data-video-cal-filter'); render(); });
@@ -544,7 +587,11 @@
             .catch(function () { /* modal already shows payload data */ });
     }
 
-    function onPageShown(e) { if (e && e.detail === PAGE_ID && !state.loaded) load(); }
+    function onPageShown(e) {
+        if (!e || e.detail !== PAGE_ID) return;
+        if (!state.loaded) { state.scrollToNow = true; load(); }
+        else scrollToNow();  // already loaded → just re-land on "now"
+    }
 
     function init() {
         wire();
