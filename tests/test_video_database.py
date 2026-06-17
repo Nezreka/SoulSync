@@ -1174,6 +1174,11 @@ def test_channel_enrichment_tracking(db):
                               [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}])
     assert set(db.wishlisted_video_ids_for_channel("UCx")) == {"a", "b"}
     assert db.channel_dates_enriched_recently("UCx") is False
+    # A THIN run (few dates → proxies were down) is still 'recent' briefly, but
+    # retries soon (15-min window) regardless of the full within_hours param.
     db.mark_channel_dates_enriched("UCx", date_count=2)
     assert db.channel_dates_enriched_recently("UCx") is True
+    # A GOOD run (>=15 dates) honours the full window param (so within_hours=0 → not recent).
+    db.mark_channel_dates_enriched("UCx", date_count=50)
+    assert db.channel_dates_enriched_recently("UCx", within_hours=24) is True
     assert db.channel_dates_enriched_recently("UCx", within_hours=0) is False   # window respected
