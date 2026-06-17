@@ -14,9 +14,10 @@
 (function () {
     'use strict';
 
-    var SERVICES = ['tmdb', 'tvdb', 'omdb'];   // pushed over the shared socket
-    var POLLED = ['youtube'];                  // standalone daemon → light polling
-    var ALL = SERVICES.concat(POLLED);
+    // All four push status over the shared socket every 2s (server emits
+    // 'enrichment:<svc>') — including the standalone YouTube date enricher — so the
+    // browser never polls /api/video/enrichment/<svc>/status.
+    var SERVICES = ['tmdb', 'tvdb', 'omdb', 'youtube'];
 
     function onVideoSide() {
         return document.body.getAttribute('data-side') === 'video';
@@ -74,13 +75,7 @@
 
     // One-time fetch so the buttons aren't blank until the first socket push.
     function primeOnce() {
-        if (onVideoSide() && !document.hidden) ALL.forEach(pollOne);
-    }
-    // The YouTube date enricher isn't on the socket — poll it so its orb reflects
-    // activity (only while the video side is foregrounded).
-    function pollPolledLoop() {
-        if (onVideoSide() && !document.hidden) POLLED.forEach(pollOne);
-        setTimeout(pollPolledLoop, 3000);
+        if (onVideoSide() && !document.hidden) SERVICES.forEach(pollOne);
     }
 
     // Listen on the shared socket (set up by core.js) for the server-pushed
@@ -112,7 +107,7 @@
     }
 
     function init() {
-        ALL.forEach(function (svc) {
+        SERVICES.forEach(function (svc) {
             var b = btn(svc);
             if (b) b.addEventListener('click', function () { toggle(svc); });
         });
@@ -123,8 +118,7 @@
             });
         }
         primeOnce();   // instant initial state
-        bindSocket();  // then the socket pushes updates for tmdb/tvdb/omdb
-        pollPolledLoop();   // ...and poll the youtube enricher
+        bindSocket();  // then the socket pushes updates for all four (incl. youtube)
         // Re-prime when the user returns to the tab (socket kept pushing, but a
         // quick fetch snaps the buttons current immediately).
         document.addEventListener('visibilitychange', function () {

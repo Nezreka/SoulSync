@@ -37271,6 +37271,14 @@ def _emit_video_enrichment_status_loop():
                 socketio.emit(f'enrichment:{svc}', w.get_stats())
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")
+        # The YouTube date enricher is a standalone daemon (not an engine worker),
+        # but it reports the SAME stats shape — push it on the same socket so its
+        # dashboard orb listens like the others (no /enrichment/youtube/status poll).
+        try:
+            from core.video.youtube_enrichment import get_youtube_date_enricher
+            socketio.emit('enrichment:youtube', get_youtube_date_enricher().stats())
+        except Exception as e:
+            logger.debug(f"Error emitting video youtube status: {e}")
 
 
 def _emit_tool_progress_loop():
