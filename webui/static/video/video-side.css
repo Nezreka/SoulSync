@@ -2513,15 +2513,14 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     color: #fff; padding: 2px 7px; border-radius: 6px; letter-spacing: 0.02em; backdrop-filter: blur(4px);
     background: rgba(0, 0, 0, 0.58); border: 1px solid rgba(255, 255, 255, 0.18); text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); }
 
-/* #3 richer episode tracks — status dot + air date */
-.vwsh-nebula .wl-tile-track { gap: 8px; }
-.vwsh-nebula .vwsh-ep-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%;
+/* episode status dot (used in the episode-card meta line) */
+.vwsh-nebula .vwsh-ep-dot { display: inline-block; vertical-align: middle; margin-right: 6px;
+    width: 7px; height: 7px; border-radius: 50%;
     background: rgb(var(--accent-rgb, 29, 185, 84)); box-shadow: 0 0 6px rgba(var(--accent-rgb, 29, 185, 84), 0.6); }
 .vwsh-nebula .vwsh-ep-dot--searching { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--downloading { background: #8ab0ff; box-shadow: 0 0 6px rgba(100, 149, 237, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
-.vwsh-nebula .vwsh-ep-date { flex-shrink: 0; font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.35); }
 
 /* #5 sort select (toolbar) */
 .vwsh-sort { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
@@ -2541,15 +2540,43 @@ body[data-side="video"] #soulsync-toggle { display: none; }
         rgba(255, 255, 255, 0.16) calc(var(--vwsh-prog, 0) * 100%));
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); }
 
-/* richer episode rows: still thumbnail + roomier expanded tile */
-.vwsh-nebula .wl-album-tile.tile-expanded { width: 320px; }
-.vwsh-nebula .wl-tile-track { gap: 8px; padding: 5px 8px; }
-.vwsh-nebula .vwsh-ep-thumb { flex-shrink: 0; width: 52px; height: 30px; border-radius: 4px; overflow: hidden;
+/* bigger square bubbles so the posters breathe */
+.vwsh-nebula .wl-orb.orb-sm { width: 84px; height: 84px; }
+.vwsh-nebula .wl-orb.orb-md { width: 104px; height: 104px; }
+.vwsh-nebula .wl-orb.orb-lg { width: 124px; height: 124px; }
+
+/* softer count badge (the big number read like a rating) */
+.vwsh-nebula .wl-album-tile-badge { font-size: 9px; font-weight: 800; letter-spacing: 0.02em; padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.85); border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(4px); }
+/* selected season tile glows in the show hue */
+.vwsh-nebula .wl-album-tile.vwsh-tile--sel { border: 1px solid hsla(var(--orb-hue, 230), 70%, 60%, 0.6);
+    box-shadow: 0 0 0 1px hsla(var(--orb-hue, 230), 70%, 55%, 0.4), 0 8px 22px -10px hsla(var(--orb-hue, 230), 70%, 45%, 0.6); }
+
+/* #1/#2 — the picked season drops its episodes here, full-width, as 2-line cards */
+.vwsh-nebula .vwsh-ep-area:empty { display: none; }
+.vwsh-nebula .vwsh-ep-area { margin-top: 14px; }
+.vwsh-nebula .vwsh-ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;
+    max-height: 360px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
+.vwsh-nebula .vwsh-epc { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px;
+    border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06);
+    transition: background 0.15s ease, border-color 0.15s ease; }
+.vwsh-nebula .vwsh-epc:hover { background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.12); }
+.vwsh-nebula .vwsh-epc-thumb { flex-shrink: 0; width: 84px; height: 47px; border-radius: 6px; overflow: hidden;
     background: #16161d; border: 1px solid rgba(255, 255, 255, 0.08); }
-.vwsh-nebula .vwsh-ep-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-nebula .vwsh-ep-thumb--none { background: repeating-linear-gradient(135deg,
+.vwsh-nebula .vwsh-epc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vwsh-nebula .vwsh-epc-thumb--none { background: repeating-linear-gradient(135deg,
     rgba(255, 255, 255, 0.04) 0 6px, rgba(255, 255, 255, 0.07) 6px 12px); }
-.vwsh-nebula .vwsh-ep-thumb--none img { display: none; }
+.vwsh-nebula .vwsh-epc-thumb--none img { display: none; }
+.vwsh-nebula .vwsh-epc-body { flex: 1; min-width: 0; }
+.vwsh-nebula .vwsh-epc-title { font-size: 12.5px; font-weight: 700; color: #fff; line-height: 1.3;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vwsh-nebula .vwsh-epc-meta { margin-top: 3px; font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
+.vwsh-nebula .vwsh-epc-rm { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(0, 0, 0, 0.35); color: rgba(255, 255, 255, 0.45); font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-epc:hover .vwsh-epc-rm { opacity: 1; }
+.vwsh-nebula .vwsh-epc-rm:hover { background: rgba(239, 68, 68, 0.85); color: #fff; }
 
 /* status pills + remove button */
 .vwsh-st { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 8px; border-radius: 6px; flex-shrink: 0; }
