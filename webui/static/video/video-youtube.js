@@ -98,6 +98,26 @@
     function removeWish(scope, sourceId) {
         return post('/api/video/youtube/wishlist/remove', { scope: scope, source_id: sourceId });
     }
+    function addVideos(channel, videos) {
+        return post('/api/video/youtube/wishlist/add', { channel: channel, videos: videos });
+    }
+
+    // mm:ss / h:mm:ss from a seconds count
+    function fmtDuration(sec) {
+        sec = parseInt(sec, 10);
+        if (!sec || sec < 0) return '';
+        var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+        var mm = (h && m < 10) ? '0' + m : '' + m, ss = s < 10 ? '0' + s : '' + s;
+        return (h ? h + ':' + mm : m + '') + ':' + ss;
+    }
+    function compactCount(n) {
+        n = parseInt(n, 10);
+        if (!n && n !== 0) return '';
+        if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return '' + n;
+    }
 
     function resolve(ref) {
         return fetch('/api/video/youtube/resolve?url=' + encodeURIComponent(ref),
@@ -106,7 +126,8 @@
 
     window.VideoYoutube = {
         esc: esc, isChannelRef: isChannelRef, fmtDate: fmtDate, avatar: avatar,
+        fmtDuration: fmtDuration, compactCount: compactCount,
         videoCard: videoCard, searchCard: searchCard, followBtn: followBtn,
-        follow: follow, unfollow: unfollow, removeWish: removeWish, resolve: resolve,
+        follow: follow, unfollow: unfollow, removeWish: removeWish, addVideos: addVideos, resolve: resolve,
     };
 })();

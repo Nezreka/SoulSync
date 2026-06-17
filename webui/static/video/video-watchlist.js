@@ -16,13 +16,13 @@
                   counts: { show: 0, person: 0 }, channelCount: 0 };
     var searchTimer = null;
 
-    // A followed YouTube channel card (avatar, title, wished-video count, unfollow).
+    // A followed YouTube channel card. Clicking it opens the in-app channel page
+    // (like any show/movie); the ✕ unfollows.
     function channelCard(ch) {
         var av = window.VideoYoutube ? VideoYoutube.avatar(ch, 'vyt-wcard-avatar') : '';
         var n = ch.video_count || 0;
-        return '<div class="vyt-wcard" data-vyt-chan="' + esc(ch.youtube_id) + '">' +
-            '<a class="vyt-wcard-art" href="https://www.youtube.com/channel/' + esc(ch.youtube_id) +
-                '" target="_blank" rel="noopener" title="Open on YouTube">' + av + '</a>' +
+        return '<div class="vyt-wcard" data-vyt-open-channel="' + esc(ch.youtube_id) + '" title="Open channel">' +
+            '<div class="vyt-wcard-art">' + av + '</div>' +
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow="' + esc(ch.youtube_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(ch.title) + '">' +
@@ -253,8 +253,14 @@
             }).catch(function () { unf.disabled = false; });
             return;
         }
-        if (e.target.closest('.vyt-wcard-art')) return;   // let the YouTube link open
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var ch = e.target.closest('[data-vyt-open-channel]');
+        if (ch) {
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                detail: { kind: 'channel', source: 'youtube', id: ch.getAttribute('data-vyt-open-channel') } }));
+            return;
+        }
         var card = e.target.closest('[data-vwlp-open]');
         if (!card) return;
         e.preventDefault();

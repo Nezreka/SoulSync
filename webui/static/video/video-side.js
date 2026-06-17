@@ -31,16 +31,21 @@
     // reload / Back / Forward / open-in-new-tab all work. ``source`` is 'library'
     // (a video.db id) today; 'tmdb' (a search result not yet in the library) later.
     var DETAIL_BASE = '/video-detail/';
-    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1 };
+    var DETAIL_PAGES = { 'video-show-detail': 1, 'video-movie-detail': 1, 'video-person-detail': 1,
+                         'video-channel-detail': 1 };
 
     function buildDetailPath(source, kind, id) {
-        return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + id;
+        return DETAIL_BASE + encodeURIComponent(source || 'library') + '/' + kind + '/' + encodeURIComponent(id);
     }
     function parseDetailPath(pathname) {
         if (!pathname || pathname.indexOf(DETAIL_BASE) !== 0) return null;
         var p = pathname.slice(DETAIL_BASE.length).split('/').filter(Boolean);
         if (p.length < 3) return null;
-        var kind = p[1], id = parseInt(p[2], 10);
+        var kind = p[1];
+        if (kind === 'channel') {   // YouTube channel ids are strings (UC…), not numeric
+            return { source: decodeURIComponent(p[0]), kind: kind, id: decodeURIComponent(p[2]) };
+        }
+        var id = parseInt(p[2], 10);
         if ((kind !== 'movie' && kind !== 'show' && kind !== 'person') || isNaN(id)) return null;
         return { source: decodeURIComponent(p[0]), kind: kind, id: id };
     }
@@ -64,6 +69,10 @@
         if (pageId === 'video-person-detail') {
             var n = document.querySelector('[data-video-person] [data-vp-name]');
             return n ? (n.textContent || '').trim() : '';
+        }
+        if (pageId === 'video-channel-detail') {
+            var cn = document.querySelector('[data-video-channel] [data-vc-name]');
+            return cn ? (cn.textContent || '').trim() : '';
         }
         var host = pageId === 'video-movie-detail' ? '[data-video-detail="movie"]' : '[data-video-detail="show"]';
         var t = document.querySelector(host + ' [data-vd-title]');
@@ -303,6 +312,7 @@
             if (d.kind === 'movie') navigate('video-movie-detail');
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
+            else if (d.kind === 'channel') navigate('video-channel-detail');
             else return;
             if (d._replace) {
                 // A redirect (e.g. a tmdb link that's actually owned) → replace the
