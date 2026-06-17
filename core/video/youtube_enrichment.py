@@ -20,7 +20,7 @@ import time
 
 from utils.logging_config import get_logger
 
-logger = get_logger("video.youtube_enrichment")
+logger = get_logger("video_enrichment.youtube")   # same namespace as the other video workers
 
 # Per-video fallback (used when the bulk proxy is down): dated in a small thread
 # pool so a channel finishes in ~30s instead of minutes, without bursting too hard.
@@ -146,10 +146,18 @@ class YoutubeDateEnricher:
         if missing:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
+            cur = self._current
+
             def fetch_date(vid):
                 try:
-                    v = yt.video_detail(vid)
-                    return vid, (v or {}).get("published_at")
+                    v = yt.video_detail(vid) or {}
+                    d = v.get("published_at")
+                    if d:
+                        # Per-item line, matching the other workers' "Matched … -> …".
+                        logger.info("Dated %s '%s' -> %s", cur, (v.get("title") or vid)[:70], d)
+                    else:
+                        logger.info("No date for %s video %s", cur, vid)
+                    return vid, d
                 except Exception:
                     return vid, None
 
