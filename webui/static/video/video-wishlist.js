@@ -77,21 +77,23 @@
             ? '<img class="wl-orb-img" src="' + esc(sh.poster_url) + '" alt="" ' +
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
-        // Season tiles are SELECTORS now — picking one renders its episodes full-
-        // width below (so episode cards get room), instead of cramming inside.
-        var tiles = (sh.seasons || []).map(function (se) {
+        // Episodes are shown grouped under a clickable season header (header →
+        // show page); each episode card SELECTS the episode (drives the info bar).
+        var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
-            var inner = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<div class="wl-album-tile-fallback">📺</div>';
-            return '<div class="wl-album-tile" data-vwsh-tile data-tmdb="' + esc(sh.tmdb_id) + '" data-vwsh-season="' + se.season_number + '">' +
-                '<div class="wl-album-tile-art">' + inner + '<span class="vwsh-season-tag">S' + se.season_number + '</span></div>' +
-                '<div class="wl-album-tile-info">' +
-                    '<div class="wl-album-tile-name">Season ' + se.season_number + '</div>' +
-                    '<div class="wl-album-tile-count">' + n + ' episode' + (n === 1 ? '' : 's') + '</div>' +
+            var thumb = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
+            var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
+            return '<div class="vwsh-szn">' +
+                '<div class="vwsh-szn-hd" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="Open show page">' +
+                    '<span class="vwsh-szn-thumb">' + thumb + '</span>' +
+                    '<span class="vwsh-szn-name">Season ' + se.season_number + '</span>' +
+                    '<span class="vwsh-szn-count">' + n + ' ep</span>' +
+                    '<span class="vwsh-szn-go" aria-hidden="true">&rarr;</span>' +
+                    '<button class="vwsh-szn-rm" type="button" data-vwsh-rm="season" ' +
+                    'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Remove season">&#10005;</button>' +
                 '</div>' +
-                '<span class="wl-album-tile-badge">' + n + ' ep</span>' +
-                '<button class="wl-album-tile-remove" type="button" data-vwsh-rm="season" ' +
-                'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" title="Remove season">&#10005;</button>' +
+                '<div class="vwsh-ep-grid">' + cards + '</div>' +
             '</div>';
         }).join('');
         var eps = total + ' episode' + (total === 1 ? '' : 's');
@@ -111,8 +113,7 @@
             '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
             '<div class="wl-orb-expanded">' +
                 '<div class="vwsh-info" data-vwsh-info></div>' +
-                '<div class="wl-album-fan">' + tiles + '</div>' +
-                '<div class="vwsh-ep-area" data-vwsh-ep-area></div></div>' +
+                '<div class="vwsh-seasons">' + seasons + '</div></div>' +
         '</div>';
     }
 
@@ -139,9 +140,7 @@
     // sel = a selected episode object (episode synopsis + guest cast), or null (show synopsis + show cast).
     function renderInfoBar(group, tmdb, sel) {
         var info = group && group.querySelector('[data-vwsh-info]'); if (!info) return;
-        var sh = state.showData[tmdb] || {}, si = state.showInfo[tmdb] || {};
-        var src = sh.library_id != null ? 'library' : 'tmdb';
-        var openId = sh.library_id != null ? sh.library_id : tmdb;
+        var si = state.showInfo[tmdb] || {};
         var eyebrow, overview, castArr;
         if (sel) {
             eyebrow = 'S' + sel.season_number + ' · E' + sel.episode_number;
@@ -152,9 +151,7 @@
         }
         var left = '<div class="vwsh-info-syn">' +
             (eyebrow ? '<span class="vwsh-info-eyebrow">' + esc(eyebrow) + '</span>' : '') +
-            esc(overview) +
-            '<button class="vwsh-info-viewshow" type="button" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '">View show &rarr;</button>' +
-            '</div>';
+            esc(overview) + '</div>';
         info.innerHTML = left + (castArr.length ? '<div class="vwsh-info-cast">' + castBubbles(castArr) + '</div>' : '');
         // lazily fetch the episode's guest stars, then re-render if still selected
         if (sel && sel._guests === undefined) {
@@ -208,14 +205,6 @@
             '<button class="vwsh-epc-rm" type="button" data-vwsh-rm="episode" ' +
             'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
         '</div>';
-    }
-    function renderEpisodeArea(group, tmdb, seasonNum) {
-        var area = group && group.querySelector('[data-vwsh-ep-area]'); if (!area) return;
-        var sh = state.showData[tmdb]; var se = null;
-        if (sh) (sh.seasons || []).forEach(function (x) { if (x.season_number === seasonNum) se = x; });
-        if (!se) { area.innerHTML = ''; return; }
-        area.innerHTML = '<div class="vwsh-ep-grid">' +
-            (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('') + '</div>';
     }
 
     function render(items) {
@@ -369,18 +358,6 @@
             if (eWasSel) { renderInfoBar(eg, etmdb, null); return; }   // back to show synopsis + cast
             epc.classList.add('vwsh-epc--sel');
             renderInfoBar(eg, etmdb, findEpisode(etmdb, parseInt(epc.getAttribute('data-s'), 10), parseInt(epc.getAttribute('data-e'), 10)));
-            return;
-        }
-        var tile = e.target.closest('[data-vwsh-tile]');
-        if (tile) {   // season → render its episodes full-width below (single-select)
-            var group = tile.closest('.wl-orb-group');
-            var tmdb = parseInt(tile.getAttribute('data-tmdb'), 10);
-            var wasSel = tile.classList.contains('vwsh-tile--sel');
-            if (group) { var all = group.querySelectorAll('.wl-album-tile'); for (var i = 0; i < all.length; i++) all[i].classList.remove('vwsh-tile--sel'); }
-            renderInfoBar(group, tmdb, null);   // changing/closing a season resets the info bar to show-level
-            if (wasSel) { var a = group && group.querySelector('[data-vwsh-ep-area]'); if (a) a.innerHTML = ''; return; }
-            tile.classList.add('vwsh-tile--sel');
-            renderEpisodeArea(group, tmdb, parseInt(tile.getAttribute('data-vwsh-season'), 10));
             return;
         }
         var orb = e.target.closest('[data-vwsh-orb]');
