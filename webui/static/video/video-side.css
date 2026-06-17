@@ -1809,6 +1809,25 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     padding: 7px 14px; border-radius: 8px; cursor: pointer; transition: all 0.15s ease; }
 .vcal-filter-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 .vcal-filter-btn--on { color: #fff; background: rgba(var(--vcal-accent), 0.9); box-shadow: 0 4px 14px rgba(var(--vcal-accent), 0.32); }
+/* view switcher (cards ↔ compact) — mirrors the filter pill group, with icons */
+.vcal-views { display: inline-flex; gap: 3px; padding: 4px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
+.vcal-view-btn { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent;
+    color: rgba(255, 255, 255, 0.7); font-size: 12.5px; font-weight: 700; padding: 7px 13px; border-radius: 8px;
+    cursor: pointer; transition: all 0.15s ease; }
+.vcal-view-btn svg { opacity: 0.85; }
+.vcal-view-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+.vcal-view-btn--on { color: #fff; background: rgba(var(--vcal-accent), 0.9); box-shadow: 0 4px 14px rgba(var(--vcal-accent), 0.32); }
+
+/* Compact view — drop the episode art to fit a lot more on screen */
+.vcal-grid.vcal-view--compact .vcal-art { display: none; }
+.vcal-grid.vcal-view--compact .vcal-slot { gap: 8px; padding: 13px 10px; }
+.vcal-grid.vcal-view--compact .vcal-card { border-radius: 10px; }
+.vcal-grid.vcal-view--compact .vcal-info { padding: 10px 12px; }
+.vcal-grid.vcal-view--compact .vcal-show { margin-top: 4px; }
+/* the art carried the library ✓ — surface ownership as a left accent stripe instead */
+.vcal-grid.vcal-view--compact .vcal-cell--owned .vcal-card { box-shadow: inset 3px 0 0 #6cd391; }
+.vcal-grid.vcal-view--compact .vcal-cell--owned .vcal-info { padding-left: 15px; }
 /* catch-up button: queue already-aired missing episodes to the wishlist */
 .vcal-addmissing { display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px; border-radius: 11px;
     border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.4); cursor: pointer; font-size: 12.5px; font-weight: 800;
