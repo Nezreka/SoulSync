@@ -13,7 +13,7 @@
     var PAGE_ID = 'video-wishlist';
     var LIMIT = 60;
     var state = { loaded: false, tab: 'movie', search: '', sort: 'added', page: 1,
-                  counts: { movie: 0, show: 0, episode: 0 } };
+                  counts: { movie: 0, show: 0, episode: 0 }, showData: {}, showInfo: {} };
     var searchTimer = null;
 
     function $(s, r) { return (r || document).querySelector(s); }
@@ -116,40 +116,82 @@
         '</div>';
     }
 
-    // Lazily load the show's synopsis + cast when its orb first expands, and lay
-    // them either side of the season fan (synopsis left, clickable cast right).
+    // ── info bar: synopsis + clickable cast, contextual to the selected episode ─
+    function castBubbles(arr) {
+        return (arr || []).slice(0, 8).map(function (c) {
+            var photo = c.photo
+                ? '<img src="' + esc(c.photo) + '" alt="" loading="lazy" onerror="this.parentNode.classList.add(\'vwsh-cast--ph\')">'
+                : '';
+            return '<button class="vwsh-cast' + (c.photo ? '' : ' vwsh-cast--ph') + '" type="button" ' +
+                'data-vwsh-open-person data-id="' + esc(c.tmdb_id) + '" ' +
+                'title="' + esc(c.name) + (c.character ? ' — ' + esc(c.character) : '') + '">' +
+                '<span class="vwsh-cast-img"><span class="vwsh-cast-ini">' + esc(initials(c.name)) + '</span>' + photo + '</span>' +
+                '<span class="vwsh-cast-name">' + esc(c.name) + '</span></button>';
+        }).join('');
+    }
+    function findEpisode(tmdb, sNum, eNum) {
+        var sh = state.showData[tmdb], ep = null;
+        if (sh) (sh.seasons || []).forEach(function (se) {
+            if (se.season_number === sNum) (se.episodes || []).forEach(function (x) { if (x.episode_number === eNum) ep = x; });
+        });
+        return ep;
+    }
+    // sel = a selected episode object (episode synopsis + guest cast), or null (show synopsis + show cast).
+    function renderInfoBar(group, tmdb, sel) {
+        var info = group && group.querySelector('[data-vwsh-info]'); if (!info) return;
+        var sh = state.showData[tmdb] || {}, si = state.showInfo[tmdb] || {};
+        var src = sh.library_id != null ? 'library' : 'tmdb';
+        var openId = sh.library_id != null ? sh.library_id : tmdb;
+        var eyebrow, overview, castArr;
+        if (sel) {
+            eyebrow = 'S' + sel.season_number + ' · E' + sel.episode_number;
+            overview = sel.overview || 'No synopsis for this episode.';
+            castArr = sel._guests || [];
+        } else {
+            eyebrow = ''; overview = si.overview || ''; castArr = si.cast || [];
+        }
+        var left = '<div class="vwsh-info-syn">' +
+            (eyebrow ? '<span class="vwsh-info-eyebrow">' + esc(eyebrow) + '</span>' : '') +
+            esc(overview) +
+            '<button class="vwsh-info-viewshow" type="button" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '">View show &rarr;</button>' +
+            '</div>';
+        info.innerHTML = left + (castArr.length ? '<div class="vwsh-info-cast">' + castBubbles(castArr) + '</div>' : '');
+        // lazily fetch the episode's guest stars, then re-render if still selected
+        if (sel && sel._guests === undefined) {
+            sel._guests = null;
+            fetch('/api/video/episode/' + tmdb + '/' + sel.season_number + '/' + sel.episode_number, { headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    sel._guests = (d && d.guest_stars) || [];
+                    var cur = group.querySelector('.vwsh-epc--sel');
+                    if (cur && +cur.getAttribute('data-s') === sel.season_number && +cur.getAttribute('data-e') === sel.episode_number)
+                        renderInfoBar(group, tmdb, sel);
+                })
+                .catch(function () { sel._guests = []; });
+        }
+    }
+    // Lazily load the show's synopsis + cast when its orb first expands.
     function loadShowInfo(group) {
-        if (!group || group.getAttribute('data-vwsh-info-loaded')) return;
-        group.setAttribute('data-vwsh-info-loaded', '1');
+        if (!group) return;
         var tmdb = parseInt(group.getAttribute('data-vwsh-tmdb'), 10);
+        renderInfoBar(group, tmdb, null);   // paint the View-show button immediately
+        if (group.getAttribute('data-vwsh-info-loaded')) return;
+        group.setAttribute('data-vwsh-info-loaded', '1');
         var sh = state.showData[tmdb]; if (!sh) return;
         var url = sh.library_id != null ? '/api/video/detail/show/' + sh.library_id : '/api/video/tmdb/show/' + tmdb;
         fetch(url, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
-                var info = group.querySelector('[data-vwsh-info]');
-                if (!d || !info) return;
-                var cast = (d.cast || []).slice(0, 8).map(function (c) {
-                    var photo = c.photo
-                        ? '<img src="' + esc(c.photo) + '" alt="" loading="lazy" onerror="this.parentNode.classList.add(\'vwsh-cast--ph\')">'
-                        : '';
-                    return '<button class="vwsh-cast' + (c.photo ? '' : ' vwsh-cast--ph') + '" type="button" ' +
-                        'data-vwsh-open-person data-id="' + esc(c.tmdb_id) + '" ' +
-                        'title="' + esc(c.name) + (c.character ? ' — ' + esc(c.character) : '') + '">' +
-                        '<span class="vwsh-cast-img"><span class="vwsh-cast-ini">' + esc(initials(c.name)) + '</span>' + photo + '</span>' +
-                        '<span class="vwsh-cast-name">' + esc(c.name) + '</span></button>';
-                }).join('');
-                info.innerHTML = (d.overview ? '<div class="vwsh-info-syn">' + esc(d.overview) + '</div>' : '') +
-                    (cast ? '<div class="vwsh-info-cast">' + cast + '</div>' : '');
+                if (!d) return;
+                state.showInfo[tmdb] = { overview: d.overview || '', cast: d.cast || [] };
+                if (!group.querySelector('.vwsh-epc--sel')) renderInfoBar(group, tmdb, null);   // unless an episode is selected
             })
             .catch(function () { /* best-effort */ });
     }
 
-    // A single episode as a rich card: still + title + meta + synopsis. The card
-    // links to the show detail (episodes have no page of their own).
+    // A single episode card. Clicking it SELECTS the episode (drives the info bar);
+    // the "View show" button in the info bar is what navigates.
     function epCard(sh, se, e) {
-        var src = sh.library_id != null ? 'library' : 'tmdb';
-        var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
         var t = e.title || ('Episode ' + e.episode_number);
         var st = STATUS[e.status] ? e.status : 'wanted';
         var date = fmtDate(e.air_date);
@@ -157,12 +199,11 @@
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(e.still_url) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
-        return '<div class="vwsh-epc" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '">' + thumb +
+        return '<div class="vwsh-epc" data-vwsh-ep data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '">' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
                 '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' +
                 'S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') + '</div>' +
-                (e.overview ? '<div class="vwsh-epc-ov">' + esc(e.overview) + '</div>' : '') +
             '</div>' +
             '<button class="vwsh-epc-rm" type="button" data-vwsh-rm="episode" ' +
             'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
@@ -319,14 +360,27 @@
             }));
             return;
         }
+        var epc = e.target.closest('[data-vwsh-ep]');
+        if (epc) {   // episode → SELECT it (drives the info bar); click again to deselect
+            var eg = epc.closest('.wl-orb-group');
+            var etmdb = parseInt(epc.getAttribute('data-tmdb'), 10);
+            var eWasSel = epc.classList.contains('vwsh-epc--sel');
+            if (eg) { var es = eg.querySelectorAll('.vwsh-epc'); for (var j = 0; j < es.length; j++) es[j].classList.remove('vwsh-epc--sel'); }
+            if (eWasSel) { renderInfoBar(eg, etmdb, null); return; }   // back to show synopsis + cast
+            epc.classList.add('vwsh-epc--sel');
+            renderInfoBar(eg, etmdb, findEpisode(etmdb, parseInt(epc.getAttribute('data-s'), 10), parseInt(epc.getAttribute('data-e'), 10)));
+            return;
+        }
         var tile = e.target.closest('[data-vwsh-tile]');
         if (tile) {   // season → render its episodes full-width below (single-select)
             var group = tile.closest('.wl-orb-group');
+            var tmdb = parseInt(tile.getAttribute('data-tmdb'), 10);
             var wasSel = tile.classList.contains('vwsh-tile--sel');
             if (group) { var all = group.querySelectorAll('.wl-album-tile'); for (var i = 0; i < all.length; i++) all[i].classList.remove('vwsh-tile--sel'); }
+            renderInfoBar(group, tmdb, null);   // changing/closing a season resets the info bar to show-level
             if (wasSel) { var a = group && group.querySelector('[data-vwsh-ep-area]'); if (a) a.innerHTML = ''; return; }
             tile.classList.add('vwsh-tile--sel');
-            renderEpisodeArea(group, parseInt(tile.getAttribute('data-tmdb'), 10), parseInt(tile.getAttribute('data-vwsh-season'), 10));
+            renderEpisodeArea(group, tmdb, parseInt(tile.getAttribute('data-vwsh-season'), 10));
             return;
         }
         var orb = e.target.closest('[data-vwsh-orb]');
