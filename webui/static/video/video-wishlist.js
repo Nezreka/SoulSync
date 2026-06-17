@@ -147,7 +147,12 @@
         if (sel) {
             eyebrow = 'S' + sel.season_number + ' · E' + sel.episode_number;
             overview = sel.overview || 'No synopsis for this episode.';
-            castArr = sel._guests || [];
+            // Episode cast = its guest stars (episode-specific) THEN the show regulars,
+            // deduped — most episodes have no guest stars, so show the regulars too.
+            var seen = {};
+            castArr = (sel._guests || []).concat(si.cast || []).filter(function (c) {
+                var k = c.tmdb_id || c.name; if (seen[k]) return false; seen[k] = 1; return true;
+            });
         } else {
             eyebrow = ''; overview = si.overview || ''; castArr = si.cast || [];
         }
