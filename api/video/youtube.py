@@ -183,6 +183,32 @@ def register_routes(bp):
             logger.exception("youtube video detail failed for %r", video_id)
             return jsonify({"success": False, "error": "Could not load video"}), 500
 
+    @bp.route("/youtube/playlists/<channel_id>", methods=["GET"])
+    def video_youtube_playlists(channel_id):
+        """The channel's playlists (rendered as 'seasons' on the channel page)."""
+        from core.video import youtube as yt
+        try:
+            return jsonify({"success": True, "playlists": yt.channel_playlists(channel_id)})
+        except Exception:
+            logger.exception("youtube playlists failed for %r", channel_id)
+            return jsonify({"success": False, "error": "Failed"}), 500
+
+    @bp.route("/youtube/playlist/<playlist_id>", methods=["GET"])
+    def video_youtube_playlist(playlist_id):
+        """A playlist's videos (lazy-loaded when a playlist section expands), with
+        per-video wished flags so the toggles hydrate."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        try:
+            vids = yt.playlist_videos(playlist_id)
+            wished = get_video_db().youtube_video_wish_state([v.get("youtube_id") for v in vids])
+            for v in vids:
+                v["wished"] = v.get("youtube_id") in wished
+            return jsonify({"success": True, "videos": vids})
+        except Exception:
+            logger.exception("youtube playlist failed for %r", playlist_id)
+            return jsonify({"success": False, "error": "Failed"}), 500
+
     @bp.route("/youtube/wishlist/add", methods=["POST"])
     def video_youtube_wishlist_add():
         """Wish specific videos (per-video add from the channel page). Body:

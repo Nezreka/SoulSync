@@ -118,17 +118,16 @@ def _entry_date(e):
     return None
 
 
-def shape_channel(info, limit=30):
-    """Map a yt-dlp channel info dict to our followable-channel shape."""
-    info = info or {}
-    entries = [e for e in (info.get("entries") or []) if isinstance(e, dict)]
-    videos = []
-    for e in entries[:limit]:
+def _shape_entries(entries, limit):
+    """Flat playlist/channel entries → our lightweight video shape (id-less and
+    null entries dropped)."""
+    out = []
+    for e in [x for x in (entries or []) if isinstance(x, dict)][:limit]:
         vid = e.get("id")
         if not vid:
             continue
         dur = e.get("duration")
-        videos.append({
+        out.append({
             "youtube_id": vid,
             "title": e.get("title") or "",
             "published_at": _entry_date(e),
@@ -137,7 +136,13 @@ def shape_channel(info, limit=30):
             "view_count": e.get("view_count"),
             "description": e.get("description"),
         })
+    return out
 
+
+def shape_channel(info, limit=30):
+    """Map a yt-dlp channel info dict to our followable-channel shape."""
+    info = info or {}
+    videos = _shape_entries(info.get("entries"), limit)
     handle = info.get("uploader_id") or info.get("channel_id_handle")
     if handle and not str(handle).startswith("@"):
         handle = None  # uploader_id is sometimes the UC id, not a handle
@@ -150,6 +155,8 @@ def shape_channel(info, limit=30):
         "banner_url": _thumb_by_id(thumbs, "banner"),
         "description": info.get("description"),
         "subscriber_count": info.get("channel_follower_count"),
+        "view_count": info.get("view_count"),
+        "tags": (info.get("tags") or [])[:12],
         "video_count": info.get("playlist_count") or len(videos),
         "videos": videos,
     }
@@ -241,3 +248,33 @@ def resolve_channel(raw, limit=30, ydl_factory=None, db=None):
         return None
     shaped = shape_channel(info, limit)
     return shaped if shaped.get("youtube_id") else None
+
+
+def channel_playlists(channel_id, limit=50, ydl_factory=None):
+    """The channel's playlists (flat) → [{playlist_id, title, video_count,
+    thumbnail_url}] — rendered as "seasons" on the channel page. Lazy-loaded."""
+    if not channel_id:
+        return []
+    url = "https://www.youtube.com/channel/" + str(channel_id) + "/playlists"
+    info = _extract(url, _ydl_opts(limit), ydl_factory)
+    out = []
+    for e in [x for x in ((info or {}).get("entries") or []) if isinstance(x, dict)][:limit]:
+        pid = e.get("id")
+        if not pid:
+            continue
+        out.append({
+            "playlist_id": pid,
+            "title": e.get("title") or "",
+            "video_count": e.get("playlist_count") or e.get("video_count"),
+            "thumbnail_url": _best_thumb(e.get("thumbnails")) or e.get("thumbnail"),
+        })
+    return out
+
+
+def playlist_videos(playlist_id, limit=50, ydl_factory=None):
+    """A playlist's videos (flat), in the same shape as channel uploads."""
+    if not playlist_id:
+        return []
+    url = "https://www.youtube.com/playlist?list=" + str(playlist_id)
+    info = _extract(url, _ydl_opts(limit), ydl_factory)
+    return _shape_entries((info or {}).get("entries"), limit)

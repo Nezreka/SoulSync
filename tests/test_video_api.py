@@ -684,3 +684,20 @@ def test_img_proxy_allows_youtube_cdn_only(tmp_path, monkeypatch):
     # still SSRF-safe: arbitrary hosts rejected
     assert client.get("/api/video/img?u=https://evil.example.com/x.jpg").status_code == 404
     assert client.get("/api/video/img?u=http://yt3.googleusercontent.com/x").status_code == 404  # http
+
+
+def test_youtube_playlists_and_playlist_videos(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "channel_playlists",
+                        lambda cid: [{"playlist_id": "PL1", "title": "Trailers", "video_count": 3, "thumbnail_url": None}])
+    pls = client.get("/api/video/youtube/playlists/UCx").get_json()
+    assert pls["success"] is True and pls["playlists"][0]["playlist_id"] == "PL1"
+
+    monkeypatch.setattr(ytmod, "playlist_videos",
+                        lambda pid: [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}])
+    # 'a' is wished → should hydrate wished=True
+    videoapi._video_db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "a", "title": "A"}])
+    pv = client.get("/api/video/youtube/playlist/PL1").get_json()
+    wished = {v["youtube_id"]: v["wished"] for v in pv["videos"]}
+    assert wished == {"a": True, "b": False}
