@@ -143,25 +143,29 @@ class YoutubeDateEnricher:
         self._current = self._titles.get(cid) or cid
         logger.debug("Enriching dates for %s (%s)", self._current, cid)
 
-        # Bulk no-key proxy (Piped/Invidious) is OPT-IN via a setting — the public
-        # instances are unreliable/API-disabled, so by default we skip straight to
-        # the yt-dlp path. Power users can point youtube_proxy_instances at a live
-        # instance ("piped|https://…, invidious|https://…").
+        # PRIMARY: YouTube's own InnerTube browse API (no key/Java/proxy) — bulk
+        # dates for the whole videos tab in a handful of requests. The path we
+        # prefer; approximate dates, great for year-seasons.
         dates = {}
-        instances = self._proxy_instances(db)
-        if instances:
-            try:
-                dates = yt.proxy_channel_dates(cid, instances=instances) or {}
-            except Exception:
-                logger.debug("proxy date fetch failed for %s", cid, exc_info=True)
-            logger.debug("proxy returned %d dates for %s", len(dates), cid)
+        try:
+            dates = yt.innertube_channel_dates(cid) or {}
+        except Exception:
+            logger.debug("innertube date fetch failed for %s", cid, exc_info=True)
+        logger.debug("innertube returned %d dates for %s", len(dates), cid)
+        # SECONDARY (opt-in): a configured Piped/Invidious proxy — only if InnerTube
+        # came up empty (the public instances are unreliable/API-disabled).
+        if not dates:
+            instances = self._proxy_instances(db)
+            if instances:
+                try:
+                    dates = yt.proxy_channel_dates(cid, instances=instances) or {}
+                except Exception:
+                    logger.debug("proxy date fetch failed for %s", cid, exc_info=True)
         if dates:
             db.cache_video_dates([{"youtube_id": k, "published_at": v} for k, v in dates.items()])
-            for k, v in dates.items():   # per-item INFO, like the other workers
-                logger.info("Dated %s %s -> %s", self._current, k, v)
 
-        # Fallback (proxy down): date the channel's RECENT UPLOADS via yt-dlp, not
-        # just wished videos — so years populate fully even with no working proxy.
+        # FALLBACK (the basic method): exact dates per-video via yt-dlp, only for
+        # the channel's videos still UNDATED — cheap when the bulk pass worked.
         ids = set(db.wishlisted_video_ids_for_channel(cid))
         if not dates:
             try:
@@ -203,7 +207,8 @@ class YoutubeDateEnricher:
         self._dates_total += len(dates) + filled
         db.mark_channel_dates_enriched(cid, len(dates) + filled)
         # Terse per-channel summary (like the worker's "Synced full episode list…").
-        logger.info("Dated %d/%d videos for %s", len(dates) + filled, len(ids), self._current)
+        logger.info("Dated %d videos for %s (%d bulk + %d per-video)",
+                    len(dates) + filled, self._current, len(dates), filled)
 
 
 _enricher = None

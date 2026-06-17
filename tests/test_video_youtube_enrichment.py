@@ -13,27 +13,27 @@ def db(tmp_path):
     return VideoDatabase(database_path=str(tmp_path / "video_library.db"))
 
 
-def test_enrich_caches_proxy_dates_and_marks_done(db, monkeypatch):
+def test_enrich_caches_bulk_dates_and_marks_done(db, monkeypatch):
     import core.video.youtube as yt
-    monkeypatch.setattr(yt, "proxy_channel_dates",
+    # InnerTube (primary) covers everything → per-video fallback must NOT run
+    monkeypatch.setattr(yt, "innertube_channel_dates",
                         lambda cid, *a, **k: {"v1": "2024-06-01", "v2": "2023-02-02"})
-    # if proxy covers everything, the per-video fallback must NOT run
     monkeypatch.setattr(yt, "video_detail", lambda vid: (_ for _ in ()).throw(AssertionError("no fallback")))
-    db.set_setting("youtube_proxy_instances", "piped|https://example.test")   # proxy is opt-in
     db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "v1", "title": "A"}])
 
     e = YoutubeDateEnricher(db_factory=lambda: db)
     e._enrich("UCx")
     assert db.get_video_dates(["v1", "v2"]) == {"v1": "2024-06-01", "v2": "2023-02-02"}
     assert db.channel_dates_enriched_recently("UCx") is True
-    # already enriched → second pass is a no-op (no proxy call)
-    monkeypatch.setattr(yt, "proxy_channel_dates", lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-swept")))
+    # already enriched → second pass is a no-op (no fetch)
+    monkeypatch.setattr(yt, "innertube_channel_dates", lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-swept")))
     e._enrich("UCx")
 
 
-def test_enrich_falls_back_to_per_video_when_proxy_empty(db, monkeypatch):
+def test_enrich_falls_back_to_per_video_when_bulk_empty(db, monkeypatch):
     import core.video.youtube as yt
-    monkeypatch.setattr(yt, "proxy_channel_dates", lambda cid, *a, **k: {})   # all proxies down
+    monkeypatch.setattr(yt, "innertube_channel_dates", lambda cid, *a, **k: {})   # InnerTube empty
+    monkeypatch.setattr(yt, "proxy_channel_dates", lambda cid, *a, **k: {})       # no proxy either
     # flat resolve adds a recent upload r1 to the date-fallback set (besides wished w1/w2)
     monkeypatch.setattr(yt, "resolve_channel",
                         lambda url, **k: {"videos": [{"youtube_id": "r1", "title": "Recent"}]})

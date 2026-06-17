@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 try:
@@ -388,6 +389,127 @@ def channel_recent_dates(channel_id, fetch=None):
     except Exception as e:
         logger.info("YouTube RSS dates failed for %s: %s", cid, e)
         return {}
+
+
+# ── InnerTube: YouTube's own browse API (no key/Java/proxy) ──────────────────
+# Same technique NewPipe/yt-dlp use. We call the channel "Videos" tab and read the
+# lockupViewModel items: contentId (video id) + a relative "N units ago" string.
+# Relative → approximate date (fine for YEAR grouping). One request per ~30 videos,
+# paginated via continuation tokens (light on rate limits). Parsing is pure +
+# resilient (recursive search rather than a brittle fixed path).
+_INNERTUBE_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"   # public WEB key (stable for years)
+_INNERTUBE_CTX = {"client": {"clientName": "WEB", "clientVersion": "2.20240304.00.00", "hl": "en", "gl": "US"}}
+_VIDEOS_PARAMS = "EgZ2aWRlb3PyBgQKAjoA"   # selects a channel's "Videos" tab
+_INNERTUBE_PAGES = 8
+_INNERTUBE_DELAY = 0.6                     # politeness pause between pages
+_REL_UNIT_DAYS = {"second": 0, "minute": 0, "hour": 0, "day": 1, "week": 7, "month": 30.44, "year": 365.25}
+_REL_RE = re.compile(r"(\d+)\s+(second|minute|hour|day|week|month|year)s?\s+ago", re.I)
+
+
+def _json_find_all(obj, key, acc):
+    if isinstance(obj, dict):
+        if key in obj:
+            acc.append(obj[key])
+        for v in obj.values():
+            _json_find_all(v, key, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            _json_find_all(v, key, acc)
+    return acc
+
+
+def _json_content_strings(obj, acc):
+    if isinstance(obj, dict):
+        c = obj.get("content")
+        if isinstance(c, str):
+            acc.append(c)
+        for v in obj.values():
+            _json_content_strings(v, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            _json_content_strings(v, acc)
+    return acc
+
+
+def relative_to_date(text, now=None):
+    """'2 years ago' / '9 hours ago' → approximate 'YYYY-MM-DD', or None."""
+    m = _REL_RE.search(text or "")
+    if not m:
+        return None
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    days = int(m.group(1)) * _REL_UNIT_DAYS[m.group(2).lower()]
+    return (now - timedelta(days=round(days))).isoformat()
+
+
+def innertube_parse_videos(obj):
+    """[(video_id, relative_text)] for VIDEO lockups in an InnerTube browse response."""
+    out, seen = [], set()
+    for lk in _json_find_all(obj, "lockupViewModel", []):
+        if not isinstance(lk, dict) or lk.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+            continue
+        vid = lk.get("contentId")
+        if not vid or vid in seen:
+            continue
+        rel = next((t for t in _json_content_strings(lk.get("metadata"), []) if _REL_RE.search(t)), None)
+        if rel:
+            seen.add(vid)
+            out.append((vid, rel))
+    return out
+
+
+def innertube_continuation(obj):
+    """The pagination continuation token (from a continuationItemRenderer), or None."""
+    for cir in _json_find_all(obj, "continuationItemRenderer", []):
+        if isinstance(cir, dict):
+            tok = (cir.get("continuationEndpoint") or {}).get("continuationCommand", {}).get("token")
+            if tok:
+                return tok
+    return None
+
+
+def _innertube_post(payload, post):
+    if post is not None:
+        return post(payload)
+    import requests
+    r = requests.post("https://www.youtube.com/youtubei/v1/browse", params={"key": _INNERTUBE_KEY},
+                      json=payload, timeout=10,
+                      headers={"User-Agent": _UA, "Content-Type": "application/json", "Accept-Language": "en-US"})
+    return r.json() if (r.status_code == 200 and r.headers.get("content-type", "").startswith("application/json")) else None
+
+
+def innertube_channel_dates(channel_id, pages=_INNERTUBE_PAGES, now=None, post=None):
+    """{video_id: 'YYYY-MM-DD'} for a channel's videos via YouTube's own InnerTube
+    browse API — no key/Java/proxy, ~1 request per 30 videos. Dates are APPROXIMATE
+    (from relative text), which is fine for year-seasons; the exact yt-dlp path can
+    refine specific videos later. Bounded + throttled. {} on any failure (→ caller
+    falls back)."""
+    cid = str(channel_id or "").strip()
+    if not cid.startswith("UC"):
+        return {}
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    out = {}
+    payload = {"context": _INNERTUBE_CTX, "browseId": cid, "params": _VIDEOS_PARAMS}
+    for _ in range(max(1, pages)):
+        try:
+            j = _innertube_post(payload, post)
+        except Exception:
+            break
+        if not isinstance(j, dict):
+            break
+        for vid, rel in innertube_parse_videos(j):
+            if vid not in out:
+                d = relative_to_date(rel, now)
+                if d:
+                    out[vid] = d
+        token = innertube_continuation(j)
+        if not token:
+            break
+        payload = {"context": _INNERTUBE_CTX, "continuation": token}
+        if post is None:
+            time.sleep(_INNERTUBE_DELAY)   # rate-limit politeness
+    return out
 
 
 def search_channels(query, limit=6, ydl_factory=None):
