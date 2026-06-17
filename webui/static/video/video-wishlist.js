@@ -100,7 +100,7 @@
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
             (sh.poster_url ? ";--vwsh-poster:url('" + esc(sh.poster_url) + "')" : '');
         var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
-        return '<div class="wl-orb-group" data-vwsh-group style="' + gstyle + '">' +
+        return '<div class="wl-orb-group" data-vwsh-group data-vwsh-tmdb="' + esc(sh.tmdb_id) + '" style="' + gstyle + '">' +
             '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
             '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
             '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb style="--vwsh-prog:' + prog + '">' +
@@ -109,9 +109,40 @@
             '</div>' +
             '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
             '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
-            '<div class="wl-orb-expanded"><div class="wl-album-fan">' + tiles + '</div>' +
+            '<div class="wl-orb-expanded">' +
+                '<div class="vwsh-info" data-vwsh-info></div>' +
+                '<div class="wl-album-fan">' + tiles + '</div>' +
                 '<div class="vwsh-ep-area" data-vwsh-ep-area></div></div>' +
         '</div>';
+    }
+
+    // Lazily load the show's synopsis + cast when its orb first expands, and lay
+    // them either side of the season fan (synopsis left, clickable cast right).
+    function loadShowInfo(group) {
+        if (!group || group.getAttribute('data-vwsh-info-loaded')) return;
+        group.setAttribute('data-vwsh-info-loaded', '1');
+        var tmdb = parseInt(group.getAttribute('data-vwsh-tmdb'), 10);
+        var sh = state.showData[tmdb]; if (!sh) return;
+        var url = sh.library_id != null ? '/api/video/detail/show/' + sh.library_id : '/api/video/tmdb/show/' + tmdb;
+        fetch(url, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var info = group.querySelector('[data-vwsh-info]');
+                if (!d || !info) return;
+                var cast = (d.cast || []).slice(0, 8).map(function (c) {
+                    var photo = c.photo
+                        ? '<img src="' + esc(c.photo) + '" alt="" loading="lazy" onerror="this.parentNode.classList.add(\'vwsh-cast--ph\')">'
+                        : '';
+                    return '<button class="vwsh-cast' + (c.photo ? '' : ' vwsh-cast--ph') + '" type="button" ' +
+                        'data-vwsh-open-person data-id="' + esc(c.tmdb_id) + '" ' +
+                        'title="' + esc(c.name) + (c.character ? ' — ' + esc(c.character) : '') + '">' +
+                        '<span class="vwsh-cast-img"><span class="vwsh-cast-ini">' + esc(initials(c.name)) + '</span>' + photo + '</span>' +
+                        '<span class="vwsh-cast-name">' + esc(c.name) + '</span></button>';
+                }).join('');
+                info.innerHTML = (d.overview ? '<div class="vwsh-info-syn">' + esc(d.overview) + '</div>' : '') +
+                    (cast ? '<div class="vwsh-info-cast">' + cast + '</div>' : '');
+            })
+            .catch(function () { /* best-effort */ });
     }
 
     // A single episode as a rich card: still + title + meta + synopsis. The card
@@ -278,12 +309,13 @@
         var rm = e.target.closest('[data-vwsh-rm]');
         if (rm) { e.preventDefault(); e.stopPropagation(); doRemove(rm); return; }
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        var open = e.target.closest('[data-vwsh-open-show], [data-vwsh-open-movie]');
+        var open = e.target.closest('[data-vwsh-open-show], [data-vwsh-open-movie], [data-vwsh-open-person]');
         if (open) {
+            var person = open.hasAttribute('data-vwsh-open-person');
             document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
-                detail: { kind: open.hasAttribute('data-vwsh-open-show') ? 'show' : 'movie',
-                          id: parseInt(open.getAttribute('data-vwsh-id'), 10),
-                          source: open.getAttribute('data-vwsh-src') || 'tmdb' },
+                detail: { kind: person ? 'person' : (open.hasAttribute('data-vwsh-open-show') ? 'show' : 'movie'),
+                          id: parseInt(person ? open.getAttribute('data-id') : open.getAttribute('data-vwsh-id'), 10),
+                          source: person ? 'tmdb' : (open.getAttribute('data-vwsh-src') || 'tmdb') },
             }));
             return;
         }
@@ -298,7 +330,10 @@
             return;
         }
         var orb = e.target.closest('[data-vwsh-orb]');
-        if (orb) { var g = orb.closest('.wl-orb-group'); if (g) g.classList.toggle('expanded'); }   // show → seasons
+        if (orb) {   // show → reveal seasons + lazily load the synopsis/cast info bar
+            var g = orb.closest('.wl-orb-group');
+            if (g && g.classList.toggle('expanded')) loadShowInfo(g);
+        }
     }
 
     function wire() {
