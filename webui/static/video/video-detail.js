@@ -1352,30 +1352,39 @@
     // pop in WITHOUT a manual reload (only re-renders if more years appeared).
     var ytRepollTimers = [];
     function ytClearRepoll() { ytRepollTimers.forEach(function (t) { clearTimeout(t); }); ytRepollTimers = []; }
+    function _undatedCount(seasons) {
+        var n = 0;
+        (seasons || []).forEach(function (s) { if (s.season_number === 0) n = s.episodes.length; });
+        return n;
+    }
     function ytRefetch(id) {
         var before = ((data && data.seasons) || []).length;
+        var undatedBefore = _undatedCount(data && data.seasons);
         fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '?limit=90', { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (resp) {
                 if (!resp || !resp.success || currentId !== id || currentSource !== 'youtube') return;
                 var nd = ytToShow(resp);
-                if (nd.seasons.length <= before) return;   // no new years yet → don't disrupt the view
+                // Re-render when dating IMPROVED — new year-seasons appeared OR the
+                // "Earlier videos" (undated) bucket shrank. (Season count alone misses
+                // the common case where many recent videos all collapse into one year.)
+                if (nd.seasons.length <= before && _undatedCount(nd.seasons) >= undatedBefore) return;
                 data = nd;
                 if (!seasonByNum(selectedSeason)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
                 renderBillboard(nd); renderSeasonNav(); renderEpisodes();
-                // years filled in → stop the "fetching dates" spinner + the polling
                 if (!nd.seasons.some(function (s) { return s.season_number === 0; })) { showEpSyncing(false); ytClearRepoll(); }
             })
             .catch(function () { /* ignore */ });
     }
     function ytScheduleRepoll(id) {
         ytClearRepoll();
-        // Tell the user dates are being fetched (the enricher takes ~30-45s).
+        // Tell the user dates are being fetched (the enricher takes ~30-45s, more
+        // if the channel is queued behind others), and poll until they land.
         showEpSyncing(true, 'Fetching upload dates from YouTube… your year-seasons will fill in shortly.');
-        [25000, 60000, 110000].forEach(function (ms) {
+        [20000, 45000, 80000, 120000, 160000].forEach(function (ms) {
             ytRepollTimers.push(setTimeout(function () { ytRefetch(id); }, ms));
         });
-        ytRepollTimers.push(setTimeout(function () { if (currentId === id) showEpSyncing(false); }, 125000));
+        ytRepollTimers.push(setTimeout(function () { if (currentId === id) showEpSyncing(false); }, 175000));
     }
 
     function loadChannel(id) {
