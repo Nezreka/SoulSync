@@ -1167,3 +1167,13 @@ def test_video_date_cache_roundtrip(db):
     # upsert refreshes
     db.cache_video_dates([{"youtube_id": "a", "published_at": "2025-12-31"}])
     assert db.get_video_dates(["a"]) == {"a": "2025-12-31"}
+
+
+def test_channel_enrichment_tracking(db):
+    db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"},
+                              [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}])
+    assert set(db.wishlisted_video_ids_for_channel("UCx")) == {"a", "b"}
+    assert db.channel_dates_enriched_recently("UCx") is False
+    db.mark_channel_dates_enriched("UCx", date_count=2)
+    assert db.channel_dates_enriched_recently("UCx") is True
+    assert db.channel_dates_enriched_recently("UCx", within_hours=0) is False   # window respected

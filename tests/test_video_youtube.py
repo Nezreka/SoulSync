@@ -338,3 +338,39 @@ def test_channel_recent_dates_via_injected_fetch():
     out = yt.channel_recent_dates("UCx", fetch=lambda url: _RSS)
     assert out["v1"] == "2024-06-01"
     assert yt.channel_recent_dates("", fetch=lambda url: _RSS) == {}
+
+
+# ── proxy bulk dates (Piped / Invidious, no key) ─────────────────────────────
+
+def test_parse_proxy_dates_piped_and_invidious():
+    piped = {"relatedStreams": [
+        {"url": "/watch?v=v1", "uploaded": 1700000000000},   # ms
+        {"url": "https://youtube.com/watch?v=v2", "uploaded": 1690000000000},
+        {"url": "/watch?v=v3"},                              # no date → skipped
+    ]}
+    assert yt.parse_proxy_dates(piped) == {"v1": "2023-11-14", "v2": "2023-07-22"}
+    inv = {"videos": [
+        {"videoId": "a", "published": 1700000000},           # seconds
+        {"videoId": "b", "published": 0},                    # bad → skipped
+    ]}
+    assert yt.parse_proxy_dates(inv) == {"a": "2023-11-14"}
+    assert yt.parse_proxy_dates("nope") == {}
+
+
+def test_proxy_channel_dates_paginates_and_falls_through_instances():
+    # first instance returns nothing → try next; piped paginates via nextpage
+    pages = {
+        "https://up/channel/UCx": {"relatedStreams": [{"url": "/watch?v=p1", "uploaded": 1700000000000}],
+                                   "nextpage": "TOK"},
+        "https://up/nextpage/channel/UCx?nextpage=TOK": {"relatedStreams": [{"url": "/watch?v=p2", "uploaded": 1690000000000}]},
+    }
+
+    def fetch(url):
+        if url.startswith("https://down"):
+            raise RuntimeError("instance down")
+        return pages.get(url)
+
+    insts = [("piped", "https://down"), ("piped", "https://up")]
+    out = yt.proxy_channel_dates("UCx", pages=5, fetch=fetch, instances=insts)
+    assert out == {"p1": "2023-11-14", "p2": "2023-07-22"}   # both pages, second instance
+    assert yt.proxy_channel_dates("", fetch=fetch, instances=insts) == {}

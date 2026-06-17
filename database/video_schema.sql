@@ -271,6 +271,14 @@ CREATE TABLE IF NOT EXISTS youtube_video_dates (
     cached_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Tracks which followed channels have had their full upload dates fetched (by the
+-- background enricher) so we don't re-sweep them constantly.
+CREATE TABLE IF NOT EXISTS youtube_channel_enrichment (
+    channel_id  TEXT PRIMARY KEY,
+    enriched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    date_count  INTEGER NOT NULL DEFAULT 0
+);
+
 -- ── Owned media files (the Library = content that has a file) ────────────────
 -- Exactly one owner FK is set (no polymorphic id). 1 row per physical file;
 -- usually 1:1 with its content, but the table allows history/extras.

@@ -81,6 +81,12 @@ def register_routes(bp):
 
             followed = db.add_channel_to_watchlist(channel)
             added = db.add_videos_to_wishlist(channel, channel.get("videos") or [], server_source=_server())
+            if followed:   # followed channels get their full upload-date catalog in the background
+                try:
+                    from core.video.youtube_enrichment import get_youtube_date_enricher
+                    get_youtube_date_enricher().enqueue(channel.get("youtube_id"))
+                except Exception:
+                    pass
             return jsonify({"success": followed, "following": followed, "added_videos": added,
                             "channel": {k: channel.get(k) for k in ("youtube_id", "title", "avatar_url")},
                             "counts": db.youtube_wishlist_counts()})
@@ -147,6 +153,12 @@ def register_routes(bp):
                 return jsonify({"success": False, "error": "Channel not found"}), 404
             cid = channel["youtube_id"]
             following = bool(db.channel_watch_state([cid]))
+            if following:   # opening a followed channel → ensure its dates get enriched
+                try:
+                    from core.video.youtube_enrichment import get_youtube_date_enricher
+                    get_youtube_date_enricher().enqueue(cid)
+                except Exception:
+                    pass
             # backfill the real avatar onto wished rows (flat listing often omits it)
             if channel.get("avatar_url"):
                 try:
