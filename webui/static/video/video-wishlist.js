@@ -114,8 +114,11 @@
         '</div>';
     }
 
-    // A single episode as a 2-line card (still + title that can wrap + meta line).
-    function epCard(tmdb, se, e) {
+    // A single episode as a rich card: still + title + meta + synopsis. The card
+    // links to the show detail (episodes have no page of their own).
+    function epCard(sh, se, e) {
+        var src = sh.library_id != null ? 'library' : 'tmdb';
+        var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
         var t = e.title || ('Episode ' + e.episode_number);
         var st = STATUS[e.status] ? e.status : 'wanted';
         var date = fmtDate(e.air_date);
@@ -123,14 +126,15 @@
             ? '<span class="vwsh-epc-thumb"><img src="' + esc(e.still_url) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
-        return '<div class="vwsh-epc">' + thumb +
+        return '<div class="vwsh-epc" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '">' + thumb +
             '<div class="vwsh-epc-body">' +
                 '<div class="vwsh-epc-title" title="' + esc(t) + '">' + esc(t) + '</div>' +
                 '<div class="vwsh-epc-meta"><span class="vwsh-ep-dot vwsh-ep-dot--' + st + '"></span>' +
                 'S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : '') + '</div>' +
+                (e.overview ? '<div class="vwsh-epc-ov">' + esc(e.overview) + '</div>' : '') +
             '</div>' +
             '<button class="vwsh-epc-rm" type="button" data-vwsh-rm="episode" ' +
-            'data-tmdb="' + esc(tmdb) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
+            'data-tmdb="' + esc(sh.tmdb_id) + '" data-s="' + se.season_number + '" data-e="' + e.episode_number + '" title="Remove">&#10005;</button>' +
         '</div>';
     }
     function renderEpisodeArea(group, tmdb, seasonNum) {
@@ -139,7 +143,7 @@
         if (sh) (sh.seasons || []).forEach(function (x) { if (x.season_number === seasonNum) se = x; });
         if (!se) { area.innerHTML = ''; return; }
         area.innerHTML = '<div class="vwsh-ep-grid">' +
-            (se.episodes || []).map(function (e) { return epCard(tmdb, se, e); }).join('') + '</div>';
+            (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('') + '</div>';
     }
 
     function render(items) {
@@ -231,7 +235,7 @@
         if (state.tab !== 'show' || artBackfilled) return;
         var missing = (items || []).some(function (sh) {
             return (sh.seasons || []).some(function (se) {
-                return !se.poster_url || (se.episodes || []).some(function (e) { return !e.still_url; });
+                return !se.poster_url || (se.episodes || []).some(function (e) { return !e.still_url || !e.overview; });
             });
         });
         if (!missing) return;

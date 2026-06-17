@@ -935,9 +935,18 @@ def test_wishlist_keys_for_shows(db):
 def test_wishlist_query_sort(db):
     db.add_episodes_to_wishlist(1, "Alpha", [{"season_number": 1, "episode_number": 1}])               # 1 ep
     db.add_episodes_to_wishlist(2, "Zeta", [{"season_number": 1, "episode_number": i} for i in range(5)])  # 5 eps
+    # CURRENT_TIMESTAMP collides within a second — pin distinct add-times so the
+    # FIFO vs newest ordering is deterministic.
+    with db.connect() as c:
+        c.execute("UPDATE video_wishlist SET date_added='2024-01-01 00:00:00' WHERE tmdb_id=1")
+        c.execute("UPDATE video_wishlist SET date_added='2024-01-02 00:00:00' WHERE tmdb_id=2")
+        c.commit()
     # most-wanted first
     w = [s["title"] for s in db.query_wishlist("show", sort="wanted")["items"]]
     assert w[0] == "Zeta"
+    # FIFO (oldest first) vs recently-added (newest first)
+    assert [s["title"] for s in db.query_wishlist("show", sort="oldest")["items"]] == ["Alpha", "Zeta"]
+    assert [s["title"] for s in db.query_wishlist("show", sort="added")["items"]] == ["Zeta", "Alpha"]
     # A–Z
     az = [s["title"] for s in db.query_wishlist("show", sort="title")["items"]]
     assert az == ["Alpha", "Zeta"]
@@ -968,3 +977,15 @@ def test_wishlist_art_backfill_targets_and_set(db):
     assert db.set_wishlist_season_poster(1396, 2, "/s2.jpg") == 1   # fills the season's episodes
     by_season = {s["season_number"]: s for s in db.query_wishlist("show")["items"][0]["seasons"]}
     assert by_season[1]["poster_url"] == "/s1.jpg" and by_season[2]["poster_url"] == "/s2.jpg"
+
+
+def test_wishlist_episode_overview_roundtrips_and_backfills(db):
+    db.add_episodes_to_wishlist(1396, "BB", [
+        {"season_number": 1, "episode_number": 1, "overview": "The one where it begins."},
+        {"season_number": 1, "episode_number": 2}])
+    eps = {e["episode_number"]: e for e in db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"]}
+    assert eps[1]["overview"] == "The one where it begins." and eps[2]["overview"] is None
+    # episode missing an overview shows up as a backfill target
+    assert (1396, 1) in {(t["tmdb_id"], t["season_number"]) for t in db.wishlist_art_backfill_targets()}
+    assert db.set_wishlist_episode_overview(1396, 1, 2, "Filled in.") is True
+    assert db.set_wishlist_episode_overview(1396, 1, 1, "nope") is False   # won't clobber
