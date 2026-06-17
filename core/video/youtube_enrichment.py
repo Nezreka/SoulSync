@@ -121,8 +121,18 @@ class YoutubeDateEnricher:
             db.cache_video_dates([{"youtube_id": k, "published_at": v} for k, v in dates.items()])
             logger.info("YouTube dates: %d cached for %s (proxy)", len(dates), cid)
 
-        # Fallback: per-video for the channel's wished videos still lacking a date.
-        ids = db.wishlisted_video_ids_for_channel(cid)
+        # Fallback (proxy down): date the channel's RECENT UPLOADS via yt-dlp, not
+        # just wished videos — so years populate fully even with no working proxy.
+        ids = set(db.wishlisted_video_ids_for_channel(cid))
+        if not dates:
+            try:
+                ch = yt.resolve_channel("https://www.youtube.com/channel/" + cid, limit=60)
+                for v in (ch or {}).get("videos") or []:
+                    if v.get("youtube_id"):
+                        ids.add(v["youtube_id"])
+            except Exception:
+                logger.info("flat resolve for date fallback failed for %s", cid, exc_info=True)
+        ids = list(ids)
         have = db.get_video_dates(ids)
         missing = [i for i in ids if i not in have and i not in dates]
         filled = 0

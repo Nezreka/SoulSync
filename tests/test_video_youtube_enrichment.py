@@ -33,8 +33,11 @@ def test_enrich_caches_proxy_dates_and_marks_done(db, monkeypatch):
 def test_enrich_falls_back_to_per_video_when_proxy_empty(db, monkeypatch):
     import core.video.youtube as yt
     monkeypatch.setattr(yt, "proxy_channel_dates", lambda cid, *a, **k: {})   # all proxies down
+    # flat resolve adds a recent upload r1 to the date-fallback set (besides wished w1/w2)
+    monkeypatch.setattr(yt, "resolve_channel",
+                        lambda url, **k: {"videos": [{"youtube_id": "r1", "title": "Recent"}]})
     monkeypatch.setattr(yt, "video_detail",
-                        lambda vid: {"youtube_id": vid, "published_at": "2022-03-03"} if vid == "w1" else None)
+                        lambda vid: {"youtube_id": vid, "published_at": "2022-03-03"} if vid in ("w1", "r1") else None)
     import core.video.youtube_enrichment as mod
     monkeypatch.setattr(mod.time, "sleep", lambda s: None)   # no real throttle delay in tests
     db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"},
@@ -42,7 +45,8 @@ def test_enrich_falls_back_to_per_video_when_proxy_empty(db, monkeypatch):
 
     e = YoutubeDateEnricher(db_factory=lambda: db)
     e._enrich("UCx")
-    assert db.get_video_dates(["w1", "w2"]) == {"w1": "2022-03-03"}   # only w1 had a date
+    # w1 (wished) + r1 (recent upload from flat resolve) got dates; w2 had none
+    assert db.get_video_dates(["w1", "w2", "r1"]) == {"w1": "2022-03-03", "r1": "2022-03-03"}
     assert db.channel_dates_enriched_recently("UCx") is True
 
 
