@@ -1752,7 +1752,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @media (prefers-reduced-motion: reduce) { .vcal-bb { transform: none; } .vcal-bb-dot { animation: none; } }
 
 /* "Next up" with 2-3 episodes → diagonal split panels; hover one to expand it */
-.vcal-bb-multi { position: relative; display: flex; min-height: 306px; border-radius: 22px; overflow: hidden;
+/* fixed height (not min-height) so hovering — which re-wraps titles at new
+   widths — never changes the hero's height and shoves the page around */
+.vcal-bb-multi { position: relative; display: flex; height: 306px; border-radius: 22px; overflow: hidden;
     border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 34px 90px rgba(0, 0, 0, 0.55); background: #08080c; }
 .vcal-bb-panel { --vcal-h: 230; position: relative; flex: 1 1 0; flex-grow: 1; min-width: 10%; overflow: hidden;
     display: flex; align-items: flex-end; cursor: pointer;
@@ -1769,7 +1771,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     opacity: 0; transition: opacity 0.4s ease; pointer-events: none; }
 .vcal-bb-multi:hover .vcal-bb-panel:not(:hover)::after { opacity: 1; }
 .vcal-bb-panel .vcal-bb-content { padding: 28px 30px 30px 50px; max-width: 540px; }
-.vcal-bb-panel .vcal-bb-title { font-size: 28px; }
+.vcal-bb-panel .vcal-bb-title { font-size: 28px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* secondary panels tease just the title; sub + actions fade in on expand */
 .vcal-bb-panel .vcal-bb-sub, .vcal-bb-panel .vcal-bb-actions { opacity: 0; transition: opacity 0.3s ease; }
 .vcal-bb-panel--lead .vcal-bb-sub, .vcal-bb-panel--lead .vcal-bb-actions { opacity: 1; }
@@ -1784,7 +1787,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vcal-hero-wrap { padding-left: 18px; padding-right: 18px; }
     .vcal-bb-title { font-size: 30px; } .vcal-bb { min-height: 240px; }
     /* stack the diagonal panels vertically on narrow screens */
-    .vcal-bb-multi { flex-direction: column; min-height: 0; }
+    .vcal-bb-multi { flex-direction: column; height: auto; }
     .vcal-bb-panel, .vcal-bb-panel:first-child, .vcal-bb-panel:last-child { clip-path: none; margin-left: 0; min-width: 0; min-height: 150px; }
     .vcal-bb-panel--lead, .vcal-bb-multi:hover .vcal-bb-panel, .vcal-bb-multi .vcal-bb-panel:hover { flex-grow: 1; }
     .vcal-bb-panel .vcal-bb-sub, .vcal-bb-panel .vcal-bb-actions { opacity: 1; }
