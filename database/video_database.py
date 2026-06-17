@@ -166,6 +166,7 @@ class VideoDatabase:
         try:
             conn.executescript(schema)
             self._ensure_columns(conn)
+            self._ensure_indexes(conn)
             conn.execute(f"PRAGMA user_version = {int(SCHEMA_VERSION)}")
             conn.commit()
             logger.info(
@@ -178,6 +179,22 @@ class VideoDatabase:
             raise
         finally:
             conn.close()
+
+    # Partial indexes that reference migration-added columns. They MUST run after
+    # _ensure_columns (the schema executescript runs first, before the ALTERs, so
+    # these would fail with "no such column" on an upgraded DB if placed there).
+    _POST_INDEXES = (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_video "
+        "ON video_wishlist(source_id) WHERE kind = 'video'",
+        "CREATE INDEX IF NOT EXISTS idx_video_wishlist_channel "
+        "ON video_wishlist(parent_source_id) WHERE kind = 'video'",
+    )
+
+    @classmethod
+    def _ensure_indexes(cls, conn) -> None:
+        """Create indexes that depend on migration-added columns (after columns exist)."""
+        for stmt in cls._POST_INDEXES:
+            conn.execute(stmt)
 
     @staticmethod
     def _ensure_columns(conn) -> None:
