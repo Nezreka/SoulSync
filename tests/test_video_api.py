@@ -569,11 +569,12 @@ def test_youtube_follow_then_channels_and_wishlist(tmp_path):
     assert chans["channels"][0]["youtube_id"] == "UCPlay"
     assert chans["channels"][0]["video_count"] == 2
 
-    # appears in the youtube wishlist grouped by channel, newest-first
-    wl = client.get("/api/video/youtube/wishlist?kind=channel").get_json()
+    # appears in the youtube wishlist as a nebula channel (year=season, video=episode)
+    wl = client.get("/api/video/youtube/wishlist").get_json()
     grp = wl["items"][0]
-    assert grp["youtube_id"] == "UCPlay" and grp["video_count"] == 2
-    assert [v["youtube_id"] for v in grp["videos"]] == ["v1", "v2"]
+    assert grp["youtube_id"] == "UCPlay" and grp["wanted"] == 2 and grp["source"] == "youtube"
+    vids = [e["source_id"] for se in grp["seasons"] for e in se["episodes"]]
+    assert set(vids) == {"v1", "v2"}
 
     # resolve now reports following=True (hydration) — stub resolve to avoid network
     import core.video.youtube as ytmod
@@ -610,3 +611,34 @@ def test_youtube_follow_requires_url_or_channel(tmp_path):
     client, _ = _make_client(tmp_path)
     r = client.post("/api/video/youtube/follow", json={})
     assert r.status_code == 400
+
+
+def test_youtube_channel_detail_hydrates_follow_and_wished(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "resolve_channel", lambda url, limit=60: dict(_CHANNEL))
+    # follow first so detail reports following + one wished video
+    client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
+    videoapi._video_db.remove_one_video_from_wishlist("v2")   # leave only v1 wished
+    d = client.get("/api/video/youtube/channel/UCPlay").get_json()
+    assert d["success"] is True and d["kind"] == "channel" and d["following"] is True
+    wished = {v["youtube_id"]: v["wished"] for v in d["channel"]["videos"]}
+    assert wished == {"v1": True, "v2": False}
+
+
+def test_youtube_channel_detail_404_on_unresolvable(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "resolve_channel", lambda url, limit=60: None)
+    assert client.get("/api/video/youtube/channel/UCnope").status_code == 404
+
+
+def test_youtube_wishlist_add_single_video(tmp_path):
+    client, _ = _make_client(tmp_path)
+    r = client.post("/api/video/youtube/wishlist/add", json={
+        "channel": {"youtube_id": "UCPlay", "title": "PlayStation"},
+        "videos": [{"youtube_id": "solo1", "title": "One Video", "published_at": "2024-03-03"}]})
+    assert r.get_json()["added"] == 1
+    assert r.get_json()["counts"] == {"channel": 1, "video": 1}
+    r = client.post("/api/video/youtube/wishlist/remove", json={"scope": "video", "source_id": "solo1"})
+    assert r.get_json()["counts"] == {"channel": 0, "video": 0}

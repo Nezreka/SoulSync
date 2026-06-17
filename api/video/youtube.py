@@ -129,6 +129,51 @@ def register_routes(bp):
             logger.exception("youtube wishlist list failed")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/youtube/channel/<channel_id>", methods=["GET"])
+    def video_youtube_channel_detail(channel_id):
+        """Full channel detail for the in-app channel page: meta + a deeper page of
+        uploads, the follow state, and per-video wished flags. Resolves live."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        try:
+            limit = int(request.args.get("limit") or 60)
+        except (TypeError, ValueError):
+            limit = 60
+        try:
+            db = get_video_db()
+            channel = yt.resolve_channel("https://www.youtube.com/channel/" + channel_id,
+                                         limit=max(1, min(90, limit)))
+            if not channel or not channel.get("youtube_id"):
+                return jsonify({"success": False, "error": "Channel not found"}), 404
+            cid = channel["youtube_id"]
+            following = bool(db.channel_watch_state([cid]))
+            wished = db.youtube_video_wish_state([v.get("youtube_id") for v in channel.get("videos") or []])
+            for v in channel.get("videos") or []:
+                v["wished"] = v.get("youtube_id") in wished
+            return jsonify({"success": True, "kind": "channel", "source": "youtube",
+                            "channel": channel, "following": following})
+        except Exception:
+            logger.exception("youtube channel detail failed for %r", channel_id)
+            return jsonify({"success": False, "error": "Could not load channel"}), 500
+
+    @bp.route("/youtube/wishlist/add", methods=["POST"])
+    def video_youtube_wishlist_add():
+        """Wish specific videos (per-video add from the channel page). Body:
+        {channel: {youtube_id, title, avatar_url?}, videos: [{youtube_id, title, …}]}."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        channel = body.get("channel") or {}
+        videos = body.get("videos") or []
+        if not channel.get("youtube_id") or not videos:
+            return jsonify({"success": False, "error": "channel and videos required"}), 400
+        try:
+            db = get_video_db()
+            n = db.add_videos_to_wishlist(channel, videos, server_source=_server())
+            return jsonify({"success": n > 0, "added": n, "counts": db.youtube_wishlist_counts()})
+        except Exception:
+            logger.exception("youtube wishlist add failed")
+            return jsonify({"success": False, "error": "Failed"}), 500
+
     @bp.route("/youtube/wishlist/remove", methods=["POST"])
     def video_youtube_wishlist_remove():
         """Remove wished videos. Body: {scope: 'channel'|'video', source_id}."""
