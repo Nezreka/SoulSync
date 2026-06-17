@@ -117,16 +117,18 @@ class YoutubeDateEnricher:
         if not cid or db.channel_dates_enriched_recently(cid):
             return
         self._current = self._titles.get(cid) or cid
-        logger.info("YouTube dates: enriching %s (%s)…", self._current, cid)
+        logger.debug("Enriching dates for %s (%s)", self._current, cid)
 
         dates = {}
         try:
             dates = yt.proxy_channel_dates(cid) or {}
         except Exception:
-            logger.info("proxy date fetch failed for %s", cid, exc_info=True)
-        logger.info("YouTube dates: proxy returned %d for %s", len(dates), cid)
+            logger.debug("proxy date fetch failed for %s", cid, exc_info=True)
+        logger.debug("proxy returned %d dates for %s", len(dates), cid)
         if dates:
             db.cache_video_dates([{"youtube_id": k, "published_at": v} for k, v in dates.items()])
+            for k, v in dates.items():   # per-item INFO, like the other workers
+                logger.info("Dated %s %s -> %s", self._current, k, v)
 
         # Fallback (proxy down): date the channel's RECENT UPLOADS via yt-dlp, not
         # just wished videos — so years populate fully even with no working proxy.
@@ -138,7 +140,7 @@ class YoutubeDateEnricher:
                     if v.get("youtube_id"):
                         ids.add(v["youtube_id"])
             except Exception:
-                logger.info("flat resolve for date fallback failed for %s", cid, exc_info=True)
+                logger.debug("flat resolve for date fallback failed for %s", cid, exc_info=True)
         ids = list(ids)
         have = db.get_video_dates(ids)
         missing = [i for i in ids if i not in have and i not in dates][:_FALLBACK_CAP]
@@ -156,7 +158,7 @@ class YoutubeDateEnricher:
                         # Per-item line, matching the other workers' "Matched … -> …".
                         logger.info("Dated %s '%s' -> %s", cur, (v.get("title") or vid)[:70], d)
                     else:
-                        logger.info("No date for %s video %s", cur, vid)
+                        logger.info("No date for %s '%s'", cur, (v.get("title") or vid)[:70])
                     return vid, d
                 except Exception:
                     return vid, None
@@ -170,8 +172,8 @@ class YoutubeDateEnricher:
         self._channels_done += 1
         self._dates_total += len(dates) + filled
         db.mark_channel_dates_enriched(cid, len(dates) + filled)
-        logger.info("YouTube dates: %s done — %d proxy + %d per-video (%d/%d dated)",
-                    cid, len(dates), filled, len(dates) + filled, len(ids))
+        # Terse per-channel summary (like the worker's "Synced full episode list…").
+        logger.info("Dated %d/%d videos for %s", len(dates) + filled, len(ids), self._current)
 
 
 _enricher = None
