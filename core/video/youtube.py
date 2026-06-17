@@ -309,7 +309,9 @@ def _proxy_get(url, fetch):
     if fetch is not None:
         return fetch(url)
     import requests
-    r = requests.get(url, timeout=8, headers={"User-Agent": _UA, "Accept": "application/json"})
+    # Short timeout so a dead instance (most public ones are flaky) fails fast and
+    # we fall through to the next / to the yt-dlp fallback instead of hanging.
+    r = requests.get(url, timeout=4, headers={"User-Agent": _UA, "Accept": "application/json"})
     return r.json() if r.status_code == 200 else None
 
 
