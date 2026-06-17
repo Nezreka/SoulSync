@@ -376,6 +376,21 @@ def test_video_side_has_real_url_routing():
     assert "'library'" in _JS
 
 
+def test_video_top_level_pages_are_deep_linked():
+    # Every sidebar page (not just detail) deep-links to '/' + pageId, mirroring
+    # the music side — pushState on nav, parse + restore on reload/Back.
+    assert "parsePagePath" in _JS and "buildPagePath" in _JS
+    assert "videoPage" in _JS                       # history state tag for pages
+    # The nav anchors carry the real path (so ⌘/middle-click open a new tab) and
+    # no longer point at the dead '#'.
+    assert 'data-video-page="video-search" href="/video-search"' in _INDEX
+    assert 'data-video-page="video-library" href="/video-library"' in _INDEX
+    assert 'href="#"' not in _block(  # none left in the video nav block
+        _INDEX, r'<nav class="sidebar-nav video-nav"', "</nav>")
+    # Modifier-clicks fall through to the href instead of being swallowed.
+    assert "metaKey" in _JS and "ctrlKey" in _JS
+
+
 def test_video_detail_module_referenced_and_isolated():
     assert "video/video-detail.js" in _INDEX
     src = (_ROOT / "webui" / "static" / "video" / "video-detail.js").read_text(encoding="utf-8")
