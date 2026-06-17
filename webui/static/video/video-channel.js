@@ -24,7 +24,7 @@
     function videoCard(v) {
         var dur = YT().fmtDuration(v.duration_seconds);
         var thumb = v.thumbnail_url
-            ? '<img class="vc-vid-img" src="' + esc(v.thumbnail_url) + '" alt="" loading="lazy" ' +
+            ? '<img class="vc-vid-img" src="' + esc(YT().img(v.thumbnail_url)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vc-vid-thumb--none\')">'
             : '';
         var bits = [];
@@ -52,12 +52,12 @@
         (ch.videos || []).forEach(function (v) { state.videos[v.youtube_id] = v; });
 
         var banner = $('[data-vc-banner]');
-        if (banner) banner.style.backgroundImage = ch.banner_url ? "url('" + ch.banner_url + "')" : '';
+        if (banner) banner.style.backgroundImage = ch.banner_url ? "url('" + YT().img(ch.banner_url) + "')" : '';
         var page = $('[data-video-channel]'); if (page) page.setAttribute('data-has-banner', ch.banner_url ? '1' : '0');
 
         var av = $('[data-vc-avatar]'), avph = $('[data-vc-avatar-ph]');
         if (av) {
-            if (ch.avatar_url) { av.src = ch.avatar_url; show(av, true); if (avph) avph.hidden = true; }
+            if (ch.avatar_url) { av.src = YT().img(ch.avatar_url); show(av, true); if (avph) avph.hidden = true; }
             else { show(av, false); if (avph) avph.hidden = false; }
         }
         var name = $('[data-vc-name]'); if (name) name.textContent = ch.title || 'Channel';

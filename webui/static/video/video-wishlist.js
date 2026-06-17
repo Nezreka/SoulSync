@@ -75,6 +75,8 @@
         // 'youtube') opens the in-app channel page. YEAR is the "season", video the
         // "episode" — the data is already shaped that way, so the same render runs.
         var yt = sh.source === 'youtube';
+        // YouTube art goes through our image proxy (reliable load); tmdb passes through.
+        var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var src = sh.library_id != null ? 'library' : 'tmdb';
         var openId = sh.library_id != null ? sh.library_id : sh.tmdb_id;
         var openAttrs = yt
@@ -86,7 +88,7 @@
         // fall back to the newest video's thumbnail so the orb is never blank.
         var poster = sh.poster_url || (yt && (sh.seasons || [])[0] ? sh.seasons[0].poster_url : null);
         var img = poster
-            ? '<img class="wl-orb-img" src="' + esc(poster) + '" alt="" ' +
+            ? '<img class="wl-orb-img" src="' + esc(pimg(poster)) + '" alt="" ' +
               'onerror="this.outerHTML=\'<div class=&quot;wl-orb-initials&quot;>' + esc(initials(sh.title)) + '</div>\'">'
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         // Episodes are shown grouped under a clickable season header (header →
@@ -95,7 +97,7 @@
         var seasons = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
             var posterUrl = se.poster_url || sh.poster_url || null;
-            var thumb = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
+            var thumb = posterUrl ? '<img src="' + esc(pimg(posterUrl)) + '" alt="">' : '<span class="vwsh-szn-ph">📺</span>';
             var cards = (se.episodes || []).map(function (e) { return epCard(sh, se, e); }).join('');
             var sName = yt ? (se.season_number ? se.season_number : 'Undated') : ('Season ' + se.season_number);
             var sRm = yt
@@ -259,13 +261,14 @@
     // the "View show" button in the info bar is what navigates.
     function epCard(sh, se, e) {
         var yt = sh.source === 'youtube';
+        var pimg = function (u) { return (yt && window.VideoYoutube) ? VideoYoutube.img(u) : u; };
         var t = e.title || (yt ? 'Untitled' : ('Episode ' + e.episode_number));
         var st = STATUS[e.status] ? e.status : 'wanted';
         var date = fmtDate(e.air_date);
         // TMDB shows the SxEx label; a YouTube video shows just its upload date.
         var metaTxt = yt ? (date || 'Video') : ('S' + se.season_number + '·E' + e.episode_number + (date ? ' · ' + esc(date) : ''));
         var thumb = e.still_url
-            ? '<span class="vwsh-epc-thumb"><img src="' + esc(e.still_url) + '" alt="" loading="lazy" ' +
+            ? '<span class="vwsh-epc-thumb"><img src="' + esc(pimg(e.still_url)) + '" alt="" loading="lazy" ' +
               'onerror="this.parentNode.classList.add(\'vwsh-epc-thumb--none\')"></span>'
             : '<span class="vwsh-epc-thumb vwsh-epc-thumb--none"></span>';
         var rm = yt

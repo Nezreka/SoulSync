@@ -117,12 +117,19 @@ def register_routes(bp):
 
     @bp.route("/img", methods=["GET"])
     def video_img_proxy():
-        """Same-origin proxy for TMDB images (image.tmdb.org ONLY — SSRF-safe).
-        Lets the detail/person pages canvas-sample a poster/portrait for the
-        per-title accent colour, which a direct cross-origin image taints."""
+        """Same-origin image proxy (SSRF-safe allowlist). TMDB for accent-sampling,
+        and YouTube CDN (avatars/banners/thumbnails) so channel art loads reliably
+        regardless of hotlink/CORS policy."""
         from flask import request
+        from urllib.parse import urlparse
         url = request.args.get("u", "")
-        if not url.startswith("https://image.tmdb.org/"):
+        if not url.startswith("https://"):
+            abort(404)
+        host = (urlparse(url).hostname or "").lower()
+        # image.tmdb.org + any YouTube image host (yt3/yt4.ggpht, googleusercontent, *.ytimg)
+        ok = host == "image.tmdb.org" or any(
+            host == s or host.endswith("." + s) for s in ("ytimg.com", "ggpht.com", "googleusercontent.com"))
+        if not ok:
             abort(404)
         try:
             import requests
