@@ -95,7 +95,7 @@
         modalState.sel.forEach(function (key) {
             var p = key.split('_'), m = (modalState.epMeta || {})[key] || {};
             eps.push({ season_number: parseInt(p[0], 10), episode_number: parseInt(p[1], 10),
-                title: m.title, air_date: m.air_date, still_url: m.still,
+                title: m.title, air_date: m.air_date, still_url: m.still, overview: m.overview,
                 season_poster_url: (modalState.seasonPoster || {})[p[0]] });
         });
         if (!eps.length) { if (btn) btn.disabled = false; toast('Select at least one episode', 'info'); return; }
@@ -343,7 +343,7 @@
             var missing = 0;
             eps.forEach(function (e) {
                 modalState.epMeta[s.season_number + '_' + e.episode_number] = { title: e.title, air_date: e.air_date,
-                    still: e.has_still ? ('/api/video/poster/episode/' + e.id) : null };
+                    overview: e.overview, still: e.has_still ? ('/api/video/poster/episode/' + e.id) : null };
                 if (epState(e, today) === 'missing') { missing++; modalState.sel.add(s.season_number + '_' + e.episode_number); }
             });
             totalMissing += missing;
@@ -406,7 +406,7 @@
                 modalState.epMeta = modalState.epMeta || {};
                 eps.forEach(function (e) {
                     modalState.epMeta[sn + '_' + e.episode_number] = { title: e.title, air_date: e.air_date,
-                        still: e.still_url || null };
+                        overview: e.overview, still: e.still_url || null };
                     if (epState(e, today) === 'missing') modalState.sel.add(sn + '_' + e.episode_number);
                 });
                 var all = seasonEl.querySelector('[data-vgm-season-all]');

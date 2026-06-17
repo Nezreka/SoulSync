@@ -126,10 +126,13 @@ def register_routes(bp):
                 if se.get("poster_url"):
                     updated += db.set_wishlist_season_poster(grp["tmdb_id"], grp["season_number"], se["poster_url"])
                 for ep in (se.get("episodes") or []):
-                    if ep.get("still_url") and ep.get("episode_number") is not None:
-                        if db.set_wishlist_still(grp["tmdb_id"], grp["season_number"],
-                                                 ep["episode_number"], ep["still_url"]):
-                            updated += 1
+                    en = ep.get("episode_number")
+                    if en is None:
+                        continue
+                    if ep.get("still_url") and db.set_wishlist_still(grp["tmdb_id"], grp["season_number"], en, ep["still_url"]):
+                        updated += 1
+                    if ep.get("overview"):
+                        db.set_wishlist_episode_overview(grp["tmdb_id"], grp["season_number"], en, ep["overview"])
             return jsonify({"success": True, "updated": updated})
         except Exception:
             logger.exception("wishlist art backfill failed")
