@@ -106,7 +106,13 @@
             body: JSON.stringify(body || {}) }).then(function (r) { return r.ok ? r.json() : null; });
     }
 
-    function follow(channel) { return post('/api/video/youtube/follow', { channel: channel }); }
+    // Following a channel WATCHLISTS it (like a show) — it doesn't auto-wish all
+    // its videos, so we send only the channel fields, not its video list.
+    function follow(channel) {
+        var ch = channel || {};
+        return post('/api/video/youtube/follow',
+            { channel: { youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url } });
+    }
     function unfollow(youtubeId) { return post('/api/video/youtube/unfollow', { youtube_id: youtubeId }); }
     function removeWish(scope, sourceId) {
         return post('/api/video/youtube/wishlist/remove', { scope: scope, source_id: sourceId });
