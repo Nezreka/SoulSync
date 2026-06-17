@@ -374,3 +374,85 @@ def test_proxy_channel_dates_paginates_and_falls_through_instances():
     out = yt.proxy_channel_dates("UCx", pages=5, fetch=fetch, instances=insts)
     assert out == {"p1": "2023-11-14", "p2": "2023-07-22"}   # both pages, second instance
     assert yt.proxy_channel_dates("", fetch=fetch, instances=insts) == {}
+
+
+# ── InnerTube channel-date parser (the no-key bulk source) ───────────────────
+
+from datetime import date
+
+
+def _lk_item(vid, rel, ctype="LOCKUP_CONTENT_TYPE_VIDEO"):
+    """A richItemRenderer wrapping a lockupViewModel, mirroring real InnerTube JSON."""
+    return {"richItemRenderer": {"content": {"lockupViewModel": {
+        "contentId": vid, "contentType": ctype,
+        "metadata": {"lockupMetadataViewModel": {
+            "title": {"content": "Title " + vid},
+            "metadata": {"contentMetadataViewModel": {"metadataRows": [
+                {"metadataParts": [{"text": {"content": "100K views"}},
+                                   {"text": {"content": rel}, "accessibilityLabel": rel}]}]}}}}}}}}
+
+
+def _cont_item(token):
+    return {"continuationItemRenderer": {"continuationEndpoint": {"continuationCommand": {"token": token}}}}
+
+
+def _page(items, token=None):
+    contents = list(items) + ([_cont_item(token)] if token else [])
+    return {"contents": {"twoColumnBrowseResultsRenderer": {"tabs": [
+        {"tabRenderer": {"content": {"richGridRenderer": {"contents": contents}}}}]}}}
+
+
+def test_relative_to_date():
+    now = date(2026, 6, 17)
+    assert yt.relative_to_date("9 hours ago", now) == "2026-06-17"     # same day
+    assert yt.relative_to_date("2 days ago", now) == "2026-06-15"
+    assert yt.relative_to_date("3 weeks ago", now) == "2026-05-27"
+    assert yt.relative_to_date("Streamed 2 years ago", now) == "2024-06-17"   # prefix tolerated
+    assert yt.relative_to_date("Premiered 5 months ago", now) == "2026-01-16"   # ~152 days (approx, fine for years)
+    assert yt.relative_to_date("no date here", now) is None
+    assert yt.relative_to_date("", now) is None
+
+
+def test_innertube_parse_videos_filters_non_videos_and_undated():
+    page = _page([
+        _lk_item("v1", "2 years ago"),
+        _lk_item("v2", "3 months ago"),
+        _lk_item("p1", "1 day ago", ctype="LOCKUP_CONTENT_TYPE_PLAYLIST"),  # not a video → skip
+        _lk_item("v3", "No views at all"),                                  # no 'ago' → skip
+    ])
+    assert yt.innertube_parse_videos(page) == [("v1", "2 years ago"), ("v2", "3 months ago")]
+
+
+def test_innertube_continuation_picks_pagination_token():
+    page = _page([_lk_item("v1", "1 day ago")], token="REAL")
+    page["decoy"] = {"some": {"continuationCommand": {"token": "DECOY-menu-token"}}}  # not a continuationItemRenderer
+    assert yt.innertube_continuation(page) == "REAL"
+    assert yt.innertube_continuation(_page([_lk_item("v1", "1 day ago")])) is None    # no token
+
+
+def test_innertube_channel_dates_paginates_and_converts():
+    now = date(2026, 6, 17)
+    pages = [
+        _page([_lk_item("v1", "1 year ago"), _lk_item("v2", "2 years ago")], token="TOK"),
+        _page([_lk_item("v3", "5 days ago")]),   # no token → stop
+    ]
+    seen = {"n": 0}
+
+    def post(payload):
+        i = seen["n"]; seen["n"] += 1
+        if i == 0:
+            assert payload.get("browseId") == "UCxxxx" and payload.get("params")
+        else:
+            assert payload.get("continuation") == "TOK"
+        return pages[i]
+
+    out = yt.innertube_channel_dates("UCxxxx", pages=5, now=now, post=post)
+    assert set(out) == {"v1", "v2", "v3"}
+    assert out["v3"] == "2026-06-12" and out["v1"] == "2025-06-17"
+    assert seen["n"] == 2   # stopped when no continuation (didn't keep hammering)
+
+
+def test_innertube_channel_dates_guards():
+    assert yt.innertube_channel_dates("not-a-uc-id", post=lambda p: {}) == {}     # only UC… channels
+    assert yt.innertube_channel_dates("UCx", post=lambda p: None) == {}           # bad/empty response → {}
+    assert yt.innertube_channel_dates("UCx", post=lambda p: (_ for _ in ()).throw(RuntimeError())) == {}
