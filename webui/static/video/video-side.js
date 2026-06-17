@@ -55,6 +55,26 @@
             { detail: { kind: r.kind, id: r.id, source: r.source, _restore: true } }));
     }
 
+    // ── Top-level pages get a real URL too: '/' + pageId (e.g. /video-search) ──
+    // Mirrors music's '/<page>' and our /video-detail/ scheme so every sidebar
+    // option is deep-linkable (reload / Back / Forward / new-tab). Only a single
+    // segment whose id is a real (non-detail) video page counts; detail URLs are
+    // matched by parseDetailPath above and never collide.
+    function isPageId(pageId) {
+        if (!pageId || DETAIL_PAGES[pageId]) return false;
+        for (var i = 0; i < VIDEO_PAGES.length; i++) {
+            if (VIDEO_PAGES[i].id === pageId) return true;
+        }
+        return false;
+    }
+    function buildPagePath(pageId) { return '/' + pageId; }
+    function parsePagePath(pathname) {
+        if (!pathname) return null;
+        var seg = pathname.replace(/^\/+|\/+$/g, '');
+        if (!seg || seg.indexOf('/') >= 0) return null;   // single segment only
+        return isPageId(seg) ? seg : null;
+    }
+
     // ── Smart back button (mirrors music's artist-detail) ─────────────────────
     // Browser history does the real (multi-layer) navigation; this stack only
     // tracks WHERE EACH detail layer was opened FROM, so the button can label
@@ -98,7 +118,8 @@
     }
 
     function onPopState() {
-        var r = parseDetailPath(window.location.pathname);
+        var path = window.location.pathname;
+        var r = parseDetailPath(path);
         if (r) {
             // Synced to the layer depth stamped on the history entry (handles both
             // our back button and the browser's Back).
@@ -109,13 +130,22 @@
             updateBackLabels();
             return;
         }
-        // Left the detail URL — return to where the chain started, not always library.
-        if (document.body.getAttribute('data-side') === 'video' &&
-            DETAIL_PAGES[document.body.getAttribute('data-video-page')]) {
-            var dest = (_backStack[0] && _backStack[0].type === 'page') ? _backStack[0].pageId : 'video-library';
+        var pg = parsePagePath(path);
+        if (pg) {
+            // Back/Forward landed on a video page URL → ensure the video side, show
+            // the page; the URL is already correct so don't re-push it.
+            if (readSide() !== 'video') { persistSide('video'); applySide('video'); }
+            navigate(pg, 'restore');
             _backStack = [];
-            navigate(dest);
             updateBackLabels();
+            return;
+        }
+        // The URL is no longer a video path (Back crossed back into music). Hand the
+        // side back so music's own router can show the page for this URL.
+        if (document.body.getAttribute('data-side') === 'video') {
+            persistSide('music');
+            applySide('music');
+            _backStack = [];
         }
     }
 
@@ -225,16 +255,27 @@
         document.dispatchEvent(new CustomEvent('soulsync:video-page-shown', { detail: meta.id }));
     }
 
-    function navigate(pageId) {
+    // Show a page + keep the URL in sync. Detail pages own their /video-detail/
+    // URL (pushed by the open-detail handler); every other page deep-links to
+    // '/' + pageId. mode: undefined = push a new history entry (user nav),
+    // 'replace' = swap the current entry, 'restore' = URL already correct (popstate
+    // / boot) so don't touch history.
+    function navigate(pageId, mode) {
         setActiveNav(pageId);
         showPage(pageId);
-        // Moving off a detail via the sidebar/nav drops the detail URL so a reload
-        // doesn't re-open it (detail pages keep their own URL via pushState).
-        if (!DETAIL_PAGES[pageId] && parseDetailPath(window.location.pathname)) {
-            try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
-        }
+        if (DETAIL_PAGES[pageId] || mode === 'restore') return;
+        var path = buildPagePath(pageId);
+        try {
+            if (mode === 'replace' || window.location.pathname === path) {
+                history.replaceState({ videoPage: pageId }, '', path);
+            } else {
+                history.pushState({ videoPage: pageId }, '', path);
+            }
+        } catch (e) { /* ignore */ }
     }
 
+    // Flip the shell chrome to a side (data-side drives the CSS). Does NOT navigate
+    // — callers decide which page to show and whether to push a URL.
     function applySide(side) {
         document.body.setAttribute('data-side', side);
         var subtitle = document.querySelector('.sidebar-header .app-subtitle');
@@ -244,25 +285,27 @@
             toggleButtons[i].classList.toggle(
                 'active', toggleButtons[i].getAttribute('data-side-target') === side);
         }
-        if (side === 'video') {
-            var active = document.querySelector('.video-nav .nav-button.active');
-            navigate(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
-        }
     }
 
     function switchSide(side) {
         if (side !== 'music' && side !== 'video') return;
         persistSide(side);
         applySide(side);
-        if (side === 'music' && parseDetailPath(window.location.pathname)) {
+        if (side === 'video') {
+            // Land on the last-active video page and give it a real URL.
+            var active = document.querySelector('.video-nav .nav-button.active');
+            navigate(active ? active.getAttribute('data-video-page') : DEFAULT_VIDEO_PAGE);
+        } else if (parseDetailPath(window.location.pathname) || parsePagePath(window.location.pathname)) {
+            // Back to music from a video URL → drop it so a reload stays on music.
             try { history.replaceState(null, '', '/'); } catch (e) { /* ignore */ }
         }
     }
 
     function init() {
-        // Deep-linked detail path captured at eval time (music may already have
-        // rewritten window.location to /dashboard by now).
+        // Deep-linked detail OR page path captured at eval time (music may already
+        // have rewritten window.location to /dashboard by now).
         var bootDetail = parseDetailPath(BOOT_PATH);
+        var bootPage = bootDetail ? null : parsePagePath(BOOT_PATH);
 
         var toggleButtons = document.querySelectorAll('.side-toggle-btn');
         for (var i = 0; i < toggleButtons.length; i++) {
@@ -277,6 +320,9 @@
         for (var j = 0; j < navButtons.length; j++) {
             (function (btn) {
                 btn.addEventListener('click', function (e) {
+                    // Let ⌘/Ctrl/middle-click open the real href (/video-<page>) in a
+                    // new tab, exactly like the music nav + the video cards.
+                    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
                     e.preventDefault();
                     _backStack = [];                 // sidebar nav is a fresh entry point
                     navigate(btn.getAttribute('data-video-page'));
@@ -347,7 +393,32 @@
             '.video-nav .nav-button[data-video-page="' + DEFAULT_VIDEO_PAGE + '"]');
         if (defaultNav) defaultNav.classList.add('active');
 
-        applySide(bootDetail ? 'video' : readSide());
+        var bootSide = (bootDetail || bootPage) ? 'video' : readSide();
+        applySide(bootSide);
+
+        // On the video side without a detail deep link, show the initial page (the
+        // page-path deep link if any, else the last-active/default nav). Deferred to
+        // a macrotask so every page module's listeners are registered first. Only a
+        // genuine page deep link re-asserts its URL against music's boot clobber;
+        // the plain last-side-was-video case leaves the URL untouched (as before).
+        if (bootSide === 'video' && !bootDetail) {
+            var activeBtn = document.querySelector('.video-nav .nav-button.active');
+            var initialPage = bootPage || (activeBtn && activeBtn.getAttribute('data-video-page')) || DEFAULT_VIDEO_PAGE;
+            setActiveNav(initialPage);
+            var pagePath = buildPagePath(initialPage);
+            var reassertPage = function () {
+                if (bootPage && document.body.getAttribute('data-side') === 'video' &&
+                    !DETAIL_PAGES[document.body.getAttribute('data-video-page')] &&
+                    window.location.pathname !== pagePath) {
+                    try { history.replaceState({ videoPage: initialPage }, '', pagePath); } catch (e) { /* ignore */ }
+                }
+            };
+            setTimeout(function () {
+                reassertPage();
+                navigate(initialPage, 'restore');
+                if (bootPage) [120, 350, 700].forEach(function (ms) { setTimeout(reassertPage, ms); });
+            }, 0);
+        }
 
         // Deep link / reload straight to a detail URL → restore it. Deferred to a
         // macrotask so EVERY script's DOMContentLoaded handler has registered
