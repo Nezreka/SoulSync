@@ -1272,9 +1272,15 @@
             .catch(function () { showEpSyncing(false); });
     }
 
-    function showEpSyncing(on) {
+    function showEpSyncing(on, message) {
         var el = q('[data-vd-ep-syncing]');
-        if (el) el.hidden = !on;
+        if (!el) return;
+        var t = el.querySelector('span:last-child');
+        // Reuse the indicator for channel date-fetching too; reset to the TMDB copy
+        // when no message is passed so the two paths don't leak text into each other.
+        if (on && t) t.textContent = message ||
+            'Fetching the full episode list from TMDB… missing episodes will fill in shortly.';
+        el.hidden = !on;
     }
 
     function reloadDetail(id) {
@@ -1357,14 +1363,19 @@
                 data = nd;
                 if (!seasonByNum(selectedSeason)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
                 renderBillboard(nd); renderSeasonNav(); renderEpisodes();
+                // years filled in → stop the "fetching dates" spinner + the polling
+                if (!nd.seasons.some(function (s) { return s.season_number === 0; })) { showEpSyncing(false); ytClearRepoll(); }
             })
             .catch(function () { /* ignore */ });
     }
     function ytScheduleRepoll(id) {
         ytClearRepoll();
+        // Tell the user dates are being fetched (the enricher takes ~30-45s).
+        showEpSyncing(true, 'Fetching upload dates from YouTube… your year-seasons will fill in shortly.');
         [25000, 60000, 110000].forEach(function (ms) {
             ytRepollTimers.push(setTimeout(function () { ytRefetch(id); }, ms));
         });
+        ytRepollTimers.push(setTimeout(function () { if (currentId === id) showEpSyncing(false); }, 125000));
     }
 
     function loadChannel(id) {
@@ -1440,9 +1451,9 @@
             document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); }).catch(function () { /* ignore */ });
         else yc.follow({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url }).then(function (d) {
             if (d && d.success) {
+                data.following = true; renderActions(data);   // toggle in place — no page reload
                 if (typeof showToast === 'function') showToast('Following · ' + (d.added_videos || 0) + ' videos added', 'success');
                 document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
-                loadChannel(data.id);   // reload so the now-wished videos reflect
             }
         }).catch(function () { /* ignore */ });
     }
