@@ -368,6 +368,7 @@ CREATE TABLE IF NOT EXISTS video_wishlist (
     episode_number INTEGER,                  -- episode rows
     episode_title  TEXT,                     -- episode rows
     still_url      TEXT,                     -- episode still thumbnail (episode rows)
+    season_poster_url TEXT,                  -- the episode's SEASON poster (episode rows)
     air_date       TEXT,                     -- episode rows (already aired by the time it's here)
     status         TEXT NOT NULL DEFAULT 'wanted',  -- wanted|searching|downloading|downloaded|failed
     library_id     INTEGER,                  -- owned movies.id/shows.id when re-downloading

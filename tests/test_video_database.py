@@ -956,14 +956,15 @@ def test_wishlist_episode_still_roundtrips(db):
     assert by[1]["still_url"] == "https://img/e1.jpg" and by[2]["still_url"] is None
 
 
-def test_wishlist_still_backfill_targets_and_set(db):
+def test_wishlist_art_backfill_targets_and_set(db):
     db.add_episodes_to_wishlist(1396, "BB", [
-        {"season_number": 1, "episode_number": 1, "still_url": "/have.jpg"},
+        {"season_number": 1, "episode_number": 1, "still_url": "/have.jpg", "season_poster_url": "/s1.jpg"},
         {"season_number": 1, "episode_number": 2},
         {"season_number": 2, "episode_number": 1}])
-    tset = {(t["tmdb_id"], t["season_number"]) for t in db.wishlist_still_backfill_targets()}
-    assert (1396, 1) in tset and (1396, 2) in tset
+    tset = {(t["tmdb_id"], t["season_number"]) for t in db.wishlist_art_backfill_targets()}
+    assert (1396, 1) in tset and (1396, 2) in tset           # S1 missing a still, S2 missing both
     assert db.set_wishlist_still(1396, 1, 2, "/new.jpg") is True
     assert db.set_wishlist_still(1396, 1, 1, "/x.jpg") is False   # won't clobber an existing still
-    eps = {e["episode_number"]: e for e in db.query_wishlist("show")["items"][0]["seasons"][0]["episodes"]}
-    assert eps[1]["still_url"] == "/have.jpg" and eps[2]["still_url"] == "/new.jpg"
+    assert db.set_wishlist_season_poster(1396, 2, "/s2.jpg") == 1   # fills the season's episodes
+    by_season = {s["season_number"]: s for s in db.query_wishlist("show")["items"][0]["seasons"]}
+    assert by_season[1]["poster_url"] == "/s1.jpg" and by_season[2]["poster_url"] == "/s2.jpg"

@@ -79,8 +79,9 @@
             : '<div class="wl-orb-initials">' + esc(initials(sh.title)) + '</div>';
         var tiles = (sh.seasons || []).map(function (se) {
             var n = se.episodes.length;
-            // #2: stamp the season number over the art so tiles read as distinct seasons
-            var inner = sh.poster_url ? '<img src="' + esc(sh.poster_url) + '" alt="">' : '<div class="wl-album-tile-fallback">📺</div>';
+            // real season poster (falls back to the show poster, then a placeholder)
+            var posterUrl = se.poster_url || sh.poster_url || null;
+            var inner = posterUrl ? '<img src="' + esc(posterUrl) + '" alt="">' : '<div class="wl-album-tile-fallback">📺</div>';
             var art = '<div class="wl-album-tile-art">' + inner + '<span class="vwsh-season-tag">S' + se.season_number + '</span></div>';
             var tracks = (se.episodes || []).map(function (e) {
                 var t = e.title || ('Episode ' + e.episode_number);
@@ -204,24 +205,24 @@
                 render(d.items || []);
                 updatePagination(p);
                 updateEmpty(p.total_count);
-                maybeBackfillStills(d.items || []);
+                maybeBackfillArt(d.items || []);
             })
             .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updatePagination(null); updateEmpty(0); });
     }
 
-    // Episodes added before still-capture have no image — fetch them once (cheap:
-    // one tmdb_season call per show/season server-side), then reload to show them.
-    var stillsBackfilled = false;
-    function maybeBackfillStills(items) {
-        if (state.tab !== 'show' || stillsBackfilled) return;
+    // Rows added before art-capture have no episode still / season poster — fetch
+    // them once (cheap: one tmdb_season call per show/season server-side), reload.
+    var artBackfilled = false;
+    function maybeBackfillArt(items) {
+        if (state.tab !== 'show' || artBackfilled) return;
         var missing = (items || []).some(function (sh) {
             return (sh.seasons || []).some(function (se) {
-                return (se.episodes || []).some(function (e) { return !e.still_url; });
+                return !se.poster_url || (se.episodes || []).some(function (e) { return !e.still_url; });
             });
         });
         if (!missing) return;
-        stillsBackfilled = true;
-        fetch('/api/video/wishlist/backfill-stills', { method: 'POST', headers: { Accept: 'application/json' } })
+        artBackfilled = true;
+        fetch('/api/video/wishlist/backfill-art', { method: 'POST', headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (res) { if (res && res.updated > 0) load(); })
             .catch(function () { /* best-effort */ });

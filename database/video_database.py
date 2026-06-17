@@ -29,7 +29,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -100,6 +100,7 @@ _COLUMN_MIGRATIONS = [
     ("shows", "airs_time", "TEXT"),   # TVDB show air time, e.g. "21:00" (network local)
     ("video_watchlist", "state", "TEXT NOT NULL DEFAULT 'follow'"),  # follow | mute (tombstone)
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
+    ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
 ]
 
 
@@ -1518,17 +1519,19 @@ class VideoDatabase:
                 conn.execute(
                     """INSERT INTO video_wishlist
                            (kind, tmdb_id, title, poster_url, season_number, episode_number,
-                            episode_title, still_url, air_date, library_id, server_source)
-                       VALUES ('episode', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            episode_title, still_url, season_poster_url, air_date, library_id, server_source)
+                       VALUES ('episode', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                        ON CONFLICT(tmdb_id, season_number, episode_number) WHERE kind='episode' DO UPDATE SET
                            title=excluded.title,
                            poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
                            episode_title=COALESCE(excluded.episode_title, video_wishlist.episode_title),
                            still_url=COALESCE(excluded.still_url, video_wishlist.still_url),
+                           season_poster_url=COALESCE(excluded.season_poster_url, video_wishlist.season_poster_url),
                            air_date=COALESCE(excluded.air_date, video_wishlist.air_date),
                            library_id=COALESCE(excluded.library_id, video_wishlist.library_id)""",
                     (int(show_tmdb_id), show_title, poster_url, int(sn), int(en),
-                     e.get("title"), e.get("still_url"), e.get("air_date"), library_id, server_source))
+                     e.get("title"), e.get("still_url"), e.get("season_poster_url"),
+                     e.get("air_date"), library_id, server_source))
                 n += 1
             conn.commit()
             return n
@@ -1628,16 +1631,20 @@ class VideoDatabase:
                 items = []
                 for sr in show_rows:
                     eps = conn.execute(
-                        "SELECT season_number, episode_number, episode_title, still_url, air_date, status "
+                        "SELECT season_number, episode_number, episode_title, still_url, "
+                        "season_poster_url, air_date, status "
                         "FROM video_wishlist WHERE kind='episode' AND tmdb_id=? "
                         "ORDER BY season_number, episode_number", (sr["tmdb_id"],)).fetchall()
                     by_season: dict = {}
+                    season_poster: dict = {}
                     for e in eps:
                         by_season.setdefault(e["season_number"], []).append({
                             "episode_number": e["episode_number"], "title": e["episode_title"],
                             "still_url": e["still_url"], "air_date": e["air_date"], "status": e["status"]})
-                    seasons = [{"season_number": sn, "episodes": by_season[sn]}
-                               for sn in sorted(by_season)]
+                        if e["season_poster_url"] and e["season_number"] not in season_poster:
+                            season_poster[e["season_number"]] = e["season_poster_url"]
+                    seasons = [{"season_number": sn, "poster_url": season_poster.get(sn),
+                                "episodes": by_season[sn]} for sn in sorted(by_season)]
                     items.append({"kind": "show", "tmdb_id": sr["tmdb_id"], "title": sr["title"],
                                   "poster_url": sr["poster_url"], "library_id": sr["library_id"],
                                   "wanted": sr["wanted"], "done": sr["done"] or 0, "seasons": seasons})
@@ -1669,16 +1676,17 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def wishlist_still_backfill_targets(self) -> list:
-        """Distinct (show_tmdb_id, season) with episode rows missing a still — one
-        tmdb_season fetch per group fills them all (cheap backfill for rows added
-        before still-capture existed)."""
+    def wishlist_art_backfill_targets(self) -> list:
+        """Distinct (show_tmdb_id, season) with episode rows missing a still OR a
+        season poster — one tmdb_season fetch per group fills both (cheap backfill
+        for rows added before art-capture existed)."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
                 "SELECT DISTINCT tmdb_id, season_number FROM video_wishlist "
-                "WHERE kind='episode' AND (still_url IS NULL OR still_url='') "
-                "AND tmdb_id IS NOT NULL AND season_number IS NOT NULL").fetchall()
+                "WHERE kind='episode' AND tmdb_id IS NOT NULL AND season_number IS NOT NULL "
+                "AND ((still_url IS NULL OR still_url='') OR "
+                "     (season_poster_url IS NULL OR season_poster_url=''))").fetchall()
             return [{"tmdb_id": r["tmdb_id"], "season_number": r["season_number"]} for r in rows]
         finally:
             conn.close()
@@ -1695,6 +1703,21 @@ class VideoDatabase:
                 (still_url, int(show_tmdb_id), int(season_number), int(episode_number)))
             conn.commit()
             return cur.rowcount > 0
+        finally:
+            conn.close()
+
+    def set_wishlist_season_poster(self, show_tmdb_id, season_number, poster_url) -> int:
+        """Fill the season poster on every episode row of a season that lacks one."""
+        if not poster_url:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE video_wishlist SET season_poster_url=? WHERE kind='episode' AND tmdb_id=? "
+                "AND season_number=? AND (season_poster_url IS NULL OR season_poster_url='')",
+                (poster_url, int(show_tmdb_id), int(season_number)))
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 
