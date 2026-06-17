@@ -102,18 +102,25 @@
         var gstyle = 'animation-delay:' + Math.min(idx * 45, 700) + 'ms;--orb-hue:' + hue +
             (sh.poster_url ? ";--vwsh-poster:url('" + esc(sh.poster_url) + "')" : '');
         var prog = total ? Math.max(0, Math.min(1, (sh.done || 0) / total)) : 0;   // #4 acquisition progress
+        // Header is a 3-column row that FLANKS the poster: synopsis (left) · poster
+        // (middle) · cast (right). When collapsed (or no data) the side columns are
+        // empty → hidden → just the centered bubble, so the nebula grid is unchanged.
         return '<div class="wl-orb-group" data-vwsh-group data-vwsh-tmdb="' + esc(sh.tmdb_id) + '" style="' + gstyle + '">' +
             '<button class="wl-orb-remove" type="button" data-vwsh-rm="show" data-tmdb="' + esc(sh.tmdb_id) + '" title="Remove show">&#10005;</button>' +
-            '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
-            '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb style="--vwsh-prog:' + prog + '">' +
-                '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
-                '<div class="vwsh-prog"></div>' +
+            '<div class="vwsh-xhead">' +
+                '<div class="vwsh-info-syn" data-vwsh-syn></div>' +
+                '<div class="vwsh-xhead-mid">' +
+                    '<div class="wl-orb-tooltip">' + esc(sh.title) + '<br><span>' + eps + '</span></div>' +
+                    '<div class="wl-orb ' + orbSize(total) + '" data-vwsh-orb style="--vwsh-prog:' + prog + '">' +
+                        '<div class="wl-orb-glow"></div>' + img + '<div class="wl-orb-ring"></div>' +
+                        '<div class="vwsh-prog"></div>' +
+                    '</div>' +
+                    '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
+                    '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
+                '</div>' +
+                '<div class="vwsh-info-cast" data-vwsh-cast></div>' +
             '</div>' +
-            '<div class="wl-orb-label" data-vwsh-open-show data-vwsh-src="' + src + '" data-vwsh-id="' + esc(openId) + '" title="' + esc(sh.title) + '">' + esc(sh.title) + '</div>' +
-            '<div class="wl-orb-meta">' + eps + (sh.done ? ' · ' + sh.done + ' done' : '') + '</div>' +
-            '<div class="wl-orb-expanded">' +
-                '<div class="vwsh-info" data-vwsh-info></div>' +
-                '<div class="vwsh-seasons">' + seasons + '</div></div>' +
+            '<div class="wl-orb-expanded"><div class="vwsh-seasons">' + seasons + '</div></div>' +
         '</div>';
     }
 
@@ -141,7 +148,9 @@
     }
     // sel = a selected episode object (episode synopsis + guest cast), or null (show synopsis + show cast).
     function renderInfoBar(group, tmdb, sel) {
-        var info = group && group.querySelector('[data-vwsh-info]'); if (!info) return;
+        var synEl = group && group.querySelector('[data-vwsh-syn]');
+        var castEl = group && group.querySelector('[data-vwsh-cast]');
+        if (!synEl || !castEl) return;
         var si = state.showInfo[tmdb] || {};
         var eyebrow, overview, castArr;
         if (sel) {
@@ -156,10 +165,10 @@
         } else {
             eyebrow = ''; overview = si.overview || ''; castArr = si.cast || [];
         }
-        var left = '<div class="vwsh-info-syn">' +
-            (eyebrow ? '<span class="vwsh-info-eyebrow">' + esc(eyebrow) + '</span>' : '') +
-            esc(overview) + '</div>';
-        info.innerHTML = left + (castArr.length ? '<div class="vwsh-info-cast">' + castBubbles(castArr) + '</div>' : '');
+        // Side columns are independent so each hides (:empty) when it has nothing.
+        synEl.innerHTML = (eyebrow || overview)
+            ? ((eyebrow ? '<span class="vwsh-info-eyebrow">' + esc(eyebrow) + '</span>' : '') + esc(overview)) : '';
+        castEl.innerHTML = castArr.length ? castBubbles(castArr) : '';
         // lazily fetch the episode's guest stars, then re-render if still selected
         if (sel && sel._guests === undefined) {
             sel._guests = null;

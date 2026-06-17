@@ -2539,12 +2539,17 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-nebula .wl-orb.orb-md { width: 104px; height: 104px; }
 .vwsh-nebula .wl-orb.orb-lg { width: 124px; height: 124px; }
 
-/* show info bar — synopsis (left) + clickable cast bubbles (right), lazy-loaded */
-.vwsh-nebula .vwsh-info:empty { display: none; }
-.vwsh-nebula .vwsh-info { display: flex; gap: 20px; align-items: flex-start; text-align: left; margin: 4px 0 18px; }
-.vwsh-nebula .vwsh-info-syn { flex: 1 1 0; min-width: 0; font-size: 12.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.6);
-    display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
-.vwsh-nebula .vwsh-info-cast { flex: 0 0 auto; max-width: 48%; display: flex; flex-wrap: wrap; gap: 12px 10px; justify-content: flex-end; }
+/* expanded header — synopsis (left) · poster (middle) · cast (right). The side
+   columns hide (:empty) when there's nothing, so a collapsed/cast-less show just
+   shows the centered bubble (nebula grid unchanged). */
+.vwsh-nebula .vwsh-xhead { display: flex; align-items: center; justify-content: center; gap: 24px; width: 100%; }
+.vwsh-nebula .vwsh-xhead-mid { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.vwsh-nebula .vwsh-info-syn { flex: 0 1 340px; min-width: 0; align-self: center; text-align: left;
+    font-size: 12.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.62);
+    display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; }
+.vwsh-nebula .vwsh-info-cast { flex: 0 1 340px; min-width: 0; align-self: center; display: flex; flex-wrap: wrap;
+    gap: 12px 10px; align-content: center; justify-content: flex-start; }
+.vwsh-nebula .vwsh-info-syn:empty, .vwsh-nebula .vwsh-info-cast:empty { display: none; }
 .vwsh-nebula .vwsh-cast { width: 56px; padding: 0; border: none; background: none; cursor: pointer;
     display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .vwsh-nebula .vwsh-cast-img { position: relative; width: 46px; height: 46px; border-radius: 50%; overflow: hidden;
@@ -2560,8 +2565,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     text-align: center; line-height: 1.2; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vwsh-nebula .vwsh-cast:hover .vwsh-cast-name { color: rgba(255, 255, 255, 0.85); }
 @media (max-width: 640px) {
-    .vwsh-nebula .vwsh-info { flex-direction: column; }
-    .vwsh-nebula .vwsh-info-cast { max-width: 100%; justify-content: flex-start; }
+    .vwsh-nebula .vwsh-xhead { flex-direction: column; gap: 14px; }
+    .vwsh-nebula .vwsh-info-syn { flex-basis: auto; text-align: center; }
+    .vwsh-nebula .vwsh-info-cast { flex-basis: auto; justify-content: center; }
 }
 .vwsh-nebula .vwsh-info-eyebrow { display: block; font-size: 10px; font-weight: 800; text-transform: uppercase;
     letter-spacing: 0.05em; color: hsl(var(--orb-hue, 230) 80% 76%); margin-bottom: 6px; }
@@ -2595,12 +2601,14 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06);
     transition: background 0.15s ease, border-color 0.15s ease; }
 .vwsh-nebula .vwsh-epc:hover { background: rgba(255, 255, 255, 0.07); border-color: hsla(var(--orb-hue, 230), 60%, 55%, 0.35); }
-.vwsh-nebula .vwsh-epc-thumb { flex-shrink: 0; width: 92px; height: 52px; border-radius: 6px; overflow: hidden;
+.vwsh-nebula .vwsh-epc-thumb { position: relative; flex-shrink: 0; width: 92px; height: 52px; border-radius: 6px; overflow: hidden;
     background: #16161d; border: 1px solid rgba(255, 255, 255, 0.08); }
 .vwsh-nebula .vwsh-epc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-nebula .vwsh-epc-thumb--none { background: repeating-linear-gradient(135deg,
-    rgba(255, 255, 255, 0.04) 0 6px, rgba(255, 255, 255, 0.07) 6px 12px); }
+/* no still → a quiet placeholder (faint icon) instead of loud diagonal stripes */
+.vwsh-nebula .vwsh-epc-thumb--none { background: rgba(255, 255, 255, 0.03); }
 .vwsh-nebula .vwsh-epc-thumb--none img { display: none; }
+.vwsh-nebula .vwsh-epc-thumb--none::after { content: '📺'; position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center; font-size: 17px; opacity: 0.22; }
 .vwsh-nebula .vwsh-epc-body { flex: 1; min-width: 0; }
 .vwsh-nebula .vwsh-epc-title { font-size: 12.5px; font-weight: 700; color: #fff; line-height: 1.3;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
