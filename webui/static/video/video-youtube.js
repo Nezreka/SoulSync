@@ -33,9 +33,19 @@
         return (w.slice(0, 2).map(function (x) { return x[0]; }).join('') || '▶').toUpperCase();
     }
 
+    // Route YouTube CDN images through our same-origin proxy so hotlink/CORS
+    // policy can't blank them out. Non-YouTube / already-proxied urls pass through.
+    function img(url) {
+        if (!url) return url;
+        if (/^https:\/\/([\w-]+\.)?(ytimg\.com|ggpht\.com|googleusercontent\.com)\//i.test(url))
+            return '/api/video/img?u=' + encodeURIComponent(url);
+        return url;
+    }
+
     function avatar(ch, cls) {
-        if (ch && ch.poster_url || (ch && ch.avatar_url)) {
-            return '<img class="' + cls + '" src="' + esc(ch.poster_url || ch.avatar_url) +
+        var url = ch && (ch.poster_url || ch.avatar_url);
+        if (url) {
+            return '<img class="' + cls + '" src="' + esc(img(url)) +
                 '" alt="" loading="lazy" onerror="this.style.display=\'none\'">';
         }
         return '<span class="' + cls + ' vyt-avatar--ph">' + esc(initials(ch && ch.title)) + '</span>';
@@ -62,7 +72,7 @@
     function searchCard(ch, following) {
         var strip = (ch.videos || []).slice(0, 6).map(function (v) {
             return v.thumbnail_url
-                ? '<span class="vyt-strip-cell"><img src="' + esc(v.thumbnail_url) + '" alt="" loading="lazy" ' +
+                ? '<span class="vyt-strip-cell"><img src="' + esc(img(v.thumbnail_url)) + '" alt="" loading="lazy" ' +
                   'onerror="this.parentNode.style.display=\'none\'"></span>'
                 : '';
         }).join('');
@@ -125,7 +135,7 @@
     }
 
     window.VideoYoutube = {
-        esc: esc, isChannelRef: isChannelRef, fmtDate: fmtDate, avatar: avatar,
+        esc: esc, isChannelRef: isChannelRef, fmtDate: fmtDate, avatar: avatar, img: img,
         fmtDuration: fmtDuration, compactCount: compactCount,
         videoCard: videoCard, searchCard: searchCard, followBtn: followBtn,
         follow: follow, unfollow: unfollow, removeWish: removeWish, addVideos: addVideos, resolve: resolve,

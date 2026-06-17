@@ -667,3 +667,20 @@ def test_youtube_video_detail_404(tmp_path, monkeypatch):
     import core.video.youtube as ytmod
     monkeypatch.setattr(ytmod, "video_detail", lambda vid: None)
     assert client.get("/api/video/youtube/video/nope").status_code == 404
+
+
+def test_img_proxy_allows_youtube_cdn_only(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import requests
+
+    class FakeResp:
+        status_code = 200
+        headers = {"Content-Type": "image/jpeg"}
+        def iter_content(self, n): yield b"x"
+    monkeypatch.setattr(requests, "get", lambda *a, **k: FakeResp())
+    assert client.get("/api/video/img?u=https://yt3.googleusercontent.com/abc=s900").status_code == 200
+    assert client.get("/api/video/img?u=https://i.ytimg.com/vi/x/hq.jpg").status_code == 200
+    assert client.get("/api/video/img?u=https://image.tmdb.org/t/p/w500/x.jpg").status_code == 200
+    # still SSRF-safe: arbitrary hosts rejected
+    assert client.get("/api/video/img?u=https://evil.example.com/x.jpg").status_code == 404
+    assert client.get("/api/video/img?u=http://yt3.googleusercontent.com/x").status_code == 404  # http
