@@ -276,7 +276,8 @@ CREATE TABLE IF NOT EXISTS youtube_video_dates (
 CREATE TABLE IF NOT EXISTS youtube_channel_enrichment (
     channel_id  TEXT PRIMARY KEY,
     enriched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    date_count  INTEGER NOT NULL DEFAULT 0
+    date_count  INTEGER NOT NULL DEFAULT 0,
+    method      TEXT                        -- 'innertube' | 'fallback'; NULL = legacy → re-enrich once
 );
 
 -- ── Owned media files (the Library = content that has a file) ────────────────

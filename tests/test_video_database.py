@@ -1182,3 +1182,13 @@ def test_channel_enrichment_tracking(db):
     db.mark_channel_dates_enriched("UCx", date_count=50)
     assert db.channel_dates_enriched_recently("UCx", within_hours=24) is True
     assert db.channel_dates_enriched_recently("UCx", within_hours=0) is False   # window respected
+
+
+def test_legacy_enrichment_rows_upgrade(db):
+    # A pre-InnerTube row (method NULL) with otherwise-good coverage must NOT be
+    # locked for 24h — it re-enriches once so it upgrades to the full catalog.
+    db.mark_channel_dates_enriched("UCleg", date_count=50, method=None)
+    assert db.channel_dates_enriched_recently("UCleg") is False
+    # After the InnerTube re-run, the normal window applies again (no churn).
+    db.mark_channel_dates_enriched("UCleg", date_count=240, method="innertube")
+    assert db.channel_dates_enriched_recently("UCleg") is True
