@@ -39,7 +39,7 @@ def register_routes(bp):
             kind = request.args.get("kind")
             if kind in _KINDS:
                 res = db.query_wishlist(
-                    kind, search=request.args.get("search", ""),
+                    kind, search=request.args.get("search", ""), sort=request.args.get("sort", "added"),
                     page=request.args.get("page", 1), limit=request.args.get("limit", 60))
                 return jsonify({"success": True, "kind": kind, "counts": counts, **res})
             return jsonify({"success": True, "counts": counts})
