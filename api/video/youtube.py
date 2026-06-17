@@ -183,6 +183,25 @@ def register_routes(bp):
             logger.exception("youtube video detail failed for %r", video_id)
             return jsonify({"success": False, "error": "Could not load video"}), 500
 
+    @bp.route("/youtube/search", methods=["GET"])
+    def video_youtube_search():
+        """Channel search results for the search page (alongside TMDB), each with a
+        followed flag so the card can hydrate. Best-effort."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            return jsonify({"success": True, "channels": []})
+        try:
+            chans = yt.search_channels(q)
+            following = get_video_db().channel_watch_state([c["youtube_id"] for c in chans])
+            for c in chans:
+                c["following"] = c["youtube_id"] in following
+            return jsonify({"success": True, "channels": chans})
+        except Exception:
+            logger.exception("youtube search failed for %r", q)
+            return jsonify({"success": False, "channels": []})
+
     @bp.route("/youtube/playlists/<channel_id>", methods=["GET"])
     def video_youtube_playlists(channel_id):
         """The channel's playlists (rendered as 'seasons' on the channel page)."""

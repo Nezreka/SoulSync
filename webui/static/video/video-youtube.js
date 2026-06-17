@@ -129,6 +129,23 @@
         return '' + n;
     }
 
+    function searchChannels(q) {
+        return fetch('/api/video/youtube/search?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; });
+    }
+
+    // A compact channel card for the search results grid (→ opens the channel page).
+    function channelResultCard(ch) {
+        var sub = ch.subscriber_count ? compactCount(ch.subscriber_count) + ' subscribers' : (ch.handle ? esc(ch.handle) : '');
+        return '<a class="vyt-result" href="#" data-vyt-open-channel="' + esc(ch.youtube_id) + '">' +
+            '<span class="vyt-result-art">' + avatar(ch, 'vyt-result-avatar') + '</span>' +
+            '<span class="vyt-result-info">' +
+                '<span class="vyt-result-badge">YouTube</span>' +
+                '<span class="vyt-result-title" title="' + esc(ch.title) + '">' + esc(ch.title) + '</span>' +
+                (sub ? '<span class="vyt-result-sub">' + sub + '</span>' : '') +
+            '</span></a>';
+    }
+
     function resolve(ref) {
         return fetch('/api/video/youtube/resolve?url=' + encodeURIComponent(ref),
             { headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : (r.status === 404 ? r.json() : null); });
@@ -139,5 +156,6 @@
         fmtDuration: fmtDuration, compactCount: compactCount,
         videoCard: videoCard, searchCard: searchCard, followBtn: followBtn,
         follow: follow, unfollow: unfollow, removeWish: removeWish, addVideos: addVideos, resolve: resolve,
+        searchChannels: searchChannels, channelResultCard: channelResultCard,
     };
 })();

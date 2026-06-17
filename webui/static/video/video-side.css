@@ -2919,3 +2919,17 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vc-pl-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 6px 14px 16px; }
 .vc-pl--collapsed .vc-pl-vids { display: none; }
 .vc-pl-loading { padding: 14px; color: rgba(255,255,255,0.5); font-size: 13px; }
+
+/* YouTube channel cards in the search results grid */
+.vyt-result-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+.vyt-result { display: flex; flex-direction: column; align-items: center; text-align: center; text-decoration: none;
+    padding: 14px 8px; border-radius: 14px; transition: background 0.15s ease; }
+.vyt-result:hover { background: rgba(255, 59, 59, 0.07); }
+.vyt-result-art { width: 92px; height: 92px; border-radius: 50%; overflow: hidden; border: 2px solid rgba(255,59,59,0.4);
+    display: flex; align-items: center; justify-content: center; background: #16161d; }
+.vyt-result-avatar { width: 100%; height: 100%; object-fit: cover; font-size: 26px; }
+.vyt-result-info { margin-top: 10px; display: flex; flex-direction: column; align-items: center; gap: 2px; max-width: 100%; }
+.vyt-result-badge { font-size: 9.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #ff6b6b; }
+.vyt-result-title { font-size: 13px; font-weight: 800; color: #fff; line-height: 1.2; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vyt-result-sub { font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.42); }
