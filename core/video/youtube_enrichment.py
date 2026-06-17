@@ -13,6 +13,7 @@ followed (or its page opened while followed). Reads/writes only video_library.db
 
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -49,6 +50,10 @@ class YoutubeDateEnricher:
         worker thread on first use)."""
         cid = str(channel_id or "").strip()
         if not cid:
+            return
+        # Never spawn the background daemon (network + the default DB) under tests;
+        # the enricher's logic is exercised directly via _enrich() with a tmp DB.
+        if os.environ.get("PYTEST_CURRENT_TEST"):
             return
         with self._lock:
             if title:
