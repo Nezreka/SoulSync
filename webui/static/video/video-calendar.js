@@ -18,7 +18,7 @@
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var MO_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
         'September', 'October', 'November', 'December'];
-    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all' };
+    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all', view: 'cards' };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -88,7 +88,7 @@
             : '<span class="vcal-time vcal-time--none">Anytime</span>';
         var flag = ep.has_file ? '<span class="vcal-flag" title="In your library">✓</span>' : '';
         var meta = '<span class="vcal-se">' + se + '</span>' + (epTitle ? '<span class="vcal-ep">' + esc(epTitle) + '</span>' : '');
-        return '<a class="vcal-cell" style="--vcal-h:' + hue + ';--i:' + (idx % 24) + '" ' +
+        return '<a class="vcal-cell' + (ep.has_file ? ' vcal-cell--owned' : '') + '" style="--vcal-h:' + hue + ';--i:' + (idx % 24) + '" ' +
             'href="/video-detail/library/show/' + ep.show_id + '" ' +
             'data-cal-ep="' + ep.id + '" ' +
             'title="' + esc(ep.show_title) + (epTitle ? ' — ' + esc(epTitle) : '') + (tl ? ' · ' + tl : '') + '">' +
@@ -448,6 +448,10 @@
         for (var i = 0; i < fbs.length; i++) (function (b) {
             b.addEventListener('click', function () { state.filter = b.getAttribute('data-video-cal-filter'); render(); });
         })(fbs[i]);
+        var vbs = document.querySelectorAll('[data-video-cal-view]');
+        for (var k = 0; k < vbs.length; k++) (function (b) {
+            b.addEventListener('click', function () { setView(b.getAttribute('data-video-cal-view')); });
+        })(vbs[k]);
         var addBtn = $('[data-video-cal-addmissing]');
         if (addBtn) addBtn.addEventListener('click', addMissing);
 
@@ -587,6 +591,21 @@
             .catch(function () { /* modal already shows payload data */ });
     }
 
+    // View switcher (cards ↔ compact). Just toggles a class on the stable grid
+    // wrapper — no refetch/re-render needed — and remembers the choice.
+    function setView(v) {
+        state.view = v;
+        try { localStorage.setItem('vcalView', v); } catch (e) { /* private mode */ }
+        applyView();
+    }
+    function applyView() {
+        var grid = $('[data-video-cal-grid]');
+        if (grid) grid.classList.toggle('vcal-view--compact', state.view === 'compact');
+        var vbs = document.querySelectorAll('[data-video-cal-view]');
+        for (var i = 0; i < vbs.length; i++)
+            vbs[i].classList.toggle('vcal-view-btn--on', vbs[i].getAttribute('data-video-cal-view') === state.view);
+    }
+
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
         if (!state.loaded) { state.scrollToNow = true; load(); }
@@ -595,6 +614,8 @@
 
     function init() {
         wire();
+        try { var sv = localStorage.getItem('vcalView'); if (sv) state.view = sv; } catch (e) { /* private mode */ }
+        applyView();
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
