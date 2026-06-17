@@ -30,6 +30,10 @@ def register_routes(bp):
         from core.video.enrichment.engine import get_video_enrichment_engine
         return get_video_enrichment_engine()
 
+    def _yt_enricher():
+        from core.video.youtube_enrichment import get_youtube_date_enricher
+        return get_youtube_date_enricher()
+
     @bp.route("/enrichment/services", methods=["GET"])
     def video_enrichment_services():
         try:
@@ -108,6 +112,8 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/status", methods=["GET"])
     def video_enrichment_status(service):
+        if service == "youtube":   # the standalone date enricher (not an engine worker)
+            return jsonify(_yt_enricher().stats())
         w = engine().worker(service)
         if not w:
             return jsonify({"error": "unknown service"}), 404
@@ -115,6 +121,9 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/pause", methods=["POST"])
     def video_enrichment_pause(service):
+        if service == "youtube":
+            _yt_enricher().pause()
+            return jsonify({"status": "paused"})
         w = engine().worker(service)
         if not w:
             return jsonify({"error": "unknown service"}), 404
@@ -123,6 +132,9 @@ def register_routes(bp):
 
     @bp.route("/enrichment/<service>/resume", methods=["POST"])
     def video_enrichment_resume(service):
+        if service == "youtube":
+            _yt_enricher().resume()
+            return jsonify({"status": "running"})
         w = engine().worker(service)
         if not w:
             return jsonify({"error": "unknown service"}), 404

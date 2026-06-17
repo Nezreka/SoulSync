@@ -14,7 +14,9 @@
 (function () {
     'use strict';
 
-    var SERVICES = ['tmdb', 'tvdb', 'omdb'];
+    var SERVICES = ['tmdb', 'tvdb', 'omdb'];   // pushed over the shared socket
+    var POLLED = ['youtube'];                  // standalone daemon → light polling
+    var ALL = SERVICES.concat(POLLED);
 
     function onVideoSide() {
         return document.body.getAttribute('data-side') === 'video';
@@ -72,7 +74,13 @@
 
     // One-time fetch so the buttons aren't blank until the first socket push.
     function primeOnce() {
-        if (onVideoSide() && !document.hidden) SERVICES.forEach(pollOne);
+        if (onVideoSide() && !document.hidden) ALL.forEach(pollOne);
+    }
+    // The YouTube date enricher isn't on the socket — poll it so its orb reflects
+    // activity (only while the video side is foregrounded).
+    function pollPolledLoop() {
+        if (onVideoSide() && !document.hidden) POLLED.forEach(pollOne);
+        setTimeout(pollPolledLoop, 3000);
     }
 
     // Listen on the shared socket (set up by core.js) for the server-pushed
@@ -104,7 +112,7 @@
     }
 
     function init() {
-        SERVICES.forEach(function (svc) {
+        ALL.forEach(function (svc) {
             var b = btn(svc);
             if (b) b.addEventListener('click', function () { toggle(svc); });
         });
@@ -115,7 +123,8 @@
             });
         }
         primeOnce();   // instant initial state
-        bindSocket();  // then the socket pushes updates — no polling
+        bindSocket();  // then the socket pushes updates for tmdb/tvdb/omdb
+        pollPolledLoop();   // ...and poll the youtube enricher
         // Re-prime when the user returns to the tab (socket kept pushing, but a
         // quick fetch snaps the buttons current immediately).
         document.addEventListener('visibilitychange', function () {

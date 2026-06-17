@@ -20,10 +20,11 @@
     // VIDEO side: the two enrichment buttons + the Manage Workers hub. `sel`
     // matches the BUTTON; the orb's positioned element is its container.
     const WORKER_DEFS = [
-        { sel: '[data-video-enrich="tmdb"]',   color: [56, 189, 248],  id: 'tmdb' },
-        { sel: '[data-video-enrich="tvdb"]',   color: [168, 85, 247],  id: 'tvdb' },
-        { sel: '[data-video-enrich="omdb"]',   color: [245, 197, 24],  id: 'omdb' },
-        { sel: '[data-video-manage-workers]',  color: [168, 85, 247],  hub: true },
+        { sel: '[data-video-enrich="tmdb"]',    color: [56, 189, 248],  id: 'tmdb' },
+        { sel: '[data-video-enrich="tvdb"]',    color: [168, 85, 247],  id: 'tvdb' },
+        { sel: '[data-video-enrich="omdb"]',    color: [245, 197, 24],  id: 'omdb' },
+        { sel: '[data-video-enrich="youtube"]', color: [255, 59, 59],   id: 'youtube' },
+        { sel: '[data-video-manage-workers]',   color: [168, 85, 247],  hub: true },
     ];
 
     const ERROR_COLOR = [255, 80, 80];   // pulses fired on real worker errors

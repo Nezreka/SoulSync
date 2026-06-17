@@ -49,3 +49,12 @@ def test_enrich_falls_back_to_per_video_when_proxy_empty(db, monkeypatch):
 def test_enricher_imports_nothing_from_music():
     src = Path("core/video/youtube_enrichment.py").read_text(encoding="utf-8")
     assert "database.music_database" not in src and "from database import" not in src
+
+
+def test_enricher_stats_shape_and_pause():
+    e = YoutubeDateEnricher(db_factory=lambda: None)
+    s = e.stats()
+    assert s["enabled"] is True and s["running"] is False and s["paused"] is False
+    assert s["current_item"] is None and "progress" in s
+    e.pause(); assert e.stats()["paused"] is True
+    e.resume(); assert e.stats()["paused"] is False

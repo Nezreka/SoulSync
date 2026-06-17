@@ -716,3 +716,13 @@ def test_youtube_search_endpoint_hydrates_following(tmp_path, monkeypatch):
     flags = {c["youtube_id"]: c["following"] for c in d["channels"]}
     assert flags == {"UCaaa": True, "UCbbb": False}
     assert client.get("/api/video/youtube/search?q=").get_json()["channels"] == []
+
+
+def test_enrichment_youtube_status_route(tmp_path):
+    client, _ = _make_client(tmp_path)
+    d = client.get("/api/video/enrichment/youtube/status").get_json()
+    assert d["enabled"] is True and "running" in d and "progress" in d
+    assert client.post("/api/video/enrichment/youtube/pause").get_json()["status"] == "paused"
+    assert client.post("/api/video/enrichment/youtube/resume").get_json()["status"] == "running"
+    # unknown service still 404s
+    assert client.get("/api/video/enrichment/bogus/status").status_code == 404

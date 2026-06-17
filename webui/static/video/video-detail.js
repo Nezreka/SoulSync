@@ -335,10 +335,13 @@
         var a = q('[data-vd-actions]');
         if (!a) return;
         if (d.source === 'youtube') {
+            // Use the SAME watchlist button as shows/movies (consistency); it just
+            // follows the channel instead of a tmdb show.
             var on = !!d.following;
             a.innerHTML =
-                '<button class="vd-yt-follow' + (on ? ' vd-yt-follow--on' : '') + '" type="button" data-vd-act="yt-follow">' +
-                    (on ? '✓ Following' : '+ Follow') + '</button>' +
+                '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vd-act="yt-follow">' +
+                    '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
+                    '<span class="watchlist-text">' + (on ? 'In Watchlist' : 'Watchlist') + '</span></button>' +
                 '<a class="vd-yt-link" href="https://www.youtube.com/channel/' + esc(d.id) +
                     '" target="_blank" rel="noopener">Open on YouTube ↗</a>';
             return;
