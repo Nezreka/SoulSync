@@ -1021,6 +1021,9 @@
                                     <button class="vwlp-tab" type="button" role="tab" data-vwlp-tab="person">
                                         People <span class="vwlp-tab-n" data-vwlp-count-person>0</span>
                                     </button>
+                                    <button class="vwlp-tab" type="button" role="tab" data-vwlp-tab="channel">
+                                        Channels <span class="vwlp-tab-n" data-vwlp-count-channel>0</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1072,6 +1075,9 @@
                                     </button>
                                     <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="show">
                                         TV <span class="vwsh-tab-n" data-vwsh-count-show>0</span>
+                                    </button>
+                                    <button class="vwsh-tab" type="button" role="tab" data-vwsh-tab="youtube">
+                                        YouTube <span class="vwsh-tab-n" data-vwsh-count-youtube>0</span>
                                     </button>
                                 </div>
                             </div>
@@ -9718,6 +9724,9 @@
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
     <script src="{{ url_for('static', filename='video/video-detail.js', v=static_v) }}"></script>
+    <!-- Shared YouTube-channel helpers (paste-a-link follow, channel/video cards);
+         load before search/watchlist/wishlist which use window.VideoYoutube -->
+    <script src="{{ url_for('static', filename='video/video-youtube.js', v=static_v) }}"></script>
     <!-- Video search (isolated; in-app multi-search → library/tmdb detail) -->
     <script src="{{ url_for('static', filename='video/video-search.js', v=static_v) }}"></script>
     <!-- Video discover (isolated; trending hero + lazy genre/decade rails + filter grid) -->

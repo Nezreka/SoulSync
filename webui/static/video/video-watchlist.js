@@ -13,8 +13,22 @@
     var PAGE_ID = 'video-watchlist';
     var LIMIT = 60;
     var state = { loaded: false, tab: 'show', search: '', sort: 'default', page: 1,
-                  counts: { show: 0, person: 0 } };
+                  counts: { show: 0, person: 0 }, channelCount: 0 };
     var searchTimer = null;
+
+    // A followed YouTube channel card (avatar, title, wished-video count, unfollow).
+    function channelCard(ch) {
+        var av = window.VideoYoutube ? VideoYoutube.avatar(ch, 'vyt-wcard-avatar') : '';
+        var n = ch.video_count || 0;
+        return '<div class="vyt-wcard" data-vyt-chan="' + esc(ch.youtube_id) + '">' +
+            '<a class="vyt-wcard-art" href="https://www.youtube.com/channel/' + esc(ch.youtube_id) +
+                '" target="_blank" rel="noopener" title="Open on YouTube">' + av + '</a>' +
+            '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow="' + esc(ch.youtube_id) +
+                '" title="Unfollow">&#10005;</button>' +
+            '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(ch.title) + '">' +
+                esc(ch.title) + '</span><span class="vyt-wcard-meta">' + n + ' video' + (n === 1 ? '' : 's') +
+            '</span></div></div>';
+    }
 
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
@@ -97,27 +111,52 @@
         if (empty) empty.classList.toggle('hidden', total > 0);
         var et = $('[data-vwlp-empty-title]');
         if (et && total === 0) {
-            et.textContent = state.search
-                ? 'No matches'
-                : (state.tab === 'show' ? 'No shows on your watchlist yet' : 'No people on your watchlist yet');
+            et.textContent = state.search ? 'No matches'
+                : state.tab === 'show' ? 'No shows on your watchlist yet'
+                : state.tab === 'person' ? 'No people on your watchlist yet'
+                : 'No channels followed yet — paste a channel link on the Search page';
         }
     }
 
     function render(items) {
+        var grid = $('[data-vwlp-grid]');
+        if (state.tab === 'channel') {
+            grid.classList.add('vyt-wgrid');
+            grid.innerHTML = items.map(channelCard).join('');
+            return;
+        }
+        grid.classList.remove('vyt-wgrid');
         // Everything on this page is watched — seed the shared cache so the eyes
         // paint "watched" with no flash.
         if (window.VideoWatchlist) {
             items.forEach(function (it) { VideoWatchlist._watched[state.tab][it.tmdb_id] = true; });
         }
-        var grid = $('[data-vwlp-grid]');
         if (grid) {
             grid.innerHTML = items.map(function (it) { return cardHTML(it, state.tab); }).join('');
             if (window.VideoWatchlist) VideoWatchlist.hydrate(grid);
         }
     }
 
+    // Followed YouTube channels live on their own endpoint, not /watchlist.
+    function loadChannels() {
+        var ld = $('[data-vwlp-loading]'); if (ld) ld.classList.remove('hidden');
+        fetch('/api/video/youtube/channels', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (ld) ld.classList.add('hidden');
+                var chans = (d && d.channels) || [];
+                state.channelCount = chans.length;
+                var cc = $('[data-vwlp-count-channel]'); if (cc) cc.textContent = chans.length;
+                render(chans);
+                updatePagination(null);
+                updateEmpty(chans.length);
+            })
+            .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updateEmpty(0); });
+    }
+
     function load() {
         state.loaded = true;
+        if (state.tab === 'channel') { loadChannels(); return; }
         var ld = $('[data-vwlp-loading]'); if (ld) ld.classList.remove('hidden');
         var params = new URLSearchParams({
             kind: state.tab, search: state.search, sort: state.sort, page: state.page, limit: LIMIT });
@@ -137,7 +176,7 @@
     }
 
     function setTab(tab) {
-        if (tab !== 'show' && tab !== 'person') return;
+        if (tab !== 'show' && tab !== 'person' && tab !== 'channel') return;
         state.tab = tab; state.page = 1;
         var tabs = document.querySelectorAll('[data-vwlp-tab]');
         for (var i = 0; i < tabs.length; i++)
@@ -181,12 +220,40 @@
         if (next) next.addEventListener('click', function () { state.page++; load(); });
 
         document.addEventListener('soulsync:video-watchlist-changed', onChanged);
+        // Following a channel fires the wishlist-changed event — keep the
+        // Channels tab + badge current too.
+        document.addEventListener('soulsync:video-wishlist-changed', function () {
+            if (state.tab === 'channel') { var g = $('[data-vwlp-grid]'); if (g && g.offsetParent !== null) { load(); return; } }
+            refreshChannelCount();
+        });
+    }
+
+    function refreshChannelCount() {
+        fetch('/api/video/youtube/channels', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var n = (d && d.channels) ? d.channels.length : 0;
+                state.channelCount = n;
+                var cc = $('[data-vwlp-count-channel]'); if (cc) cc.textContent = n;
+            })
+            .catch(function () { /* ignore */ });
     }
 
     // Intercept card clicks → in-app SPA navigation (a bare <a href> would do a
     // FULL page reload). The eye button's capture-phase handler already stops its
     // own clicks from reaching here. Mirrors video-library.js.
     function onGridClick(e) {
+        var unf = e.target.closest('[data-vyt-wunfollow]');
+        if (unf && window.VideoYoutube) {
+            e.preventDefault(); e.stopPropagation();
+            unf.disabled = true;
+            VideoYoutube.unfollow(unf.getAttribute('data-vyt-wunfollow')).then(function () {
+                if (typeof showToast === 'function') showToast('Unfollowed', 'info');
+                load();
+            }).catch(function () { unf.disabled = false; });
+            return;
+        }
+        if (e.target.closest('.vyt-wcard-art')) return;   // let the YouTube link open
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var card = e.target.closest('[data-vwlp-open]');
         if (!card) return;
@@ -200,12 +267,13 @@
         }));
     }
 
-    function onShown(e) { if (e && e.detail === PAGE_ID) { state.page = 1; load(); } }
+    function onShown(e) { if (e && e.detail === PAGE_ID) { state.page = 1; load(); refreshChannelCount(); } }
 
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onShown);
         refreshBadge();   // seed the nav badge on boot
+        refreshChannelCount();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

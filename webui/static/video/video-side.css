@@ -2707,3 +2707,95 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vwsh-head, .vwsh-toolbar, .vwsh-body { padding-left: 18px; padding-right: 18px; }
     .vwsh-grid--movies { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 18px 14px; }
 }
+
+/* ══ YouTube channels (search chip · wishlist channel blocks · watchlist cards) ══
+   Scoped .vyt-* — never touches music wl-* or the TMDB vwsh-* nebula. */
+.vyt-avatar--ph { display: inline-flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #ff3b3b, #b3122a); color: #fff; font-weight: 800; }
+
+/* ── Search page: the pasted-channel Follow chip ─────────────────────────── */
+.vyt-search { margin-top: 4px; }
+.vyt-chip { border-radius: 16px; border: 1px solid rgba(255, 59, 59, 0.28);
+    background: linear-gradient(180deg, rgba(255, 59, 59, 0.07), rgba(255, 255, 255, 0.02));
+    padding: 16px 18px; max-width: 720px; }
+.vyt-chip-head { display: flex; align-items: center; gap: 15px; }
+.vyt-chip-avatar { flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%; object-fit: cover;
+    font-size: 20px; border: 2px solid rgba(255, 59, 59, 0.5); }
+.vyt-chip-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vyt-chip-badge { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: #ff6b6b; }
+.vyt-chip-title { font-size: 19px; font-weight: 800; color: #fff; line-height: 1.15;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vyt-chip-sub { font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.5); }
+.vyt-follow { flex-shrink: 0; border: 0; cursor: pointer; border-radius: 999px; padding: 10px 20px;
+    font-size: 13px; font-weight: 800; background: #ff3b3b; color: #fff; transition: all 0.15s ease;
+    box-shadow: 0 6px 18px rgba(255, 59, 59, 0.35); }
+.vyt-follow:hover { transform: translateY(-1px); background: #ff5252; }
+.vyt-follow:disabled { opacity: 0.6; cursor: default; }
+.vyt-follow--on { background: rgba(255, 255, 255, 0.1); color: #6cd391; box-shadow: none; }
+.vyt-strip { display: flex; gap: 7px; margin-top: 14px; overflow: hidden; }
+.vyt-strip-cell { flex: 1 1 0; min-width: 0; aspect-ratio: 16 / 9; border-radius: 7px; overflow: hidden;
+    background: #16161d; }
+.vyt-strip-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vyt-miss { padding: 22px; border-radius: 14px; background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.6); font-size: 13.5px; }
+.vyt-miss code { background: rgba(255, 255, 255, 0.08); padding: 2px 7px; border-radius: 6px; color: #fff; }
+
+/* ── Wishlist YouTube tab: channel block = header + flat video feed ───────── */
+.vyt-field { display: flex; flex-direction: column; gap: 16px; }
+.vyt-chan { border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.02); overflow: hidden; }
+.vyt-chan-hd { display: flex; align-items: center; gap: 14px; padding: 13px 16px; cursor: pointer;
+    transition: background 0.15s ease; }
+.vyt-chan-hd:hover { background: rgba(255, 59, 59, 0.06); }
+.vyt-chan-avatar { flex-shrink: 0; width: 46px; height: 46px; border-radius: 50%; object-fit: cover;
+    font-size: 16px; border: 2px solid rgba(255, 59, 59, 0.45); }
+.vyt-chan-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.vyt-chan-title { font-size: 15.5px; font-weight: 800; color: #fff; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vyt-chan-sub { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
+.vyt-chan-link { flex-shrink: 0; font-size: 11.5px; font-weight: 800; color: #ff6b6b; text-decoration: none;
+    padding: 6px 11px; border-radius: 999px; border: 1px solid rgba(255, 59, 59, 0.3); }
+.vyt-chan-link:hover { background: rgba(255, 59, 59, 0.12); }
+.vyt-chan-unfollow { flex-shrink: 0; border: 1px solid rgba(255, 255, 255, 0.12); cursor: pointer;
+    background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.6); font-size: 11.5px; font-weight: 700;
+    padding: 6px 13px; border-radius: 999px; transition: all 0.15s ease; }
+.vyt-chan-unfollow:hover { background: rgba(239, 68, 68, 0.85); color: #fff; border-color: transparent; }
+.vyt-chan-chev { flex-shrink: 0; color: rgba(255, 255, 255, 0.35); transition: transform 0.2s ease; }
+.vyt-chan--collapsed .vyt-chan-chev { transform: rotate(-90deg); }
+.vyt-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+    padding: 4px 16px 18px; }
+.vyt-chan--collapsed .vyt-vids { display: none; }
+.vyt-vid { border-radius: 11px; overflow: hidden; background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06); }
+.vyt-vid-thumb { position: relative; aspect-ratio: 16 / 9; background: #16161d; }
+.vyt-vid-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vyt-vid-thumb--none { background: rgba(255, 255, 255, 0.04); }
+.vyt-vid-thumb--none::after { content: '▶'; position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 22px; color: rgba(255, 59, 59, 0.4); }
+.vyt-vid-rm { position: absolute; top: 7px; right: 7px; width: 24px; height: 24px; border-radius: 50%;
+    border: none; background: rgba(0, 0, 0, 0.55); color: rgba(255, 255, 255, 0.75); font-size: 12px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vyt-vid:hover .vyt-vid-rm { opacity: 1; }
+.vyt-vid-rm:hover { background: rgba(239, 68, 68, 0.9); color: #fff; }
+.vyt-vid-body { padding: 9px 11px 11px; }
+.vyt-vid-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    font-size: 12.5px; font-weight: 700; color: #fff; line-height: 1.3; }
+.vyt-vid-date { display: block; margin-top: 4px; font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.4); }
+
+/* ── Watchlist Channels tab: avatar cards ────────────────────────────────── */
+.vyt-wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 18px; }
+.vyt-wcard { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.vyt-wcard-art { display: block; width: 118px; height: 118px; border-radius: 50%; overflow: hidden;
+    border: 2px solid rgba(255, 59, 59, 0.4); transition: transform 0.15s ease, box-shadow 0.15s ease; }
+.vyt-wcard-art:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(255, 59, 59, 0.35); }
+.vyt-wcard-avatar { width: 100%; height: 100%; object-fit: cover; font-size: 34px; }
+.vyt-wcard-unfollow { position: absolute; top: 4px; right: 50%; margin-right: -59px; width: 26px; height: 26px;
+    border-radius: 50%; border: none; background: rgba(0, 0, 0, 0.6); color: rgba(255, 255, 255, 0.7);
+    font-size: 12px; cursor: pointer; opacity: 0; transition: all 0.15s ease; }
+.vyt-wcard:hover .vyt-wcard-unfollow { opacity: 1; }
+.vyt-wcard-unfollow:hover { background: rgba(239, 68, 68, 0.9); color: #fff; }
+.vyt-wcard-info { margin-top: 11px; display: flex; flex-direction: column; gap: 2px; max-width: 100%; }
+.vyt-wcard-title { font-size: 13.5px; font-weight: 800; color: #fff; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vyt-wcard-meta { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
