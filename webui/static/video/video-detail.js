@@ -1324,7 +1324,10 @@
                     still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id };
             });
             var wishedN = eps.filter(function (e) { return e.owned; }).length;
-            return { season_number: yr, title: yr ? String(yr) : 'Undated', poster_url: poster || ytProx(ch.avatar_url),
+            // No upload dates (flat listing omits them) → a single "All Videos"
+            // season instead of a lone "Undated"; mixed → label the dateless bucket.
+            var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Unknown date');
+            return { season_number: yr, title: label, poster_url: poster || ytProx(ch.avatar_url),
                 episode_owned: wishedN, episode_total: eps.length, episodes: eps };
         });
         return { kind: 'channel', source: 'youtube', id: ch.youtube_id, title: ch.title || 'Channel',
@@ -1353,7 +1356,7 @@
                 data = ytToShow(resp); menuOpen = false; missingOnly = false;
                 selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
                 var mt = q('[data-vd-missing-toggle]');
-                if (mt) { mt.hidden = !data.seasons.length; mt.classList.remove('vd-missing-toggle--on'); }
+                if (mt) { mt.hidden = true; mt.classList.remove('vd-missing-toggle--on'); }   // n/a for channels
                 renderBillboard(data); renderViewToggle(); renderSeasonNav(); ensureSeasonEpisodes();
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
