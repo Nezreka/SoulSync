@@ -2575,28 +2575,32 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-nebula .vwsh-epc.vwsh-epc--sel { background: hsla(var(--orb-hue, 230), 48%, 22%, 0.5);
     border-color: hsla(var(--orb-hue, 230), 70%, 58%, 0.65); }
 
-/* episodes grouped under a clickable season header (header → show page) */
-.vwsh-nebula .vwsh-seasons { display: flex; flex-direction: column; gap: 16px; }
-.vwsh-nebula .vwsh-szn-hd { display: flex; align-items: center; gap: 11px; padding: 7px 9px; margin-bottom: 9px; cursor: pointer;
-    border-radius: 10px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06);
-    transition: background 0.15s ease, border-color 0.15s ease; }
-.vwsh-nebula .vwsh-szn-hd:hover { background: hsla(var(--orb-hue, 230), 45%, 24%, 0.45); border-color: hsla(var(--orb-hue, 230), 70%, 58%, 0.45); }
-.vwsh-nebula .vwsh-szn-thumb { flex-shrink: 0; width: 34px; height: 48px; border-radius: 5px; overflow: hidden; background: #16161d;
-    display: flex; align-items: center; justify-content: center; }
-.vwsh-nebula .vwsh-szn-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.vwsh-nebula .vwsh-szn-ph { font-size: 16px; opacity: 0.4; }
-.vwsh-nebula .vwsh-szn-name { font-size: 14px; font-weight: 800; color: #fff; }
-.vwsh-nebula .vwsh-szn-count { font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.4); }
-.vwsh-nebula .vwsh-szn-go { margin-left: auto; font-size: 14px; font-weight: 800; color: rgba(255, 255, 255, 0.3); transition: color 0.15s ease, transform 0.15s ease; }
-.vwsh-nebula .vwsh-szn-hd:hover .vwsh-szn-go { color: hsl(var(--orb-hue, 230) 80% 75%); transform: translateX(3px); }
-.vwsh-nebula .vwsh-szn-rm { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; border: none; background: rgba(0, 0, 0, 0.35);
-    color: rgba(255, 255, 255, 0.4); font-size: 12px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-    opacity: 0; transition: all 0.15s ease; }
-.vwsh-nebula .vwsh-szn-hd:hover .vwsh-szn-rm { opacity: 1; }
-.vwsh-nebula .vwsh-szn-rm:hover { background: rgba(239, 68, 68, 0.85); color: #fff; }
+/* season = a poster panel on the LEFT (→ show page), episode grid to its RIGHT */
+.vwsh-nebula .vwsh-seasons { display: flex; flex-direction: column; gap: 20px; }
+.vwsh-nebula .vwsh-szn { display: flex; align-items: flex-start; gap: 16px; }
+.vwsh-nebula .vwsh-szn-side { position: relative; flex-shrink: 0; width: 108px; cursor: pointer; text-align: center;
+    padding: 7px 7px 9px; border-radius: 12px; border: 1px solid transparent; transition: background 0.15s ease, border-color 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover { background: hsla(var(--orb-hue, 230), 45%, 22%, 0.4); border-color: hsla(var(--orb-hue, 230), 70%, 58%, 0.4); }
+.vwsh-nebula .vwsh-szn-poster { width: 94px; aspect-ratio: 2 / 3; margin: 0 auto; border-radius: 8px; overflow: hidden; background: #16161d;
+    border: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-poster { transform: translateY(-2px);
+    border-color: hsla(var(--orb-hue, 230), 75%, 62%, 0.6); box-shadow: 0 8px 20px hsla(var(--orb-hue, 230), 60%, 30%, 0.5); }
+.vwsh-nebula .vwsh-szn-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vwsh-nebula .vwsh-szn-ph { font-size: 26px; opacity: 0.35; }
+.vwsh-nebula .vwsh-szn-name { margin-top: 8px; font-size: 13px; font-weight: 800; color: #fff; }
+.vwsh-nebula .vwsh-szn-count { margin-top: 2px; font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.42); }
+.vwsh-nebula .vwsh-szn-go { margin-top: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+    color: hsl(var(--orb-hue, 230) 80% 74%); opacity: 0; transition: opacity 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-go { opacity: 1; }
+.vwsh-nebula .vwsh-szn-rm { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 50%; border: none;
+    background: rgba(0, 0, 0, 0.5); color: rgba(255, 255, 255, 0.55); font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.15s ease; }
+.vwsh-nebula .vwsh-szn-side:hover .vwsh-szn-rm { opacity: 1; }
+.vwsh-nebula .vwsh-szn-rm:hover { background: rgba(239, 68, 68, 0.9); color: #fff; }
 
-.vwsh-nebula .vwsh-ep-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;
-    max-height: 420px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
+.vwsh-nebula .vwsh-ep-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px;
+    max-height: 440px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
 .vwsh-nebula .vwsh-epc { position: relative; display: flex; align-items: flex-start; gap: 11px; padding: 9px; cursor: pointer;
     border-radius: 10px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.06);
     transition: background 0.15s ease, border-color 0.15s ease; }
