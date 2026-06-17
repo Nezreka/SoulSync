@@ -2027,6 +2027,52 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def wishlisted_video_ids_for_channel(self, channel_id) -> list:
+        """The youtube video ids wished under a channel (the per-video date fallback set)."""
+        if not channel_id:
+            return []
+        conn = self._get_connection()
+        try:
+            return [r["source_id"] for r in conn.execute(
+                "SELECT source_id FROM video_wishlist WHERE kind='video' AND parent_source_id=?",
+                (str(channel_id),))]
+        finally:
+            conn.close()
+
+    def mark_channel_dates_enriched(self, channel_id, date_count=0) -> None:
+        """Record that the background enricher swept this channel (skip re-sweeps)."""
+        if not channel_id:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO youtube_channel_enrichment (channel_id, enriched_at, date_count) "
+                "VALUES (?, CURRENT_TIMESTAMP, ?) ON CONFLICT(channel_id) DO UPDATE SET "
+                "enriched_at=CURRENT_TIMESTAMP, date_count=excluded.date_count",
+                (str(channel_id), int(date_count or 0)))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def channel_dates_enriched_recently(self, channel_id, within_hours=24) -> bool:
+        """True if the channel was date-enriched within the window (don't re-sweep)."""
+        if not channel_id:
+            return False
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT enriched_at FROM youtube_channel_enrichment WHERE channel_id=?",
+                               (str(channel_id),)).fetchone()
+            if not row or not row["enriched_at"]:
+                return False
+            try:
+                when = datetime.strptime(row["enriched_at"], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError):
+                return False
+            now = datetime.now(timezone.utc).replace(tzinfo=None)   # naive UTC, matches CURRENT_TIMESTAMP
+            return (now - when) < timedelta(hours=within_hours)
+        finally:
+            conn.close()
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()

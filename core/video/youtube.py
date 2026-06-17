@@ -250,6 +250,108 @@ def resolve_channel(raw, limit=30, ydl_factory=None, db=None):
     return shaped if shaped.get("youtube_id") else None
 
 
+# No-key bulk date sources: community Piped/Invidious instances. Flaky (they go
+# up/down), so we try several and fall back to per-video yt-dlp if none answer.
+_PROXY_INSTANCES = [
+    ("piped", "https://pipedapi.kavin.rocks"),
+    ("piped", "https://pipedapi.adminforge.de"),
+    ("piped", "https://api.piped.private.coffee"),
+    ("invidious", "https://invidious.nerdvpn.de"),
+    ("invidious", "https://inv.nadeko.net"),
+]
+
+
+def _epoch_to_date(v):
+    """epoch seconds OR milliseconds → 'YYYY-MM-DD', or None."""
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    if n > 1e12:            # milliseconds
+        n /= 1000.0
+    try:
+        return datetime.fromtimestamp(n, tz=timezone.utc).date().isoformat()
+    except Exception:
+        return None
+
+
+def _vid_from_url(u):
+    m = re.search(r"[?&]v=([\w-]+)", u or "")
+    return m.group(1) if m else None
+
+
+def parse_proxy_dates(obj):
+    """{video_id: 'YYYY-MM-DD'} from a Piped (relatedStreams) or Invidious (videos)
+    channel JSON response — handles both shapes."""
+    out = {}
+    if not isinstance(obj, dict):
+        return out
+    for s in (obj.get("relatedStreams") or []):     # Piped
+        if not isinstance(s, dict):
+            continue
+        vid = _vid_from_url(s.get("url")) or s.get("videoId")
+        d = _epoch_to_date(s.get("uploaded"))
+        if vid and d:
+            out[vid] = d
+    for v in (obj.get("videos") or []):              # Invidious
+        if not isinstance(v, dict):
+            continue
+        vid = v.get("videoId")
+        d = _epoch_to_date(v.get("published"))
+        if vid and d:
+            out[vid] = d
+    return out
+
+
+def _proxy_get(url, fetch):
+    if fetch is not None:
+        return fetch(url)
+    import requests
+    r = requests.get(url, timeout=8, headers={"User-Agent": _UA, "Accept": "application/json"})
+    return r.json() if r.status_code == 200 else None
+
+
+def _harvest(kind, base, cid, pages, fetch):
+    """Walk one instance's channel pages, accumulating {video_id: date}."""
+    from urllib.parse import quote
+    out, token = {}, None
+    for i in range(max(1, pages)):
+        if kind == "piped":
+            url = (base + "/channel/" + cid) if token is None \
+                else (base + "/nextpage/channel/" + cid + "?nextpage=" + quote(token, safe=""))
+        else:  # invidious
+            url = base + "/api/v1/channels/" + cid + "/videos" + \
+                (("?continuation=" + quote(token, safe="")) if token else "")
+        obj = _proxy_get(url, fetch)
+        page = parse_proxy_dates(obj if isinstance(obj, dict) else {})
+        if not page and i == 0:
+            return {}                                # instance gave nothing → caller tries next
+        out.update(page)
+        token = (obj.get("nextpage") if kind == "piped" else obj.get("continuation")) if isinstance(obj, dict) else None
+        if not token:
+            break
+    return out
+
+
+def proxy_channel_dates(channel_id, pages=6, fetch=None, instances=None):
+    """Bulk upload dates for a whole channel via a no-key proxy (Piped/Invidious),
+    paginated. Tries instances until one answers. {video_id: 'YYYY-MM-DD'} (empty
+    if all are down → caller falls back to per-video yt-dlp)."""
+    cid = str(channel_id or "").strip()
+    if not cid:
+        return {}
+    for kind, base in (instances or _PROXY_INSTANCES):
+        try:
+            dates = _harvest(kind, base, cid, pages, fetch)
+            if dates:
+                return dates
+        except Exception:
+            continue
+    return {}
+
+
 def parse_rss_dates(xml_text):
     """{video_id: 'YYYY-MM-DD'} from a YouTube channel RSS feed (pure, testable)."""
     import xml.etree.ElementTree as ET
