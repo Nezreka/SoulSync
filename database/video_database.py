@@ -16,6 +16,7 @@ verbatim on first init.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import sqlite3
@@ -29,7 +30,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -102,7 +103,22 @@ _COLUMN_MIGRATIONS = [
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
+    # generic source bridge (YouTube channels/videos ride the existing tables)
+    ("video_watchlist", "source", "TEXT NOT NULL DEFAULT 'tmdb'"),
+    ("video_watchlist", "source_id", "TEXT"),
+    ("video_wishlist", "source", "TEXT NOT NULL DEFAULT 'tmdb'"),
+    ("video_wishlist", "source_id", "TEXT"),
+    ("video_wishlist", "parent_source_id", "TEXT"),   # owning channel youtube id (video rows)
 ]
+
+
+def youtube_surrogate_id(source_id: str) -> int:
+    """A stable positive 60-bit int derived from a YouTube id, used as the
+    NOT NULL ``tmdb_id`` surrogate for non-tmdb rows so the existing
+    UNIQUE(kind, tmdb_id) dedup + group-by machinery keeps working unchanged.
+    Collision probability across realistic channel counts is negligible."""
+    h = hashlib.sha1((source_id or "").encode("utf-8")).hexdigest()
+    return int(h[:15], 16)  # 60 bits — comfortably inside SQLite's signed 64-bit INTEGER
 
 
 class VideoDatabase:
@@ -1762,6 +1778,205 @@ class VideoDatabase:
             return out
         finally:
             conn.close()
+
+    # ── YouTube channels (bridged onto the watchlist/wishlist tables) ─────────
+    # A followed CHANNEL is a video_watchlist row (kind='channel', source='youtube',
+    # source_id=channel id). Its wished VIDEOS are video_wishlist rows
+    # (kind='video', source_id=video id, parent_source_id=channel id). tmdb_id on
+    # both carries the channel's surrogate so existing dedup/grouping just works.
+    def add_channel_to_watchlist(self, channel: dict) -> bool:
+        """Follow a YouTube channel. ``channel`` = {youtube_id, title, avatar_url?}.
+        Idempotent upsert on the channel surrogate. Returns True on success."""
+        cid = (channel or {}).get("youtube_id")
+        title = (channel or {}).get("title")
+        if not cid or not title:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, source, source_id, state)
+                   VALUES ('channel', ?, ?, ?, 'youtube', ?, 'follow')
+                   ON CONFLICT(kind, tmdb_id) DO UPDATE SET
+                       state='follow', title=excluded.title,
+                       poster_url=COALESCE(excluded.poster_url, video_watchlist.poster_url),
+                       source='youtube', source_id=excluded.source_id""",
+                (youtube_surrogate_id(cid), title, channel.get("avatar_url"), cid))
+            conn.commit()
+            return True
+        except Exception:
+            logger.exception("add_channel_to_watchlist failed (%s)", cid)
+            return False
+        finally:
+            conn.close()
+
+    def remove_channel_from_watchlist(self, youtube_id: str) -> bool:
+        """Un-follow a channel (hard delete — channels have no airing-default to
+        guard against, so no tombstone). Its already-wished videos are left alone."""
+        if not youtube_id:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM video_watchlist WHERE kind='channel' AND source_id=?", (youtube_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def list_watchlist_channels(self) -> list[dict]:
+        """Followed channels (newest first), each with a wished-video count for the card."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT w.title, w.poster_url, w.source_id, w.date_added, "
+                "(SELECT COUNT(*) FROM video_wishlist v WHERE v.kind='video' "
+                " AND v.parent_source_id = w.source_id) AS video_count "
+                "FROM video_watchlist w WHERE w.kind='channel' AND w.state='follow' "
+                "ORDER BY w.date_added DESC, w.id DESC").fetchall()
+            return [{"kind": "channel", "youtube_id": r["source_id"], "title": r["title"],
+                     "poster_url": r["poster_url"], "video_count": r["video_count"],
+                     "date_added": r["date_added"]} for r in rows]
+        finally:
+            conn.close()
+
+    def channel_watch_state(self, youtube_ids) -> dict:
+        """{youtube_id: True} for followed channels — hydrates the Follow button."""
+        out: dict = {}
+        ids = [str(x) for x in (youtube_ids or []) if x]
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT source_id FROM video_watchlist WHERE kind='channel' "
+                        f"AND state='follow' AND source_id IN ({ph})", chunk):
+                    out[r["source_id"]] = True
+            return out
+        finally:
+            conn.close()
+
+    def add_videos_to_wishlist(self, channel: dict, videos: list, *, server_source=None) -> int:
+        """Wish for a channel's videos. ``channel`` = {youtube_id, title, avatar_url?};
+        ``videos`` = [{youtube_id, title, published_at?, thumbnail_url?, description?}, …].
+        Idempotent per video id. Returns the count written."""
+        cid = (channel or {}).get("youtube_id")
+        ctitle = (channel or {}).get("title")
+        if not cid or not ctitle or not videos:
+            return 0
+        avatar = (channel or {}).get("avatar_url")
+        surrogate = youtube_surrogate_id(cid)
+        conn = self._get_connection()
+        n = 0
+        try:
+            for v in videos:
+                vid = v.get("youtube_id")
+                if not vid:
+                    continue
+                conn.execute(
+                    """INSERT INTO video_wishlist
+                           (kind, tmdb_id, title, poster_url, episode_title, still_url,
+                            episode_overview, air_date, source, source_id, parent_source_id, server_source)
+                       VALUES ('video', ?, ?, ?, ?, ?, ?, ?, 'youtube', ?, ?, ?)
+                       ON CONFLICT(source_id) WHERE kind='video' DO UPDATE SET
+                           title=excluded.title,
+                           poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
+                           episode_title=COALESCE(excluded.episode_title, video_wishlist.episode_title),
+                           still_url=COALESCE(excluded.still_url, video_wishlist.still_url),
+                           episode_overview=COALESCE(excluded.episode_overview, video_wishlist.episode_overview),
+                           air_date=COALESCE(excluded.air_date, video_wishlist.air_date)""",
+                    (surrogate, ctitle, avatar, v.get("title"), v.get("thumbnail_url"),
+                     v.get("description"), v.get("published_at"), vid, cid, server_source))
+                n += 1
+            conn.commit()
+            return n
+        except Exception:
+            logger.exception("add_videos_to_wishlist failed (%s)", cid)
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def remove_youtube_from_wishlist(self, scope: str, source_id: str) -> int:
+        """Remove wished videos: scope 'channel' (all of a channel, source_id=channel
+        id) or 'video' (one, source_id=video id). Returns rows removed."""
+        if not source_id:
+            return 0
+        if scope == "channel":
+            sql = "DELETE FROM video_wishlist WHERE kind='video' AND parent_source_id=?"
+        elif scope == "video":
+            sql = "DELETE FROM video_wishlist WHERE kind='video' AND source_id=?"
+        else:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(sql, (source_id,))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def youtube_wishlist_counts(self) -> dict:
+        """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
+        conn = self._get_connection()
+        try:
+            video = conn.execute("SELECT COUNT(*) c FROM video_wishlist WHERE kind='video'").fetchone()["c"]
+            channel = conn.execute(
+                "SELECT COUNT(DISTINCT parent_source_id) c FROM video_wishlist WHERE kind='video'").fetchone()["c"]
+            return {"channel": channel, "video": video}
+        finally:
+            conn.close()
+
+    def query_youtube_wishlist(self, *, search=None, sort="added", page=1, limit=60) -> dict:
+        """Wished YouTube videos grouped by channel (channel = orb, videos = flat
+        newest-first feed). ``sort`` ∈ added | oldest | title | wanted. Mirrors the
+        {items, pagination} shape of query_wishlist."""
+        try:
+            page = max(1, int(page or 1))
+            limit = max(1, min(200, int(limit or 60)))
+        except (TypeError, ValueError):
+            page, limit = 1, 60
+        s = (search or "").strip()
+        conn = self._get_connection()
+        try:
+            where, args = ["kind='video'"], []
+            if s:
+                where.append("(title LIKE ? COLLATE NOCASE OR episode_title LIKE ? COLLATE NOCASE)")
+                args += ["%" + s + "%", "%" + s + "%"]
+            wsql = " WHERE " + " AND ".join(where)
+            total = conn.execute(
+                "SELECT COUNT(DISTINCT parent_source_id) c FROM video_wishlist" + wsql, args).fetchone()["c"]
+            order = {"title": "title COLLATE NOCASE", "wanted": "video_count DESC, last_added DESC",
+                     "oldest": "last_added ASC", "added": "last_added DESC"}.get(sort, "last_added DESC")
+            chan_rows = conn.execute(
+                "SELECT parent_source_id, MAX(title) AS title, MAX(poster_url) AS poster_url, "
+                "COUNT(*) AS video_count, "
+                "SUM(CASE WHEN status='downloaded' THEN 1 ELSE 0 END) AS done, "
+                "MAX(date_added) AS last_added "
+                "FROM video_wishlist" + wsql +
+                " GROUP BY parent_source_id ORDER BY " + order + " LIMIT ? OFFSET ?",
+                args + [limit, (page - 1) * limit]).fetchall()
+            items = []
+            for cr in chan_rows:
+                vids = conn.execute(
+                    "SELECT source_id, episode_title, still_url, episode_overview, air_date, status "
+                    "FROM video_wishlist WHERE kind='video' AND parent_source_id=? "
+                    "ORDER BY (air_date IS NULL), air_date DESC, id DESC", (cr["parent_source_id"],)).fetchall()
+                items.append({
+                    "kind": "channel", "youtube_id": cr["parent_source_id"], "title": cr["title"],
+                    "poster_url": cr["poster_url"], "video_count": cr["video_count"],
+                    "done": cr["done"] or 0,
+                    "videos": [{"youtube_id": v["source_id"], "title": v["episode_title"],
+                                "still_url": v["still_url"], "overview": v["episode_overview"],
+                                "published_at": v["air_date"], "status": v["status"]} for v in vids]})
+        finally:
+            conn.close()
+        total_pages = max(1, (total + limit - 1) // limit)
+        page = min(page, total_pages)
+        return {"items": items, "pagination": {
+            "page": page, "total_pages": total_pages, "total_count": total,
+            "has_prev": page > 1, "has_next": page < total_pages}}
 
     def movie_detail(self, movie_id: int) -> dict | None:
         """Full movie detail: the movie + owned/file info. Drives the (isolated)

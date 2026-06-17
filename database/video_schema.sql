@@ -338,11 +338,15 @@ CREATE INDEX IF NOT EXISTS idx_activity_created ON activity(created_at);
 -- later phase — this table just records membership + enough to render + link.
 CREATE TABLE IF NOT EXISTS video_watchlist (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind        TEXT NOT NULL,             -- 'show' | 'person'
-    tmdb_id     INTEGER NOT NULL,
-    title       TEXT NOT NULL,             -- show title / person name
-    poster_url  TEXT,                      -- poster (show) / photo (person)
+    kind        TEXT NOT NULL,             -- 'show' | 'person' | 'channel' (youtube)
+    tmdb_id     INTEGER NOT NULL,          -- tmdb id; for non-tmdb sources a stable surrogate of source_id
+    title       TEXT NOT NULL,             -- show title / person name / channel title
+    poster_url  TEXT,                      -- poster (show) / photo (person) / avatar (channel)
     library_id  INTEGER,                   -- shows.id when owned (else NULL)
+    -- generic source bridge: 'tmdb' (default) or 'youtube'; source_id = native id
+    -- (channel youtube id) for non-tmdb rows. One table, both worlds.
+    source      TEXT NOT NULL DEFAULT 'tmdb',
+    source_id   TEXT,
     -- 'follow' = explicit user follow. 'mute' = a TOMBSTONE: the user
     -- un-followed something that is on the watchlist by default (an actively
     -- airing library show), so the default must not re-add it. Library shows
@@ -359,30 +363,39 @@ CREATE INDEX IF NOT EXISTS idx_video_watchlist_kind ON video_watchlist(kind);
 -- so the wishlist only ever holds things you can actually acquire right now.
 CREATE TABLE IF NOT EXISTS video_wishlist (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind           TEXT NOT NULL,            -- 'movie' | 'episode'
-    tmdb_id        INTEGER NOT NULL,         -- movie's tmdb id | the SHOW's tmdb id (episode rows)
-    title          TEXT NOT NULL,            -- movie title | show title
-    poster_url     TEXT,                     -- movie/show poster
+    kind           TEXT NOT NULL,            -- 'movie' | 'episode' | 'video' (youtube)
+    tmdb_id        INTEGER NOT NULL,         -- movie's tmdb id | the SHOW's tmdb id (episode) | channel surrogate (video)
+    title          TEXT NOT NULL,            -- movie title | show title | channel title (video rows)
+    poster_url     TEXT,                     -- movie/show poster | channel avatar (video rows)
     year           INTEGER,                  -- movie year (movie rows)
     season_number  INTEGER,                  -- episode rows
     episode_number INTEGER,                  -- episode rows
-    episode_title  TEXT,                     -- episode rows
-    still_url      TEXT,                     -- episode still thumbnail (episode rows)
-    episode_overview  TEXT,                  -- episode synopsis (episode rows)
+    episode_title  TEXT,                     -- episode rows | video title (video rows)
+    still_url      TEXT,                     -- episode still | video thumbnail (video rows)
+    episode_overview  TEXT,                  -- episode synopsis | video description (video rows)
     season_poster_url TEXT,                  -- the episode's SEASON poster (episode rows)
-    air_date       TEXT,                     -- episode rows (already aired by the time it's here)
+    air_date       TEXT,                     -- episode air date | video published_at (video rows)
     status         TEXT NOT NULL DEFAULT 'wanted',  -- wanted|searching|downloading|downloaded|failed
     library_id     INTEGER,                  -- owned movies.id/shows.id when re-downloading
     server_source  TEXT,                     -- server context that added it (informational)
+    -- generic source bridge (mirrors video_watchlist). For 'video' rows:
+    -- source='youtube', source_id=video youtube id, parent_source_id=channel youtube id.
+    source         TEXT NOT NULL DEFAULT 'tmdb',
+    source_id      TEXT,
+    parent_source_id TEXT,                   -- owning channel's youtube id (video rows)
     date_added     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
--- one row per movie, one per (show, season, episode) — partial uniques so the two
--- shapes don't collide and re-adding is an idempotent upsert.
+-- one row per movie, one per (show, season, episode), one per youtube video —
+-- partial uniques so the shapes don't collide and re-adding is an idempotent upsert.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_movie
     ON video_wishlist(tmdb_id) WHERE kind = 'movie';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_episode
     ON video_wishlist(tmdb_id, season_number, episode_number) WHERE kind = 'episode';
 CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_video
+    ON video_wishlist(source_id) WHERE kind = 'video';
+CREATE INDEX IF NOT EXISTS idx_video_wishlist_channel
+    ON video_wishlist(parent_source_id) WHERE kind = 'video';
 
 -- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
 -- WATCHLIST = things you follow for NEW content: monitored shows + channels.
