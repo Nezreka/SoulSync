@@ -1088,3 +1088,41 @@ def test_youtube_rows_do_not_disturb_tmdb_counts(db):
     # youtube counts live on their own surface
     assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
     assert db.list_watchlist_channels()[0]["video_count"] == 1
+
+
+def test_upgrade_from_pre_source_schema(tmp_path):
+    """Regression: an existing pre-bridge DB (no source/source_id/parent_source_id
+    columns) must upgrade cleanly. The source_id partial indexes can't live in the
+    schema executescript (it runs BEFORE the column ALTERs), or init blows up with
+    'no such column: source_id' and the whole video DB fails to initialize."""
+    path = str(tmp_path / "video_library.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE video_watchlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, tmdb_id INTEGER NOT NULL,
+            title TEXT NOT NULL, poster_url TEXT, library_id INTEGER,
+            state TEXT NOT NULL DEFAULT 'follow', date_added TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(kind, tmdb_id));
+        CREATE TABLE video_wishlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, tmdb_id INTEGER NOT NULL,
+            title TEXT NOT NULL, poster_url TEXT, year INTEGER, season_number INTEGER,
+            episode_number INTEGER, episode_title TEXT, still_url TEXT, episode_overview TEXT,
+            season_poster_url TEXT, air_date TEXT, status TEXT NOT NULL DEFAULT 'wanted',
+            library_id INTEGER, server_source TEXT, date_added TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+        """)
+    conn.commit()
+    conn.close()
+
+    db = VideoDatabase(database_path=path)   # must upgrade in place, no raise
+    with db.connect() as c:
+        cols = {r[1] for r in c.execute("PRAGMA table_info(video_wishlist)")}
+        assert {"source", "source_id", "parent_source_id"} <= cols
+        wcols = {r[1] for r in c.execute("PRAGMA table_info(video_watchlist)")}
+        assert {"source", "source_id"} <= wcols
+        idx = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+        assert "idx_video_wishlist_video" in idx and "idx_video_wishlist_channel" in idx
+    # the youtube path actually works on the upgraded DB
+    assert db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "Chan"},
+                                     [{"youtube_id": "x1", "title": "X1"}]) == 1
+    assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}

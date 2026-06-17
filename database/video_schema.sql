@@ -392,10 +392,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_movie
 CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_episode
     ON video_wishlist(tmdb_id, season_number, episode_number) WHERE kind = 'episode';
 CREATE INDEX IF NOT EXISTS idx_video_wishlist_show ON video_wishlist(tmdb_id) WHERE kind = 'episode';
-CREATE UNIQUE INDEX IF NOT EXISTS idx_video_wishlist_video
-    ON video_wishlist(source_id) WHERE kind = 'video';
-CREATE INDEX IF NOT EXISTS idx_video_wishlist_channel
-    ON video_wishlist(parent_source_id) WHERE kind = 'video';
+-- NOTE: the source_id / parent_source_id partial indexes are created in code
+-- (VideoDatabase._ensure_indexes) AFTER the column migrations run — they can't
+-- live here because this script runs via executescript() BEFORE the ALTERs, so
+-- on an upgraded DB the columns wouldn't exist yet.
 
 -- ── Derived views: Watchlist / Wishlist / Calendar ──────────────────────────
 -- WATCHLIST = things you follow for NEW content: monitored shows + channels.
