@@ -116,15 +116,16 @@ class YoutubeDateEnricher:
         if not cid or db.channel_dates_enriched_recently(cid):
             return
         self._current = self._titles.get(cid) or cid
+        logger.info("YouTube dates: enriching %s (%s)…", self._current, cid)
 
         dates = {}
         try:
             dates = yt.proxy_channel_dates(cid) or {}
         except Exception:
             logger.info("proxy date fetch failed for %s", cid, exc_info=True)
+        logger.info("YouTube dates: proxy returned %d for %s", len(dates), cid)
         if dates:
             db.cache_video_dates([{"youtube_id": k, "published_at": v} for k, v in dates.items()])
-            logger.info("YouTube dates: %d cached for %s (proxy)", len(dates), cid)
 
         # Fallback (proxy down): date the channel's RECENT UPLOADS via yt-dlp, not
         # just wished videos — so years populate fully even with no working proxy.
@@ -150,12 +151,11 @@ class YoutubeDateEnricher:
                 db.cache_video_dates([{"youtube_id": vid, "published_at": v["published_at"]}])
                 filled += 1
             time.sleep(_FALLBACK_DELAY)
-        if filled:
-            logger.info("YouTube dates: %d cached for %s (per-video fallback)", filled, cid)
-
         self._channels_done += 1
         self._dates_total += len(dates) + filled
         db.mark_channel_dates_enriched(cid, len(dates) + filled)
+        logger.info("YouTube dates: %s done — %d proxy + %d per-video (%d/%d dated)",
+                    cid, len(dates), filled, len(dates) + filled, len(ids))
 
 
 _enricher = None

@@ -1341,11 +1341,38 @@
             episode_total: (ch.videos || []).length, episode_owned: 0 };
     }
 
+    // Freshly-followed channels get their upload dates filled in over the next
+    // minute+ by the background enricher. Re-fetch a few times so new year-seasons
+    // pop in WITHOUT a manual reload (only re-renders if more years appeared).
+    var ytRepollTimers = [];
+    function ytClearRepoll() { ytRepollTimers.forEach(function (t) { clearTimeout(t); }); ytRepollTimers = []; }
+    function ytRefetch(id) {
+        var before = ((data && data.seasons) || []).length;
+        fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '?limit=90', { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (resp) {
+                if (!resp || !resp.success || currentId !== id || currentSource !== 'youtube') return;
+                var nd = ytToShow(resp);
+                if (nd.seasons.length <= before) return;   // no new years yet → don't disrupt the view
+                data = nd;
+                if (!seasonByNum(selectedSeason)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
+                renderBillboard(nd); renderSeasonNav(); renderEpisodes();
+            })
+            .catch(function () { /* ignore */ });
+    }
+    function ytScheduleRepoll(id) {
+        ytClearRepoll();
+        [25000, 60000, 110000].forEach(function (ms) {
+            ytRepollTimers.push(setTimeout(function () { ytRefetch(id); }, ms));
+        });
+    }
+
     function loadChannel(id) {
         currentKind = 'show'; currentSource = 'youtube';   // render into the show container
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
         if (!root()) return;
+        ytClearRepoll();
         showLoading(true); resetExtras(); showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
@@ -1364,6 +1391,9 @@
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
                 ytLoadPlaylists(id);
+                // If videos are still undated, the enricher is (or will be) filling
+                // them in — poll a few times so the years appear live.
+                if (data.seasons.some(function (s) { return s.season_number === 0; })) ytScheduleRepoll(id);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
     }
