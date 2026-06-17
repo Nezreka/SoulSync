@@ -79,8 +79,23 @@
     }
 
     // TMDB groups (movies/shows/people) + a YouTube channels group, each painted
-    // as soon as its source resolves (they're fetched in parallel).
-    function render(results, ytChannels) {
+    // as soon as its source resolves (they're fetched in parallel). While YouTube
+    // is still in flight a "Searching YouTube…" skeleton group shows — so an empty
+    // TMDB result never flashes "No results" before the channels arrive.
+    function ytSkeletonGroup() {
+        var cards = '';
+        for (var i = 0; i < 4; i++) {
+            cards += '<div class="vyt-result vyt-result--skel">' +
+                '<span class="vyt-result-art vyt-skel"></span>' +
+                '<span class="vyt-result-info"><span class="vyt-skel vyt-skel-line"></span>' +
+                '<span class="vyt-skel vyt-skel-line vyt-skel-line--sm"></span></span></div>';
+        }
+        return '<div class="vsr-group"><h2 class="vsr-group-title">' +
+            '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channels' +
+            '<span class="vsr-yt-loading">searching…</span></h2>' +
+            '<div class="vsr-grid vyt-result-grid">' + cards + '</div></div>';
+    }
+    function render(results, ytChannels, ytSearching) {
         var host = $('[data-video-search-results]');
         if (!host) return;
         var html = '';
@@ -101,6 +116,8 @@
                 '<div class="vsr-grid vyt-result-grid">' +
                 ytChannels.map(function (c) { return VideoYoutube.channelResultCard(c); }).join('') +
                 '</div></div>';
+        } else if (ytSearching) {
+            html += ytSkeletonGroup();
         }
         var any = html.length > 0;
         show('[data-video-search-hint]', false);
@@ -138,14 +155,15 @@
         loadTrending();
     }
 
-    var curResults = null, curYt = null;   // TMDB + YouTube halves of the active query
+    var curResults = null, curYt = null, ytSearching = false;   // TMDB + YouTube halves of the active query
     function paint(seq) {
         if (seq !== reqSeq) return;
-        render(curResults || [], curYt || []);
+        render(curResults || [], curYt, ytSearching);
     }
     function runSearch(q) {
         var seq = ++reqSeq;
         curResults = null; curYt = null;
+        ytSearching = !!(window.VideoYoutube && q.length >= 2);
         show('[data-video-search-loading]', true);
         fetch(SEARCH_URL + '?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -161,11 +179,12 @@
                 curResults = [];
                 paint(seq);
             });
-        // YouTube channels in parallel (best-effort) — appended as their own group.
-        if (window.VideoYoutube && q.length >= 2) {
+        // YouTube channels in parallel (best-effort) — its own group, shown as a
+        // "searching…" skeleton until it resolves so nothing flashes "No results".
+        if (ytSearching) {
             VideoYoutube.searchChannels(q)
-                .then(function (d) { if (seq !== reqSeq) return; curYt = (d && d.channels) || []; paint(seq); })
-                .catch(function () { if (seq !== reqSeq) return; curYt = []; paint(seq); });
+                .then(function (d) { if (seq !== reqSeq) return; curYt = (d && d.channels) || []; ytSearching = false; paint(seq); })
+                .catch(function () { if (seq !== reqSeq) return; curYt = []; ytSearching = false; paint(seq); });
         }
     }
 
