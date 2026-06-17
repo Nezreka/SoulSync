@@ -111,11 +111,22 @@ def register_routes(bp):
 
     @bp.route("/youtube/channels", methods=["GET"])
     def video_youtube_channels():
-        """Followed channels (newest first) for the watchlist page."""
+        """Followed channels (newest first) for the watchlist page. Also sweeps:
+        any followed channel not date-enriched recently gets queued for the
+        background enricher (so existing follows get picked up, not just new ones)."""
         from . import get_video_db
         try:
             db = get_video_db()
-            return jsonify({"success": True, "channels": db.list_watchlist_channels(),
+            channels = db.list_watchlist_channels()
+            try:
+                from core.video.youtube_enrichment import get_youtube_date_enricher
+                enr = get_youtube_date_enricher()
+                for c in channels:
+                    if not db.channel_dates_enriched_recently(c["youtube_id"]):
+                        enr.enqueue(c["youtube_id"], c.get("title"))
+            except Exception:
+                pass
+            return jsonify({"success": True, "channels": channels,
                             "counts": db.youtube_wishlist_counts()})
         except Exception:
             logger.exception("youtube channels list failed")
