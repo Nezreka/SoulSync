@@ -49,6 +49,35 @@
     }
     function byId(id) { return document.getElementById(id); }
 
+    // The music modal's circular accent icon chip (.em-icon), reused verbatim so
+    // the video rail/hero match it. Logo → <img>, otherwise a colored glyph/letter.
+    function workerIcon(w, lg) {
+        var cls = 'em-icon' + (lg ? ' em-icon--lg' : '');
+        var inner;
+        if (LOGOS[w.id]) {
+            var filt = w.id === 'tvdb' ? ' style="filter:invert(1)"' : '';
+            inner = '<img class="em-icon-img" src="' + LOGOS[w.id] + '" alt=""' + filt + '>';
+        } else {
+            inner = '<span class="em-icon-letter">' + esc(w.glyph || w.name.charAt(0)) + '</span>';
+        }
+        return '<span class="' + cls + '" style="--em-accent: ' + w.color + '">' + inner + '</span>';
+    }
+
+    // "3d ago" for a SQLite UTC timestamp; '' when never attempted (mirrors music).
+    function relTime(value) {
+        if (!value) return '';
+        var raw = String(value);
+        var ts = Date.parse(raw.replace(' ', 'T') + (raw.indexOf('Z') >= 0 ? '' : 'Z'));
+        if (isNaN(ts)) return '';
+        var secs = Math.max(0, (Date.now() - ts) / 1000);
+        if (secs < 60) return 'just now';
+        var mins = secs / 60; if (mins < 60) return Math.floor(mins) + 'm ago';
+        var hrs = mins / 60; if (hrs < 24) return Math.floor(hrs) + 'h ago';
+        var days = hrs / 24; if (days < 30) return Math.floor(days) + 'd ago';
+        var months = days / 30; if (months < 12) return Math.floor(months) + 'mo ago';
+        return Math.floor(months / 12) + 'y ago';
+    }
+
     function statusInfo(s) {
         if (!s || !s.enabled) return { cls: 'disabled', label: 'Not configured' };
         if (s.running && !s.paused && !s.idle) return { cls: 'running', label: 'Running' };
@@ -118,17 +147,14 @@
     function renderRail() {
         var rail = byId('vem-rail');
         if (!rail) return;
-        rail.innerHTML = WORKERS.map(function (w) {
+        rail.innerHTML = WORKERS.map(function (w, i) {
             var s = state.statuses[w.id];
             var info = statusInfo(s);
             var pct = overallPct(s);
             var cov = pct == null ? '' :
                 '<span class="em-rail-cov"><span class="em-rail-cov-fill" style="width:' + pct + '%"></span></span>';
-            var icon = LOGOS[w.id]
-                ? '<img class="vem-logo vem-logo--' + w.id + '" src="' + LOGOS[w.id] + '" alt="">'
-                : '<span class="vem-glyph" style="color:' + w.color + '">' + (w.glyph || '★') + '</span>';
-            return '<button class="em-worker-row" data-em-select="' + w.id + '" style="--row-accent: ' + w.rgb + '">' +
-                '<span class="em-worker-icon">' + icon + '</span>' +
+            return '<button class="em-worker-row" data-em-select="' + w.id + '" style="--i:' + i + ';--row-accent: ' + w.rgb + '">' +
+                workerIcon(w) +
                 '<span class="em-worker-meta"><span class="em-worker-name">' + esc(w.name) + '</span>' +
                 '<span class="em-worker-sub">' + esc(railSub(s, w.id)) + '</span>' + cov + '</span>' +
                 '<span class="em-dot em-dot--' + info.cls + '" title="' + info.label + '"></span></button>';
@@ -140,17 +166,12 @@
     }
 
     function renderYoutubePanel(panel) {
+        var w = workerDef('youtube') || {};
         var s = state.statuses.youtube || {};
-        var info = statusInfo(s);
         var prog = (s.progress && s.progress.channels) || {};
-        var current = (s.current_item && s.current_item.name)
-            ? '<span class="em-ph-current">channel: ' + esc(s.current_item.name) + '</span>' : '';
         panel.innerHTML =
-            '<div class="em-panel-header">' +
-                '<div class="em-ph-main"><span class="em-dot em-dot--' + info.cls + '"></span>' +
-                '<strong>YouTube Dates</strong><span class="em-ph-status">' + info.label + '</span>' + current + '</div>' +
-                '<button class="em-pause-btn" data-em-pause>' + (s.paused ? '▶ Resume' : '⏸ Pause') + '</button></div>' +
-            '<div class="vem-yt-about">Fetches real upload dates for the YouTube channels you follow, so the channel page can group videos into year-seasons. Runs in the background when you follow or open a channel — bulk via a no-key proxy, falling back to per-video; cached so it\'s a one-time pass per channel.</div>' +
+            '<div class="em-panel-header" id="vem-panel-header">' + heroHtml(w, s) + '</div>' +
+            '<div class="vem-yt-about">Fetches real upload dates for the YouTube channels you follow, so the channel page can group videos into year-seasons. Runs in the background when you follow or open a channel — bulk via YouTube\'s own InnerTube API, falling back to per-video; cached so it\'s a one-time pass per channel.</div>' +
             '<div class="vem-yt-stats">' +
                 '<div class="vem-yt-stat"><span class="vem-yt-num">' + (prog.matched || 0) + '</span><span class="vem-yt-lbl">channels enriched</span></div>' +
                 '<div class="vem-yt-stat"><span class="vem-yt-num">' + (s.dates_cached || 0) + '</span><span class="vem-yt-lbl">dates cached</span></div>' +
@@ -162,13 +183,18 @@
         var panel = byId('vem-panel');
         if (!panel) return;
         // Theme the panel to the selected worker's accent (like the music modal).
+        // Music's shared .em-btn/.em-tab/.em-seg rules key off --accent-rgb, so set
+        // it here too (scoped to the panel) — that's what makes them recolor.
         var w = WORKERS.find(function (x) { return x.id === state.selected; }) || WORKERS[0];
         panel.style.setProperty('--em-accent', w.color);
         panel.style.setProperty('--em-accent-rgb', w.rgb);
+        panel.style.setProperty('--accent-rgb', w.rgb);
+        panel.style.setProperty('--accent-light-rgb', w.rgb);
         if (state.selected === 'youtube') { renderYoutubePanel(panel); return; }
         panel.innerHTML =
             '<div class="em-panel-header" id="vem-panel-header"></div>' +
-            '<div class="em-section-label em-section-label--row"><span>Coverage</span>' +
+            '<div class="em-section-label em-section-label--row"><span>Coverage &amp; processing order ' +
+            '<span class="em-section-sub">— click a group to enrich it first</span></span>' +
             '<span class="em-coverage-overall" id="vem-coverage-overall"></span></div>' +
             '<div class="em-cards" id="vem-cards"></div>' +
             '<div class="em-unmatched">' +
@@ -181,21 +207,34 @@
         renderList();
     }
 
+    function heroHtml(w, s) {
+        var info = statusInfo(s);
+        var live = info.cls === 'running' ? ' em-hero--live' : '';
+        var item = s && s.current_item;
+        var sub = (item && item.name)
+            ? 'Now enriching: <strong>' + esc(item.name) + '</strong>' +
+              (item.type ? ' <span class="em-muted">(' + esc(item.type) + ')</span>' : '')
+            : '<span class="em-muted">No item processing</span>';
+        var pauseLabel = s && s.paused ? '▶ Resume' : '⏸ Pause';
+        var go = s && s.paused ? ' em-btn--go' : '';
+        return '<div class="em-hero' + live + '">' +
+            '<div class="em-hero-glow"></div>' +
+            workerIcon(w, true) +
+            '<div class="em-ph-titles"><div class="em-ph-nameline">' +
+            '<span class="em-ph-name">' + esc(w.name) + ' <span class="em-ph-name-sub">enrichment</span></span>' +
+            '<span class="em-pill em-pill--' + info.cls + '">' + info.label + '</span></div>' +
+            '<div class="em-ph-sub">' + sub + '</div></div>' +
+            '<div class="em-ph-actions">' +
+            '<button class="em-btn' + go + '" data-em-pause' + (s && s.enabled ? '' : ' disabled') + '>' + pauseLabel + '</button>' +
+            '</div></div>';
+    }
+
     function renderHeader() {
         var host = byId('vem-panel-header');
         if (!host) return;
         var s = state.statuses[state.selected] || {};
-        var info = statusInfo(s);
         var w = WORKERS.find(function (x) { return x.id === state.selected; }) || {};
-        var pauseLabel = s.paused ? '▶ Resume' : '⏸ Pause';
-        var current = (s.current_item && s.current_item.name)
-            ? esc((s.current_item.type || '') + ': ' + s.current_item.name) : '';
-        host.innerHTML =
-            '<div class="em-ph-main"><span class="em-dot em-dot--' + info.cls + '"></span>' +
-            '<strong>' + esc(w.name) + '</strong>' +
-            '<span class="em-ph-status">' + info.label + '</span>' +
-            (current ? '<span class="em-ph-current">' + current + '</span>' : '') + '</div>' +
-            '<button class="em-pause-btn" data-em-pause' + (s.enabled ? '' : ' disabled') + '>' + pauseLabel + '</button>';
+        host.innerHTML = heroHtml(w, s);
     }
 
     function renderCards() {
@@ -213,10 +252,21 @@
             var total = matched + nf + pend;
             var pct = total ? Math.round(matched / total * 100) : 0;
             var seg = function (n) { return total ? (n / total) * 100 : 0; };
-            var active = e === state.kind ? ' em-card--current' : '';
-            return '<button class="em-card' + active + '" data-em-kind="' + e + '">' +
+            var left = nf + pend;
+            var isPinned = state.priority === e && (e === 'movie' || e === 'show');
+            var isDone = total > 0 && left === 0;
+            var cls = 'em-card' +
+                (e === state.kind ? ' em-card--current' : '') +
+                (isPinned ? ' em-card--pinned' : '') +
+                (isDone ? ' em-card--done' : '');
+            var badge = isPinned
+                ? '<span class="em-card-badge em-card-badge--pin">📌 First</span>'
+                : isDone
+                    ? '<span class="em-card-badge em-card-badge--done">✓ Done</span>'
+                    : '<span class="em-card-badge">' + left.toLocaleString() + ' left</span>';
+            return '<button class="' + cls + '" data-em-kind="' + e + '">' +
                 '<div class="em-card-top"><span class="em-card-glyph">' + (GLYPH[e] || '•') + '</span>' +
-                '<span class="em-card-title">' + (KIND_LABEL[e] || e) + '</span>' +
+                '<span class="em-card-title">' + (KIND_LABEL[e] || e) + '</span>' + badge +
                 '<span class="em-card-pct">' + pct + '<span class="em-stat-pct-sym">%</span></span></div>' +
                 '<div class="em-seg"><div class="em-seg-fill em-seg--matched" style="width:' + seg(matched) + '%"></div>' +
                 '<div class="em-seg-fill em-seg--nf" style="width:' + seg(nf) + '%"></div>' +
@@ -257,9 +307,9 @@
         host.innerHTML =
             '<div class="em-unmatched-bar">' +
             '<div class="em-section-label em-section-label--inline">' +
-            (KIND_LABEL[state.kind] || state.kind) + ' not yet matched' +
+            (isEpisode ? 'Episodes missing art' : (KIND_LABEL[state.kind] || state.kind) + ' not yet matched') +
             (total != null ? '<span class="em-count">' + total.toLocaleString() + '</span>' : '') +
-            (isEpisode ? '' : '<button class="em-btn em-btn--sm em-btn--ghost em-retry-all-btn" data-em-retry-all>↻ Retry all failed</button>') +
+            (isEpisode ? '' : '<button class="em-btn em-btn--sm em-btn--ghost" data-em-retry-all>↻ Retry all failed</button>') +
             '</div>' +
             '<div class="em-filter-row">' +
             (isEpisode ? '' :
@@ -267,33 +317,53 @@
                 opt('not_found', 'Not found') + opt('pending', 'Pending') + '</select>') +
             '<div class="em-search-wrap"><span class="em-search-ico">⌕</span>' +
             '<input class="em-search" type="text" placeholder="Search…" value="' + esc(state.search) + '" data-em-search></div>' +
-            '</div></div>';
+            '</div></div>' +
+            '<div class="em-hint">' + (isEpisode
+                ? 'Episode stills backfill automatically once their show is matched.'
+                : 'Failed lookups auto-retry later · “Retry” re-queues immediately.') + '</div>';
     }
 
     function renderList() {
         var host = byId('vem-unmatched-list');
         if (!host) return;
         var data = state.unmatched || { items: [], total: 0 };
+        var isEpisode = state.kind === 'episode';
         if (!data.items.length) {
-            host.innerHTML = '<div class="em-empty">Nothing unmatched here 🎉</div>';
+            host.innerHTML = '<div class="em-empty"><div class="em-empty-emoji">' +
+                (state.statusFilter === 'unmatched' ? '🎉' : '🔍') + '</div>' +
+                '<div>' + (state.statusFilter === 'unmatched'
+                    ? 'Everything here is matched for this source.'
+                    : 'Nothing matches this filter.') + '</div></div>';
         } else {
+            // No per-item status flag, so colour the stripe from the active filter.
+            var rowCls = state.statusFilter === 'not_found' ? 'em-row em-row--nf' : 'em-row em-row--pend';
             host.innerHTML = data.items.map(function (it) {
-                var poster = it.has_poster
-                    ? '<img class="em-item-img" src="/api/video/poster/' + state.kind + '/' + it.id + '" alt="" loading="lazy">'
-                    : '<span class="em-item-img em-item-img--ph">' + (GLYPH[state.kind] || '•') + '</span>';
-                return '<div class="em-item">' + poster +
-                    '<span class="em-item-meta"><span class="em-item-name">' + esc(it.title) + '</span>' +
-                    '<span class="em-item-sub">' + (it.year || '') + '</span></span>' +
-                    '<button class="em-item-retry" data-em-retry-item="' + it.id + '">Retry</button></div>';
+                var glyph = GLYPH[state.kind] || '•';
+                var pic = it.has_poster
+                    ? '<img class="em-row-img-pic" src="/api/video/poster/' + state.kind + '/' + it.id + '" alt="" loading="lazy" onerror="this.remove()">'
+                    : '';
+                var img = '<div class="em-row-img em-row-img--ph">' + glyph + pic + '</div>';
+                var rel = relTime(it.last_attempted);
+                var meta = [];
+                if (it.year) meta.push('<span class="em-muted">' + esc(String(it.year)) + '</span>');
+                meta.push('<span class="em-muted">' + (rel ? 'tried ' + rel : 'never tried') + '</span>');
+                var action = isEpisode ? ''
+                    : '<button class="em-btn em-btn--sm em-btn--ghost" data-em-retry-item="' + it.id + '">Retry</button>';
+                return '<div class="' + rowCls + '">' + img +
+                    '<div class="em-row-info"><div class="em-row-name" title="' + esc(it.title) + '">' + esc(it.title) + '</div>' +
+                    '<div class="em-row-meta">' + meta.join(' ') + '</div></div>' +
+                    '<div class="em-row-actions">' + action + '</div></div>';
             }).join('');
         }
         var pager = byId('vem-pager');
         if (pager) {
-            var pages = Math.max(1, Math.ceil((data.total || 0) / state.pageSize));
-            pager.innerHTML = (data.total || 0) > state.pageSize
-                ? '<button class="em-pg" data-em-page="prev"' + (state.page <= 0 ? ' disabled' : '') + '>‹</button>' +
-                  '<span class="em-pg-info">' + (state.page + 1) + ' / ' + pages + '</span>' +
-                  '<button class="em-pg" data-em-page="next"' + (state.page + 1 >= pages ? ' disabled' : '') + '>›</button>'
+            var total = data.total || 0;
+            var from = total ? state.page * state.pageSize + 1 : 0;
+            var to = Math.min((state.page + 1) * state.pageSize, total);
+            pager.innerHTML = total > state.pageSize
+                ? '<button class="em-btn em-btn--sm" data-em-page="prev"' + (state.page <= 0 ? ' disabled' : '') + '>‹ Prev</button>' +
+                  '<span class="em-muted">' + from + '–' + to + ' of ' + total.toLocaleString() + '</span>' +
+                  '<button class="em-btn em-btn--sm" data-em-page="next"' + (to >= total ? ' disabled' : '') + '>Next ›</button>'
                 : '';
         }
     }
@@ -432,7 +502,15 @@
 
     function open() {
         var overlay = ensureOverlay();
-        overlay.classList.remove('hidden');
+        overlay.classList.remove('hidden', 'em-closing');
+        // Re-trigger the music modal's entrance animation even on reuse. Drop the
+        // class once it's played so the 3s rail re-render doesn't replay the
+        // per-row stagger (.em-in .em-worker-row) on every poll.
+        var modal = overlay.querySelector('.enrichment-manager-modal');
+        if (modal) {
+            modal.classList.remove('em-in'); void modal.offsetWidth; modal.classList.add('em-in');
+            setTimeout(function () { modal.classList.remove('em-in'); }, 700);
+        }
         document.body.classList.add('em-scroll-lock');
         state.open = true;
         refreshAll().then(function () {
@@ -456,8 +534,11 @@
         var overlay = byId('vem-overlay');
         state.open = false;
         if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
-        if (overlay) overlay.classList.add('hidden');
         document.body.classList.remove('em-scroll-lock');
+        if (!overlay) return;
+        // Brief fade/scale-out (music's .em-closing), then hide.
+        overlay.classList.add('em-closing');
+        setTimeout(function () { overlay.classList.add('hidden'); overlay.classList.remove('em-closing'); }, 170);
     }
 
     document.addEventListener('soulsync:video-open-workers', open);
