@@ -2553,6 +2553,31 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-nebula .wl-album-tile.vwsh-tile--sel { border: 1px solid hsla(var(--orb-hue, 230), 70%, 60%, 0.6);
     box-shadow: 0 0 0 1px hsla(var(--orb-hue, 230), 70%, 55%, 0.4), 0 8px 22px -10px hsla(var(--orb-hue, 230), 70%, 45%, 0.6); }
 
+/* show info bar — synopsis (left) + clickable cast bubbles (right), lazy-loaded */
+.vwsh-nebula .vwsh-info:empty { display: none; }
+.vwsh-nebula .vwsh-info { display: flex; gap: 20px; align-items: flex-start; text-align: left; margin: 4px 0 18px; }
+.vwsh-nebula .vwsh-info-syn { flex: 1 1 0; min-width: 0; font-size: 12.5px; line-height: 1.55; color: rgba(255, 255, 255, 0.6);
+    display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.vwsh-nebula .vwsh-info-cast { flex: 0 0 auto; max-width: 48%; display: flex; flex-wrap: wrap; gap: 12px 10px; justify-content: flex-end; }
+.vwsh-nebula .vwsh-cast { width: 56px; padding: 0; border: none; background: none; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.vwsh-nebula .vwsh-cast-img { position: relative; width: 46px; height: 46px; border-radius: 50%; overflow: hidden;
+    background: #1c1c24; border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
+.vwsh-nebula .vwsh-cast:hover .vwsh-cast-img { transform: translateY(-2px);
+    border-color: hsla(var(--orb-hue, 230), 70%, 62%, 0.75); box-shadow: 0 6px 16px -4px hsla(var(--orb-hue, 230), 70%, 50%, 0.6); }
+.vwsh-nebula .vwsh-cast-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vwsh-nebula .vwsh-cast--ph .vwsh-cast-img img { display: none; }
+.vwsh-nebula .vwsh-cast-ini { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; color: rgba(255, 255, 255, 0.45); }
+.vwsh-nebula .vwsh-cast-name { font-size: 9.5px; font-weight: 600; color: rgba(255, 255, 255, 0.55);
+    text-align: center; line-height: 1.2; max-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vwsh-nebula .vwsh-cast:hover .vwsh-cast-name { color: rgba(255, 255, 255, 0.85); }
+@media (max-width: 640px) {
+    .vwsh-nebula .vwsh-info { flex-direction: column; }
+    .vwsh-nebula .vwsh-info-cast { max-width: 100%; justify-content: flex-start; }
+}
+
 /* #1/#2 — the picked season drops its episodes here, full-width, as 2-line cards */
 .vwsh-nebula .vwsh-ep-area:empty { display: none; }
 .vwsh-nebula .vwsh-ep-area { margin-top: 14px; }
