@@ -22,9 +22,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video.youtube_enrichment")
 
-# Throttle the per-video fallback so we don't burst YouTube into rate-limiting.
+# Per-video fallback (used when the bulk proxy is down): dated in a small thread
+# pool so a channel finishes in ~30s instead of minutes, without bursting too hard.
 _FALLBACK_CAP = 60
-_FALLBACK_DELAY = 0.4
+_FALLBACK_WORKERS = 3
 
 
 class YoutubeDateEnricher:
@@ -140,17 +141,24 @@ class YoutubeDateEnricher:
                 logger.info("flat resolve for date fallback failed for %s", cid, exc_info=True)
         ids = list(ids)
         have = db.get_video_dates(ids)
-        missing = [i for i in ids if i not in have and i not in dates]
+        missing = [i for i in ids if i not in have and i not in dates][:_FALLBACK_CAP]
         filled = 0
-        for vid in missing[:_FALLBACK_CAP]:
-            try:
-                v = yt.video_detail(vid)
-            except Exception:
-                v = None
-            if v and v.get("published_at"):
-                db.cache_video_dates([{"youtube_id": vid, "published_at": v["published_at"]}])
-                filled += 1
-            time.sleep(_FALLBACK_DELAY)
+        if missing:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            def fetch_date(vid):
+                try:
+                    v = yt.video_detail(vid)
+                    return vid, (v or {}).get("published_at")
+                except Exception:
+                    return vid, None
+
+            with ThreadPoolExecutor(max_workers=_FALLBACK_WORKERS) as ex:
+                for fut in as_completed([ex.submit(fetch_date, v) for v in missing]):
+                    vid, d = fut.result()
+                    if d:
+                        db.cache_video_dates([{"youtube_id": vid, "published_at": d}])
+                        filled += 1
         self._channels_done += 1
         self._dates_total += len(dates) + filled
         db.mark_channel_dates_enriched(cid, len(dates) + filled)
