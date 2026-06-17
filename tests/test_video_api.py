@@ -510,3 +510,103 @@ def test_wishlist_backfill_art_endpoint(tmp_path, monkeypatch):
     assert client.post("/api/video/wishlist/backfill-art").get_json()["success"] is True
     season = db.query_wishlist("show")["items"][0]["seasons"][0]
     assert season["poster_url"] == "/s1.jpg" and season["episodes"][0]["still_url"] == "/s.jpg"
+
+
+# ── YouTube channels ─────────────────────────────────────────────────────────
+
+def test_youtube_routes_registered():
+    from api.video import create_video_blueprint
+    app = Flask(__name__)
+    app.register_blueprint(create_video_blueprint(), url_prefix="/api/video")
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    for r in ("/api/video/youtube/resolve", "/api/video/youtube/follow",
+              "/api/video/youtube/unfollow", "/api/video/youtube/channels",
+              "/api/video/youtube/wishlist", "/api/video/youtube/wishlist/remove"):
+        assert r in rules
+
+
+_CHANNEL = {
+    "youtube_id": "UCPlay", "title": "PlayStation", "avatar_url": "http://a/p.jpg",
+    "handle": "@PlayStation", "videos": [
+        {"youtube_id": "v1", "title": "State of Play", "published_at": "2024-06-01",
+         "thumbnail_url": "http://t/1.jpg", "description": "the latest"},
+        {"youtube_id": "v2", "title": "Trailer", "published_at": "2024-01-01"},
+    ]}
+
+
+def test_youtube_resolve_previews_without_committing(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "resolve_channel", lambda url, limit=24: dict(_CHANNEL))
+    r = client.get("/api/video/youtube/resolve?url=https://youtube.com/@PlayStation")
+    data = r.get_json()
+    assert data["success"] is True
+    assert data["channel"]["youtube_id"] == "UCPlay"
+    assert data["following"] is False                     # not committed yet
+    # nothing was written
+    assert videoapi._video_db.youtube_wishlist_counts() == {"channel": 0, "video": 0}
+
+
+def test_youtube_resolve_rejects_non_channel(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    monkeypatch.setattr(ytmod, "resolve_channel", lambda url, limit=24: None)
+    r = client.get("/api/video/youtube/resolve?url=https://youtube.com/watch?v=x")
+    assert r.status_code == 404 and r.get_json()["success"] is False
+
+
+def test_youtube_follow_then_channels_and_wishlist(tmp_path):
+    client, _ = _make_client(tmp_path)
+    # pre-resolved channel in the body → no network/yt-dlp needed
+    r = client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
+    data = r.get_json()
+    assert data["success"] is True and data["following"] is True
+    assert data["added_videos"] == 2
+    assert data["counts"] == {"channel": 1, "video": 2}
+
+    # appears on the watchlist channels list with a video count
+    chans = client.get("/api/video/youtube/channels").get_json()
+    assert chans["channels"][0]["youtube_id"] == "UCPlay"
+    assert chans["channels"][0]["video_count"] == 2
+
+    # appears in the youtube wishlist grouped by channel, newest-first
+    wl = client.get("/api/video/youtube/wishlist?kind=channel").get_json()
+    grp = wl["items"][0]
+    assert grp["youtube_id"] == "UCPlay" and grp["video_count"] == 2
+    assert [v["youtube_id"] for v in grp["videos"]] == ["v1", "v2"]
+
+    # resolve now reports following=True (hydration) — stub resolve to avoid network
+    import core.video.youtube as ytmod
+    ytmod_resolve = ytmod.resolve_channel
+    try:
+        ytmod.resolve_channel = lambda url, limit=24: dict(_CHANNEL)
+        rr = client.get("/api/video/youtube/resolve?url=@PlayStation").get_json()
+        assert rr["following"] is True
+    finally:
+        ytmod.resolve_channel = ytmod_resolve
+
+
+def test_youtube_unfollow_and_remove_scopes(tmp_path):
+    client, db_api = _make_client(tmp_path)
+    client.post("/api/video/youtube/follow", json={"channel": _CHANNEL})
+
+    # unfollow removes the watchlist row but keeps wished videos
+    r = client.post("/api/video/youtube/unfollow", json={"youtube_id": "UCPlay"})
+    assert r.get_json() == {"success": True, "following": False}
+    assert client.get("/api/video/youtube/channels").get_json()["channels"] == []
+    assert db_api._video_db.youtube_wishlist_counts() == {"channel": 1, "video": 2}
+
+    # remove a single video
+    r = client.post("/api/video/youtube/wishlist/remove", json={"scope": "video", "source_id": "v1"})
+    assert r.get_json()["removed"] == 1
+    assert r.get_json()["counts"] == {"channel": 1, "video": 1}
+
+    # remove the whole channel's videos
+    r = client.post("/api/video/youtube/wishlist/remove", json={"scope": "channel", "source_id": "UCPlay"})
+    assert r.get_json()["counts"] == {"channel": 0, "video": 0}
+
+
+def test_youtube_follow_requires_url_or_channel(tmp_path):
+    client, _ = _make_client(tmp_path)
+    r = client.post("/api/video/youtube/follow", json={})
+    assert r.status_code == 400
