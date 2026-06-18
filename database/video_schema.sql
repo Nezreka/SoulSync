@@ -310,6 +310,34 @@ CREATE TABLE IF NOT EXISTS youtube_channel_meta (
     cached_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Per-video supplementary stats from the no-key YouTube enrichers (keyed by
+-- youtube_id, NOT by channel, so a video shared across playlists is enriched
+-- once). Merged onto the cached catalog on read.
+--   ryd_*  Return YouTube Dislike  -> like/dislike estimates
+--   sb_*   SponsorBlock            -> crowd-sourced segments (in youtube_video_segments)
+-- status columns: NULL = pending, 'ok' | 'not_found' | 'error'.
+CREATE TABLE IF NOT EXISTS youtube_video_stats (
+    youtube_id    TEXT PRIMARY KEY,
+    like_count    INTEGER,
+    dislike_count INTEGER,
+    ryd_status    TEXT,
+    ryd_attempted TEXT,
+    sb_status     TEXT,
+    sb_attempted  TEXT
+);
+
+-- SponsorBlock crowd segments (sponsor/intro/outro/selfpromo/…) for a video.
+CREATE TABLE IF NOT EXISTS youtube_video_segments (
+    youtube_id TEXT NOT NULL,
+    category   TEXT NOT NULL,           -- sponsor | intro | outro | selfpromo | interaction | music_offtopic | preview | filler | poi_highlight | chapter
+    start_sec  REAL NOT NULL,
+    end_sec    REAL NOT NULL,
+    votes      INTEGER,
+    uuid       TEXT NOT NULL,
+    PRIMARY KEY (youtube_id, uuid)
+);
+CREATE INDEX IF NOT EXISTS idx_yvseg_video ON youtube_video_segments(youtube_id);
+
 -- ── Owned media files (the Library = content that has a file) ────────────────
 -- Exactly one owner FK is set (no polymorphic id). 1 row per physical file;
 -- usually 1:1 with its content, but the table allows history/extras.

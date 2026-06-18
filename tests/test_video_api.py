@@ -293,7 +293,9 @@ def test_enrichment_endpoints(tmp_path):
     client = app.test_client()
     try:
         svc = client.get("/api/video/enrichment/services").get_json()
-        assert {s["id"] for s in svc["services"]} == {"tmdb", "tvdb"}
+        ids = {s["id"] for s in svc["services"]}
+        assert {"tmdb", "tvdb"} <= ids                    # matcher workers
+        assert {"ryd", "sponsorblock", "fanart", "opensubtitles"} <= ids  # backfill workers
 
         mid = db.upsert_movie("plex", {"server_id": "m1", "title": "X"})
         st = client.get("/api/video/enrichment/tmdb/status").get_json()

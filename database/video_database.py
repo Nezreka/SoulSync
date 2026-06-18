@@ -71,6 +71,28 @@ _ENRICH_META_COLS = {
               "imdb_id", "tmdb_id", "tvdb_id"},
 }
 
+# Backfill-worker plumbing (parallels _ENRICH, but for services that enrich an
+# already-identified library item BY id rather than matching a title). Maps a
+# service + kind to (table, status_col, attempted_col, where_has_required_id).
+_BACKFILL = {
+    "fanart": {
+        "movie": ("movies", "fanart_status", "fanart_attempted",
+                  "(tmdb_id IS NOT NULL OR imdb_id IS NOT NULL)"),
+        "show": ("shows", "fanart_status", "fanart_attempted", "tvdb_id IS NOT NULL"),
+    },
+    "opensubtitles": {
+        "movie": ("movies", "subs_status", "subs_attempted",
+                  "(imdb_id IS NOT NULL OR tmdb_id IS NOT NULL)"),
+        "show": ("shows", "subs_status", "subs_attempted",
+                 "(imdb_id IS NOT NULL OR tmdb_id IS NOT NULL)"),
+    },
+}
+# Columns each backfill service may gap-fill (whitelist; never clobbers server data).
+_BACKFILL_COLS = {
+    "fanart": {"logo_url", "backdrop_url", "poster_url", "clearart_url", "banner_url"},
+    "opensubtitles": {"subtitle_langs"},
+}
+
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
 _COLUMN_MIGRATIONS = [
     ("movies", "tmdb_match_status", "TEXT"),
@@ -115,6 +137,16 @@ _COLUMN_MIGRATIONS = [
     # per-video duration + approximate view count on the remembered catalog
     ("youtube_channel_videos", "duration", "TEXT"),
     ("youtube_channel_videos", "view_count", "INTEGER"),
+    # fanart.tv artwork backfill (gap-fill only; logo/backdrop/poster live already)
+    ("movies", "clearart_url", "TEXT"), ("movies", "banner_url", "TEXT"),
+    ("movies", "fanart_status", "TEXT"), ("movies", "fanart_attempted", "TEXT"),
+    ("shows", "clearart_url", "TEXT"), ("shows", "banner_url", "TEXT"),
+    ("shows", "fanart_status", "TEXT"), ("shows", "fanart_attempted", "TEXT"),
+    # OpenSubtitles availability backfill (which languages exist for a title)
+    ("movies", "subtitle_langs", "TEXT"),            # JSON array of language codes
+    ("movies", "subs_status", "TEXT"), ("movies", "subs_attempted", "TEXT"),
+    ("shows", "subtitle_langs", "TEXT"),
+    ("shows", "subs_status", "TEXT"), ("shows", "subs_attempted", "TEXT"),
 ]
 
 
@@ -335,6 +367,12 @@ class VideoDatabase:
     def enrichment_breakdown(self, service: str) -> dict:
         if service == "omdb":
             return self._ratings_breakdown()
+        if service == "ryd":
+            return self.youtube_enrich_breakdown("ryd_status")
+        if service == "sponsorblock":
+            return self.youtube_enrich_breakdown("sb_status")
+        if service in _BACKFILL:
+            return self.backfill_breakdown(service)
         kinds = _ENRICH.get(service, {})
         out = {}
         conn = self._get_connection()
@@ -357,6 +395,166 @@ class VideoDatabase:
                 out["episode"] = {"matched": with_still, "not_found": 0, "errors": 0,
                                   "pending": total - with_still, "coverage_only": True}
             return out
+        finally:
+            conn.close()
+
+    # ── backfill-worker plumbing (artwork / subtitles, by id) ─────────────────
+    def backfill_next(self, service: str) -> dict | None:
+        """Next library item needing a backfill service: a row that already has the
+        id the service needs and no status yet. Returns
+        {kind, id, title, tmdb_id, imdb_id[, tvdb_id]} or None."""
+        kinds = _BACKFILL.get(service)
+        if not kinds:
+            return None
+        conn = self._get_connection()
+        try:
+            for kind, (tbl, sc, _ac, has_id) in kinds.items():
+                cols = "id, title, tmdb_id, imdb_id" + (", tvdb_id" if tbl == "shows" else "")
+                row = conn.execute(
+                    f"SELECT {cols} FROM {tbl} WHERE {sc} IS NULL AND {has_id} "
+                    f"ORDER BY id LIMIT 1").fetchone()
+                if row:
+                    d = dict(row)
+                    d["kind"] = kind
+                    return d
+            return None
+        finally:
+            conn.close()
+
+    def backfill_mark(self, service: str, kind: str, item_id: int, status: str,
+                      columns: dict | None = None) -> None:
+        """Record a backfill result (status + attempted) and gap-fill whitelisted
+        columns (COALESCE — never clobbers). status: 'ok'|'not_found'|'error'."""
+        spec = _BACKFILL.get(service, {}).get(kind)
+        if not spec:
+            return
+        tbl, sc, ac, _has = spec
+        allowed = _BACKFILL_COLS.get(service, set())
+        sets = [f"{sc}=?", f"{ac}=CURRENT_TIMESTAMP"]
+        params: list = [status]
+        for col, val in (columns or {}).items():
+            if val is None or col not in allowed:
+                continue
+            sets.append(f"{col}=COALESCE(NULLIF({col}, ''), ?)")
+            params.append(val)
+        params.append(item_id)
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {tbl} SET {', '.join(sets)} WHERE id=?", params)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def backfill_breakdown(self, service: str) -> dict:
+        kinds = _BACKFILL.get(service, {})
+        out = {}
+        conn = self._get_connection()
+        try:
+            for kind, (tbl, sc, _ac, has_id) in kinds.items():
+                base = f"FROM {tbl} WHERE {has_id}"
+                out[kind] = {
+                    "matched": conn.execute(f"SELECT COUNT(*) {base} AND {sc}='ok'").fetchone()[0],
+                    "not_found": conn.execute(f"SELECT COUNT(*) {base} AND {sc}='not_found'").fetchone()[0],
+                    "errors": conn.execute(f"SELECT COUNT(*) {base} AND {sc}='error'").fetchone()[0],
+                    "pending": conn.execute(f"SELECT COUNT(*) {base} AND {sc} IS NULL").fetchone()[0],
+                }
+            return out
+        finally:
+            conn.close()
+
+    # ── per-video YouTube enrichment (no-key: RYD votes + SponsorBlock) ────────
+    def youtube_enrich_next(self, status_col: str) -> dict | None:
+        """Next cached YouTube video missing a per-video enrichment. status_col is
+        'ryd_status' or 'sb_status'. Distinct by youtube_id (a video shared across
+        playlists is enriched once). Returns {kind:'video', id, name, youtube_id}."""
+        if status_col not in ("ryd_status", "sb_status"):
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT cv.youtube_id AS youtube_id, MIN(cv.title) AS title "
+                "FROM youtube_channel_videos cv "
+                "LEFT JOIN youtube_video_stats s ON s.youtube_id = cv.youtube_id "
+                f"WHERE s.youtube_id IS NULL OR s.{status_col} IS NULL "
+                "GROUP BY cv.youtube_id LIMIT 1").fetchone()
+            if not row:
+                return None
+            return {"kind": "video", "id": row["youtube_id"],
+                    "name": row["title"], "youtube_id": row["youtube_id"]}
+        finally:
+            conn.close()
+
+    def apply_youtube_votes(self, youtube_id, like_count, dislike_count, status: str) -> None:
+        yid = str(youtube_id or "").strip()
+        if not yid:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO youtube_video_stats "
+                "(youtube_id, like_count, dislike_count, ryd_status, ryd_attempted) "
+                "VALUES (?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(youtube_id) DO UPDATE SET "
+                "like_count=COALESCE(excluded.like_count, like_count), "
+                "dislike_count=COALESCE(excluded.dislike_count, dislike_count), "
+                "ryd_status=excluded.ryd_status, ryd_attempted=CURRENT_TIMESTAMP",
+                (yid, like_count, dislike_count, status))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def apply_youtube_segments(self, youtube_id, segments, status: str) -> None:
+        yid = str(youtube_id or "").strip()
+        if not yid:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO youtube_video_stats (youtube_id, sb_status, sb_attempted) "
+                "VALUES (?,?,CURRENT_TIMESTAMP) ON CONFLICT(youtube_id) DO UPDATE SET "
+                "sb_status=excluded.sb_status, sb_attempted=CURRENT_TIMESTAMP", (yid, status))
+            if segments:
+                conn.execute("DELETE FROM youtube_video_segments WHERE youtube_id=?", (yid,))
+                rows = [(yid, s.get("category"), s.get("start_sec"), s.get("end_sec"),
+                         s.get("votes"), s.get("uuid"))
+                        for s in segments if s.get("uuid") and s.get("category")]
+                if rows:
+                    conn.executemany(
+                        "INSERT OR IGNORE INTO youtube_video_segments "
+                        "(youtube_id, category, start_sec, end_sec, votes, uuid) "
+                        "VALUES (?,?,?,?,?,?)", rows)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def youtube_enrich_breakdown(self, status_col: str) -> dict:
+        if status_col not in ("ryd_status", "sb_status"):
+            return {}
+        conn = self._get_connection()
+        try:
+            total = conn.execute(
+                "SELECT COUNT(DISTINCT youtube_id) FROM youtube_channel_videos").fetchone()[0]
+
+            def c(st):
+                return conn.execute(
+                    f"SELECT COUNT(*) FROM youtube_video_stats WHERE {status_col}=?", (st,)).fetchone()[0]
+
+            matched, nf, err = c("ok"), c("not_found"), c("error")
+            return {"video": {"matched": matched, "not_found": nf, "errors": err,
+                              "pending": max(0, total - matched - nf - err)}}
+        finally:
+            conn.close()
+
+    def youtube_video_segments(self, youtube_id) -> list:
+        """SponsorBlock segments for a video (detail UI / skip logic)."""
+        yid = str(youtube_id or "").strip()
+        if not yid:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT category, start_sec, end_sec, votes FROM youtube_video_segments "
+                "WHERE youtube_id=? ORDER BY start_sec", (yid,)).fetchall()
+            return [dict(r) for r in rows]
         finally:
             conn.close()
 
@@ -742,6 +940,39 @@ class VideoDatabase:
                     cur = conn.execute(f"UPDATE {tbl} SET ratings_synced=0 WHERE id=?", (item_id,))
                 else:
                     cur = conn.execute(f"UPDATE {tbl} SET ratings_synced=0 WHERE imdb_rating IS NULL")
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+        if service in ("ryd", "sponsorblock"):
+            col = "ryd_status" if service == "ryd" else "sb_status"
+            att = "ryd_attempted" if service == "ryd" else "sb_attempted"
+            conn = self._get_connection()
+            try:
+                if scope == "item" and item_id is not None:
+                    cur = conn.execute(
+                        f"UPDATE youtube_video_stats SET {col}=NULL, {att}=NULL WHERE youtube_id=?",
+                        (str(item_id),))
+                else:
+                    cur = conn.execute(
+                        f"UPDATE youtube_video_stats SET {col}=NULL, {att}=NULL "
+                        f"WHERE {col} IN ('not_found','error')")
+                conn.commit()
+                return cur.rowcount
+            finally:
+                conn.close()
+        if service in _BACKFILL:
+            spec = _BACKFILL[service].get(kind)
+            if not spec:
+                return 0
+            tbl, sc, ac, _has = spec
+            conn = self._get_connection()
+            try:
+                if scope == "item" and item_id is not None:
+                    cur = conn.execute(f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE id=?", (item_id,))
+                else:
+                    cur = conn.execute(
+                        f"UPDATE {tbl} SET {sc}=NULL, {ac}=NULL WHERE {sc} IN ('not_found','error')")
                 conn.commit()
                 return cur.rowcount
             finally:
@@ -2200,14 +2431,17 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT v.youtube_id, v.title, v.thumbnail_url, v.duration, v.view_count, d.published_at "
+                "SELECT v.youtube_id, v.title, v.thumbnail_url, v.duration, v.view_count, "
+                "d.published_at, s.like_count, s.dislike_count "
                 "FROM youtube_channel_videos v "
                 "LEFT JOIN youtube_video_dates d ON d.youtube_id = v.youtube_id "
+                "LEFT JOIN youtube_video_stats s ON s.youtube_id = v.youtube_id "
                 "WHERE v.channel_id=? "
                 "ORDER BY (d.published_at IS NULL), d.published_at DESC, v.rowid",
                 (cid,)).fetchall()
             return [{"youtube_id": r["youtube_id"], "title": r["title"], "thumbnail_url": r["thumbnail_url"],
-                     "duration": r["duration"], "view_count": r["view_count"], "published_at": r["published_at"]}
+                     "duration": r["duration"], "view_count": r["view_count"], "published_at": r["published_at"],
+                     "like_count": r["like_count"], "dislike_count": r["dislike_count"]}
                     for r in rows]
         finally:
             conn.close()
