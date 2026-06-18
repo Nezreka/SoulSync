@@ -151,7 +151,7 @@
     function followPlaylist(pl) {
         var p = pl || {};
         return post('/api/video/youtube/playlist/follow', { playlist: {
-            playlist_id: p.playlist_id, title: p.title, thumbnail_url: p.thumbnail_url } });
+            playlist_id: p.playlist_id, title: p.title, thumbnail_url: p.thumbnail_url, videos: p.videos } });
     }
     function unfollowPlaylist(playlistId) {
         return post('/api/video/youtube/playlist/unfollow', { playlist_id: playlistId });

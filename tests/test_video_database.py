@@ -1105,7 +1105,8 @@ def test_youtube_rows_do_not_disturb_tmdb_counts(db):
     assert db.watchlist_counts() == {"show": 1, "person": 0, "total": 1}
     # youtube counts live on their own surface
     assert db.youtube_wishlist_counts() == {"channel": 1, "video": 1}
-    assert db.list_watchlist_channels()[0]["video_count"] == 1
+    assert db.list_watchlist_channels()[0]["wished_count"] == 1   # 1 wished video
+    assert db.list_watchlist_channels()[0]["video_count"] == 0    # remembered catalog (nothing cached)
 
 
 def test_upgrade_from_pre_source_schema(tmp_path):

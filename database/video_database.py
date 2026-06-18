@@ -1846,18 +1846,21 @@ class VideoDatabase:
             conn.close()
 
     def list_watchlist_channels(self) -> list[dict]:
-        """Followed channels (newest first), each with a wished-video count for the card."""
+        """Followed channels (newest first): ``video_count`` is the REMEMBERED catalog
+        size (from the cache, fills in as the channel is enriched/opened), plus how
+        many of its videos are wished."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
                 "SELECT w.title, w.poster_url, w.source_id, w.date_added, "
+                "(SELECT COUNT(*) FROM youtube_channel_videos cv WHERE cv.channel_id = w.source_id) AS video_count, "
                 "(SELECT COUNT(*) FROM video_wishlist v WHERE v.kind='video' "
-                " AND v.parent_source_id = w.source_id) AS video_count "
+                " AND v.parent_source_id = w.source_id) AS wished_count "
                 "FROM video_watchlist w WHERE w.kind='channel' AND w.state='follow' "
                 "ORDER BY w.date_added DESC, w.id DESC").fetchall()
             return [{"kind": "channel", "youtube_id": r["source_id"], "title": r["title"],
                      "poster_url": r["poster_url"], "video_count": r["video_count"],
-                     "date_added": r["date_added"]} for r in rows]
+                     "wished_count": r["wished_count"], "date_added": r["date_added"]} for r in rows]
         finally:
             conn.close()
 
@@ -1918,14 +1921,18 @@ class VideoDatabase:
             conn.close()
 
     def list_watchlist_playlists(self) -> list[dict]:
-        """Followed playlists (newest first)."""
+        """Followed playlists (newest first), each with its remembered video count
+        (cached when the playlist is followed/opened)."""
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT title, poster_url, source_id, date_added FROM video_watchlist "
-                "WHERE kind='playlist' AND state='follow' ORDER BY date_added DESC, id DESC").fetchall()
+                "SELECT w.title, w.poster_url, w.source_id, w.date_added, "
+                "(SELECT COUNT(*) FROM youtube_channel_videos cv WHERE cv.channel_id = w.source_id) AS video_count "
+                "FROM video_watchlist w WHERE w.kind='playlist' AND w.state='follow' "
+                "ORDER BY w.date_added DESC, w.id DESC").fetchall()
             return [{"kind": "playlist", "playlist_id": r["source_id"], "title": r["title"],
-                     "poster_url": r["poster_url"], "date_added": r["date_added"]} for r in rows]
+                     "poster_url": r["poster_url"], "video_count": r["video_count"],
+                     "date_added": r["date_added"]} for r in rows]
         finally:
             conn.close()
 
