@@ -20,14 +20,14 @@
     // (like any show/movie); the ✕ unfollows.
     function channelCard(ch) {
         var av = window.VideoYoutube ? VideoYoutube.avatar(ch, 'vyt-wcard-avatar') : '';
-        var n = ch.video_count || 0;
+        var n = ch.video_count || 0;   // remembered catalog size (fills in as enriched)
+        var meta = n > 0 ? (n + ' video' + (n === 1 ? '' : 's')) : 'Channel';
         return '<div class="vyt-wcard" data-vyt-open-channel="' + esc(ch.youtube_id) + '" title="Open channel">' +
             '<div class="vyt-wcard-art">' + av + '</div>' +
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow="' + esc(ch.youtube_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(ch.title) + '">' +
-                esc(ch.title) + '</span><span class="vyt-wcard-meta">' + n + ' video' + (n === 1 ? '' : 's') +
-            '</span></div></div>';
+                esc(ch.title) + '</span><span class="vyt-wcard-meta">' + esc(meta) + '</span></div></div>';
     }
 
     // Followed playlists sit beside channels in the same grid; the ✕ unfollows.
@@ -39,7 +39,9 @@
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow-playlist="' + esc(pl.playlist_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(pl.title) + '">' +
-                esc(pl.title) + '</span><span class="vyt-wcard-meta">Playlist</span></div></div>';
+                esc(pl.title) + '</span><span class="vyt-wcard-meta">' +
+                (pl.video_count > 0 ? esc(pl.video_count + ' video' + (pl.video_count === 1 ? '' : 's')) : 'Playlist') +
+            '</span></div></div>';
     }
 
     function $(s, r) { return (r || document).querySelector(s); }

@@ -131,6 +131,11 @@ def register_routes(bp):
             if not playlist or not playlist.get("playlist_id"):
                 return jsonify({"success": False, "error": "Could not resolve playlist"}), 404
             ok = db.add_playlist_to_watchlist(playlist)
+            if ok and playlist.get("videos"):   # remember the count straight away
+                try:
+                    db.cache_channel_videos(playlist["playlist_id"], playlist["videos"])
+                except Exception:
+                    pass
             return jsonify({"success": ok, "following": ok,
                             "playlist": {k: playlist.get(k) for k in ("playlist_id", "title", "thumbnail_url")}})
         except Exception:
@@ -385,6 +390,10 @@ def register_routes(bp):
                 v["wished"] = v.get("youtube_id") in wished
                 if not v.get("published_at") and dates.get(v.get("youtube_id")):
                     v["published_at"] = dates[v["youtube_id"]]
+            try:
+                db.cache_channel_videos(playlist_id, vids)   # remember the count for the watchlist card
+            except Exception:
+                pass
             return jsonify({"success": True, "videos": vids, "playlist": pl,
                             "following": bool(db.playlist_watch_state([pl["playlist_id"]])),
                             "kind": "playlist", "source": "youtube"})

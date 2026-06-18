@@ -564,10 +564,12 @@ def test_youtube_follow_then_channels_and_wishlist(tmp_path):
     assert data["added_videos"] == 2
     assert data["counts"] == {"channel": 1, "video": 2}
 
-    # appears on the watchlist channels list with a video count
+    # appears on the watchlist channels list: wished_count = the 2 wished videos,
+    # video_count = the remembered catalog (0 here — nothing cached in this test).
     chans = client.get("/api/video/youtube/channels").get_json()
     assert chans["channels"][0]["youtube_id"] == "UCPlay"
-    assert chans["channels"][0]["video_count"] == 2
+    assert chans["channels"][0]["wished_count"] == 2
+    assert chans["channels"][0]["video_count"] == 0
 
     # appears in the youtube wishlist as a nebula channel (year=season, video=episode)
     wl = client.get("/api/video/youtube/wishlist").get_json()
