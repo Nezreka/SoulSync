@@ -1880,6 +1880,74 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # A followed PLAYLIST mirrors a channel: a video_watchlist row (kind='playlist',
+    # source='youtube', source_id=PL id). Same surrogate scheme so dedup just works.
+    def add_playlist_to_watchlist(self, playlist: dict) -> bool:
+        """Follow a YouTube playlist. ``playlist`` = {playlist_id, title, thumbnail_url?}."""
+        pid = (playlist or {}).get("playlist_id")
+        title = (playlist or {}).get("title")
+        if not pid or not title:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """INSERT INTO video_watchlist (kind, tmdb_id, title, poster_url, source, source_id, state)
+                   VALUES ('playlist', ?, ?, ?, 'youtube', ?, 'follow')
+                   ON CONFLICT(kind, tmdb_id) DO UPDATE SET
+                       state='follow', title=excluded.title,
+                       poster_url=COALESCE(excluded.poster_url, video_watchlist.poster_url),
+                       source='youtube', source_id=excluded.source_id""",
+                (youtube_surrogate_id(pid), title, (playlist or {}).get("thumbnail_url"), pid))
+            conn.commit()
+            return True
+        except Exception:
+            logger.exception("add_playlist_to_watchlist failed (%s)", pid)
+            return False
+        finally:
+            conn.close()
+
+    def remove_playlist_from_watchlist(self, playlist_id: str) -> bool:
+        if not playlist_id:
+            return False
+        conn = self._get_connection()
+        try:
+            conn.execute("DELETE FROM video_watchlist WHERE kind='playlist' AND source_id=?", (playlist_id,))
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+    def list_watchlist_playlists(self) -> list[dict]:
+        """Followed playlists (newest first)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT title, poster_url, source_id, date_added FROM video_watchlist "
+                "WHERE kind='playlist' AND state='follow' ORDER BY date_added DESC, id DESC").fetchall()
+            return [{"kind": "playlist", "playlist_id": r["source_id"], "title": r["title"],
+                     "poster_url": r["poster_url"], "date_added": r["date_added"]} for r in rows]
+        finally:
+            conn.close()
+
+    def playlist_watch_state(self, playlist_ids) -> dict:
+        """{playlist_id: True} for followed playlists — hydrates the Follow button."""
+        out: dict = {}
+        ids = [str(x) for x in (playlist_ids or []) if x]
+        if not ids:
+            return out
+        conn = self._get_connection()
+        try:
+            for i in range(0, len(ids), 400):
+                chunk = ids[i:i + 400]
+                ph = ",".join("?" * len(chunk))
+                for r in conn.execute(
+                        f"SELECT source_id FROM video_watchlist WHERE kind='playlist' "
+                        f"AND state='follow' AND source_id IN ({ph})", chunk):
+                    out[r["source_id"]] = True
+            return out
+        finally:
+            conn.close()
+
     def add_videos_to_wishlist(self, channel: dict, videos: list, *, server_source=None) -> int:
         """Wish for a channel's videos. ``channel`` = {youtube_id, title, avatar_url?};
         ``videos`` = [{youtube_id, title, published_at?, thumbnail_url?, description?}, …].

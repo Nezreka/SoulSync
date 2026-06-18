@@ -706,3 +706,40 @@ def playlist_videos(playlist_id, limit=50, ydl_factory=None):
     url = "https://www.youtube.com/playlist?list=" + str(playlist_id)
     info = _extract(url, _ydl_opts(limit), ydl_factory)
     return _shape_entries((info or {}).get("entries"), limit)
+
+
+_PLAYLIST_RE = re.compile(r"[?&]list=([A-Za-z0-9_-]+)")
+
+
+def parse_playlist_id(raw):
+    """A followable playlist id from a URL or bare id, or None. Rejects mixes/radios
+    (RD…) and the personal Watch-Later/Liked lists, which aren't real playlists."""
+    raw = (raw or "").strip()
+    m = _PLAYLIST_RE.search(raw)
+    pid = m.group(1) if m else (raw if re.match(r"^(PL|OL|FL|UU)[A-Za-z0-9_-]{8,}$", raw) else None)
+    if not pid or pid.startswith(("RD", "UL", "LL", "WL")):
+        return None
+    return pid
+
+
+def resolve_playlist(raw, limit=100, ydl_factory=None, db=None):
+    """Resolve a pasted playlist reference → ``{playlist_id, title, channel_title,
+    video_count, thumbnail_url, videos:[...]}``, or None if it isn't a real
+    followable playlist. Order is the curator's (NOT date) — playlists are
+    deliberately a partial, ordered set."""
+    pid = parse_playlist_id(raw)
+    if not pid:
+        return None
+    info = _extract("https://www.youtube.com/playlist?list=" + pid, _ydl_opts(limit, db), ydl_factory)
+    if not info:
+        return None
+    videos = _shape_entries(info.get("entries"), limit)
+    return {
+        "playlist_id": pid,
+        "title": info.get("title") or "Playlist",
+        "channel_title": info.get("channel") or info.get("uploader") or "",
+        "channel_id": info.get("channel_id") or info.get("uploader_id"),
+        "video_count": info.get("playlist_count") or len(videos),
+        "thumbnail_url": _best_thumb(info.get("thumbnails")) or (videos[0]["thumbnail_url"] if videos else None),
+        "videos": videos,
+    }

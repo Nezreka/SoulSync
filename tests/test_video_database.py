@@ -1194,6 +1194,21 @@ def test_legacy_enrichment_rows_upgrade(db):
     assert db.channel_dates_enriched_recently("UCleg") is True
 
 
+def test_playlist_watchlist_roundtrip(db):
+    assert db.add_playlist_to_watchlist({"playlist_id": "PLx", "title": "Mix", "thumbnail_url": "t"}) is True
+    assert db.playlist_watch_state(["PLx", "PLy"]) == {"PLx": True}
+    pls = db.list_watchlist_playlists()
+    assert len(pls) == 1 and pls[0]["playlist_id"] == "PLx" and pls[0]["title"] == "Mix"
+    # channels and playlists are separate kinds — they don't bleed into each other
+    db.add_channel_to_watchlist({"youtube_id": "UCx", "title": "Chan"})
+    assert {p["playlist_id"] for p in db.list_watchlist_playlists()} == {"PLx"}
+    assert db.channel_watch_state(["UCx"]) == {"UCx": True} and db.playlist_watch_state(["UCx"]) == {}
+    assert db.remove_playlist_from_watchlist("PLx") is True
+    assert db.list_watchlist_playlists() == [] and db.playlist_watch_state(["PLx"]) == {}
+    # name/title required
+    assert db.add_playlist_to_watchlist({"playlist_id": "PLn"}) is False
+
+
 def test_remembered_channel_videos_and_meta(db):
     # Cache a list (out of date order) + a date for one of them.
     db.cache_video_dates([{"youtube_id": "b", "published_at": "2020-05-01"}])

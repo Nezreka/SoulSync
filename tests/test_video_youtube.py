@@ -156,6 +156,39 @@ def test_resolve_channel_rejects_non_channel_without_network():
     assert called == []
 
 
+def test_parse_playlist_id():
+    assert yt.parse_playlist_id("https://www.youtube.com/playlist?list=PLabc123def456") == "PLabc123def456"
+    assert yt.parse_playlist_id("https://www.youtube.com/watch?v=x&list=PLxyz789ghi012") == "PLxyz789ghi012"
+    assert yt.parse_playlist_id("PLabcdefghij123") == "PLabcdefghij123"
+    assert yt.parse_playlist_id("https://youtube.com/watch?v=x&list=RDmix123") is None    # mix → not followable
+    assert yt.parse_playlist_id("https://www.youtube.com/@PlayStation") is None           # channel → None
+    assert yt.parse_playlist_id("") is None
+
+
+class _FakePlaylistYDL:
+    last_url = None
+
+    def __init__(self, opts): self.opts = opts
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+
+    def extract_info(self, url, download=False):
+        _FakePlaylistYDL.last_url = url
+        return {"title": "Deep Learning", "channel": "Lex Fridman", "channel_id": "UClex", "playlist_count": 3,
+                "thumbnails": [{"url": "http://pl/cover.jpg", "width": 480, "height": 360}],
+                "entries": [{"id": "a", "title": "One"}, {"id": "b", "title": "Two"},
+                            None, {"title": "no id → skip"}]}
+
+
+def test_resolve_playlist_keeps_curator_order_and_meta():
+    pl = yt.resolve_playlist("https://www.youtube.com/playlist?list=PLdeep123", limit=5, ydl_factory=_FakePlaylistYDL)
+    assert pl["playlist_id"] == "PLdeep123" and pl["title"] == "Deep Learning"
+    assert pl["channel_title"] == "Lex Fridman" and pl["video_count"] == 3
+    assert [v["youtube_id"] for v in pl["videos"]] == ["a", "b"]    # order preserved, null/idless dropped
+    assert _FakePlaylistYDL.last_url == "https://www.youtube.com/playlist?list=PLdeep123"
+    assert yt.resolve_playlist("https://youtube.com/@chan", ydl_factory=_FakePlaylistYDL) is None   # not a playlist
+
+
 def test_resolve_channel_returns_none_on_extractor_error():
     class _Boom:
         def __init__(self, opts):

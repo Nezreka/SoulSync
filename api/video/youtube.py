@@ -50,16 +50,23 @@ def register_routes(bp):
         except (TypeError, ValueError):
             limit = _RESOLVE_LIMIT
         try:
+            # A playlist link → resolve as a playlist (curator-ordered, partial set).
+            if yt.parse_playlist_id(url):
+                pl = yt.resolve_playlist(url, limit=max(1, min(50, limit)))
+                if not pl:
+                    return jsonify({"success": False, "error": "Could not read that playlist"}), 404
+                following = bool(get_video_db().playlist_watch_state([pl["playlist_id"]]))
+                return jsonify({"success": True, "playlist": pl, "following": following})
             channel = yt.resolve_channel(url, limit=max(1, min(50, limit)))
             if not channel:
                 return jsonify({"success": False,
-                                "error": "Not a YouTube channel link (paste a channel URL like "
-                                         "youtube.com/@handle)"}), 404
+                                "error": "Not a YouTube channel or playlist link (paste a channel "
+                                         "URL like youtube.com/@handle, or a playlist link)"}), 404
             following = bool(get_video_db().channel_watch_state([channel["youtube_id"]]))
             return jsonify({"success": True, "channel": channel, "following": following})
         except Exception:
             logger.exception("youtube resolve failed for %r", url)
-            return jsonify({"success": False, "error": "Could not read that channel"}), 500
+            return jsonify({"success": False, "error": "Could not read that link"}), 500
 
     @bp.route("/youtube/follow", methods=["POST"])
     def video_youtube_follow():
@@ -109,6 +116,40 @@ def register_routes(bp):
             logger.exception("youtube unfollow failed")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/youtube/playlist/follow", methods=["POST"])
+    def video_youtube_playlist_follow():
+        """Follow a YouTube playlist. Body: {playlist:{...}} (already resolved) or {url}."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        try:
+            playlist = body.get("playlist")
+            if not playlist:
+                url = (body.get("url") or "").strip()
+                playlist = yt.resolve_playlist(url) if url else None
+            if not playlist or not playlist.get("playlist_id"):
+                return jsonify({"success": False, "error": "Could not resolve playlist"}), 404
+            ok = db.add_playlist_to_watchlist(playlist)
+            return jsonify({"success": ok, "following": ok,
+                            "playlist": {k: playlist.get(k) for k in ("playlist_id", "title", "thumbnail_url")}})
+        except Exception:
+            logger.exception("youtube playlist follow failed")
+            return jsonify({"success": False, "error": "Failed to follow playlist"}), 500
+
+    @bp.route("/youtube/playlist/unfollow", methods=["POST"])
+    def video_youtube_playlist_unfollow():
+        from . import get_video_db
+        pid = ((request.get_json(silent=True) or {}).get("playlist_id") or "").strip()
+        if not pid:
+            return jsonify({"success": False, "error": "playlist_id is required"}), 400
+        try:
+            get_video_db().remove_playlist_from_watchlist(pid)
+            return jsonify({"success": True, "following": False})
+        except Exception:
+            logger.exception("youtube playlist unfollow failed")
+            return jsonify({"success": False, "error": "Failed"}), 500
+
     @bp.route("/youtube/channels", methods=["GET"])
     def video_youtube_channels():
         """Followed channels (newest first) for the watchlist page. Also sweeps:
@@ -118,6 +159,7 @@ def register_routes(bp):
         try:
             db = get_video_db()
             channels = db.list_watchlist_channels()
+            playlists = db.list_watchlist_playlists()
             try:
                 from core.video.youtube_enrichment import get_youtube_date_enricher
                 enr = get_youtube_date_enricher()
@@ -126,7 +168,7 @@ def register_routes(bp):
                         enr.enqueue(c["youtube_id"], c.get("title"))
             except Exception:
                 pass
-            return jsonify({"success": True, "channels": channels,
+            return jsonify({"success": True, "channels": channels, "playlists": playlists,
                             "counts": db.youtube_wishlist_counts()})
         except Exception:
             logger.exception("youtube channels list failed")
@@ -313,16 +355,33 @@ def register_routes(bp):
 
     @bp.route("/youtube/playlist/<playlist_id>", methods=["GET"])
     def video_youtube_playlist(playlist_id):
-        """A playlist's videos (lazy-loaded when a playlist section expands), with
-        per-video wished flags so the toggles hydrate."""
+        """A playlist's videos + metadata + follow state. Serves BOTH the channel-page
+        playlist expansion (reads ``videos``) and the standalone playlist detail view
+        (reads ``playlist`` + ``following``). Curator-ordered — a partial set, NOT
+        grouped by year. Per-video wished + cached-date flags hydrate the toggles."""
         from . import get_video_db
         from core.video import youtube as yt
         try:
-            vids = yt.playlist_videos(playlist_id)
-            wished = get_video_db().youtube_video_wish_state([v.get("youtube_id") for v in vids])
+            limit = int(request.args.get("limit") or 200)
+        except (TypeError, ValueError):
+            limit = 200
+        try:
+            db = get_video_db()
+            pl = yt.resolve_playlist("https://www.youtube.com/playlist?list=" + playlist_id,
+                                     limit=max(1, min(500, limit)))
+            if not pl:
+                return jsonify({"success": False, "error": "Playlist not found"}), 404
+            vids = pl.get("videos") or []
+            ids = [v.get("youtube_id") for v in vids]
+            wished = db.youtube_video_wish_state(ids)
+            dates = db.get_video_dates(ids)
             for v in vids:
                 v["wished"] = v.get("youtube_id") in wished
-            return jsonify({"success": True, "videos": vids})
+                if not v.get("published_at") and dates.get(v.get("youtube_id")):
+                    v["published_at"] = dates[v["youtube_id"]]
+            return jsonify({"success": True, "videos": vids, "playlist": pl,
+                            "following": bool(db.playlist_watch_state([pl["playlist_id"]])),
+                            "kind": "playlist", "source": "youtube"})
         except Exception:
             logger.exception("youtube playlist failed for %r", playlist_id)
             return jsonify({"success": False, "error": "Failed"}), 500
