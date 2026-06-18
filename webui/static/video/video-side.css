@@ -2885,11 +2885,16 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* YouTube episode rows have no index/badge → 4 columns (thumb · info · wish · chev) */
 .vd-ep--yt { grid-template-columns: 150px 1fr auto auto; }
 /* per-video Wish button inside an episode row */
-.vd-yt-wish { flex-shrink: 0; align-self: center; border: 1px solid rgba(255,255,255,0.14); cursor: pointer;
-    background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.78); font-size: 11.5px; font-weight: 800;
-    padding: 6px 13px; border-radius: 999px; transition: all 0.15s ease; white-space: nowrap; }
-.vd-yt-wish:hover { background: rgba(255,59,59,0.18); border-color: rgba(255,59,59,0.5); color: #fff; }
-.vd-yt-wish--on { background: rgba(108,211,145,0.16); border-color: rgba(108,211,145,0.4); color: #6cd391; }
+/* Per-video wishlist toggle = the standard watchlist button (.library-artist-
+   watchlist-btn), shrunk for the dense rows; .watching → "on the wishlist" green. */
+.vd-yt-wishbtn { flex-shrink: 0; align-self: center; padding: 5px 12px; font-size: 11.5px; white-space: nowrap; }
+.vd-yt-wishbtn--icon { padding: 5px 9px; }
+.vd-yt-wishbtn.watching { color: #6cd391;
+    background: linear-gradient(135deg, rgba(108,211,145,0.2) 0%, rgba(108,211,145,0.07) 100%);
+    border-color: rgba(108,211,145,0.4); }
+.vd-yt-wishbtn.watching:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(108,211,145,0.3) 0%, rgba(108,211,145,0.12) 100%);
+    box-shadow: 0 4px 16px rgba(108,211,145,0.2); }
 /* playlist video chips */
 .vd-yt-plvid { display: flex; flex-direction: column; }
 .vd-yt-plvid-thumb { position: relative; display: block; aspect-ratio: 16/9; border-radius: 9px; overflow: hidden; background: #16161d; }
@@ -2898,7 +2903,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vd-yt-plvid-thumb:hover .vd-yt-plvid-play { opacity: 0.9; }
 .vd-yt-plvid-title { font-size: 12px; font-weight: 700; color: #fff; line-height: 1.3; margin-top: 7px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.vd-yt-plvid .vd-yt-wish { align-self: flex-start; margin-top: 7px; }
+.vd-yt-plvid .vd-yt-wishbtn { align-self: flex-start; margin-top: 7px; }
 
 /* YouTube search-results loading state (skeleton cards + "searching…" label) */
 .vsr-yt-loading { margin-left: 10px; font-size: 12px; font-weight: 600; color: #ff8a8a; opacity: 0.85; }
