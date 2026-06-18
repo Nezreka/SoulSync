@@ -68386,17 +68386,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-/* ── Hero ── */
-.reid-hero { position: relative; padding: 26px 28px; overflow: hidden; }
+/* ── Hero ──
+   No overflow:hidden on .reid-hero itself (it was clipping the header content).
+   Instead the decorative blurred bg + overlay live in .reid-hero-decor, an
+   absolutely-positioned clip layer: it contains the blur (so it can't bleed into
+   the tabs) and is pointer-events:none (so it can never steal clicks from the
+   source tabs). The actual content is a SIBLING of the decor layer, so it's never
+   clipped. */
+.reid-hero { position: relative; padding: 26px 28px; }
+.reid-hero-decor {
+    position: absolute; inset: 0; z-index: 0;
+    overflow: hidden; pointer-events: none;
+    border-radius: 20px 20px 0 0;
+}
 .reid-hero-bg {
     position: absolute; inset: -30px;
     background-size: cover; background-position: center;
     filter: blur(46px) brightness(0.4) saturate(1.5);
-    transform: scale(1.25); z-index: 0; opacity: 0.9;
+    transform: scale(1.25); opacity: 0.9;
     transition: background-image 0.4s ease;
 }
 .reid-hero-overlay {
-    position: absolute; inset: 0; z-index: 1;
+    position: absolute; inset: 0;
     background: linear-gradient(135deg, rgba(10,11,16,0.55) 0%, rgba(10,11,16,0.8) 100%);
 }
 .reid-hero-content { position: relative; z-index: 2; display: flex; gap: 18px; align-items: center; }
