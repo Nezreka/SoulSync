@@ -689,6 +689,28 @@ def test_youtube_channel_videos_batch_streams_and_merges(tmp_path, monkeypatch):
     assert r2["continuation"] is None and calls[1] == "NEXT"
 
 
+def test_youtube_playlist_follow_detail_and_watchlist(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    _PL = {"playlist_id": "PLx", "title": "Mix", "channel_title": "Lex", "video_count": 2,
+           "thumbnail_url": "t", "videos": [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}]}
+    monkeypatch.setattr(ytmod, "parse_playlist_id", lambda u: "PLx" if "list=" in (u or "") else None)
+    monkeypatch.setattr(ytmod, "resolve_playlist", lambda *a, **k: dict(_PL))
+    # resolve detects a playlist link → returns a playlist (not a channel)
+    r = client.get("/api/video/youtube/resolve?url=https://youtube.com/playlist?list=PLx").get_json()
+    assert r["success"] and r["playlist"]["playlist_id"] == "PLx" and r["following"] is False
+    # follow → appears under the watchlist's playlists
+    assert client.post("/api/video/youtube/playlist/follow", json={"playlist": _PL}).get_json()["following"] is True
+    assert [p["playlist_id"] for p in client.get("/api/video/youtube/channels").get_json()["playlists"]] == ["PLx"]
+    # detail (kept in curator order; flagged following)
+    d = client.get("/api/video/youtube/playlist/PLx").get_json()
+    assert d["kind"] == "playlist" and d["following"] is True
+    assert [v["youtube_id"] for v in d["playlist"]["videos"]] == ["a", "b"]
+    # unfollow
+    assert client.post("/api/video/youtube/playlist/unfollow", json={"playlist_id": "PLx"}).get_json()["following"] is False
+    assert client.get("/api/video/youtube/channels").get_json()["playlists"] == []
+
+
 def test_youtube_wishlist_add_single_video(tmp_path):
     client, _ = _make_client(tmp_path)
     r = client.post("/api/video/youtube/wishlist/add", json={
@@ -750,12 +772,14 @@ def test_youtube_playlists_and_playlist_videos(tmp_path, monkeypatch):
     pls = client.get("/api/video/youtube/playlists/UCx").get_json()
     assert pls["success"] is True and pls["playlists"][0]["playlist_id"] == "PL1"
 
-    monkeypatch.setattr(ytmod, "playlist_videos",
-                        lambda pid: [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}])
+    monkeypatch.setattr(ytmod, "resolve_playlist",
+                        lambda *a, **k: {"playlist_id": "PL1", "title": "Trailers",
+                                         "videos": [{"youtube_id": "a", "title": "A"},
+                                                    {"youtube_id": "b", "title": "B"}]})
     # 'a' is wished → should hydrate wished=True
     videoapi._video_db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "a", "title": "A"}])
     pv = client.get("/api/video/youtube/playlist/PL1").get_json()
-    wished = {v["youtube_id"]: v["wished"] for v in pv["videos"]}
+    wished = {v["youtube_id"]: v["wished"] for v in pv["videos"]}    # still top-level `videos` for the expansion
     assert wished == {"a": True, "b": False}
 
 
