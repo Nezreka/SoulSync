@@ -975,7 +975,10 @@
             : '';
         var dur = ep.yt_duration ? '<span class="vd-ep-dur">' + esc(ep.yt_duration) + '</span>' : '';
         var meta = [];
-        if (ep.view_count) { var yc = window.VideoYoutube; meta.push((yc ? yc.compactCount(ep.view_count) : ep.view_count) + ' views'); }
+        var yc0 = window.VideoYoutube;
+        if (ep.view_count) { meta.push((yc0 ? yc0.compactCount(ep.view_count) : ep.view_count) + ' views'); }
+        if (ep.like_count) { meta.push('👍 ' + (yc0 ? yc0.compactCount(ep.like_count) : ep.like_count)); }
+        if (ep.dislike_count) { meta.push('👎 ' + (yc0 ? yc0.compactCount(ep.dislike_count) : ep.dislike_count)); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.owned;
         return '<div class="vd-ep vd-ep--yt" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
@@ -1373,7 +1376,8 @@
         return { episode_number: i + 1, title: v.title, overview: v.description || '',
             air_date: v.published_at, owned: !!v.wished, has_still: false,
             still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id,
-            yt_duration: v.duration || '', view_count: v.view_count || 0 };
+            yt_duration: v.duration || '', view_count: v.view_count || 0,
+            like_count: v.like_count || 0, dislike_count: v.dislike_count || 0 };
     }
     function ytDurSecs(d) {
         if (!d) return 0;

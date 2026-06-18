@@ -36,6 +36,14 @@ def _server():
 
 
 def register_routes(bp):
+    @bp.route("/youtube/video/<video_id>/segments", methods=["GET"])
+    def video_youtube_segments(video_id):
+        """SponsorBlock crowd segments stored for a video (sponsor/intro/outro/…),
+        so the player can offer skips. [] until the SponsorBlock worker enriches it."""
+        from . import get_video_db
+        return jsonify({"video_id": video_id,
+                        "segments": get_video_db().youtube_video_segments(video_id)})
+
     @bp.route("/youtube/resolve", methods=["GET"])
     def video_youtube_resolve():
         """Preview a pasted channel URL without committing. Returns the channel +
