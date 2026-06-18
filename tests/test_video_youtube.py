@@ -458,34 +458,45 @@ def test_innertube_channel_dates_guards():
     assert yt.innertube_channel_dates("UCx", post=lambda p: (_ for _ in ()).throw(RuntimeError())) == {}
 
 
-def _lk_item_thumb(vid, rel, thumb):
-    """_lk_item plus a contentImage so thumbnail extraction can be exercised."""
+def _lk_item_thumb(vid, rel, thumb, dur=None):
+    """_lk_item plus a contentImage (+ optional duration overlay badge)."""
     item = _lk_item(vid, rel)
     lk = item["richItemRenderer"]["content"]["lockupViewModel"]
-    lk["contentImage"] = {"thumbnailViewModel": {"image": {"sources": [{"url": thumb}]}}}
+    lk["contentImage"] = {"thumbnailViewModel": {"image": {"sources": [{"url": thumb}]},
+                          "overlays": ([{"thumbnailOverlayBadgeViewModel": {"thumbnailBadges": [
+                              {"thumbnailBadgeViewModel": {"text": dur}}]}}] if dur else [])}}
     return item
 
 
-def test_innertube_parse_video_items_keeps_title_and_thumbnail():
+def test_parse_view_count():
+    assert yt.parse_view_count("2.6M views") == 2_600_000
+    assert yt.parse_view_count("1,234 views") == 1234
+    assert yt.parse_view_count("987 views") == 987
+    assert yt.parse_view_count("1.2B views") == 1_200_000_000
+    assert yt.parse_view_count("no views here") is None and yt.parse_view_count("") is None
+
+
+def test_innertube_parse_video_items_keeps_title_thumb_duration_views():
     page = _page([
-        _lk_item_thumb("v1", "2 years ago", "https://i.ytimg.com/vi/v1/hq.jpg"),
-        _lk_item("v2", "3 months ago"),                                       # no thumbnail → None
+        _lk_item_thumb("v1", "2 years ago", "https://i.ytimg.com/vi/v1/hq.jpg", dur="12:34"),
+        _lk_item("v2", "3 months ago"),                                       # no thumbnail/duration → None
         _lk_item("p1", "1 day ago", ctype="LOCKUP_CONTENT_TYPE_PLAYLIST"),    # not a video → skip
     ])
     items = yt.innertube_parse_video_items(page)
     assert [it["youtube_id"] for it in items] == ["v1", "v2"]                 # playlist filtered out
-    assert items[0] == {"youtube_id": "v1", "title": "Title v1",
-                        "thumbnail_url": "https://i.ytimg.com/vi/v1/hq.jpg", "relative": "2 years ago"}
-    assert items[1]["title"] == "Title v2" and items[1]["thumbnail_url"] is None
+    # _lk_item's metadata carries "100K views" → parsed; v1 also has a duration badge
+    assert items[0] == {"youtube_id": "v1", "title": "Title v1", "thumbnail_url": "https://i.ytimg.com/vi/v1/hq.jpg",
+                        "duration": "12:34", "view_count": 100_000, "relative": "2 years ago"}
+    assert items[1]["thumbnail_url"] is None and items[1]["duration"] is None and items[1]["view_count"] == 100_000
 
 
 def test_innertube_channel_videos_page_converts_and_pages():
     now = date(2026, 6, 17)
-    page1 = _page([_lk_item_thumb("v1", "1 year ago", "t1"), _lk_item("v2", "2 years ago")], token="TOK")
+    page1 = _page([_lk_item_thumb("v1", "1 year ago", "t1", dur="5:00"), _lk_item("v2", "2 years ago")], token="TOK")
     got = yt.innertube_channel_videos_page("UCxxxx", now=now, post=lambda p: page1)
     assert got["continuation"] == "TOK"
-    assert got["videos"][0] == {"youtube_id": "v1", "title": "Title v1",
-                                "thumbnail_url": "t1", "published_at": "2025-06-17"}
+    assert got["videos"][0] == {"youtube_id": "v1", "title": "Title v1", "thumbnail_url": "t1",
+                                "duration": "5:00", "view_count": 100_000, "published_at": "2025-06-17"}
     assert got["videos"][1]["published_at"] == "2024-06-17"
     # a continuation request carries the token (not browseId) and ends when none returned
     end = yt.innertube_channel_videos_page("UCxxxx", continuation="TOK", now=now,
