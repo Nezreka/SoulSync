@@ -26,6 +26,13 @@ class VideoEnrichmentEngine:
             service: VideoEnrichmentWorker(db, service, client, display_name=_DISPLAY.get(service))
             for service, client in clients.items()
         }
+        # Backfill workers (artwork / subtitles / no-key YouTube extras). Same
+        # lifecycle + get_stats() shape, so the registry/API/UI drive them too.
+        try:
+            from .backfill import build_backfill_workers
+            self.workers.update(build_backfill_workers(db))
+        except Exception:
+            logger.exception("video enrichment: backfill workers unavailable")
         # OMDb ratings (IMDb/RT/Metacritic) — not a matcher, so not a worker;
         # backfilled on the lazy detail refresh.
         self.ratings_client = ratings_client

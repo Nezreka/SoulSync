@@ -918,7 +918,11 @@ def test_worker_disabled_without_key(db):
 
 def test_engine_builds_and_lists_workers(db):
     eng = VideoEnrichmentEngine(db, {"tmdb": FakeClient(None), "tvdb": FakeClient(None)})
-    assert {s["id"] for s in eng.services()} == {"tmdb", "tvdb"}
+    ids = {s["id"] for s in eng.services()}
+    assert {"tmdb", "tvdb"} <= ids                         # the matcher workers
+    # The backfill workers (artwork / subtitles / no-key YouTube extras) are always
+    # registered alongside, so the manager/API can drive them too.
+    assert {"ryd", "sponsorblock", "fanart", "opensubtitles"} <= ids
     assert eng.worker("tmdb") is not None and eng.worker("nope") is None
 
 
@@ -953,7 +957,7 @@ def test_scan_pause_resumes_only_what_it_paused(db):
     assert eng.worker("tvdb").paused and not eng.worker("tmdb").paused
 
     paused = eng.pause_for_scan()
-    assert paused == {"tmdb"}                        # only the running one
+    assert "tmdb" in paused and "tvdb" not in paused  # only running ones (tvdb was user-paused)
     assert eng.worker("tmdb").paused and eng.worker("tvdb").paused
 
     eng.resume_after_scan()
