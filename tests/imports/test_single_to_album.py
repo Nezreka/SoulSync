@@ -5,10 +5,13 @@ takes injected fetchers, so neither needs a live metadata client.
 
 from __future__ import annotations
 
+import pytest
+
 from core.imports.single_to_album import (
     select_parent_album,
     resolve_single_to_album,
 )
+from core.imports.context import detect_album_info_web
 
 
 # ── pure selector ─────────────────────────────────────────────────────────────
@@ -132,3 +135,72 @@ def test_resolver_caps_albums_probed():
         fetch_album_tracks=fetch_tracks,
         max_albums=5)
     assert probed["n"] == 5  # never probes more than the cap
+
+
+# ── gated wiring through detect_album_info_web (config gate + client shapes) ───
+class _Cfg:
+    def __init__(self, on):
+        self._on = on
+
+    def get(self, key, default=None):
+        if key == "metadata_enhancement.single_to_album":
+            return self._on
+        return default
+
+
+_SINGLE_CTX = {
+    "source": "spotify",
+    "artist": {"id": "art1", "name": "Coldplay"},
+    # album_type unset + name == track + total_tracks 1 -> is_album False, and the
+    # existing best-effort skips (album name == track), so the glue is reached.
+    "album": {"id": "s1", "name": "Yellow", "total_tracks": 1},
+    "track_info": {"id": "t1", "name": "Yellow", "track_number": 7},
+    "original_search_result": {"title": "Yellow", "album": "Yellow"},
+}
+
+
+def _patch_clients(monkeypatch, albums, tracks_by_id):
+    monkeypatch.setattr("core.metadata.album_tracks.get_artist_albums_for_source",
+                        lambda *a, **k: albums)
+    monkeypatch.setattr("core.metadata.album_tracks.get_artist_album_tracks",
+                        lambda album_id, **k: {"tracks": tracks_by_id.get(album_id, [])})
+
+
+def test_glue_promotes_single_to_parent_album_when_enabled(monkeypatch):
+    monkeypatch.setattr("core.metadata.common.get_config_manager", lambda: _Cfg(True))
+    _patch_clients(
+        monkeypatch,
+        albums=[{"name": "Yellow", "album_type": "single", "id": "s1"},
+                {"name": "Parachutes", "album_type": "album", "id": "a2"}],
+        tracks_by_id={"a2": [{"title": "Shiver"}, {"title": "Yellow"}]},
+    )
+    out = detect_album_info_web(dict(_SINGLE_CTX), {"id": "art1", "name": "Coldplay"})
+    assert out and out["is_album"] is True
+    assert out["album_name"] == "Parachutes"
+    assert out["track_number"] == 7   # preserved
+
+
+def test_glue_disabled_by_default_returns_none(monkeypatch):
+    monkeypatch.setattr("core.metadata.common.get_config_manager", lambda: _Cfg(False))
+    # Even with clients that WOULD match, the flag off => no promotion.
+    _patch_clients(monkeypatch,
+                   albums=[{"name": "Parachutes", "album_type": "album", "id": "a2"}],
+                   tracks_by_id={"a2": [{"title": "Yellow"}]})
+    assert detect_album_info_web(dict(_SINGLE_CTX), {"id": "art1", "name": "Coldplay"}) is None
+
+
+def test_glue_no_match_returns_none(monkeypatch):
+    monkeypatch.setattr("core.metadata.common.get_config_manager", lambda: _Cfg(True))
+    _patch_clients(monkeypatch,
+                   albums=[{"name": "Other Album", "album_type": "album", "id": "a9"}],
+                   tracks_by_id={"a9": [{"title": "Different Song"}]})
+    assert detect_album_info_web(dict(_SINGLE_CTX), {"id": "art1", "name": "Coldplay"}) is None
+
+
+def test_glue_failsafe_when_client_raises(monkeypatch):
+    monkeypatch.setattr("core.metadata.common.get_config_manager", lambda: _Cfg(True))
+
+    def boom(*a, **k):
+        raise RuntimeError("spotify down")
+    monkeypatch.setattr("core.metadata.album_tracks.get_artist_albums_for_source", boom)
+    assert detect_album_info_web(dict(_SINGLE_CTX), {"id": "art1", "name": "Coldplay"}) is None
