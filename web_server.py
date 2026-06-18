@@ -10127,7 +10127,29 @@ def reidentify_apply():
             conn.close()
         if not row or not row['file_path']:
             return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
-        real_path = _resolve_library_file_path(row['file_path']) or row['file_path']
+        stored_path = row['file_path']
+
+        # Resolve the stored DB path to a file THIS process can actually read, using
+        # the SAME strong resolver the rest of the app uses (transfer/download/library/
+        # Plex search + #833 confusable folding via find_on_disk).
+        real_path = _resolve_library_file_path(stored_path)
+        if not real_path:
+            # On a miss, run the diagnostic variant purely to tell us (and the user)
+            # what was tried — instead of failing on the raw, possibly-stale path.
+            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+            try:
+                _plex = media_server_engine.client('plex') if media_server_engine else None
+            except Exception:
+                _plex = None
+            _, attempt = resolve_library_file_path_with_diagnostic(
+                stored_path, config_manager=config_manager, plex_client=_plex)
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
+                           library_track_id, stored_path, attempt.raw_path_existed, searched)
+            return jsonify({"success": False, "error": (
+                f"SoulSync couldn't find this track's file on disk.\nStored path: {stored_path}\n"
+                f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
+                f"(or the stored path is stale), re-identify isn't available for it.")}), 404
 
         # 3) Copy into staging + fingerprint the copy.
         staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
