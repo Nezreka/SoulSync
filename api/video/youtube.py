@@ -345,10 +345,16 @@ def register_routes(bp):
 
     @bp.route("/youtube/playlists/<channel_id>", methods=["GET"])
     def video_youtube_playlists(channel_id):
-        """The channel's playlists (rendered as 'seasons' on the channel page)."""
+        """The channel's playlists (collapsible sections on the channel page), each
+        flagged ``following`` so its Add-to-watchlist button hydrates."""
+        from . import get_video_db
         from core.video import youtube as yt
         try:
-            return jsonify({"success": True, "playlists": yt.channel_playlists(channel_id)})
+            pls = yt.channel_playlists(channel_id)
+            followed = get_video_db().playlist_watch_state([p.get("playlist_id") for p in pls])
+            for p in pls:
+                p["following"] = p.get("playlist_id") in followed
+            return jsonify({"success": True, "playlists": pls})
         except Exception:
             logger.exception("youtube playlists failed for %r", channel_id)
             return jsonify({"success": False, "error": "Failed"}), 500

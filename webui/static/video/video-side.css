@@ -2849,6 +2849,9 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vc-pl-title { font-size: 14px; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vc-pl-count { font-size: 11.5px; font-weight: 600; color: rgba(255,255,255,0.42); }
 .vc-pl-chev { flex-shrink: 0; color: rgba(255,255,255,0.35); transition: transform 0.2s ease; }
+/* Compact watchlist button on each playlist row (the standard button, shrunk) */
+.vc-pl-watch { flex: 0 0 auto; padding: 6px 12px; font-size: 12px; }
+.vc-pl-watch .watchlist-icon { font-size: 13px; }
 .vc-pl--collapsed .vc-pl-chev { transform: rotate(-90deg); }
 .vc-pl-vids { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; padding: 6px 14px 16px; }
 .vc-pl--collapsed .vc-pl-vids { display: none; }
