@@ -4190,6 +4190,7 @@ function _buildTrackRow(track, album, admin) {
             actionsTd.innerHTML = `
                 <div class="enhanced-track-actions-group">
                     <button class="enhanced-source-info-btn" title="View download source info">ℹ</button>
+                    <button class="enhanced-reidentify-btn" title="Re-identify — file this track under a different release">&#8644;</button>
                     <button class="enhanced-redownload-btn" title="Redownload this track">&#8635;</button>
                     <button class="enhanced-delete-btn" title="Delete track from library">&#10005;</button>
                 </div>
@@ -4384,6 +4385,15 @@ function _attachTableDelegation(table, album) {
         if (target.closest('.enhanced-source-info-btn')) {
             e.stopPropagation();
             showTrackSourceInfo(track, target.closest('.enhanced-source-info-btn'));
+            return;
+        }
+
+        // Re-identify button (admin) — #889
+        if (target.closest('.enhanced-reidentify-btn')) {
+            e.stopPropagation();
+            const artistName = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.name : '';
+            openReidentifyModal(track.id, track.title || 'Unknown', artistName,
+                                album.title || '', album.thumb_url || '');
             return;
         }
 

@@ -59621,6 +59621,7 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 .enhanced-track-actions-group.visible { opacity: 1; }
 
 .enhanced-source-info-btn,
+.enhanced-reidentify-btn,
 .enhanced-redownload-btn {
     background: none; border: none; cursor: pointer;
     width: 24px; height: 24px; border-radius: 5px;
@@ -59630,6 +59631,9 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 
 .enhanced-source-info-btn { color: rgba(255,255,255,0.35); font-size: 13px; }
 .enhanced-source-info-btn:hover { color: rgba(100,181,246,0.9); background: rgba(100,181,246,0.1); }
+
+.enhanced-reidentify-btn { color: rgba(255,255,255,0.35); font-size: 15px; }
+.enhanced-reidentify-btn:hover { color: rgb(var(--accent-light-rgb)); background: rgba(var(--accent-rgb),0.1); }
 
 .enhanced-redownload-btn { color: rgba(255,255,255,0.35); font-size: 15px; }
 .enhanced-redownload-btn:hover { color: var(--accent); background: rgba(var(--accent-rgb),0.1); }
