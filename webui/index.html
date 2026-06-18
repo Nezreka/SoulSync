@@ -5135,6 +5135,37 @@
                                     </div>
                                 </div>
 
+                                <!-- AAC Quality (opt-in; Soulseek/torrents — off by default) -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-aac-enabled"
+                                                onchange="toggleQuality('aac')">
+                                            <span class="quality-tier-name">AAC <span style="opacity:.6;font-weight:400;">(.m4a/.aac — Soulseek)</span></span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-aac">Priority: 1.5</span>
+                                    </div>
+                                    <div class="quality-tier-sliders" id="sliders-aac">
+                                        <div class="slider-group">
+                                            <label>Bitrate Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min"
+                                                    id="aac-min" min="0" max="400" value="128" step="10"
+                                                    oninput="updateQualityRange('aac')">
+                                                <input type="range" class="range-slider range-slider-max"
+                                                    id="aac-max" min="0" max="400" value="400" step="10"
+                                                    oninput="updateQualityRange('aac')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="aac-min-value">128 kbps</span>
+                                                <span>-</span>
+                                                <span id="aac-max-value">400 kbps</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- MP3 320 Quality -->
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
