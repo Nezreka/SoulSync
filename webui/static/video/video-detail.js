@@ -342,15 +342,19 @@
         var a = q('[data-vd-actions]');
         if (!a) return;
         if (d.source === 'youtube') {
-            // Use the SAME watchlist button as shows/movies (consistency); it just
-            // follows the channel instead of a tmdb show.
+            // Same watchlist button as shows/movies (consistency); it follows the
+            // CHANNEL or the PLAYLIST depending on what this page is.
             var on = !!d.following;
+            var isPl = d.kind === 'playlist';
+            var ytUrl = isPl
+                ? 'https://www.youtube.com/playlist?list=' + esc(d.id)
+                : 'https://www.youtube.com/channel/' + esc(d.id);
             a.innerHTML =
-                '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vd-act="yt-follow">' +
+                '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vd-act="' +
+                    (isPl ? 'yt-pl-follow' : 'yt-follow') + '">' +
                     '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
                     '<span class="watchlist-text">' + (on ? 'In Watchlist' : 'Watchlist') + '</span></button>' +
-                '<a class="vd-yt-link" href="https://www.youtube.com/channel/' + esc(d.id) +
-                    '" target="_blank" rel="noopener">Open on YouTube ↗</a>';
+                '<a class="vd-yt-link" href="' + ytUrl + '" target="_blank" rel="noopener">Open on YouTube ↗</a>';
             return;
         }
         // The watchlist eye applies only to airing shows (movies + ended shows are
@@ -1646,6 +1650,23 @@
         }
     }
 
+    // Hero Watchlist button on a PLAYLIST page → follow/unfollow the playlist.
+    function toggleYtPlaylistFollowHero() {
+        var yc = window.VideoYoutube; if (!yc || !data) return;
+        var pl = data._playlist || {}, on = data.following;
+        var bump = function () { document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); };
+        if (on) {
+            yc.unfollowPlaylist(data.id).then(function () { data.following = false; renderActions(data); bump(); }).catch(function () { /* ignore */ });
+        } else {
+            yc.followPlaylist({ playlist_id: data.id, title: pl.title, thumbnail_url: pl.thumbnail_url, videos: pl.videos })
+                .then(function (d) {
+                    if (d && d.success) { data.following = true; renderActions(data);
+                        if (typeof showToast === 'function') showToast('Added to watchlist', 'success'); }
+                    bump();
+                }).catch(function () { /* ignore */ });
+        }
+    }
+
     function toggleYtFollow() {
         var yc = window.VideoYoutube; if (!yc || !data) return;
         var ch = data._channel || {}, on = data.following;
@@ -1819,6 +1840,7 @@
             if (which === 'watchlist') toggleWatchlist();
             else if (which === 'missing') toggleMissing();
             else if (which === 'yt-follow') toggleYtFollow();
+            else if (which === 'yt-pl-follow') toggleYtPlaylistFollowHero();
             else if (which === 'trailer' && data && data.trailer) openTrailer(data.trailer.key);
             return;
         }
