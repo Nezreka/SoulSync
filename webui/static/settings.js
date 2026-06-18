@@ -1934,7 +1934,7 @@ function populateQualityProfileUI(profile) {
     }
 
     // Populate each quality tier
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
+    const qualities = ['flac', 'aac', 'mp3_320', 'mp3_256', 'mp3_192'];
     qualities.forEach(quality => {
         const config = profile.qualities[quality];
         if (config) {
@@ -2128,15 +2128,18 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
     };
 
-    const qualities = ['flac', 'mp3_320', 'mp3_256', 'mp3_192'];
+    const qualities = ['flac', 'aac', 'mp3_320', 'mp3_256', 'mp3_192'];
 
     qualities.forEach((quality, index) => {
         const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
         const minSlider = document.getElementById(`${quality}-min`);
         const maxSlider = document.getElementById(`${quality}-max`);
 
-        // Preserve priority from the currently loaded profile instead of using array order
-        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? (index + 1);
+        // Preserve priority from the currently loaded profile instead of using array order.
+        // AAC's default is 1.5 (above MP3, below FLAC) — not index+1 — so an upgraded
+        // profile that never had an aac tier still ranks it correctly on first save.
+        const _defaultPriority = quality === 'aac' ? 1.5 : (index + 1);
+        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? _defaultPriority;
 
         profile.qualities[quality] = {
             enabled: enabled,

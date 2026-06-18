@@ -426,8 +426,11 @@ class SoulseekClient(DownloadSourcePlugin):
                 if f'.{file_ext}' not in audio_extensions:
                     continue
                 
-                quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
-                
+                # .m4a is the usual AAC container — bucket it as 'aac' (the
+                # quality filter treats AAC as an opt-in tier; off by default).
+                quality = 'aac' if file_ext == 'm4a' else (
+                    file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
+
                 # Create TrackResult
                 # Convert duration from seconds to milliseconds (slskd returns seconds, Spotify uses ms)
                 raw_duration = file_data.get('length')
@@ -1147,7 +1150,9 @@ class SoulseekClient(DownloadSourcePlugin):
             ext = Path(filename).suffix.lower()
             if ext not in audio_extensions:
                 continue
-            quality = ext.lstrip('.') if ext.lstrip('.') in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
+            _qext = ext.lstrip('.')
+            quality = 'aac' if _qext == 'm4a' else (
+                _qext if _qext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
             raw_duration = file_data.get('length')
             duration_ms = raw_duration * 1000 if raw_duration else None
             results.append(TrackResult(
@@ -1957,6 +1962,7 @@ class SoulseekClient(DownloadSourcePlugin):
         'mp3_320': (1, 50),
         'mp3_256': (1, 40),
         'mp3_192': (1, 30),
+        'aac':     (1, 50),
         'other':   (0, 500),
     }
 
@@ -2040,6 +2046,7 @@ class SoulseekClient(DownloadSourcePlugin):
             'mp3_320': [],
             'mp3_256': [],
             'mp3_192': [],
+            'aac': [],
             'other': []
         }
 
@@ -2067,6 +2074,17 @@ class SoulseekClient(DownloadSourcePlugin):
                 else:
                     quality_buckets['other'].append(candidate)
                     continue
+            elif track_format in ('aac', 'm4a'):
+                # Opt-in AAC tier. ADDITIVE: when AAC isn't enabled in the
+                # profile (the default, and every profile that predates this),
+                # route exactly where AAC went before — the 'other' bucket — so
+                # behaviour is byte-identical. Only a user who turns AAC on lets
+                # it become a first-class, selectable tier.
+                aac_cfg = profile['qualities'].get('aac')
+                if not (aac_cfg and aac_cfg.get('enabled')):
+                    quality_buckets['other'].append(candidate)
+                    continue
+                quality_key = 'aac'
             else:
                 quality_buckets['other'].append(candidate)
                 continue

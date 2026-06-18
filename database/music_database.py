@@ -8676,6 +8676,15 @@ class MusicDatabase:
                     "min_kbps": 150,
                     "max_kbps": 300,
                     "priority": 4
+                },
+                # AAC (incl. .m4a): opt-in, OFF by default. Priority 1.5 sits it
+                # above MP3 but below FLAC (AAC is more efficient than MP3); the
+                # min_kbps gate keeps junk-bitrate AAC from beating a good MP3.
+                "aac": {
+                    "enabled": False,
+                    "min_kbps": 128,
+                    "max_kbps": 400,
+                    "priority": 1.5
                 }
             },
             "fallback_enabled": True
@@ -8725,6 +8734,12 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 4
+                    },
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 1.5
                     }
                 },
                 "fallback_enabled": False
@@ -8757,6 +8772,12 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 4
+                    },
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 1.5
                     }
                 },
                 "fallback_enabled": True
@@ -8789,6 +8810,14 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 3
+                    },
+                    # Space-saver favours small files, where AAC shines — but it
+                    # still ships OFF (opt-in). Priority 0.5 puts it above MP3.
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 0.5
                     }
                 },
                 "fallback_enabled": True
