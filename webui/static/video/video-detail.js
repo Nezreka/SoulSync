@@ -1652,12 +1652,38 @@
             ? '<img class="vc-pl-thumb" src="' + esc(ytProx(p.thumbnail_url)) + '" alt="" loading="lazy">'
             : '<span class="vc-pl-thumb vc-pl-thumb--none">▶</span>';
         var n = p.video_count != null ? p.video_count + ' video' + (p.video_count === 1 ? '' : 's') : '';
+        var on = !!p.following;
+        var watch = '<button class="library-artist-watchlist-btn vc-pl-watch' + (on ? ' watching' : '') + '" type="button" ' +
+            'data-vd-yt-pl-watch="' + esc(p.playlist_id) + '" data-pl-title="' + esc(p.title) + '" data-pl-thumb="' + esc(p.thumbnail_url || '') + '">' +
+            '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
+            '<span class="watchlist-text">' + (on ? 'In Watchlist' : 'Add to Watchlist') + '</span></button>';
         return '<div class="vc-pl vc-pl--collapsed" data-vc-pl="' + esc(p.playlist_id) + '">' +
             '<div class="vc-pl-hd" data-vd-yt-pl-toggle="' + esc(p.playlist_id) + '">' + thumb +
                 '<div class="vc-pl-meta"><span class="vc-pl-title">' + esc(p.title) + '</span>' +
-                (n ? '<span class="vc-pl-count">' + n + '</span>' : '') + '</div>' +
+                (n ? '<span class="vc-pl-count">' + n + '</span>' : '') + '</div>' + watch +
                 '<span class="vc-pl-chev" aria-hidden="true">▾</span></div>' +
             '<div class="vc-pl-vids" data-vd-yt-pl-vids="' + esc(p.playlist_id) + '"></div></div>';
+    }
+    function toggleYtPlaylistWatch(btn) {
+        var yc = window.VideoYoutube; if (!yc) return;
+        var pid = btn.getAttribute('data-vd-yt-pl-watch'), on = btn.classList.contains('watching');
+        btn.disabled = true;
+        var setBtn = function (s) {
+            btn.classList.toggle('watching', s);
+            var ic = btn.querySelector('.watchlist-icon'); if (ic) ic.textContent = s ? '✓' : '＋';
+            var tx = btn.querySelector('.watchlist-text'); if (tx) tx.textContent = s ? 'In Watchlist' : 'Add to Watchlist';
+            btn.disabled = false;
+        };
+        var bump = function () { document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); };
+        if (on) {
+            yc.unfollowPlaylist(pid).then(function () { setBtn(false); bump(); }).catch(function () { btn.disabled = false; });
+        } else {
+            yc.followPlaylist({ playlist_id: pid, title: btn.getAttribute('data-pl-title'),
+                                thumbnail_url: btn.getAttribute('data-pl-thumb') }).then(function (d) {
+                if (d && d.success) { setBtn(true); bump(); if (typeof showToast === 'function') showToast('Added to watchlist', 'success'); }
+                else btn.disabled = false;
+            }).catch(function () { btn.disabled = false; });
+        }
     }
     function ytLoadPlaylists(cid) {
         var sec = q('[data-vd-yt-pl-section]'), host = q('[data-vd-yt-playlists]');
@@ -1757,6 +1783,8 @@
         if (e.target.closest('[data-vd-ext]')) return;   // let watch links open
         var ytWish = e.target.closest('[data-vd-yt-wish]');
         if (ytWish && r.contains(ytWish)) { e.preventDefault(); toggleYtWish(ytWish); return; }
+        var ytPlW = e.target.closest('[data-vd-yt-pl-watch]');
+        if (ytPlW && r.contains(ytPlW)) { e.preventDefault(); e.stopPropagation(); toggleYtPlaylistWatch(ytPlW); return; }
         var ytPl = e.target.closest('[data-vd-yt-pl-toggle]');
         if (ytPl && r.contains(ytPl)) { toggleYtPlaylist(ytPl); return; }
         var epRow = e.target.closest('[data-vd-ep-key]');
