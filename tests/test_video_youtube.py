@@ -456,3 +456,47 @@ def test_innertube_channel_dates_guards():
     assert yt.innertube_channel_dates("not-a-uc-id", post=lambda p: {}) == {}     # only UC… channels
     assert yt.innertube_channel_dates("UCx", post=lambda p: None) == {}           # bad/empty response → {}
     assert yt.innertube_channel_dates("UCx", post=lambda p: (_ for _ in ()).throw(RuntimeError())) == {}
+
+
+def _lk_item_thumb(vid, rel, thumb):
+    """_lk_item plus a contentImage so thumbnail extraction can be exercised."""
+    item = _lk_item(vid, rel)
+    lk = item["richItemRenderer"]["content"]["lockupViewModel"]
+    lk["contentImage"] = {"thumbnailViewModel": {"image": {"sources": [{"url": thumb}]}}}
+    return item
+
+
+def test_innertube_parse_video_items_keeps_title_and_thumbnail():
+    page = _page([
+        _lk_item_thumb("v1", "2 years ago", "https://i.ytimg.com/vi/v1/hq.jpg"),
+        _lk_item("v2", "3 months ago"),                                       # no thumbnail → None
+        _lk_item("p1", "1 day ago", ctype="LOCKUP_CONTENT_TYPE_PLAYLIST"),    # not a video → skip
+    ])
+    items = yt.innertube_parse_video_items(page)
+    assert [it["youtube_id"] for it in items] == ["v1", "v2"]                 # playlist filtered out
+    assert items[0] == {"youtube_id": "v1", "title": "Title v1",
+                        "thumbnail_url": "https://i.ytimg.com/vi/v1/hq.jpg", "relative": "2 years ago"}
+    assert items[1]["title"] == "Title v2" and items[1]["thumbnail_url"] is None
+
+
+def test_innertube_channel_videos_page_converts_and_pages():
+    now = date(2026, 6, 17)
+    page1 = _page([_lk_item_thumb("v1", "1 year ago", "t1"), _lk_item("v2", "2 years ago")], token="TOK")
+    got = yt.innertube_channel_videos_page("UCxxxx", now=now, post=lambda p: page1)
+    assert got["continuation"] == "TOK"
+    assert got["videos"][0] == {"youtube_id": "v1", "title": "Title v1",
+                                "thumbnail_url": "t1", "published_at": "2025-06-17"}
+    assert got["videos"][1]["published_at"] == "2024-06-17"
+    # a continuation request carries the token (not browseId) and ends when none returned
+    end = yt.innertube_channel_videos_page("UCxxxx", continuation="TOK", now=now,
+                                           post=lambda p: (_page([_lk_item("v3", "5 days ago")])
+                                                           if p.get("continuation") == "TOK" else None))
+    assert [v["youtube_id"] for v in end["videos"]] == ["v3"] and end["continuation"] is None
+
+
+def test_innertube_channel_videos_page_guards():
+    assert yt.innertube_channel_videos_page("not-uc", post=lambda p: {}) == {"videos": [], "continuation": None}
+    assert yt.innertube_channel_videos_page("UCx", post=lambda p: None) == {"videos": [], "continuation": None}
+    # a continuation token works even without a UC id (it encodes the channel itself)
+    assert yt.innertube_channel_videos_page("", continuation="TOK",
+                                            post=lambda p: _page([_lk_item("v9", "1 day ago")]))["videos"]

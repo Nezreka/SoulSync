@@ -512,6 +512,69 @@ def innertube_channel_dates(channel_id, pages=_INNERTUBE_PAGES, now=None, post=N
     return out
 
 
+def _lockup_title(lk):
+    """The video title from a lockupViewModel (metadata.title.content)."""
+    for md in _json_find_all(lk, "lockupMetadataViewModel", []):
+        if isinstance(md, dict) and isinstance(md.get("title"), dict):
+            c = md["title"].get("content")
+            if isinstance(c, str) and c:
+                return c
+    return None
+
+
+def _lockup_thumb(lk):
+    """The first thumbnail url from a lockupViewModel (contentImage…sources[0].url)."""
+    for srcs in _json_find_all(lk.get("contentImage") or {}, "sources", []):
+        if isinstance(srcs, list) and srcs and isinstance(srcs[0], dict) and srcs[0].get("url"):
+            return srcs[0]["url"]
+    return None
+
+
+def innertube_parse_video_items(obj):
+    """Full per-video metadata for VIDEO lockups in an InnerTube browse/continuation
+    response: [{youtube_id, title, thumbnail_url, relative}]. Same source as
+    innertube_parse_videos but keeps title + thumbnail so the channel page can list
+    the whole catalog (not just date them)."""
+    out, seen = [], set()
+    for lk in _json_find_all(obj, "lockupViewModel", []):
+        if not isinstance(lk, dict) or lk.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
+            continue
+        vid = lk.get("contentId")
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        rel = next((t for t in _json_content_strings(lk.get("metadata"), []) if _REL_RE.search(t)), None)
+        out.append({"youtube_id": vid, "title": _lockup_title(lk),
+                    "thumbnail_url": _lockup_thumb(lk), "relative": rel})
+    return out
+
+
+def innertube_channel_videos_page(channel_id, continuation=None, now=None, post=None):
+    """ONE InnerTube page of a channel's videos (with metadata) + the next token:
+    {"videos": [{youtube_id, title, thumbnail_url, published_at}], "continuation": token|None}.
+    Stateless — hand the returned token back to fetch the next page, so the caller
+    can stream the FULL catalog in batches (O(n), each page fetched once). {} fields
+    / None token on any failure."""
+    cid = str(channel_id or "").strip()
+    if not continuation and not cid.startswith("UC"):
+        return {"videos": [], "continuation": None}
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    payload = ({"context": _INNERTUBE_CTX, "continuation": continuation} if continuation
+               else {"context": _INNERTUBE_CTX, "browseId": cid, "params": _VIDEOS_PARAMS})
+    try:
+        j = _innertube_post(payload, post)
+    except Exception:
+        return {"videos": [], "continuation": None}
+    if not isinstance(j, dict):
+        return {"videos": [], "continuation": None}
+    videos = []
+    for it in innertube_parse_video_items(j):
+        it["published_at"] = relative_to_date(it.pop("relative", None), now)
+        videos.append(it)
+    return {"videos": videos, "continuation": innertube_continuation(j)}
+
+
 def search_channels(query, limit=6, ydl_factory=None):
     """Search YouTube for CHANNELS (the results page filtered to channels) → a few
     {youtube_id, title, handle, avatar_url, subscriber_count} for the search page.

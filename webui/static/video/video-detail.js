@@ -1348,44 +1348,62 @@
             episode_total: (ch.videos || []).length, episode_owned: 0 };
     }
 
-    // Freshly-followed channels get their upload dates filled in over the next
-    // minute+ by the background enricher. Re-fetch a few times so new year-seasons
-    // pop in WITHOUT a manual reload (only re-renders if more years appeared).
-    var ytRepollTimers = [];
-    function ytClearRepoll() { ytRepollTimers.forEach(function (t) { clearTimeout(t); }); ytRepollTimers = []; }
-    function _undatedCount(seasons) {
-        var n = 0;
-        (seasons || []).forEach(function (s) { if (s.season_number === 0) n = s.episodes.length; });
-        return n;
-    }
-    function ytRefetch(id) {
-        var before = ((data && data.seasons) || []).length;
-        var undatedBefore = _undatedCount(data && data.seasons);
-        fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '?limit=90', { headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (resp) {
-                if (!resp || !resp.success || currentId !== id || currentSource !== 'youtube') return;
-                var nd = ytToShow(resp);
-                // Re-render when dating IMPROVED — new year-seasons appeared OR the
-                // "Earlier videos" (undated) bucket shrank. (Season count alone misses
-                // the common case where many recent videos all collapse into one year.)
-                if (nd.seasons.length <= before && _undatedCount(nd.seasons) >= undatedBefore) return;
-                data = nd;
-                if (!seasonByNum(selectedSeason)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
-                renderBillboard(nd); renderSeasonNav(); renderEpisodes();
-                if (!nd.seasons.some(function (s) { return s.season_number === 0; })) { showEpSyncing(false); ytClearRepoll(); }
-            })
-            .catch(function () { /* ignore */ });
-    }
-    function ytScheduleRepoll(id) {
-        ytClearRepoll();
-        // Tell the user dates are being fetched (the enricher takes ~30-45s, more
-        // if the channel is queued behind others), and poll until they land.
-        showEpSyncing(true, 'Fetching upload dates from YouTube… your year-seasons will fill in shortly.');
-        [20000, 45000, 80000, 120000, 160000].forEach(function (ms) {
-            ytRepollTimers.push(setTimeout(function () { ytRefetch(id); }, ms));
-        });
-        ytRepollTimers.push(setTimeout(function () { if (currentId === id) showEpSyncing(false); }, 175000));
+    // Stream the channel's FULL video catalog in batches via InnerTube (each page
+    // fetched once, light on rate limits) and fold it into the year-seasons live:
+    // each batch fills missing upload dates on the videos already shown AND appends
+    // older ones, re-rendering after every batch. Replaces the old date-only re-poll
+    // — this both DATES the recent videos and EXPANDS past the initial ~90 cap.
+    var ytLoadAllToken = 0;
+    function ytCancelLoad() { ytLoadAllToken++; }
+    function ytLoadAllVideos(id) {
+        var token = ++ytLoadAllToken;
+        var byId = {};
+        ((data && data._channel && data._channel.videos) || []).forEach(function (v) { byId[v.youtube_id] = v; });
+        var cont = null, MAX = 2000;   // safety ceiling for pathological channels
+        function step() {
+            if (token !== ytLoadAllToken || currentId !== id || currentSource !== 'youtube') return;
+            var url = '/api/video/youtube/channel/' + encodeURIComponent(id) + '/videos' +
+                (cont ? '?continuation=' + encodeURIComponent(cont) : '');
+            fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (resp) {
+                    if (token !== ytLoadAllToken || currentId !== id || currentSource !== 'youtube') return;
+                    if (!resp || !resp.success) { showEpSyncing(false); return; }
+                    var prevSel = selectedSeason;
+                    var selObj = seasonByNum(prevSel);
+                    var prevEp = selObj ? selObj.episodes.length : -1;
+                    var changed = false;
+                    (resp.videos || []).forEach(function (v) {
+                        if (!v.youtube_id) return;
+                        var ex = byId[v.youtube_id];
+                        if (ex) {                                   // already shown → backfill a missing date
+                            if (!ex.published_at && v.published_at) { ex.published_at = v.published_at; changed = true; }
+                        } else {                                    // older video → add it
+                            byId[v.youtube_id] = v; data._channel.videos.push(v); changed = true;
+                        }
+                    });
+                    if (changed) {
+                        var nd = ytToShow({ channel: data._channel, following: data.following });
+                        data = nd;
+                        if (!seasonByNum(prevSel)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
+                        renderBillboard(nd); renderSeasonNav();
+                        // Only re-render the episode grid if the season you're viewing
+                        // actually changed (most batches add OLDER years, not yours).
+                        var nowObj = seasonByNum(selectedSeason);
+                        if (selectedSeason !== prevSel || !nowObj || nowObj.episodes.length !== prevEp) renderEpisodes();
+                    }
+                    cont = resp.continuation;
+                    if (cont && data._channel.videos.length < MAX) {
+                        showEpSyncing(true, 'Loading the channel’s full video history… ' +
+                            data._channel.videos.length + ' videos so far.');
+                        setTimeout(step, 120);
+                    } else {
+                        showEpSyncing(false);
+                    }
+                })
+                .catch(function () { showEpSyncing(false); });
+        }
+        step();
     }
 
     function loadChannel(id) {
@@ -1393,7 +1411,7 @@
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
         if (!root()) return;
-        ytClearRepoll();
+        ytCancelLoad();
         showLoading(true); resetExtras(); showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
         var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
@@ -1412,9 +1430,8 @@
                 var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
                 if (sub) sub.scrollTop = 0;
                 ytLoadPlaylists(id);
-                // If videos are still undated, the enricher is (or will be) filling
-                // them in — poll a few times so the years appear live.
-                if (data.seasons.some(function (s) { return s.season_number === 0; })) ytScheduleRepoll(id);
+                // Stream the rest of the catalog (and fill upload dates) in batches.
+                ytLoadAllVideos(id);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
     }

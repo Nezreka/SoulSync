@@ -636,6 +636,40 @@ def test_youtube_channel_detail_404_on_unresolvable(tmp_path, monkeypatch):
     assert client.get("/api/video/youtube/channel/UCnope").status_code == 404
 
 
+def test_youtube_channel_videos_batch_streams_and_merges(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    # First call (no continuation) returns two InnerTube videos + a token; a second
+    # call with that token would return more — but the endpoint stops at the token.
+    calls = []
+
+    def fake_page(cid, continuation=None, now=None, post=None):
+        calls.append(continuation)
+        if continuation is None:
+            # A full page (>=90) so the endpoint stops AT the token (one batch) rather
+            # than draining it; a1/a2 are the rows we assert on, the rest are filler.
+            vids = [{"youtube_id": "a1", "title": "A1", "thumbnail_url": "ta", "published_at": "2020-01-01"},
+                    {"youtube_id": "a2", "title": "A2", "thumbnail_url": "tb", "published_at": "2019-01-01"}]
+            vids += [{"youtube_id": "f%d" % i, "title": "F%d" % i, "thumbnail_url": "t",
+                      "published_at": "2018-01-01"} for i in range(95)]
+            return {"videos": vids, "continuation": "NEXT"}
+        return {"videos": [], "continuation": None}
+
+    monkeypatch.setattr(ytmod, "innertube_channel_videos_page", fake_page)
+    # Seed a cached (exact) date for a1 + wish a2 so the merge is observable.
+    videoapi._video_db.cache_video_dates([{"youtube_id": "a1", "published_at": "2020-03-15"}])
+    videoapi._video_db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"},
+                                              [{"youtube_id": "a2", "title": "A2"}])
+
+    r = client.get("/api/video/youtube/channel/UCx/videos").get_json()
+    assert r["success"] is True
+    assert r["continuation"] == "NEXT"                      # token passed back for the next batch
+    vids = {v["youtube_id"]: v for v in r["videos"]}
+    assert vids["a1"]["published_at"] == "2020-03-15"       # cached date wins over InnerTube's
+    assert vids["a1"]["wished"] is False and vids["a2"]["wished"] is True
+    assert calls[0] is None                                 # first batch started from page 1
+
+
 def test_youtube_wishlist_add_single_video(tmp_path):
     client, _ = _make_client(tmp_path)
     r = client.post("/api/video/youtube/wishlist/add", json={
