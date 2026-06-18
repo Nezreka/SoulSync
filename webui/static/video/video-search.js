@@ -262,20 +262,25 @@
         }
     }
 
-    // Add / remove the resolved playlist chip to the watchlist.
+    // Add / remove the resolved playlist chip to the watchlist (standard watchlist button).
+    function setPlBtn(btn, on) {
+        btn.classList.toggle('watching', on);
+        var ic = btn.querySelector('.watchlist-icon'); if (ic) ic.textContent = on ? '✓' : '＋';
+        var tx = btn.querySelector('.watchlist-text'); if (tx) tx.textContent = on ? 'In Watchlist' : 'Add to Watchlist';
+    }
     function togglePlaylistFollow(btn) {
         if (!lastPlaylist) return;
-        var on = btn.classList.contains('vyt-follow--on');
+        var on = btn.classList.contains('watching');
         btn.disabled = true;
         var done = function () { btn.disabled = false; document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); };
         if (on) {
             VideoYoutube.unfollowPlaylist(lastPlaylist.playlist_id).then(function () {
-                btn.classList.remove('vyt-follow--on'); btn.innerHTML = '+ Follow'; done();
+                setPlBtn(btn, false); done();
             }).catch(function () { btn.disabled = false; });
         } else {
             VideoYoutube.followPlaylist(lastPlaylist).then(function (d) {
                 if (d && d.success) {
-                    btn.classList.add('vyt-follow--on'); btn.innerHTML = '✓ Following';
+                    setPlBtn(btn, true);
                     if (typeof showToast === 'function')
                         showToast('Added ' + lastPlaylist.title + ' to watchlist', 'success');
                 }
