@@ -979,7 +979,8 @@
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.owned;
         return '<div class="vd-ep vd-ep--yt" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
-            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
+            '<div class="vd-ep-thumb vd-ep-thumb--play" data-vd-yt-play="' + esc(ep.youtube_id) + '" title="Play video">' +
+            still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Untitled') + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
@@ -1743,8 +1744,8 @@
         var thumb = v.thumbnail_url
             ? '<img src="' + esc(ytProx(v.thumbnail_url)) + '" alt="" loading="lazy">' : '';
         return '<div class="vd-yt-plvid">' +
-            '<a class="vd-yt-plvid-thumb" href="https://www.youtube.com/watch?v=' + esc(v.youtube_id) +
-                '" target="_blank" rel="noopener" data-vd-ext>' + thumb + '<span class="vd-yt-plvid-play">▶</span></a>' +
+            '<div class="vd-yt-plvid-thumb" data-vd-yt-play="' + esc(v.youtube_id) + '" title="Play video">' +
+                thumb + '<span class="vd-yt-plvid-play">▶</span></div>' +
             '<div class="vd-yt-plvid-title" title="' + esc(v.title) + '">' + esc(v.title || 'Untitled') + '</div>' +
             ytWishBtn(v.youtube_id, v.wished, true) + '</div>';
     }
@@ -1820,6 +1821,8 @@
         }
         // YouTube channel interactions (rendered in the show container)
         if (e.target.closest('[data-vd-ext]')) return;   // let watch links open
+        var ytPlay = e.target.closest('[data-vd-yt-play]');   // play the video inline (reuses the trailer player)
+        if (ytPlay && r.contains(ytPlay)) { e.preventDefault(); openTrailer(ytPlay.getAttribute('data-vd-yt-play')); return; }
         var ytWish = e.target.closest('[data-vd-yt-wish]');
         if (ytWish && r.contains(ytWish)) { e.preventDefault(); toggleYtWish(ytWish); return; }
         var ytPlW = e.target.closest('[data-vd-yt-pl-watch]');
