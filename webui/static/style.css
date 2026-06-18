@@ -62563,6 +62563,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 }
 
 #artist-detail-page .artist-detail-hero-bg {
+    /* Blurred artist-cover backdrop retired — Boulder didn't want the artist
+       image bleeding behind the header. The element stays in the DOM (JS still
+       sets its background-image) but is hidden; flip display back on to restore. */
+    display: none;
     position: absolute;
     inset: -20px;
     background-size: cover;
