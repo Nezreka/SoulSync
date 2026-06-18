@@ -193,6 +193,65 @@ def list_pending_hints(cursor: Any) -> list:
     return [_row_to_hint(r) for r in cursor.fetchall()]
 
 
+def build_identification_from_hint(hint: RematchHint) -> dict:
+    """Turn a hint into the ``identification`` dict the auto-import matcher expects,
+    so a re-identify SKIPS the guessing tiers entirely and matches straight against
+    the user-chosen release. Mirrors the shape `_identify_folder` returns (album_id
+    / source / track_number drive the album fetch + file→track match)."""
+    return {
+        "album_id": hint.album_id or None,
+        "album_name": hint.album_name or hint.track_title or "",
+        "artist_name": hint.artist_name or "",
+        "artist_id": hint.artist_id or "",
+        "track_name": hint.track_title or "",
+        "track_id": hint.track_id or "",
+        "image_url": "",
+        "release_date": "",
+        "track_number": hint.track_number or 1,
+        "total_tracks": 1,
+        "source": hint.source,
+        "method": "rematch_hint",
+        "identification_confidence": 1.0,
+        "is_single": True,
+        "album_type": hint.album_type,
+    }
+
+
+def delete_replaced_track(cursor: Any, replace_track_id: Any, *, unlink=os.remove) -> Optional[str]:
+    """Remove the OLD library row a re-identify replaces, and its file.
+
+    Called only AFTER the re-import has landed the track at its new home, so the
+    original is never lost on failure. Safe by construction: the file is unlinked
+    only if it still exists and **no other track row references it** (guards against
+    yanking a file a different row legitimately points to). Returns the path it
+    removed, or ``None`` if there was nothing to do. ``unlink`` is injectable for
+    tests. Assumes the new home differs from the old — the Re-identify modal never
+    offers the track's current release as a target, so this holds."""
+    if not replace_track_id:
+        return None
+    cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (replace_track_id,))
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    old_path = (row["file_path"] if not isinstance(row, (tuple, list)) else row[0]) or ""
+
+    cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
+
+    if not old_path:
+        return None
+    # Only unlink if no surviving row still points at this file.
+    cursor.execute("SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1", (old_path,))
+    if cursor.fetchone() is not None:
+        return None
+    try:
+        if os.path.exists(old_path):
+            unlink(old_path)
+            return old_path
+    except OSError:
+        pass
+    return None
+
+
 def quick_file_signature(path: str, *, chunk: int = 65536) -> Optional[str]:
     """A cheap, rename-proof content fingerprint: size + first/last chunk, hashed.
 
@@ -222,5 +281,7 @@ __all__ = [
     "find_hint_for_file",
     "consume_hint",
     "list_pending_hints",
+    "build_identification_from_hint",
+    "delete_replaced_track",
     "quick_file_signature",
 ]
