@@ -10085,6 +10085,84 @@ def reidentify_search():
         return jsonify({"success": False, "error": str(e), "results": []}), 500
 
 
+@app.route('/api/reidentify/apply', methods=['POST'])
+def reidentify_apply():
+    """Apply a re-identify: stage the track's library file + write a single-use hint
+    so the auto-import worker re-files it under the chosen release (Phase 2).
+
+    Body: ``{library_track_id, source, track_id, replace}``. Admin-only (mutates the
+    library). COPIES the file — the original is removed only after the re-import
+    succeeds, and only when ``replace`` is true."""
+    try:
+        database = get_database()
+        pid = get_current_profile_id()
+        prof = database.get_profile(pid) if pid else None
+        if not prof or not prof.get('is_admin'):
+            return jsonify({"success": False, "error": "Admin only"}), 403
+
+        data = request.get_json(silent=True) or {}
+        library_track_id = data.get('library_track_id')
+        source = (data.get('source') or '').strip()
+        track_id = (data.get('track_id') or '').strip()
+        replace = bool(data.get('replace', True))
+        if not library_track_id or not source or not track_id:
+            return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
+
+        from core.imports.rematch_search import resolve_hint_fields
+        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+        from core.imports.rematch_hints import create_hint
+
+        # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
+        hint_fields = resolve_hint_fields(source, track_id)
+        if not hint_fields:
+            return jsonify({"success": False, "error": "Could not resolve the selected release (no album id)"}), 400
+
+        # 2) Locate the library file for this track.
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(library_track_id),))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or not row['file_path']:
+            return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
+        real_path = _resolve_library_file_path(row['file_path']) or row['file_path']
+
+        # 3) Copy into staging + fingerprint the copy.
+        staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
+
+        # 4) Persist the single-use hint.
+        hint = build_reidentify_hint(library_track_id, hint_fields,
+                                     staged['staged_path'], staged['content_hash'], replace=replace)
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            hint_id = create_hint(cur, hint)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 5) Nudge the worker so it doesn't wait for the next timer tick.
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as _e:
+            logger.debug("Re-identify: scan nudge failed (worker will catch it on its timer): %s", _e)
+
+        logger.info("[Re-identify] staged track %s → %s '%s' (%s), replace=%s",
+                    library_track_id, hint.album_type or 'release', hint.album_name or '?',
+                    source, replace)
+        return jsonify({"success": True, "hint_id": hint_id, "staged_path": staged['staged_path'],
+                        "album_name": hint.album_name, "album_type": hint.album_type})
+    except FileNotFoundError as e:
+        return jsonify({"success": False, "error": f"Source file not found: {e}"}), 404
+    except Exception as e:
+        logger.error(f"Re-identify apply error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/artist/<artist_id>/quality-analysis')
 def get_artist_quality_analysis(artist_id):
     """Analyze track quality for an artist — returns tier classification for each track."""
