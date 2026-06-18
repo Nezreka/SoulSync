@@ -1619,7 +1619,14 @@
         };
         if (on) yc.removeWish('video', id).then(function (d) { setOn(!(d && d.success)); }).catch(function () { btn.disabled = false; });
         else {
+            // Channel pages carry _channel; playlist pages carry _playlist — fall back
+            // to the playlist's owner channel so + Wish works there too (was a 400).
             var ch = (data && data._channel) || {};
+            if (!ch.youtube_id && data && data._playlist) {
+                var pl = data._playlist;
+                ch = { youtube_id: pl.channel_id || pl.playlist_id, title: pl.channel_title || pl.title || 'Playlist',
+                       avatar_url: pl.thumbnail_url };
+            }
             yc.addVideos({ youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url },
                 [ytVideoMap[id] || { youtube_id: id, title: '' }])
                 .then(function (d) { setOn(!!(d && d.success)); if (d && d.success && typeof showToast === 'function') showToast('Added to wishlist', 'success'); })
