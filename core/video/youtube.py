@@ -182,7 +182,9 @@ def _ydl_opts(limit, db=None):
         "extract_flat": True,        # fast: enumerate uploads without per-video format probing
         "skip_download": True,
         "playlistend": int(limit),
-        "user_agent": _UA,
+        # NB: do NOT pin user_agent here — yt-dlp manages its own (current) client
+        # identity; a static UA trips YouTube's heuristics and truncates large
+        # playlist pagination (the reason a fresh ytdl-sub pages further than us).
     }
     opts.update(_cookie_opts())
     return opts
