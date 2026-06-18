@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.context")
+
 
 def _as_dict(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
@@ -440,4 +444,86 @@ def detect_album_info_web(context, artist_context=None):
             force_album=True,
         )
 
-    return None
+    # Last resort: the track matched a SINGLE with no usable album context —
+    # look up the parent ALBUM that actually contains it (gated, fail-safe).
+    return _resolve_single_to_parent_album(context, artist_context)
+
+
+def _resolve_single_to_parent_album(context, artist_context):
+    """A single-matched track -> a promoted album_info for its parent album, or
+    None. GATED by ``metadata_enhancement.single_to_album`` (default OFF — it's a
+    per-import metadata lookup, so it's opt-in). Fail-safe: any miss/error returns
+    None so the track stays exactly as it was matched (never worse than today)."""
+    try:
+        from core.metadata.common import get_config_manager
+        if not get_config_manager().get("metadata_enhancement.single_to_album", False):
+            return None
+    except Exception:
+        return None
+
+    try:
+        source = get_import_source(context)
+        track_info = get_import_track_info(context)
+        original_search = get_import_original_search(context)
+        track_title = (track_info.get("name") or original_search.get("title") or "").strip()
+        artist_name = (extract_artist_name(artist_context)
+                       or get_import_clean_artist(context, default="")).strip()
+        if not source or not track_title or not artist_name:
+            return None
+        artist_id = str(get_import_source_ids(context).get("artist_id") or "")
+
+        from core.metadata.album_tracks import (
+            get_artist_albums_for_source,
+            get_artist_album_tracks,
+        )
+        from core.imports.single_to_album import resolve_single_to_album
+
+        def _acc(o, *ks):
+            for k in ks:
+                v = o.get(k) if isinstance(o, dict) else getattr(o, k, None)
+                if v:
+                    return v
+            return None
+
+        def fetch_candidates():
+            albums = get_artist_albums_for_source(
+                source, artist_id, artist_name=artist_name,
+                album_type="album", limit=20) or []
+            return [{"name": _acc(a, "name", "title"),
+                     "album_type": _acc(a, "album_type") or "album",
+                     "id": _acc(a, "id", "album_id")} for a in albums]
+
+        def fetch_tracks(alb):
+            payload = get_artist_album_tracks(
+                str(alb.get("id") or ""), artist_name=artist_name,
+                album_name=alb.get("name") or "") or {}
+            return [(_acc(t, "title", "name", "track_name") or "")
+                    for t in (payload.get("tracks") or [])]
+
+        album = resolve_single_to_album(
+            track_title,
+            fetch_album_candidates=fetch_candidates,
+            fetch_album_tracks=fetch_tracks)
+        if not album or not album.get("name"):
+            return None
+        logger.info("single->album: re-homed '%s' onto parent album '%s'",
+                    track_title, album["name"])
+        promoted = build_import_album_info(
+            context,
+            album_info={
+                "album_name": album["name"],
+                "track_number": track_info.get("track_number"),
+                "disc_number": track_info.get("disc_number"),
+                "album_image_url": "",
+                "confidence": 0.5,
+            },
+            force_album=True,
+        )
+        # build_import_album_info resolves album_name via get_import_clean_album,
+        # which prefers original_search.album (the SINGLE's name); override it
+        # with the resolved parent album so grouping + tags use the album.
+        promoted["album_name"] = album["name"]
+        return promoted
+    except Exception as e:
+        logger.debug("single->album resolution failed: %s", e)
+        return None
