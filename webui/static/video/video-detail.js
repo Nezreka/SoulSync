@@ -1570,10 +1570,14 @@
         var vids = pl.videos || [];
         ytVideoMap = {};
         vids.forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
+        var total = pl.video_count || vids.length;
+        // YouTube only exposes ~200 of a playlist via browsing — be honest when partial.
+        var note = total > vids.length
+            ? 'Showing the first ' + vids.length + ' of ' + total + ' videos (YouTube limits playlist browsing).' : '';
         var season = { season_number: 1, title: 'Videos', poster_url: ytProx(pl.thumbnail_url),
             episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
         return { kind: 'playlist', source: 'youtube', id: pl.playlist_id, title: pl.title || 'Playlist',
-            overview: '', poster_url: ytProx(pl.thumbnail_url), has_poster: !!pl.thumbnail_url,
+            overview: note, poster_url: ytProx(pl.thumbnail_url), has_poster: !!pl.thumbnail_url,
             backdrop_url: ytProx(pl.thumbnail_url), has_backdrop: !!pl.thumbnail_url,
             genres: pl.channel_title ? [pl.channel_title] : [], handle: null,
             subscriber_count: null, view_count: null, video_count: pl.video_count,
