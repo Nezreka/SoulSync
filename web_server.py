@@ -10044,6 +10044,47 @@ def get_artist_enhanced_detail(artist_id):
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
+
+# ── Re-identify an imported track (#889) ──
+@app.route('/api/reidentify/sources', methods=['GET'])
+def reidentify_sources():
+    """Source tabs for the Re-identify modal — every metadata source with a live
+    client, the active one flagged so the UI selects it by default."""
+    try:
+        from core.imports.rematch_search import available_sources
+        return jsonify({"success": True, "sources": available_sources()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "sources": []}), 500
+
+
+@app.route('/api/reidentify/search', methods=['GET'])
+def reidentify_search():
+    """Search one metadata source for the releases a track appears on.
+
+    Query params: ``source`` (defaults to the active source), ``q`` (the query),
+    ``limit``. Returns display rows — the SAME song across single/EP/album, each
+    with a type badge — for the user to pick. album_id is resolved later, only for
+    the chosen row."""
+    try:
+        from core.imports.rematch_search import available_sources, search_release_candidates
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        source = (request.args.get('source') or '').strip()
+        if not source:
+            actives = [s for s in available_sources() if s.get('active')]
+            source = actives[0]['source'] if actives else 'spotify'
+        try:
+            limit = max(1, min(50, int(request.args.get('limit', 25))))
+        except (TypeError, ValueError):
+            limit = 25
+        rows = search_release_candidates(source, query, limit=limit)
+        return jsonify({"success": True, "source": source, "results": rows})
+    except Exception as e:
+        logger.error(f"Re-identify search error: {e}")
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
 @app.route('/api/library/artist/<artist_id>/quality-analysis')
 def get_artist_quality_analysis(artist_id):
     """Analyze track quality for an artist — returns tier classification for each track."""
