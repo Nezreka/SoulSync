@@ -112,6 +112,9 @@ _COLUMN_MIGRATIONS = [
     # which source produced a channel's dates — NULL on legacy (pre-InnerTube) rows
     # so they re-enrich once and upgrade to the full InnerTube catalog.
     ("youtube_channel_enrichment", "method", "TEXT"),
+    # per-video duration + approximate view count on the remembered catalog
+    ("youtube_channel_videos", "duration", "TEXT"),
+    ("youtube_channel_videos", "view_count", "INTEGER"),
 ]
 
 
@@ -2093,17 +2096,20 @@ class VideoDatabase:
         """Remember a channel's videos (id/title/thumbnail). Upsert — refreshes
         title/thumbnail, never deletes (older pages stay remembered)."""
         cid = str(channel_id or "").strip()
-        rows = [(cid, v.get("youtube_id"), v.get("title"), v.get("thumbnail_url"))
+        rows = [(cid, v.get("youtube_id"), v.get("title"), v.get("thumbnail_url"),
+                 v.get("duration"), v.get("view_count"))
                 for v in (videos or []) if isinstance(v, dict) and v.get("youtube_id")]
         if not cid or not rows:
             return 0
         conn = self._get_connection()
         try:
             conn.executemany(
-                "INSERT INTO youtube_channel_videos (channel_id, youtube_id, title, thumbnail_url) "
-                "VALUES (?,?,?,?) ON CONFLICT(channel_id, youtube_id) DO UPDATE SET "
+                "INSERT INTO youtube_channel_videos (channel_id, youtube_id, title, thumbnail_url, "
+                "duration, view_count) VALUES (?,?,?,?,?,?) ON CONFLICT(channel_id, youtube_id) DO UPDATE SET "
                 "title=COALESCE(excluded.title, title), "
                 "thumbnail_url=COALESCE(excluded.thumbnail_url, thumbnail_url), "
+                "duration=COALESCE(excluded.duration, duration), "
+                "view_count=COALESCE(excluded.view_count, view_count), "
                 "cached_at=CURRENT_TIMESTAMP", rows)
             conn.commit()
             return len(rows)
@@ -2119,14 +2125,14 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT v.youtube_id, v.title, v.thumbnail_url, d.published_at "
+                "SELECT v.youtube_id, v.title, v.thumbnail_url, v.duration, v.view_count, d.published_at "
                 "FROM youtube_channel_videos v "
                 "LEFT JOIN youtube_video_dates d ON d.youtube_id = v.youtube_id "
                 "WHERE v.channel_id=? "
                 "ORDER BY (d.published_at IS NULL), d.published_at DESC, v.rowid",
                 (cid,)).fetchall()
-            return [{"youtube_id": r["youtube_id"], "title": r["title"],
-                     "thumbnail_url": r["thumbnail_url"], "published_at": r["published_at"]}
+            return [{"youtube_id": r["youtube_id"], "title": r["title"], "thumbnail_url": r["thumbnail_url"],
+                     "duration": r["duration"], "view_count": r["view_count"], "published_at": r["published_at"]}
                     for r in rows]
         finally:
             conn.close()

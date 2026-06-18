@@ -530,11 +530,50 @@ def _lockup_thumb(lk):
     return None
 
 
+_DUR_RE = re.compile(r"^\d{1,2}:\d{2}(?::\d{2})?$")               # 12:34 / 1:02:03 (the overlay badge)
+_VIEWS_RE = re.compile(r"([\d.,]+)\s*([KMB]?)\s+views?", re.I)    # "2.6M views", "1,234 views"
+_VIEW_MULT = {"": 1, "K": 1e3, "M": 1e6, "B": 1e9}
+
+
+def _json_all_strings(obj, acc):
+    if isinstance(obj, dict):
+        for v in obj.values():
+            _json_all_strings(v, acc)
+    elif isinstance(obj, list):
+        for v in obj:
+            _json_all_strings(v, acc)
+    elif isinstance(obj, str):
+        acc.append(obj)
+    return acc
+
+
+def parse_view_count(text):
+    """'2.6M views' → 2600000, '1,234 views' → 1234, else None (approximate)."""
+    m = _VIEWS_RE.search(text or "")
+    if not m:
+        return None
+    try:
+        return int(float(m.group(1).replace(",", "")) * _VIEW_MULT.get(m.group(2).upper(), 1))
+    except ValueError:
+        return None
+
+
+def _lockup_duration(lk):
+    """The duration overlay badge ('12:34') from a lockupViewModel, or None."""
+    return next((s for s in _json_all_strings(lk, []) if _DUR_RE.match(s)), None)
+
+
+def _lockup_views(lk):
+    """Approximate view count parsed from the lockup's metadata text, or None."""
+    return next((v for v in (parse_view_count(s) for s in _json_content_strings(lk.get("metadata"), []))
+                 if v is not None), None)
+
+
 def innertube_parse_video_items(obj):
     """Full per-video metadata for VIDEO lockups in an InnerTube browse/continuation
-    response: [{youtube_id, title, thumbnail_url, relative}]. Same source as
-    innertube_parse_videos but keeps title + thumbnail so the channel page can list
-    the whole catalog (not just date them)."""
+    response: [{youtube_id, title, thumbnail_url, duration, view_count, relative}].
+    Same source as innertube_parse_videos but keeps the title/thumbnail/duration/
+    views so the channel page can list the whole catalog (not just date them)."""
     out, seen = [], set()
     for lk in _json_find_all(obj, "lockupViewModel", []):
         if not isinstance(lk, dict) or lk.get("contentType") != "LOCKUP_CONTENT_TYPE_VIDEO":
@@ -544,8 +583,8 @@ def innertube_parse_video_items(obj):
             continue
         seen.add(vid)
         rel = next((t for t in _json_content_strings(lk.get("metadata"), []) if _REL_RE.search(t)), None)
-        out.append({"youtube_id": vid, "title": _lockup_title(lk),
-                    "thumbnail_url": _lockup_thumb(lk), "relative": rel})
+        out.append({"youtube_id": vid, "title": _lockup_title(lk), "thumbnail_url": _lockup_thumb(lk),
+                    "duration": _lockup_duration(lk), "view_count": _lockup_views(lk), "relative": rel})
     return out
 
 

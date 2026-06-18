@@ -288,6 +288,8 @@ CREATE TABLE IF NOT EXISTS youtube_channel_videos (
     youtube_id    TEXT NOT NULL,
     title         TEXT,
     thumbnail_url TEXT,
+    duration      TEXT,                  -- overlay badge, e.g. "12:34"
+    view_count    INTEGER,               -- approximate (parsed from "2.6M views")
     cached_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (channel_id, youtube_id)
 );

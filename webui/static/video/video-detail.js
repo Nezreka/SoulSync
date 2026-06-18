@@ -942,11 +942,13 @@
         var still = ep.still_url
             ? '<img class="vd-ep-still" src="' + esc(ep.still_url) + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">'
             : '';
+        var dur = ep.yt_duration ? '<span class="vd-ep-dur">' + esc(ep.yt_duration) + '</span>' : '';
         var meta = [];
+        if (ep.view_count) { var yc = window.VideoYoutube; meta.push((yc ? yc.compactCount(ep.view_count) : ep.view_count) + ' views'); }
         if (ep.air_date) meta.push(fmtDate(ep.air_date));
         var wished = !!ep.owned;
         return '<div class="vd-ep vd-ep--yt" data-vd-ep-key="' + key + '" data-vd-yt-vid="' + esc(ep.youtube_id) + '">' +
-            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span></div>' +
+            '<div class="vd-ep-thumb">' + still + '<span class="vd-ep-thumb-ic">▶</span>' + dur + '</div>' +
             '<div class="vd-ep-info"><div class="vd-ep-top"><span class="vd-ep-title">' +
             esc(ep.title || 'Untitled') + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
@@ -1331,7 +1333,8 @@
             var eps = vids.map(function (v, i) {
                 return { episode_number: i + 1, title: v.title, overview: v.description || '',
                     air_date: v.published_at, owned: !!v.wished, has_still: false,
-                    still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id };
+                    still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id,
+                    yt_duration: v.duration || '', view_count: v.view_count || 0 };
             });
             var wishedN = eps.filter(function (e) { return e.owned; }).length;
             // No upload dates (flat listing omits them) → a single "All Videos"
@@ -1378,8 +1381,10 @@
                     (resp.videos || []).forEach(function (v) {
                         if (!v.youtube_id) return;
                         var ex = byId[v.youtube_id];
-                        if (ex) {                                   // already shown → backfill a missing date
+                        if (ex) {                                   // already shown → backfill missing fields
                             if (!ex.published_at && v.published_at) { ex.published_at = v.published_at; changed = true; }
+                            if (!ex.duration && v.duration) { ex.duration = v.duration; changed = true; }
+                            if (!ex.view_count && v.view_count) { ex.view_count = v.view_count; changed = true; }
                         } else {                                    // older video → add it
                             byId[v.youtube_id] = v; data._channel.videos.push(v); changed = true;
                         }
