@@ -26,6 +26,7 @@
     var wired = false;
     var trendingCache = null;  // null = not fetched; [] = fetched/empty
     var lastChannel = null;    // resolved YouTube channel awaiting a Follow
+    var lastPlaylist = null;   // resolved YouTube playlist awaiting Add-to-watchlist
 
     function $(sel) { return document.querySelector(sel); }
     function esc(s) {
@@ -188,8 +189,8 @@
         }
     }
 
-    // A pasted YouTube channel link → resolve + render a Follow chip instead of
-    // a normal title search (the obscure-channel entry point).
+    // A pasted YouTube channel OR playlist link → resolve + render a Follow chip
+    // instead of a normal title search (the obscure-channel / playlist entry point).
     function runChannel(ref) {
         var seq = ++reqSeq;
         show('[data-video-search-loading]', true);
@@ -197,16 +198,22 @@
             if (seq !== reqSeq) return;
             show('[data-video-search-loading]', false);
             show('[data-video-search-hint]', false);
+            show('[data-video-search-empty]', false);
             var host = $('[data-video-search-results]'); if (!host) return;
-            if (!d || !d.success || !d.channel) {
-                show('[data-video-search-empty]', false);
-                host.innerHTML = '<div class="vsr-group"><div class="vyt-miss">' +
-                    'Couldn’t read that channel. Paste a channel link like ' +
-                    '<code>youtube.com/@handle</code>.</div></div>';
+            if (d && d.success && d.playlist) {
+                lastPlaylist = d.playlist; lastChannel = null;
+                host.innerHTML = '<div class="vsr-group"><h2 class="vsr-group-title">' +
+                    '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube playlist</h2>' +
+                    '<div class="vyt-search">' + VideoYoutube.playlistCard(d.playlist, d.following) + '</div></div>';
                 return;
             }
-            lastChannel = d.channel;
-            show('[data-video-search-empty]', false);
+            if (!d || !d.success || !d.channel) {
+                host.innerHTML = '<div class="vsr-group"><div class="vyt-miss">' +
+                    'Couldn’t read that link. Paste a channel link like ' +
+                    '<code>youtube.com/@handle</code> or a playlist link.</div></div>';
+                return;
+            }
+            lastChannel = d.channel; lastPlaylist = null;
             host.innerHTML = '<div class="vsr-group"><h2 class="vsr-group-title">' +
                 '<span class="vsr-group-ic" aria-hidden="true">▶</span>YouTube channel</h2>' +
                 '<div class="vyt-search">' + VideoYoutube.searchCard(d.channel, d.following) + '</div></div>';
@@ -226,7 +233,7 @@
             showIdle();                               // back to the trending rail
             return;
         }
-        if (window.VideoYoutube && VideoYoutube.isChannelRef(q)) {
+        if (window.VideoYoutube && (VideoYoutube.isChannelRef(q) || VideoYoutube.isPlaylistRef(q))) {
             timer = setTimeout(function () { runChannel(q); }, 360);
             return;
         }
@@ -249,6 +256,28 @@
                     btn.classList.add('vyt-follow--on'); btn.innerHTML = '✓ Following';
                     if (typeof showToast === 'function')
                         showToast('Added ' + lastChannel.title + ' to watchlist', 'success');
+                }
+                done();
+            }).catch(function () { btn.disabled = false; });
+        }
+    }
+
+    // Add / remove the resolved playlist chip to the watchlist.
+    function togglePlaylistFollow(btn) {
+        if (!lastPlaylist) return;
+        var on = btn.classList.contains('vyt-follow--on');
+        btn.disabled = true;
+        var done = function () { btn.disabled = false; document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed')); };
+        if (on) {
+            VideoYoutube.unfollowPlaylist(lastPlaylist.playlist_id).then(function () {
+                btn.classList.remove('vyt-follow--on'); btn.innerHTML = '+ Follow'; done();
+            }).catch(function () { btn.disabled = false; });
+        } else {
+            VideoYoutube.followPlaylist(lastPlaylist).then(function (d) {
+                if (d && d.success) {
+                    btn.classList.add('vyt-follow--on'); btn.innerHTML = '✓ Following';
+                    if (typeof showToast === 'function')
+                        showToast('Added ' + lastPlaylist.title + ' to watchlist', 'success');
                 }
                 done();
             }).catch(function () { btn.disabled = false; });
@@ -280,11 +309,20 @@
                 if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
                 var fb = e.target.closest('[data-vyt-follow]');
                 if (fb && results.contains(fb)) { e.preventDefault(); toggleFollow(fb); return; }
+                var pfb = e.target.closest('[data-vyt-follow-playlist]');
+                if (pfb && results.contains(pfb)) { e.preventDefault(); togglePlaylistFollow(pfb); return; }
                 var ytc = e.target.closest('[data-vyt-open-channel]');
                 if (ytc && results.contains(ytc)) {
                     e.preventDefault();
                     document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
                         { detail: { kind: 'channel', source: 'youtube', id: ytc.getAttribute('data-vyt-open-channel') } }));
+                    return;
+                }
+                var ytp = e.target.closest('[data-vyt-playlist]');   // the chip (not its button) → open detail
+                if (ytp && results.contains(ytp)) {
+                    e.preventDefault();
+                    document.dispatchEvent(new CustomEvent('soulsync:video-open-detail',
+                        { detail: { kind: 'playlist', source: 'youtube', id: ytp.getAttribute('data-vyt-playlist') } }));
                     return;
                 }
                 var card = e.target.closest('[data-vsr-open]');

@@ -164,13 +164,19 @@
 
         var meta = [];
         if (d.source === 'youtube') {
-            meta.push('<span class="vd-status vd-status--yt">YouTube</span>');
+            var isPl = d.kind === 'playlist';
+            meta.push('<span class="vd-status vd-status--yt">' + (isPl ? 'Playlist' : 'YouTube') + '</span>');
             var yc = window.VideoYoutube;
-            var subs = yc && yc.compactCount(d.subscriber_count); if (subs) meta.push('<span>' + subs + ' subscribers</span>');
-            // NB: no "N videos" — YouTube doesn't expose a reliable total, and what we
-            // fetch is just the recent page (the cap), so showing it would mislead.
-            var views = yc && yc.compactCount(d.view_count); if (views) meta.push('<span>' + views + ' views</span>');
-            if (d.handle) meta.push('<span>' + esc(d.handle) + '</span>');
+            if (isPl) {
+                // A playlist IS a known, fixed list, so its count is real (unlike a
+                // channel's total). Owner shows as a genre tag below.
+                if (d.video_count != null) meta.push('<span>' + esc(d.video_count) + ' videos</span>');
+            } else {
+                var subs = yc && yc.compactCount(d.subscriber_count); if (subs) meta.push('<span>' + subs + ' subscribers</span>');
+                // NB: no "N videos" for a CHANNEL — YouTube doesn't expose a reliable total.
+                var views = yc && yc.compactCount(d.view_count); if (views) meta.push('<span>' + views + ' views</span>');
+                if (d.handle) meta.push('<span>' + esc(d.handle) + '</span>');
+            }
             var mm = q('[data-vd-meta]'); if (mm) mm.innerHTML = meta.join('');
             renderActions(d);
             var ll = q('[data-vd-links]'); if (ll) ll.innerHTML = '';
@@ -869,6 +875,7 @@
     function renderViewToggle() {
         var host = q('[data-vd-view-toggle]');
         if (!host) return;
+        if (data && data.kind === 'playlist') { host.innerHTML = ''; return; }   // flat list — no view toggle
         host.innerHTML = VIEWS.map(function (v) {
             return '<button class="vd-vt-btn' + (v.id === seasonView ? ' vd-vt-btn--active' : '') +
                 '" type="button" data-vd-view="' + v.id + '" title="' + v.label + '">' +
@@ -879,6 +886,7 @@
     function renderSeasonNav() {
         var host = q('[data-vd-season-nav]');
         if (!host || !data || !data.seasons.length) { if (host) host.innerHTML = ''; return; }
+        if (data.kind === 'playlist') { host.innerHTML = ''; return; }   // flat list — no season nav
         if (data.source === 'youtube') {   // channels: search + sort controls above the
             // year nav — which still honours the view toggle (rail posters, timeline,
             // tabs, list). Flat mode (search / most-viewed / longest) hides the nav.
@@ -1539,6 +1547,51 @@
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
     }
 
+    // A playlist → a single FLAT season in the curator's order (a partial set, so
+    // no year-grouping, no season nav, no catalog streaming).
+    function ytPlaylistToShow(resp) {
+        var pl = resp.playlist || {};
+        var vids = pl.videos || [];
+        ytVideoMap = {};
+        vids.forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
+        var season = { season_number: 1, title: 'Videos', poster_url: ytProx(pl.thumbnail_url),
+            episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
+        return { kind: 'playlist', source: 'youtube', id: pl.playlist_id, title: pl.title || 'Playlist',
+            overview: '', poster_url: ytProx(pl.thumbnail_url), has_poster: !!pl.thumbnail_url,
+            backdrop_url: ytProx(pl.thumbnail_url), has_backdrop: !!pl.thumbnail_url,
+            genres: pl.channel_title ? [pl.channel_title] : [], handle: null,
+            subscriber_count: null, view_count: null, video_count: pl.video_count,
+            following: !!resp.following, _playlist: pl, seasons: [season], season_count: 1,
+            episode_total: vids.length, episode_owned: 0 };
+    }
+
+    function loadPlaylist(id) {
+        currentKind = 'show'; currentSource = 'youtube';
+        if (currentId !== id) artAttemptedFor = null;
+        currentId = id;
+        if (!root()) return;
+        ytFilter = { q: '', sort: 'newest' };
+        ytCancelLoad();
+        showLoading(true); resetExtras(); showEpSyncing(false);
+        ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
+        var r0 = root(); if (r0) r0.style.removeProperty('--vd-accent-rgb');
+        ytResetPlaylists();
+        fetch('/api/video/youtube/playlist/' + encodeURIComponent(id), { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (resp) {
+                showLoading(false);
+                if (!resp || !resp.success || !resp.playlist) { setText('[data-vd-title]', 'Playlist unavailable'); return; }
+                if (currentId !== id) return;
+                data = ytPlaylistToShow(resp); menuOpen = false; missingOnly = false;
+                selectedSeason = 1;
+                var mt = q('[data-vd-missing-toggle]'); if (mt) { mt.hidden = true; mt.classList.remove('vd-missing-toggle--on'); }
+                renderBillboard(data); renderViewToggle(); renderSeasonNav(); renderEpisodes();
+                var sub = document.querySelector('.video-subpage[data-video-subpage="video-show-detail"]');
+                if (sub) sub.scrollTop = 0;
+            })
+            .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load playlist'); });
+    }
+
     function ytFindEp(id) {
         if (!data || !data.seasons) return null;
         for (var i = 0; i < data.seasons.length; i++) {
@@ -1655,6 +1708,7 @@
         if (e.detail.kind === 'movie') loadMovie(e.detail.id, src);
         else if (e.detail.kind === 'show') loadShow(e.detail.id, src);
         else if (e.detail.kind === 'channel') loadChannel(e.detail.id);
+        else if (e.detail.kind === 'playlist') loadPlaylist(e.detail.id);
         // 'person' is handled by video-person.js (same event).
     }
 

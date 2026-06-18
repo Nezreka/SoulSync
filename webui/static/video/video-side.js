@@ -41,7 +41,7 @@
         var p = pathname.slice(DETAIL_BASE.length).split('/').filter(Boolean);
         if (p.length < 3) return null;
         var kind = p[1];
-        if (kind === 'channel') {   // YouTube channel ids are strings (UC…), not numeric
+        if (kind === 'channel' || kind === 'playlist') {   // YouTube ids are strings (UC… / PL…), not numeric
             return { source: decodeURIComponent(p[0]), kind: kind, id: decodeURIComponent(p[2]) };
         }
         var id = parseInt(p[2], 10);
@@ -354,6 +354,7 @@
             else if (d.kind === 'show') navigate('video-show-detail');
             else if (d.kind === 'person') navigate('video-person-detail');
             else if (d.kind === 'channel') navigate('video-show-detail');   // channels reuse the show detail page
+            else if (d.kind === 'playlist') navigate('video-show-detail');   // playlists too (flat list)
             else return;
             if (d._replace) {
                 // A redirect (e.g. a tmdb link that's actually owned) → replace the

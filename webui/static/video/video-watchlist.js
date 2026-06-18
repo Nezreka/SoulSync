@@ -30,6 +30,18 @@
             '</span></div></div>';
     }
 
+    // Followed playlists sit beside channels in the same grid; the ✕ unfollows.
+    function playlistCard(pl) {
+        var av = window.VideoYoutube
+            ? VideoYoutube.avatar({ poster_url: pl.poster_url, title: pl.title }, 'vyt-wcard-avatar') : '';
+        return '<div class="vyt-wcard vyt-wcard--pl" data-vyt-open-playlist="' + esc(pl.playlist_id) + '" title="Open playlist">' +
+            '<div class="vyt-wcard-art">' + av + '<span class="vyt-wcard-pl-ic" aria-hidden="true">▤</span></div>' +
+            '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow-playlist="' + esc(pl.playlist_id) +
+                '" title="Unfollow">&#10005;</button>' +
+            '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(pl.title) + '">' +
+                esc(pl.title) + '</span><span class="vyt-wcard-meta">Playlist</span></div></div>';
+    }
+
     function $(s, r) { return (r || document).querySelector(s); }
     function esc(s) {
         return String(s == null ? '' : s)
@@ -122,7 +134,7 @@
         var grid = $('[data-vwlp-grid]');
         if (state.tab === 'channel') {
             grid.classList.add('vyt-wgrid');
-            grid.innerHTML = items.map(channelCard).join('');
+            grid.innerHTML = items.map(function (it) { return it.playlist_id ? playlistCard(it) : channelCard(it); }).join('');
             return;
         }
         grid.classList.remove('vyt-wgrid');
@@ -144,12 +156,12 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (ld) ld.classList.add('hidden');
-                var chans = (d && d.channels) || [];
-                state.channelCount = chans.length;
-                var cc = $('[data-vwlp-count-channel]'); if (cc) cc.textContent = chans.length;
-                render(chans);
+                var all = ((d && d.channels) || []).concat((d && d.playlists) || []);   // channels + playlists
+                state.channelCount = all.length;
+                var cc = $('[data-vwlp-count-channel]'); if (cc) cc.textContent = all.length;
+                render(all);
                 updatePagination(null);
-                updateEmpty(chans.length);
+                updateEmpty(all.length);
             })
             .catch(function () { if (ld) ld.classList.add('hidden'); render([]); updateEmpty(0); });
     }
@@ -253,12 +265,29 @@
             }).catch(function () { unf.disabled = false; });
             return;
         }
+        var punf = e.target.closest('[data-vyt-wunfollow-playlist]');
+        if (punf && window.VideoYoutube) {
+            e.preventDefault(); e.stopPropagation();
+            punf.disabled = true;
+            VideoYoutube.unfollowPlaylist(punf.getAttribute('data-vyt-wunfollow-playlist')).then(function () {
+                if (typeof showToast === 'function') showToast('Unfollowed', 'info');
+                load();
+            }).catch(function () { punf.disabled = false; });
+            return;
+        }
         if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var ch = e.target.closest('[data-vyt-open-channel]');
         if (ch) {
             e.preventDefault();
             document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
                 detail: { kind: 'channel', source: 'youtube', id: ch.getAttribute('data-vyt-open-channel') } }));
+            return;
+        }
+        var pl = e.target.closest('[data-vyt-open-playlist]');
+        if (pl) {
+            e.preventDefault();
+            document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                detail: { kind: 'playlist', source: 'youtube', id: pl.getAttribute('data-vyt-open-playlist') } }));
             return;
         }
         var card = e.target.closest('[data-vwlp-open]');
