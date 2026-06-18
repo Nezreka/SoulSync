@@ -879,9 +879,16 @@
     function renderSeasonNav() {
         var host = q('[data-vd-season-nav]');
         if (!host || !data || !data.seasons.length) { if (host) host.innerHTML = ''; return; }
-        if (data.source === 'youtube') {   // channels: search + sort controls, then year pills (hidden in flat mode)
-            host.className = 'vd-season-nav vd-season-nav--yt';
-            host.innerHTML = ytControlsHTML() + (ytFlatMode() ? '' : pillsHTML());
+        if (data.source === 'youtube') {   // channels: search + sort controls above the
+            // year nav — which still honours the view toggle (rail posters, timeline,
+            // tabs, list). Flat mode (search / most-viewed / longest) hides the nav.
+            host.className = 'vd-season-nav vd-season-nav--yt vd-season-nav--' + seasonView;
+            var nav = ytFlatMode() ? ''
+                : seasonView === 'rail' ? railHTML()
+                : seasonView === 'timeline' ? timelineHTML()
+                : seasonView === 'pills' ? pillsHTML()
+                : dropdownHTML();
+            host.innerHTML = ytControlsHTML() + nav;
             return;
         }
         host.className = 'vd-season-nav vd-season-nav--' + seasonView;
