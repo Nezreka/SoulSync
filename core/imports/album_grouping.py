@@ -25,6 +25,10 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from utils.logging_config import get_logger
+
+logger = get_logger("imports.album_grouping")
+
 # Album source-id columns this grouping may key on. An allowlist (not arbitrary
 # interpolation) — the column name IS spliced into SQL, so it must be a known,
 # trusted identifier. Mirrors get_library_source_id_columns()' 'album' values.
@@ -78,12 +82,12 @@ def find_existing_soulsync_album_id(
             row = cursor.fetchone()
             if row:
                 return row[0]
-        except Exception:
+        except Exception as exc:
             # That source has no dedicated album column on this DB (e.g. Deezer
             # doesn't split per-entity id columns) — fall through to the name
             # match rather than break the import. Mirrors the guarded source-id
             # UPDATE the caller already does on insert.
-            pass
+            logger.debug("album source-id lookup skipped (%s): %s", album_source_col, exc)
 
     cursor.execute(
         "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? "
