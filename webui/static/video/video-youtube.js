@@ -127,8 +127,11 @@
                     '<span class="vyt-chip-title">' + esc(pl.title) + '</span>' +
                     (sub.length ? '<span class="vyt-chip-sub">' + sub.join(' · ') + '</span>' : '') +
                 '</div>' +
-                '<button class="vyt-follow' + (following ? ' vyt-follow--on' : '') + '" type="button" ' +
-                'data-vyt-follow-playlist>' + (following ? '✓ Following' : '+ Follow') + '</button>' +
+                '<button class="library-artist-watchlist-btn' + (following ? ' watching' : '') + '" type="button" ' +
+                'data-vyt-follow-playlist>' +
+                    '<span class="watchlist-icon">' + (following ? '✓' : '＋') + '</span>' +
+                    '<span class="watchlist-text">' + (following ? 'In Watchlist' : 'Add to Watchlist') + '</span>' +
+                '</button>' +
             '</div></div>';
     }
 
