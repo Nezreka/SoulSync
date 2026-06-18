@@ -500,3 +500,20 @@ def test_innertube_channel_videos_page_guards():
     # a continuation token works even without a UC id (it encodes the channel itself)
     assert yt.innertube_channel_videos_page("", continuation="TOK",
                                             post=lambda p: _page([_lk_item("v9", "1 day ago")]))["videos"]
+
+
+def test_innertube_channel_catalog_pages_until_no_token():
+    now = date(2026, 6, 17)
+    pages = [_page([_lk_item("v1", "1 year ago"), _lk_item("v2", "2 years ago")], token="TOK"),
+             _page([_lk_item("v3", "5 days ago")])]   # no token → stop
+    seq = {"n": 0}
+
+    def post(payload):
+        i = seq["n"]; seq["n"] += 1
+        return pages[i]
+
+    cat = yt.innertube_channel_catalog("UCxxxx", pages=5, now=now, post=post)
+    assert [v["youtube_id"] for v in cat] == ["v1", "v2", "v3"]          # full list, in order
+    assert cat[0]["title"] == "Title v1" and cat[2]["published_at"] == "2026-06-12"
+    assert seq["n"] == 2                                                 # stopped when the token ran out
+    assert yt.innertube_channel_catalog("not-uc", post=lambda p: None) == []

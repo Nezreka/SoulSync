@@ -13,30 +13,36 @@ def db(tmp_path):
     return VideoDatabase(database_path=str(tmp_path / "video_library.db"))
 
 
-def test_enrich_caches_bulk_dates_and_marks_done(db, monkeypatch):
+def test_enrich_remembers_catalog_meta_and_dates(db, monkeypatch):
     import core.video.youtube as yt
-    # InnerTube (primary) covers everything → per-video fallback must NOT run
-    monkeypatch.setattr(yt, "innertube_channel_dates",
-                        lambda cid, *a, **k: {"v1": "2024-06-01", "v2": "2023-02-02"})
+    # InnerTube catalog (primary) covers everything → per-video fallback must NOT run
+    monkeypatch.setattr(yt, "innertube_channel_catalog", lambda cid, *a, **k: [
+        {"youtube_id": "v1", "title": "A", "thumbnail_url": "t1", "published_at": "2024-06-01"},
+        {"youtube_id": "v2", "title": "B", "thumbnail_url": "t2", "published_at": "2023-02-02"}])
+    monkeypatch.setattr(yt, "resolve_channel", lambda url, **k: {"youtube_id": "UCx", "title": "X", "avatar_url": "a.jpg"})
     monkeypatch.setattr(yt, "video_detail", lambda vid: (_ for _ in ()).throw(AssertionError("no fallback")))
     db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "v1", "title": "A"}])
 
     e = YoutubeDateEnricher(db_factory=lambda: db)
     e._enrich("UCx")
     assert db.get_video_dates(["v1", "v2"]) == {"v1": "2024-06-01", "v2": "2023-02-02"}
+    # the LIST + METADATA got remembered, not just the dates
+    remembered = db.get_channel_videos("UCx")
+    assert {v["youtube_id"] for v in remembered} == {"v1", "v2"}
+    assert db.get_channel_meta("UCx")["avatar_url"] == "a.jpg"
     assert db.channel_dates_enriched_recently("UCx") is True
     # already enriched → second pass is a no-op (no fetch)
-    monkeypatch.setattr(yt, "innertube_channel_dates", lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-swept")))
+    monkeypatch.setattr(yt, "innertube_channel_catalog", lambda *a, **k: (_ for _ in ()).throw(AssertionError("re-swept")))
     e._enrich("UCx")
 
 
 def test_enrich_falls_back_to_per_video_when_bulk_empty(db, monkeypatch):
     import core.video.youtube as yt
-    monkeypatch.setattr(yt, "innertube_channel_dates", lambda cid, *a, **k: {})   # InnerTube empty
-    monkeypatch.setattr(yt, "proxy_channel_dates", lambda cid, *a, **k: {})       # no proxy either
+    monkeypatch.setattr(yt, "innertube_channel_catalog", lambda cid, *a, **k: [])  # InnerTube empty
+    monkeypatch.setattr(yt, "proxy_channel_dates", lambda cid, *a, **k: {})        # no proxy either
     # flat resolve adds a recent upload r1 to the date-fallback set (besides wished w1/w2)
     monkeypatch.setattr(yt, "resolve_channel",
-                        lambda url, **k: {"videos": [{"youtube_id": "r1", "title": "Recent"}]})
+                        lambda url, **k: {"youtube_id": "UCx", "videos": [{"youtube_id": "r1", "title": "Recent"}]})
     monkeypatch.setattr(yt, "video_detail",
                         lambda vid: {"youtube_id": vid, "published_at": "2022-03-03"} if vid in ("w1", "r1") else None)
     import core.video.youtube_enrichment as mod

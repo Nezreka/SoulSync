@@ -2088,6 +2088,97 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── Remembered channel catalog + metadata (cache-first channel pages) ──────
+    def cache_channel_videos(self, channel_id, videos) -> int:
+        """Remember a channel's videos (id/title/thumbnail). Upsert — refreshes
+        title/thumbnail, never deletes (older pages stay remembered)."""
+        cid = str(channel_id or "").strip()
+        rows = [(cid, v.get("youtube_id"), v.get("title"), v.get("thumbnail_url"))
+                for v in (videos or []) if isinstance(v, dict) and v.get("youtube_id")]
+        if not cid or not rows:
+            return 0
+        conn = self._get_connection()
+        try:
+            conn.executemany(
+                "INSERT INTO youtube_channel_videos (channel_id, youtube_id, title, thumbnail_url) "
+                "VALUES (?,?,?,?) ON CONFLICT(channel_id, youtube_id) DO UPDATE SET "
+                "title=COALESCE(excluded.title, title), "
+                "thumbnail_url=COALESCE(excluded.thumbnail_url, thumbnail_url), "
+                "cached_at=CURRENT_TIMESTAMP", rows)
+            conn.commit()
+            return len(rows)
+        finally:
+            conn.close()
+
+    def get_channel_videos(self, channel_id) -> list:
+        """The remembered video list with dates merged from youtube_video_dates,
+        newest first (undated last). [] if nothing is cached for the channel."""
+        cid = str(channel_id or "").strip()
+        if not cid:
+            return []
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT v.youtube_id, v.title, v.thumbnail_url, d.published_at "
+                "FROM youtube_channel_videos v "
+                "LEFT JOIN youtube_video_dates d ON d.youtube_id = v.youtube_id "
+                "WHERE v.channel_id=? "
+                "ORDER BY (d.published_at IS NULL), d.published_at DESC, v.rowid",
+                (cid,)).fetchall()
+            return [{"youtube_id": r["youtube_id"], "title": r["title"],
+                     "thumbnail_url": r["thumbnail_url"], "published_at": r["published_at"]}
+                    for r in rows]
+        finally:
+            conn.close()
+
+    def cache_channel_meta(self, channel_id, meta) -> None:
+        """Remember a channel's header metadata (avatar/subs/tags/…) for instant re-open."""
+        cid = str(channel_id or "").strip()
+        if not cid or not isinstance(meta, dict):
+            return
+        import json
+        tags = meta.get("tags")
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO youtube_channel_meta (channel_id, title, handle, description, "
+                "avatar_url, banner_url, subscriber_count, view_count, tags, cached_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(channel_id) DO UPDATE SET "
+                "title=COALESCE(excluded.title, title), handle=COALESCE(excluded.handle, handle), "
+                "description=COALESCE(excluded.description, description), "
+                "avatar_url=COALESCE(excluded.avatar_url, avatar_url), "
+                "banner_url=COALESCE(excluded.banner_url, banner_url), "
+                "subscriber_count=COALESCE(excluded.subscriber_count, subscriber_count), "
+                "view_count=COALESCE(excluded.view_count, view_count), "
+                "tags=COALESCE(excluded.tags, tags), cached_at=CURRENT_TIMESTAMP",
+                (cid, meta.get("title"), meta.get("handle"), meta.get("description"),
+                 meta.get("avatar_url"), meta.get("banner_url"),
+                 meta.get("subscriber_count"), meta.get("view_count"),
+                 json.dumps(tags) if tags else None))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_channel_meta(self, channel_id):
+        """The remembered channel metadata dict (tags decoded), or None."""
+        cid = str(channel_id or "").strip()
+        if not cid:
+            return None
+        import json
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT * FROM youtube_channel_meta WHERE channel_id=?", (cid,)).fetchone()
+            if not r:
+                return None
+            d = dict(r)
+            try:
+                d["tags"] = json.loads(d["tags"]) if d.get("tags") else []
+            except (ValueError, TypeError):
+                d["tags"] = []
+            return d
+        finally:
+            conn.close()
+
     def youtube_wishlist_counts(self) -> dict:
         """{'channel': n distinct channels, 'video': n videos} in the wishlist."""
         conn = self._get_connection()

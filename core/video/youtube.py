@@ -575,6 +575,31 @@ def innertube_channel_videos_page(channel_id, continuation=None, now=None, post=
     return {"videos": videos, "continuation": innertube_continuation(j)}
 
 
+def innertube_channel_catalog(channel_id, pages=_INNERTUBE_PAGES, now=None, post=None):
+    """A channel's video catalog (list + approximate dates) via InnerTube, up to
+    ``pages`` pages: [{youtube_id, title, thumbnail_url, published_at}]. Like
+    innertube_channel_dates but keeps title/thumbnail so callers can REMEMBER the
+    whole list, not just date it. Bounded + throttled; [] on any failure."""
+    cid = str(channel_id or "").strip()
+    if not cid.startswith("UC"):
+        return []
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    out, seen, token = [], set(), None
+    for _ in range(max(1, pages)):
+        page = innertube_channel_videos_page(cid, continuation=token, now=now, post=post)
+        for v in page.get("videos") or []:
+            if v.get("youtube_id") and v["youtube_id"] not in seen:
+                seen.add(v["youtube_id"])
+                out.append(v)
+        token = page.get("continuation")
+        if not token:
+            break
+        if post is None:
+            time.sleep(_INNERTUBE_DELAY)   # rate-limit politeness
+    return out
+
+
 def search_channels(query, limit=6, ydl_factory=None):
     """Search YouTube for CHANNELS (the results page filtered to channels) → a few
     {youtube_id, title, handle, avatar_url, subscriber_count} for the search page.

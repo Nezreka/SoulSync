@@ -134,7 +134,8 @@ class YoutubeDateEnricher:
                 self._q.task_done()
 
     def _enrich(self, channel_id):
-        """Fetch + cache a channel's upload dates. Proxy in bulk; per-video fallback."""
+        """REMEMBER a channel: cache its video catalog (list) + metadata + upload
+        dates so re-opening it is instant. InnerTube bulk; per-video yt-dlp fallback."""
         from core.video import youtube as yt
         db = self._db_factory()
         cid = str(channel_id or "").strip()
@@ -143,15 +144,27 @@ class YoutubeDateEnricher:
         self._current = self._titles.get(cid) or cid
         logger.debug("Enriching dates for %s (%s)", self._current, cid)
 
-        # PRIMARY: YouTube's own InnerTube browse API (no key/Java/proxy) — bulk
-        # dates for the whole videos tab in a handful of requests. The path we
-        # prefer; approximate dates, great for year-seasons.
+        # Remember channel metadata (avatar/subs/tags) for an instant header re-open.
+        try:
+            meta = yt.resolve_channel("https://www.youtube.com/channel/" + cid, limit=1)
+            if meta and meta.get("youtube_id"):
+                db.cache_channel_meta(cid, meta)
+        except Exception:
+            logger.debug("channel meta fetch failed for %s", cid, exc_info=True)
+
+        # PRIMARY: InnerTube — the whole videos tab (list + approximate dates) in a
+        # handful of requests. Remember the LIST too (not just dates) so the page
+        # can render the full catalog cache-first on the next open.
         dates = {}
         try:
-            dates = yt.innertube_channel_dates(cid) or {}
+            catalog = yt.innertube_channel_catalog(cid) or []
         except Exception:
-            logger.debug("innertube date fetch failed for %s", cid, exc_info=True)
-        logger.debug("innertube returned %d dates for %s", len(dates), cid)
+            catalog = []
+            logger.debug("innertube catalog fetch failed for %s", cid, exc_info=True)
+        if catalog:
+            db.cache_channel_videos(cid, catalog)
+            dates = {v["youtube_id"]: v["published_at"] for v in catalog if v.get("published_at")}
+        logger.debug("innertube remembered %d videos (%d dated) for %s", len(catalog), len(dates), cid)
         # SECONDARY (opt-in): a configured Piped/Invidious proxy — only if InnerTube
         # came up empty (the public instances are unreliable/API-disabled).
         if not dates:
@@ -206,11 +219,11 @@ class YoutubeDateEnricher:
         self._channels_done += 1
         self._dates_total += len(dates) + filled
         # Tag the source so legacy (pre-InnerTube) rows are recognisable and upgrade.
-        method = "innertube" if dates else "fallback"
+        method = "innertube" if (catalog or dates) else "fallback"
         db.mark_channel_dates_enriched(cid, len(dates) + filled, method=method)
         # Terse per-channel summary (like the worker's "Synced full episode list…").
-        logger.info("Dated %d videos for %s (%d bulk + %d per-video)",
-                    len(dates) + filled, self._current, len(dates), filled)
+        logger.info("Remembered %d videos for %s (%d dated, %d per-video)",
+                    len(catalog) or (len(dates) + filled), self._current, len(dates), filled)
 
 
 _enricher = None

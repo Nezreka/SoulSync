@@ -1192,3 +1192,27 @@ def test_legacy_enrichment_rows_upgrade(db):
     # After the InnerTube re-run, the normal window applies again (no churn).
     db.mark_channel_dates_enriched("UCleg", date_count=240, method="innertube")
     assert db.channel_dates_enriched_recently("UCleg") is True
+
+
+def test_remembered_channel_videos_and_meta(db):
+    # Cache a list (out of date order) + a date for one of them.
+    db.cache_video_dates([{"youtube_id": "b", "published_at": "2020-05-01"}])
+    db.cache_channel_videos("UCc", [
+        {"youtube_id": "a", "title": "A", "thumbnail_url": "ta"},          # undated → sorts last
+        {"youtube_id": "b", "title": "B", "thumbnail_url": "tb"}])
+    got = db.get_channel_videos("UCc")
+    assert [v["youtube_id"] for v in got] == ["b", "a"]                    # dated first, undated last
+    assert got[0]["published_at"] == "2020-05-01" and got[1]["published_at"] is None
+    assert got[0]["title"] == "B" and got[0]["thumbnail_url"] == "tb"
+    # Upsert refreshes fields without dropping the row; COALESCE keeps a non-null title.
+    db.cache_channel_videos("UCc", [{"youtube_id": "a", "title": "A2", "thumbnail_url": None}])
+    a = next(v for v in db.get_channel_videos("UCc") if v["youtube_id"] == "a")
+    assert a["title"] == "A2" and a["thumbnail_url"] == "ta"               # title updated, thumb kept
+    assert db.get_channel_videos("UNKNOWN") == []
+
+    # Metadata round-trips with tags decoded.
+    assert db.get_channel_meta("UCc") is None
+    db.cache_channel_meta("UCc", {"title": "Chan", "handle": "@c", "avatar_url": "av",
+                                  "subscriber_count": 1234, "tags": ["x", "y"]})
+    m = db.get_channel_meta("UCc")
+    assert m["title"] == "Chan" and m["subscriber_count"] == 1234 and m["tags"] == ["x", "y"]

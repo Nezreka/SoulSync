@@ -158,37 +158,53 @@ def register_routes(bp):
             limit = 60
         try:
             db = get_video_db()
-            channel = yt.resolve_channel("https://www.youtube.com/channel/" + channel_id,
-                                         limit=max(1, min(90, limit)))
-            if not channel or not channel.get("youtube_id"):
-                return jsonify({"success": False, "error": "Channel not found"}), 404
-            cid = channel["youtube_id"]
+            cid = str(channel_id).strip()
             following = bool(db.channel_watch_state([cid]))
-            # Opening a channel page → enrich its upload dates in the background
-            # (followed or not — you're looking at it, so you want the years).
+            # Opening a channel page → (re)remember it in the background (followed or
+            # not — you're looking at it). The enricher caches list + meta + dates.
             try:
                 from core.video.youtube_enrichment import get_youtube_date_enricher
-                get_youtube_date_enricher().enqueue(cid, channel.get("title"))
+                get_youtube_date_enricher().enqueue(cid)
             except Exception:
                 pass
-            # backfill the real avatar onto wished rows (flat listing often omits it)
-            if channel.get("avatar_url"):
-                try:
-                    db.set_wishlist_channel_poster(cid, channel["avatar_url"])
-                except Exception:
-                    pass
+
+            # CACHE-FIRST: a remembered channel renders instantly (no yt-dlp). The
+            # page's background re-stream + the enricher keep it fresh.
+            meta = db.get_channel_meta(cid)
+            cached_vids = db.get_channel_videos(cid)
+            from_cache = bool(meta and cached_vids)
+            if from_cache:
+                channel = {"youtube_id": cid, "title": meta.get("title"), "handle": meta.get("handle"),
+                           "description": meta.get("description"), "avatar_url": meta.get("avatar_url"),
+                           "banner_url": meta.get("banner_url"), "subscriber_count": meta.get("subscriber_count"),
+                           "view_count": meta.get("view_count"), "tags": meta.get("tags") or [],
+                           "videos": cached_vids}
+            else:
+                # MISS → fetch live (yt-dlp header + recent uploads) and remember it.
+                channel = yt.resolve_channel("https://www.youtube.com/channel/" + cid,
+                                             limit=max(1, min(90, limit)))
+                if not channel or not channel.get("youtube_id"):
+                    return jsonify({"success": False, "error": "Channel not found"}), 404
+                cid = channel["youtube_id"]
+                db.cache_channel_meta(cid, channel)
+                db.cache_channel_videos(cid, channel.get("videos") or [])
+                if channel.get("avatar_url"):
+                    try:
+                        db.set_wishlist_channel_poster(cid, channel["avatar_url"])
+                    except Exception:
+                        pass
+
             vids = channel.get("videos") or []
             ids = [v.get("youtube_id") for v in vids]
             wished = db.youtube_video_wish_state(ids)
-            # Upload dates → real year-seasons. Merge the persistent cache with a
-            # fresh RSS fetch (recent ~15); cache anything new so it fills in over time.
+            # Dates → year-seasons. Cached list already carries them; only pull a
+            # fresh RSS (recent ~15) on a live MISS so the cache-hit stays instant.
             dates = db.get_video_dates(ids)
-            try:
-                rss = yt.channel_recent_dates(cid)
-            except Exception:
-                rss = {}
-            if rss:
-                dates.update(rss)
+            if not from_cache:
+                try:
+                    dates.update(yt.channel_recent_dates(cid) or {})
+                except Exception:
+                    pass
             for v in vids:
                 v["wished"] = v.get("youtube_id") in wished
                 if not v.get("published_at") and dates.get(v.get("youtube_id")):
@@ -199,7 +215,7 @@ def register_routes(bp):
             except Exception:
                 pass
             return jsonify({"success": True, "kind": "channel", "source": "youtube",
-                            "channel": channel, "following": following})
+                            "channel": channel, "following": following, "from_cache": from_cache})
         except Exception:
             logger.exception("youtube channel detail failed for %r", channel_id)
             return jsonify({"success": False, "error": "Could not load channel"}), 500
@@ -235,6 +251,7 @@ def register_routes(bp):
                     v["published_at"] = cached[vid]
                 v["wished"] = vid in wished
             try:
+                db.cache_channel_videos(channel_id, videos)   # remember the list
                 db.cache_video_dates([{"youtube_id": v["youtube_id"], "published_at": v.get("published_at")}
                                       for v in videos if v.get("youtube_id") and v.get("published_at")])
             except Exception:

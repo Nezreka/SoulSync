@@ -629,6 +629,27 @@ def test_youtube_channel_detail_hydrates_follow_and_wished(tmp_path, monkeypatch
     assert videoapi._video_db.get_video_dates(["v1"]) == {"v1": "2024-06-01"}
 
 
+def test_youtube_channel_detail_is_cache_first(tmp_path, monkeypatch):
+    client, videoapi = _make_client(tmp_path)
+    import core.video.youtube as ytmod
+    db = videoapi._video_db
+    # Pre-remember the channel (as the enricher / a prior open would have).
+    db.cache_channel_meta("UCmem", {"title": "Remembered", "avatar_url": "av", "subscriber_count": 9})
+    db.cache_channel_videos("UCmem", [{"youtube_id": "m1", "title": "M1", "thumbnail_url": "t1"}])
+    db.cache_video_dates([{"youtube_id": "m1", "published_at": "2021-07-07"}])
+
+    # A cache HIT must NOT touch the network (yt-dlp / RSS).
+    monkeypatch.setattr(ytmod, "resolve_channel",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("resolved on a cache hit")))
+    monkeypatch.setattr(ytmod, "channel_recent_dates",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("RSS on a cache hit")))
+    d = client.get("/api/video/youtube/channel/UCmem").get_json()
+    assert d["success"] is True and d["from_cache"] is True
+    assert d["channel"]["title"] == "Remembered" and d["channel"]["subscriber_count"] == 9
+    vids = d["channel"]["videos"]
+    assert len(vids) == 1 and vids[0]["youtube_id"] == "m1" and vids[0]["published_at"] == "2021-07-07"
+
+
 def test_youtube_channel_detail_404_on_unresolvable(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path)
     import core.video.youtube as ytmod
