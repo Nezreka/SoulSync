@@ -980,10 +980,21 @@
             esc(ep.title || 'Untitled') + '</span>' +
             (meta.length ? '<span class="vd-ep-rt">' + esc(meta.join(' · ')) + '</span>' : '') + '</div>' +
             (ep.overview ? '<p class="vd-ep-desc">' + esc(ep.overview) + '</p>' : '') + '</div>' +
-            '<button class="vd-yt-wish' + (wished ? ' vd-yt-wish--on' : '') + '" type="button" data-vd-yt-wish="' +
-            esc(ep.youtube_id) + '">' + (wished ? '✓ Wished' : '+ Wish') + '</button>' +
+            ytWishBtn(ep.youtube_id, wished, false) +
             '<span class="vd-ep-chev" aria-hidden="true">⌄</span></div>' +
             '<div class="vd-ep-extra" data-vd-ep-panel="' + key + '" hidden></div>';
+    }
+
+    // The per-video wishlist toggle — the app-standard watchlist-button chrome
+    // (icon + text, accent gradient) so it stops looking bespoke. iconOnly trims
+    // the label for the tight playlist-section cards.
+    function ytWishBtn(id, wished, iconOnly) {
+        return '<button class="library-artist-watchlist-btn vd-yt-wishbtn' +
+            (iconOnly ? ' vd-yt-wishbtn--icon' : '') + (wished ? ' watching' : '') +
+            '" type="button" data-vd-yt-wish="' + esc(id) + '">' +
+            '<span class="watchlist-icon">' + (wished ? '✓' : '＋') + '</span>' +
+            (iconOnly ? '' : '<span class="watchlist-text">' + (wished ? 'In Wishlist' : 'Wishlist') + '</span>') +
+            '</button>';
     }
 
     function episodeRow(ep) {
@@ -1611,8 +1622,9 @@
             if (ytVideoMap[id]) ytVideoMap[id].wished = val;
             var r0 = root(), btns = r0 ? r0.querySelectorAll('[data-vd-yt-wish="' + id + '"]') : [];
             for (var i = 0; i < btns.length; i++) {
-                btns[i].classList.toggle('vd-yt-wish--on', val);
-                btns[i].textContent = val ? '✓ Wished' : '+ Wish';
+                btns[i].classList.toggle('watching', val);
+                var ic = btns[i].querySelector('.watchlist-icon'); if (ic) ic.textContent = val ? '✓' : '＋';
+                var tx = btns[i].querySelector('.watchlist-text'); if (tx) tx.textContent = val ? 'In Wishlist' : 'Wishlist';
             }
             var ep = ytFindEp(id); if (ep) { ep.owned = val; renderSeasonNav(); }
             document.dispatchEvent(new CustomEvent('soulsync:video-wishlist-changed'));
@@ -1713,8 +1725,7 @@
             '<a class="vd-yt-plvid-thumb" href="https://www.youtube.com/watch?v=' + esc(v.youtube_id) +
                 '" target="_blank" rel="noopener" data-vd-ext>' + thumb + '<span class="vd-yt-plvid-play">▶</span></a>' +
             '<div class="vd-yt-plvid-title" title="' + esc(v.title) + '">' + esc(v.title || 'Untitled') + '</div>' +
-            '<button class="vd-yt-wish' + (v.wished ? ' vd-yt-wish--on' : '') + '" type="button" data-vd-yt-wish="' +
-                esc(v.youtube_id) + '">' + (v.wished ? '✓' : '+') + '</button></div>';
+            ytWishBtn(v.youtube_id, v.wished, true) + '</div>';
     }
     function toggleYtPlaylist(el) {
         var pid = el.getAttribute('data-vd-yt-pl-toggle');
