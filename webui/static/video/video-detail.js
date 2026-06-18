@@ -1355,7 +1355,7 @@
     // — this both DATES the recent videos and EXPANDS past the initial ~90 cap.
     var ytLoadAllToken = 0;
     function ytCancelLoad() { ytLoadAllToken++; }
-    function ytLoadAllVideos(id) {
+    function ytLoadAllVideos(id, silent) {
         var token = ++ytLoadAllToken;
         var byId = {};
         ((data && data._channel && data._channel.videos) || []).forEach(function (v) { byId[v.youtube_id] = v; });
@@ -1394,7 +1394,9 @@
                     }
                     cont = resp.continuation;
                     if (cont && data._channel.videos.length < MAX) {
-                        showEpSyncing(true, 'Loading the channel’s full video history… ' +
+                        // Quiet when refreshing a remembered channel; only the first
+                        // (cache-miss) load shows the "loading full history" banner.
+                        if (!silent) showEpSyncing(true, 'Loading the channel’s full video history… ' +
                             data._channel.videos.length + ' videos so far.');
                         setTimeout(step, 120);
                     } else {
@@ -1431,7 +1433,8 @@
                 if (sub) sub.scrollTop = 0;
                 ytLoadPlaylists(id);
                 // Stream the rest of the catalog (and fill upload dates) in batches.
-                ytLoadAllVideos(id);
+                // A remembered channel renders full from cache → refresh quietly.
+                ytLoadAllVideos(id, !!resp.from_cache);
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load channel'); });
     }

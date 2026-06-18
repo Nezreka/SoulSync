@@ -280,6 +280,34 @@ CREATE TABLE IF NOT EXISTS youtube_channel_enrichment (
     method      TEXT                        -- 'innertube' | 'fallback'; NULL = legacy → re-enrich once
 );
 
+-- Remembered per-channel catalog so re-opening a channel (especially a watchlisted
+-- one) is instant: served cache-first, then a background re-stream refreshes it.
+-- Upload dates stay in youtube_video_dates (merged on read); this holds the list.
+CREATE TABLE IF NOT EXISTS youtube_channel_videos (
+    channel_id    TEXT NOT NULL,
+    youtube_id    TEXT NOT NULL,
+    title         TEXT,
+    thumbnail_url TEXT,
+    cached_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (channel_id, youtube_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ycv_channel ON youtube_channel_videos(channel_id);
+
+-- Remembered channel metadata (avatar/subs/tags/banner) so the header renders
+-- instantly on re-open without a yt-dlp re-fetch.
+CREATE TABLE IF NOT EXISTS youtube_channel_meta (
+    channel_id       TEXT PRIMARY KEY,
+    title            TEXT,
+    handle           TEXT,
+    description      TEXT,
+    avatar_url       TEXT,
+    banner_url       TEXT,
+    subscriber_count INTEGER,
+    view_count       INTEGER,
+    tags             TEXT,                  -- JSON array
+    cached_at        TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ── Owned media files (the Library = content that has a file) ────────────────
 -- Exactly one owner FK is set (no polymorphic id). 1 row per physical file;
 -- usually 1:1 with its content, but the table allows history/extras.
