@@ -1362,9 +1362,11 @@
         var cont = null, MAX = 2000;   // safety ceiling for pathological channels
         function step() {
             if (token !== ytLoadAllToken || currentId !== id || currentSource !== 'youtube') return;
-            var url = '/api/video/youtube/channel/' + encodeURIComponent(id) + '/videos' +
-                (cont ? '?continuation=' + encodeURIComponent(cont) : '');
-            fetch(url, { headers: { 'Accept': 'application/json' } })
+            // POST so the (huge) continuation token rides in the body, not the URL.
+            fetch('/api/video/youtube/channel/' + encodeURIComponent(id) + '/videos', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ continuation: cont || null }),
+            })
                 .then(function (r) { return r.ok ? r.json() : null; })
                 .then(function (resp) {
                     if (token !== ytLoadAllToken || currentId !== id || currentSource !== 'youtube') return;
