@@ -662,7 +662,12 @@ class ConfigManager:
                 # source whose art is smaller is skipped so the next source is
                 # tried — stops a low-res Cover Art Archive upload from winning.
                 # 0 disables the size gate.
-                "min_art_size": 1000
+                "min_art_size": 1000,
+                # When a track matches a SINGLE release, look up the parent ALBUM
+                # that contains it and tag it as that album, so it groups with its
+                # album-mates and gets the album cover (not the single's). Off by
+                # default — it's an extra per-import metadata lookup.
+                "single_to_album": False
             },
             "musicbrainz": {
                 "embed_tags": True

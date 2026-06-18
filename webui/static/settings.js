@@ -1235,6 +1235,7 @@ async function loadSettingsData() {
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
         document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
         document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
+        document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
@@ -3104,6 +3105,7 @@ async function saveSettings(quiet = false) {
             cover_art_download: document.getElementById('cover-art-download').checked,
             prefer_caa_art: document.getElementById('prefer-caa-art').checked,
             album_art_order: getArtOrder(),
+            single_to_album: document.getElementById('single-to-album-enabled').checked,
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),

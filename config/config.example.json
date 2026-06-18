@@ -44,7 +44,8 @@
   },
   "metadata_enhancement": {
     "enabled": true,
-    "embed_album_art": true
+    "embed_album_art": true,
+    "single_to_album": false
   },
   "file_organization": {
     "enabled": true,
