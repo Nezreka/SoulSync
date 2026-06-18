@@ -37257,17 +37257,16 @@ def _emit_video_enrichment_status_loop():
     the access log). No-op until the video engine is actually running, so this
     never spins it up on the music side."""
     from core.video.enrichment.engine import peek_video_enrichment_engine
-    services = ('tmdb', 'tvdb', 'omdb')
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(2)
         eng = peek_video_enrichment_engine()
         if eng is None:
             continue
-        for svc in services:
+        # Emit for EVERY registered worker (matchers + backfill: fanart / opensubtitles
+        # / ryd / sponsorblock) so new dashboard buttons get live status with no extra
+        # wiring here.
+        for svc, w in (eng.workers or {}).items():
             try:
-                w = eng.worker(svc)
-                if w is None:
-                    continue
                 socketio.emit(f'enrichment:{svc}', w.get_stats())
             except Exception as e:
                 logger.debug(f"Error emitting video {svc} status: {e}")

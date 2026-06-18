@@ -17,7 +17,8 @@
     // All four push status over the shared socket every 2s (server emits
     // 'enrichment:<svc>') — including the standalone YouTube date enricher — so the
     // browser never polls /api/video/enrichment/<svc>/status.
-    var SERVICES = ['tmdb', 'tvdb', 'omdb', 'youtube'];
+    var SERVICES = ['tmdb', 'tvdb', 'omdb', 'youtube',
+        'fanart', 'opensubtitles', 'ryd', 'sponsorblock'];
 
     function onVideoSide() {
         return document.body.getAttribute('data-side') === 'video';
