@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 # Columns in INSERT/SELECT order — single source of truth so the dataclass, the
 # write, and the read can't drift apart.
@@ -212,12 +212,23 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
         "source": hint.source,
         "method": "rematch_hint",
         "identification_confidence": 1.0,
-        "is_single": True,
+        # is_single reflects the CHOSEN release, but force_album_match makes the
+        # matcher FETCH that release (even for a lone staged file) instead of taking
+        # the singles fast-path — so the re-imported track gets the real album
+        # metadata: year, the correct in-album track number, and the album art.
+        "is_single": (str(hint.album_type or "").lower() == "single"),
+        "force_album_match": True,
         "album_type": hint.album_type,
     }
 
 
-def delete_replaced_track(cursor: Any, replace_track_id: Any, *, unlink=os.remove) -> Optional[str]:
+def delete_replaced_track(
+    cursor: Any,
+    replace_track_id: Any,
+    *,
+    unlink=os.remove,
+    resolve_fn: Optional[Callable[[str], Optional[str]]] = None,
+) -> Optional[str]:
     """Remove the OLD library row a re-identify replaces, and its file.
 
     Called only AFTER the re-import has landed the track at its new home, so the
@@ -226,7 +237,12 @@ def delete_replaced_track(cursor: Any, replace_track_id: Any, *, unlink=os.remov
     yanking a file a different row legitimately points to). Returns the path it
     removed, or ``None`` if there was nothing to do. ``unlink`` is injectable for
     tests. Assumes the new home differs from the old — the Re-identify modal never
-    offers the track's current release as a target, so this holds."""
+    offers the track's current release as a target, so this holds.
+
+    ``resolve_fn`` maps the STORED DB path to the file's actual on-disk location
+    before the exists/unlink check — essential because the stored path may be a
+    Docker/media-server view this process can't read literally (without it we'd
+    delete the row but orphan the file)."""
     if not replace_track_id:
         return None
     cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (replace_track_id,))
@@ -239,14 +255,22 @@ def delete_replaced_track(cursor: Any, replace_track_id: Any, *, unlink=os.remov
 
     if not old_path:
         return None
-    # Only unlink if no surviving row still points at this file.
+    # Only unlink if no surviving row still points at this file (rows store the
+    # stored path, so compare against the stored path, not the resolved one).
     cursor.execute("SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1", (old_path,))
     if cursor.fetchone() is not None:
         return None
+    # Resolve to the real on-disk path before touching the filesystem.
+    real_path = old_path
+    if resolve_fn is not None:
+        try:
+            real_path = resolve_fn(old_path) or old_path
+        except Exception:
+            real_path = old_path
     try:
-        if os.path.exists(old_path):
-            unlink(old_path)
-            return old_path
+        if os.path.exists(real_path):
+            unlink(real_path)
+            return real_path
     except OSError:
         pass
     return None

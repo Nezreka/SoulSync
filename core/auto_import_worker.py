@@ -1059,10 +1059,20 @@ class AutoImportWorker:
         failure is logged, never raised, since the re-import already succeeded."""
         try:
             from core.imports.rematch_hints import consume_hint, delete_replaced_track
+
+            def _resolve_old(stored):
+                # The old row's path is a STORED path (Docker/media-server view) — map
+                # it to a file this process can actually unlink, same as everywhere else.
+                try:
+                    from core.library.path_resolver import resolve_library_file_path
+                    return resolve_library_file_path(stored, config_manager=getattr(self, '_config_manager', None))
+                except Exception:
+                    return None
+
             conn = self.database._get_connection()
             try:
                 cursor = conn.cursor()
-                removed = delete_replaced_track(cursor, hint.replace_track_id)
+                removed = delete_replaced_track(cursor, hint.replace_track_id, resolve_fn=_resolve_old)
                 consume_hint(cursor, hint.id)
                 conn.commit()
             finally:
@@ -1500,8 +1510,11 @@ class AutoImportWorker:
 
     def _match_tracks(self, candidate: FolderCandidate, identification: Dict) -> Optional[Dict]:
         """Match staging files to the identified album's tracklist."""
-        # Singles: no album tracklist to match against — the file IS the match
-        if candidate.is_single or identification.get('is_single'):
+        # Singles: no album tracklist to match against — the file IS the match.
+        # force_album_match (set by a re-identify hint) overrides this: even a lone
+        # staged file is matched INTO the chosen album, so it inherits the album's
+        # year / track number / art instead of the bare singles stub (#889).
+        if not identification.get('force_album_match') and (candidate.is_single or identification.get('is_single')):
             conf = identification.get('identification_confidence', 0.7)
             track_data = {
                 'name': identification.get('track_name', identification.get('album_name', '')),
