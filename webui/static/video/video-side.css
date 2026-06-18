@@ -570,6 +570,10 @@ body[data-side="video"] .dashboard-header-sweep {
     padding: 1px 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.4;
     color: #fff; background: rgba(0, 0, 0, 0.82); letter-spacing: 0.02em;
 }
+/* YouTube video thumbnails are play buttons (stream in-app via the embed overlay) */
+.vd-ep-thumb--play, .vd-yt-plvid-thumb { cursor: pointer; }
+.vd-ep-thumb--play .vd-ep-thumb-ic { opacity: 0.92; transform: scale(1); }   /* always show the play hint */
+.vd-ep-thumb--play:hover .vd-ep-thumb-ic { opacity: 1; transform: scale(1.15); }
 
 /* Channel search + sort controls (above the year pills) */
 .vd-season-nav--yt { display: flex; flex-direction: column; gap: 14px; }
