@@ -902,7 +902,14 @@
         return '<div class="vd-rail">' + data.seasons.map(function (s) {
             var art = seasonArt(s), p = pct(s);
             var on = s.season_number === selectedSeason ? ' vd-rcard--active' : '';
-            var img = art ? '<img class="vd-rcard-img" src="' + art + '" alt="" loading="lazy" onerror="this.style.display=\'none\'">' : '';
+            // YouTube posters carry a lower-res fallback (maxres → original) so a
+            // missing maxresdefault.jpg downgrades instead of vanishing.
+            var fb = (s.poster_fallback && s.poster_fallback !== art) ? s.poster_fallback : '';
+            var oe = fb
+                ? 'var f=this.getAttribute(\'data-fb\');if(f){this.removeAttribute(\'data-fb\');this.src=f;}else{this.style.display=\'none\';}'
+                : 'this.style.display=\'none\'';
+            var img = art ? '<img class="vd-rcard-img" src="' + art + '" alt="" loading="lazy"' +
+                (fb ? ' data-fb="' + esc(fb) + '"' : '') + ' onerror="' + oe + '">' : '';
             return '<button class="vd-rcard' + on + '" type="button" data-vd-season="' + s.season_number + '">' +
                 '<div class="vd-rcard-art">' + img + '<div class="vd-rcard-fb">📺</div>' +
                 '<div class="vd-rcard-grad"></div><div class="vd-rcard-pct">' + p + '%</div></div>' +
@@ -1331,6 +1338,12 @@
     var ytSearchTimer = null;
 
     function ytProx(u) { return (window.VideoYoutube && u) ? VideoYoutube.img(u) : (u || ''); }
+    // Upgrade an i.ytimg thumbnail to maxresdefault (1280×720) for the big rail
+    // poster — hqdefault (480×360, often sqp-shrunk) looks soft cropped to 2:3.
+    function ytHiRes(u) {
+        var m = /\/vi\/([^/?]+)\//.exec(u || '');
+        return m ? 'https://i.ytimg.com/vi/' + m[1] + '/maxresdefault.jpg' : (u || '');
+    }
 
     function ytEpisodeOf(v, i) {
         return { episode_number: i + 1, title: v.title, overview: v.description || '',
@@ -1355,12 +1368,14 @@
                 var x = a.published_at || '', y = b.published_at || '';
                 return asc ? (x < y ? -1 : x > y ? 1 : 0) : (x > y ? -1 : x < y ? 1 : 0);
             });
-            var poster = '';
-            for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { poster = ytProx(vids[k].thumbnail_url); break; } }
+            var thumb = '';
+            for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { thumb = vids[k].thumbnail_url; break; } }
+            var poster = thumb ? ytProx(ytHiRes(thumb)) : '';        // maxres for the rail card
             var eps = vids.map(ytEpisodeOf);
             var wishedN = eps.filter(function (e) { return e.owned; }).length;
             var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Earlier videos');
             return { season_number: yr, title: label, poster_url: poster || ytProx(ch.avatar_url),
+                poster_fallback: thumb ? ytProx(thumb) : '',         // ← if maxres 404s
                 episode_owned: wishedN, episode_total: eps.length, episodes: eps };
         });
     }
