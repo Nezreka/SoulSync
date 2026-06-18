@@ -204,6 +204,46 @@ def register_routes(bp):
             logger.exception("youtube channel detail failed for %r", channel_id)
             return jsonify({"success": False, "error": "Could not load channel"}), 500
 
+    @bp.route("/youtube/channel/<channel_id>/videos", methods=["GET"])
+    def video_youtube_channel_videos(channel_id):
+        """A batch of a channel's videos via InnerTube — the channel page streams the
+        WHOLE catalog by calling this with the continuation token from each response
+        (each page fetched once; no yt-dlp re-scan). Returns ~a hundred videos with
+        approximate upload dates (refined from the date cache) + next ``continuation``
+        (null = no more)."""
+        from . import get_video_db
+        from core.video import youtube as yt
+        import time
+        cont = (request.args.get("continuation") or "").strip() or None
+        try:
+            db = get_video_db()
+            videos, token = [], cont
+            # ~3 InnerTube pages (~90 videos) per request, gently throttled.
+            for i in range(3):
+                page = yt.innertube_channel_videos_page(channel_id, continuation=token)
+                videos.extend(page.get("videos") or [])
+                token = page.get("continuation")
+                if not token or len(videos) >= 90:
+                    break
+                time.sleep(0.2)
+            ids = [v.get("youtube_id") for v in videos if v.get("youtube_id")]
+            cached = db.get_video_dates(ids)
+            wished = db.youtube_video_wish_state(ids)
+            for v in videos:
+                vid = v.get("youtube_id")
+                if cached.get(vid):                 # a cached (possibly exact) date wins
+                    v["published_at"] = cached[vid]
+                v["wished"] = vid in wished
+            try:
+                db.cache_video_dates([{"youtube_id": v["youtube_id"], "published_at": v.get("published_at")}
+                                      for v in videos if v.get("youtube_id") and v.get("published_at")])
+            except Exception:
+                pass
+            return jsonify({"success": True, "videos": videos, "continuation": token})
+        except Exception:
+            logger.exception("youtube channel videos batch failed for %r", channel_id)
+            return jsonify({"success": False, "videos": [], "continuation": None}), 200
+
     @bp.route("/youtube/video/<video_id>", methods=["GET"])
     def video_youtube_video_detail(video_id):
         """Full metadata for one video (description, views, likes, duration, tags) —
