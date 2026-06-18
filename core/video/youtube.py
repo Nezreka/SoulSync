@@ -614,6 +614,70 @@ def innertube_channel_videos_page(channel_id, continuation=None, now=None, post=
     return {"videos": videos, "continuation": innertube_continuation(j)}
 
 
+def _innertube_playlist_total(obj):
+    """The playlist's TRUE video count from its browse header ('512 videos'), or None.
+    Reliable even when yt-dlp's playlist_count isn't populated."""
+    for t in _json_find_all(obj, "numVideosText", []):
+        m = re.search(r"([\d,]+)", "".join(_json_all_strings(t, [])))
+        if m:
+            try:
+                return int(m.group(1).replace(",", ""))
+            except ValueError:
+                pass
+    return None
+
+
+def innertube_playlist_page(playlist_id, continuation=None, now=None, post=None):
+    """One InnerTube page of a PLAYLIST's videos (browseId VL<id>) in the curator's
+    order: {"videos": [...], "continuation": token|None, "total": N|None}. Fixes
+    yt-dlp flat's ~100-item cap (browse pages to ~200) and exposes the real count.
+    Same item shape as innertube_channel_videos_page."""
+    pid = str(playlist_id or "").strip()
+    if not continuation and not pid:
+        return {"videos": [], "continuation": None, "total": None}
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    payload = ({"context": _INNERTUBE_CTX, "continuation": continuation} if continuation
+               else {"context": _INNERTUBE_CTX, "browseId": "VL" + pid})
+    try:
+        j = _innertube_post(payload, post)
+    except Exception:
+        return {"videos": [], "continuation": None, "total": None}
+    if not isinstance(j, dict):
+        return {"videos": [], "continuation": None, "total": None}
+    videos = []
+    for it in innertube_parse_video_items(j):
+        it["published_at"] = relative_to_date(it.pop("relative", None), now)
+        videos.append(it)
+    return {"videos": videos, "continuation": innertube_continuation(j), "total": _innertube_playlist_total(j)}
+
+
+def innertube_playlist_catalog(playlist_id, pages=40, now=None, post=None):
+    """A playlist's video list (curator order) + TRUE total via InnerTube:
+    {"videos": [...], "total": N|None}. yt-dlp flat caps at ~100; the browse pages
+    to ~200 and the header carries the real count. {} on failure."""
+    pid = str(playlist_id or "").strip()
+    if not pid:
+        return {"videos": [], "total": None}
+    if now is None:
+        now = datetime.now(timezone.utc).date()
+    out, seen, token, total = [], set(), None, None
+    for _ in range(max(1, pages)):
+        page = innertube_playlist_page(pid, continuation=token, now=now, post=post)
+        if total is None:
+            total = page.get("total")
+        for v in page.get("videos") or []:
+            if v.get("youtube_id") and v["youtube_id"] not in seen:
+                seen.add(v["youtube_id"])
+                out.append(v)
+        token = page.get("continuation")
+        if not token:
+            break
+        if post is None:
+            time.sleep(_INNERTUBE_DELAY)
+    return {"videos": out, "total": total}
+
+
 def innertube_channel_catalog(channel_id, pages=_INNERTUBE_PAGES, now=None, post=None):
     """A channel's video catalog (list + approximate dates) via InnerTube, up to
     ``pages`` pages: [{youtube_id, title, thumbnail_url, published_at}]. Like

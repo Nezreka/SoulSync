@@ -561,3 +561,22 @@ def test_innertube_channel_catalog_pages_until_no_token():
     assert cat[0]["title"] == "Title v1" and cat[2]["published_at"] == "2026-06-12"
     assert seq["n"] == 2                                                 # stopped when the token ran out
     assert yt.innertube_channel_catalog("not-uc", post=lambda p: None) == []
+
+
+def test_innertube_playlist_page_keeps_order_and_true_count():
+    now = date(2026, 6, 17)
+    page = _page([_lk_item("a", "1 day ago"), _lk_item("b", "2 days ago")], token="TOK")
+    page["header"] = {"numVideosText": {"runs": [{"text": "512"}, {"text": " videos"}]}}   # the real total
+    got = yt.innertube_playlist_page("PLx", now=now, post=lambda p: page)
+    assert [v["youtube_id"] for v in got["videos"]] == ["a", "b"]        # curator order preserved
+    assert got["total"] == 512 and got["continuation"] == "TOK"
+    # catalog pages until no token, surfacing the header count
+    pages = [page, _page([_lk_item("c", "3 days ago")])]   # 2nd page: no token → stop
+    seq = {"n": 0}
+
+    def post(p):
+        i = seq["n"]; seq["n"] += 1; return pages[i]
+
+    cat = yt.innertube_playlist_catalog("PLx", now=now, post=post)
+    assert [v["youtube_id"] for v in cat["videos"]] == ["a", "b", "c"] and cat["total"] == 512
+    assert yt.innertube_playlist_catalog("", post=lambda p: None) == {"videos": [], "total": None}

@@ -698,6 +698,7 @@ def test_youtube_playlist_follow_detail_and_watchlist(tmp_path, monkeypatch):
            "thumbnail_url": "t", "videos": [{"youtube_id": "a", "title": "A"}, {"youtube_id": "b", "title": "B"}]}
     monkeypatch.setattr(ytmod, "parse_playlist_id", lambda u: "PLx" if "list=" in (u or "") else None)
     monkeypatch.setattr(ytmod, "resolve_playlist", lambda *a, **k: dict(_PL))
+    monkeypatch.setattr(ytmod, "innertube_playlist_catalog", lambda *a, **k: {"videos": [], "total": None})
     # resolve detects a playlist link → returns a playlist (not a channel)
     r = client.get("/api/video/youtube/resolve?url=https://youtube.com/playlist?list=PLx").get_json()
     assert r["success"] and r["playlist"]["playlist_id"] == "PLx" and r["following"] is False
@@ -778,6 +779,7 @@ def test_youtube_playlists_and_playlist_videos(tmp_path, monkeypatch):
                         lambda *a, **k: {"playlist_id": "PL1", "title": "Trailers",
                                          "videos": [{"youtube_id": "a", "title": "A"},
                                                     {"youtube_id": "b", "title": "B"}]})
+    monkeypatch.setattr(ytmod, "innertube_playlist_catalog", lambda *a, **k: {"videos": [], "total": None})
     # 'a' is wished → should hydrate wished=True
     videoapi._video_db.add_videos_to_wishlist({"youtube_id": "UCx", "title": "X"}, [{"youtube_id": "a", "title": "A"}])
     pv = client.get("/api/video/youtube/playlist/PL1").get_json()
