@@ -378,17 +378,20 @@ def register_routes(bp):
             limit = 200
         try:
             db = get_video_db()
-            pl = yt.resolve_playlist("https://www.youtube.com/playlist?list=" + playlist_id, limit=60)
+            # Pull the WHOLE playlist. With cookies configured (youtube.cookies_browser,
+            # like ytdl-sub) yt-dlp pages the full list; anonymous, YouTube throttles
+            # us to ~100, so the InnerTube catalog (~200 + the true header count) is the
+            # better source. Use whichever got more, with the true total.
+            pl = yt.resolve_playlist("https://www.youtube.com/playlist?list=" + playlist_id, limit=5000)
             if not pl:
                 return jsonify({"success": False, "error": "Playlist not found"}), 404
-            # yt-dlp flat caps playlists at ~100 and its count is often unset. Overlay
-            # the InnerTube catalog (curator order, up to ~200) + the TRUE header count.
             try:
                 cat = yt.innertube_playlist_catalog(playlist_id)
-                if cat.get("videos"):
+                if len(cat.get("videos") or []) > len(pl.get("videos") or []):
                     pl["videos"] = cat["videos"]
-                if cat.get("total"):
-                    pl["video_count"] = cat["total"]
+                total = max(pl.get("video_count") or 0, cat.get("total") or 0)
+                if total:
+                    pl["video_count"] = total
             except Exception:
                 pass
             vids = pl.get("videos") or []

@@ -1571,9 +1571,10 @@
         ytVideoMap = {};
         vids.forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
         var total = pl.video_count || vids.length;
-        // YouTube only exposes ~200 of a playlist via browsing — be honest when partial.
+        // Anonymous, YouTube throttles us to ~100-200; with YouTube cookies set in
+        // Settings, yt-dlp pages the whole playlist (like ytdl-sub). Be honest when partial.
         var note = total > vids.length
-            ? 'Showing the first ' + vids.length + ' of ' + total + ' videos (YouTube limits playlist browsing).' : '';
+            ? 'Showing ' + vids.length + ' of ' + total + ' videos — add YouTube cookies in Settings to load the full playlist.' : '';
         var season = { season_number: 1, title: 'Videos', poster_url: ytProx(pl.thumbnail_url),
             episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
         return { kind: 'playlist', source: 'youtube', id: pl.playlist_id, title: pl.title || 'Playlist',
