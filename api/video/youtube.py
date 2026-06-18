@@ -220,28 +220,22 @@ def register_routes(bp):
             logger.exception("youtube channel detail failed for %r", channel_id)
             return jsonify({"success": False, "error": "Could not load channel"}), 500
 
-    @bp.route("/youtube/channel/<channel_id>/videos", methods=["GET"])
+    @bp.route("/youtube/channel/<channel_id>/videos", methods=["POST"])
     def video_youtube_channel_videos(channel_id):
-        """A batch of a channel's videos via InnerTube — the channel page streams the
-        WHOLE catalog by calling this with the continuation token from each response
-        (each page fetched once; no yt-dlp re-scan). Returns ~a hundred videos with
-        approximate upload dates (refined from the date cache) + next ``continuation``
-        (null = no more)."""
+        """ONE InnerTube page of a channel's videos — the channel page streams the
+        WHOLE catalog by re-POSTing with the continuation token from each response
+        (each page fetched once; no yt-dlp re-scan). POST (not GET) keeps the giant
+        continuation token out of the URL/access logs; the frontend paces the calls,
+        so each is fast and never trips the slow-request warning. Returns the videos
+        (dates refined from cache) + next ``continuation`` (null = no more)."""
         from . import get_video_db
         from core.video import youtube as yt
-        import time
-        cont = (request.args.get("continuation") or "").strip() or None
+        body = request.get_json(silent=True) or {}
+        cont = (body.get("continuation") or "").strip() or None
         try:
             db = get_video_db()
-            videos, token = [], cont
-            # ~3 InnerTube pages (~90 videos) per request, gently throttled.
-            for i in range(3):
-                page = yt.innertube_channel_videos_page(channel_id, continuation=token)
-                videos.extend(page.get("videos") or [])
-                token = page.get("continuation")
-                if not token or len(videos) >= 90:
-                    break
-                time.sleep(0.2)
+            page = yt.innertube_channel_videos_page(channel_id, continuation=cont)
+            videos, token = page.get("videos") or [], page.get("continuation")
             ids = [v.get("youtube_id") for v in videos if v.get("youtube_id")]
             cached = db.get_video_dates(ids)
             wished = db.youtube_video_wish_state(ids)
