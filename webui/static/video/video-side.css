@@ -570,6 +570,25 @@ body[data-side="video"] .dashboard-header-sweep {
     padding: 1px 5px; border-radius: 4px; font-size: 11px; font-weight: 700; line-height: 1.4;
     color: #fff; background: rgba(0, 0, 0, 0.82); letter-spacing: 0.02em;
 }
+
+/* Channel search + sort controls (above the year pills) */
+.vd-season-nav--yt { display: flex; flex-direction: column; gap: 14px; }
+.vd-yt-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.vd-yt-search { position: relative; flex: 1 1 240px; min-width: 200px; }
+.vd-yt-search-ic { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+    font-size: 15px; color: rgba(255, 255, 255, 0.4); pointer-events: none; }
+.vd-yt-search-in {
+    width: 100%; padding: 9px 12px 9px 34px; border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #fff; font-size: 13.5px;
+}
+.vd-yt-search-in:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255 59 59), 0.6);
+    background: rgba(255, 255, 255, 0.09); }
+.vd-yt-sort {
+    padding: 9px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.vd-yt-sort:focus { outline: none; border-color: rgba(var(--vd-accent-rgb, 255 59 59), 0.6); }
 .vd-ep-info { min-width: 0; }
 .vd-ep-top { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
 .vd-ep-title { font-size: 15.5px; font-weight: 700; color: #fff; }

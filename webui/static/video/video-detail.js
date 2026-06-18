@@ -879,6 +879,11 @@
     function renderSeasonNav() {
         var host = q('[data-vd-season-nav]');
         if (!host || !data || !data.seasons.length) { if (host) host.innerHTML = ''; return; }
+        if (data.source === 'youtube') {   // channels: search + sort controls, then year pills (hidden in flat mode)
+            host.className = 'vd-season-nav vd-season-nav--yt';
+            host.innerHTML = ytControlsHTML() + (ytFlatMode() ? '' : pillsHTML());
+            return;
+        }
         host.className = 'vd-season-nav vd-season-nav--' + seasonView;
         if (seasonView === 'rail') host.innerHTML = railHTML();
         else if (seasonView === 'timeline') host.innerHTML = timelineHTML();
@@ -1068,9 +1073,10 @@
         var season = seasonByNum(selectedSeason);
         if (!season) { host.innerHTML = ''; return; }
         var eps = missingOnly ? season.episodes.filter(function (e) { return !e.owned; }) : season.episodes;
-        host.innerHTML = eps.length
-            ? eps.map(episodeRow).join('')
-            : '<div class="vd-ep-empty">No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉</div>';
+        var emptyMsg = (data && data.source === 'youtube')
+            ? (ytFilter.q ? 'No videos match “' + esc(ytFilter.q) + '”.' : 'No videos here.')
+            : 'No ' + (missingOnly ? 'missing ' : '') + 'episodes here. 🎉';
+        host.innerHTML = eps.length ? eps.map(episodeRow).join('') : '<div class="vd-ep-empty">' + emptyMsg + '</div>';
         host.classList.remove('vd-ep-anim'); void host.offsetWidth; host.classList.add('vd-ep-anim');
     }
 
@@ -1314,35 +1320,109 @@
     // d.source='youtube' driving every branch above. All TMDB-only sections
     // auto-hide on empty channel data.
     var ytVideoMap = {};   // youtube_id -> raw video (for wish add, main grid + playlists)
+    var ytFilter = { q: '', sort: 'newest' };   // channel search + sort
+    var ytSearchTimer = null;
 
     function ytProx(u) { return (window.VideoYoutube && u) ? VideoYoutube.img(u) : (u || ''); }
 
-    function ytToShow(resp) {
-        var ch = resp.channel || {};
+    function ytEpisodeOf(v, i) {
+        return { episode_number: i + 1, title: v.title, overview: v.description || '',
+            air_date: v.published_at, owned: !!v.wished, has_still: false,
+            still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id,
+            yt_duration: v.duration || '', view_count: v.view_count || 0 };
+    }
+    function ytDurSecs(d) {
+        if (!d) return 0;
+        return String(d).split(':').reduce(function (acc, n) { return acc * 60 + (parseInt(n, 10) || 0); }, 0);
+    }
+    // Year-grouped seasons (the default "by year" view). asc → oldest first.
+    function ytGroupByYear(videos, ch, asc) {
         var byYear = {};
-        ytVideoMap = {};
-        (ch.videos || []).forEach(function (v) {
-            ytVideoMap[v.youtube_id] = v;
+        videos.forEach(function (v) {
             var yr = (v.published_at && /^\d{4}/.test(v.published_at)) ? parseInt(v.published_at.slice(0, 4), 10) : 0;
             (byYear[yr] = byYear[yr] || []).push(v);
         });
-        var years = Object.keys(byYear).map(Number).sort(function (a, b) { return b - a; });
-        var seasons = years.map(function (yr) {
-            var vids = byYear[yr], poster = '';
-            for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { poster = ytProx(vids[k].thumbnail_url); break; } }
-            var eps = vids.map(function (v, i) {
-                return { episode_number: i + 1, title: v.title, overview: v.description || '',
-                    air_date: v.published_at, owned: !!v.wished, has_still: false,
-                    still_url: ytProx(v.thumbnail_url), youtube_id: v.youtube_id,
-                    yt_duration: v.duration || '', view_count: v.view_count || 0 };
+        var years = Object.keys(byYear).map(Number).sort(function (a, b) { return asc ? a - b : b - a; });
+        return years.map(function (yr) {
+            var vids = byYear[yr].slice().sort(function (a, b) {
+                var x = a.published_at || '', y = b.published_at || '';
+                return asc ? (x < y ? -1 : x > y ? 1 : 0) : (x > y ? -1 : x < y ? 1 : 0);
             });
+            var poster = '';
+            for (var k = 0; k < vids.length; k++) { if (vids[k].thumbnail_url) { poster = ytProx(vids[k].thumbnail_url); break; } }
+            var eps = vids.map(ytEpisodeOf);
             var wishedN = eps.filter(function (e) { return e.owned; }).length;
-            // No upload dates (flat listing omits them) → a single "All Videos"
-            // season instead of a lone "Undated"; mixed → label the dateless bucket.
             var label = yr ? String(yr) : (years.length === 1 ? 'All Videos' : 'Earlier videos');
             return { season_number: yr, title: label, poster_url: poster || ytProx(ch.avatar_url),
                 episode_owned: wishedN, episode_total: eps.length, episodes: eps };
         });
+    }
+    // A search OR a popularity/length sort collapses the year view into one flat,
+    // sorted "results" list instead of per-year seasons.
+    function ytFlatMode() { return !!ytFilter.q || ytFilter.sort === 'views' || ytFilter.sort === 'longest'; }
+    function ytVisibleVideos() {
+        var all = (data && data._channel && data._channel.videos) || [];
+        var q = (ytFilter.q || '').toLowerCase().trim();
+        var vids = q ? all.filter(function (v) { return (v.title || '').toLowerCase().indexOf(q) >= 0; }) : all.slice();
+        if (ytFilter.sort === 'views') vids.sort(function (a, b) { return (b.view_count || 0) - (a.view_count || 0); });
+        else if (ytFilter.sort === 'longest') vids.sort(function (a, b) { return ytDurSecs(b.duration) - ytDurSecs(a.duration); });
+        else if (ytFilter.sort === 'oldest') vids.sort(function (a, b) { var x = a.published_at || '￿', y = b.published_at || '￿'; return x < y ? -1 : x > y ? 1 : 0; });
+        else vids.sort(function (a, b) { var x = a.published_at || '', y = b.published_at || ''; return x > y ? -1 : x < y ? 1 : 0; });
+        return vids;
+    }
+    function ytFlatSeason(vids) {
+        var ch = (data && data._channel) || {};
+        var title = ytFilter.q ? (vids.length + ' result' + (vids.length === 1 ? '' : 's'))
+            : (ytFilter.sort === 'views' ? 'Most viewed' : 'Longest');
+        return { season_number: -1, title: title, poster_url: ytProx(ch.avatar_url),
+            episode_owned: 0, episode_total: vids.length, episodes: vids.map(ytEpisodeOf) };
+    }
+    function ytRebuildMap() {
+        ytVideoMap = {};
+        ((data && data._channel && data._channel.videos) || []).forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
+    }
+    // Re-derive data.seasons from the master list honouring the active filter/sort.
+    // force=true always re-renders the grid (a filter change); else only when the
+    // viewed season actually changed (so a streaming batch doesn't flicker).
+    function ytRegroup(force) {
+        if (!data || !data._channel) return;
+        var prevSel = selectedSeason, prevObj = seasonByNum(prevSel);
+        var prevEp = prevObj ? prevObj.episodes.length : -1;
+        ytRebuildMap();
+        if (ytFlatMode()) {
+            data.seasons = [ytFlatSeason(ytVisibleVideos())];
+            selectedSeason = -1;
+        } else {
+            data.seasons = ytGroupByYear(data._channel.videos.slice(), data._channel, ytFilter.sort === 'oldest');
+            if (!seasonByNum(selectedSeason)) selectedSeason = data.seasons.length ? data.seasons[0].season_number : null;
+        }
+        data.season_count = data.seasons.length;
+        data.episode_total = (data._channel.videos || []).length;
+        renderSeasonNav();
+        var nowObj = seasonByNum(selectedSeason);
+        if (force || selectedSeason !== prevSel || !nowObj || nowObj.episodes.length !== prevEp) renderEpisodes();
+        if (force) ytRefocusSearch();
+    }
+    function ytRefocusSearch() {
+        var inp = q('[data-vd-yt-search]');
+        if (inp && document.activeElement !== inp) { var v = inp.value; inp.focus(); inp.value = ''; inp.value = v; }
+    }
+    function ytControlsHTML() {
+        var sorts = [['newest', 'Newest'], ['oldest', 'Oldest'], ['views', 'Most viewed'], ['longest', 'Longest']];
+        return '<div class="vd-yt-controls">' +
+            '<div class="vd-yt-search"><span class="vd-yt-search-ic">⌕</span>' +
+            '<input class="vd-yt-search-in" type="text" placeholder="Search this channel…" value="' +
+            esc(ytFilter.q) + '" data-vd-yt-search></div>' +
+            '<select class="vd-yt-sort" data-vd-yt-sort>' + sorts.map(function (s) {
+                return '<option value="' + s[0] + '"' + (ytFilter.sort === s[0] ? ' selected' : '') + '>' + esc(s[1]) + '</option>';
+            }).join('') + '</select></div>';
+    }
+
+    function ytToShow(resp) {
+        var ch = resp.channel || {};
+        ytVideoMap = {};
+        (ch.videos || []).forEach(function (v) { ytVideoMap[v.youtube_id] = v; });
+        var seasons = ytGroupByYear(ch.videos || [], ch, false);
         return { kind: 'channel', source: 'youtube', id: ch.youtube_id, title: ch.title || 'Channel',
             overview: ch.description || '', backdrop_url: ytProx(ch.banner_url), has_backdrop: !!ch.banner_url,
             poster_url: ytProx(ch.avatar_url), has_poster: !!ch.avatar_url, genres: ch.tags || [], handle: ch.handle,
@@ -1374,9 +1454,6 @@
                 .then(function (resp) {
                     if (token !== ytLoadAllToken || currentId !== id || currentSource !== 'youtube') return;
                     if (!resp || !resp.success) { showEpSyncing(false); return; }
-                    var prevSel = selectedSeason;
-                    var selObj = seasonByNum(prevSel);
-                    var prevEp = selObj ? selObj.episodes.length : -1;
                     var changed = false;
                     (resp.videos || []).forEach(function (v) {
                         if (!v.youtube_id) return;
@@ -1389,16 +1466,9 @@
                             byId[v.youtube_id] = v; data._channel.videos.push(v); changed = true;
                         }
                     });
-                    if (changed) {
-                        var nd = ytToShow({ channel: data._channel, following: data.following });
-                        data = nd;
-                        if (!seasonByNum(prevSel)) selectedSeason = nd.seasons.length ? nd.seasons[0].season_number : null;
-                        renderBillboard(nd); renderSeasonNav();
-                        // Only re-render the episode grid if the season you're viewing
-                        // actually changed (most batches add OLDER years, not yours).
-                        var nowObj = seasonByNum(selectedSeason);
-                        if (selectedSeason !== prevSel || !nowObj || nowObj.episodes.length !== prevEp) renderEpisodes();
-                    }
+                    // Re-derive the view from the grown master, honouring the active
+                    // filter/sort (only re-renders the grid if the viewed season moved).
+                    if (changed) ytRegroup(false);
                     cont = resp.continuation;
                     if (cont && data._channel.videos.length < MAX) {
                         // Quiet when refreshing a remembered channel; only the first
@@ -1420,6 +1490,7 @@
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
         if (!root()) return;
+        ytFilter = { q: '', sort: 'newest' };   // a fresh channel starts unfiltered
         ytCancelLoad();
         showLoading(true); resetExtras(); showEpSyncing(false);
         ['[data-vd-episodes]', '[data-vd-season-nav]'].forEach(function (s) { var n = q(s); if (n) n.innerHTML = ''; });
@@ -1644,6 +1715,19 @@
     function init() {
         document.addEventListener('soulsync:video-open-detail', onOpen);
         document.addEventListener('click', onClick);
+        // Channel search (debounced) + sort — only act on the youtube controls.
+        document.addEventListener('input', function (e) {
+            var inp = e.target && e.target.closest && e.target.closest('[data-vd-yt-search]');
+            if (!inp || !data || data.source !== 'youtube') return;
+            var v = inp.value;
+            if (ytSearchTimer) clearTimeout(ytSearchTimer);
+            ytSearchTimer = setTimeout(function () { ytFilter.q = v; ytRegroup(true); }, 200);
+        });
+        document.addEventListener('change', function (e) {
+            var sel = e.target && e.target.closest && e.target.closest('[data-vd-yt-sort]');
+            if (!sel || !data || data.source !== 'youtube') return;
+            ytFilter.sort = sel.value; ytRegroup(true);
+        });
         // Kill the billboard trailer (audio!) when navigating to a non-detail page.
         document.addEventListener('soulsync:video-page-shown', function (e) {
             if (e && e.detail !== 'video-movie-detail' && e.detail !== 'video-show-detail') stopBillboardTrailer();
