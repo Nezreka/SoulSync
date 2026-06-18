@@ -1,0 +1,226 @@
+"""Re-identify hints (#889) — a single-use, user-designated answer to "which
+release does this already-imported track belong to".
+
+Flow: the user clicks *Re-identify* on a library track, searches a source, and
+picks the exact release (single / EP / album) it should live under. We write a
+**hint** here and stage the file for auto-import. The import flow then reads the
+hint at the very TOP of matching — before any fuzzy tier — builds the match from
+these exact IDs, and consumes the row. So the original ambiguity that mis-filed
+the track (which release?) is gone: the user already answered it.
+
+Two safety properties live in the hint, not the import code:
+
+- ``replace_track_id`` — the library row to delete AFTER the re-import lands (so a
+  re-identify *replaces* rather than *duplicates*). Cleanup is deferred to success
+  so a failed import can never lose the file.
+- ``exempt_dedup`` — always set: a re-identify is an explicit user action and must
+  not be silently dropped by the quality dedup-skip (which would otherwise see the
+  incoming file as a duplicate of the very row we're replacing).
+
+This module is pure DB mechanics over an injected ``cursor`` (sqlite3-style,
+``?`` params) — no connection management, no app state — so the create / find /
+consume seam is unit-tested against an in-memory DB with no live metadata client.
+The binding is keyed on the staged path, with ``content_hash`` as a rename-proof
+fallback in case the staging watcher normalizes the filename on ingest.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Any, Optional
+
+# Columns in INSERT/SELECT order — single source of truth so the dataclass, the
+# write, and the read can't drift apart.
+_FIELDS = (
+    "staged_path",
+    "content_hash",
+    "source",
+    "isrc",
+    "track_id",
+    "album_id",
+    "artist_id",
+    "track_title",
+    "album_name",
+    "artist_name",
+    "album_type",
+    "track_number",
+    "disc_number",
+    "replace_track_id",
+    "exempt_dedup",
+)
+
+
+@dataclass
+class RematchHint:
+    """One user-designated re-identify answer. ``id``/``status`` are set by the DB."""
+    staged_path: str
+    source: str
+    content_hash: Optional[str] = None
+    isrc: Optional[str] = None
+    track_id: Optional[str] = None
+    album_id: Optional[str] = None
+    artist_id: Optional[str] = None
+    track_title: Optional[str] = None
+    album_name: Optional[str] = None
+    artist_name: Optional[str] = None
+    album_type: Optional[str] = None
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
+    replace_track_id: Optional[int] = None
+    exempt_dedup: bool = True
+    id: Optional[int] = None
+    status: str = "pending"
+
+    def _values(self) -> tuple:
+        return (
+            self.staged_path,
+            self.content_hash,
+            self.source,
+            self.isrc,
+            self.track_id,
+            self.album_id,
+            self.artist_id,
+            self.track_title,
+            self.album_name,
+            self.artist_name,
+            self.album_type,
+            self.track_number,
+            self.disc_number,
+            self.replace_track_id,
+            1 if self.exempt_dedup else 0,
+        )
+
+
+def _row_to_hint(row: Any) -> RematchHint:
+    """Map a sqlite3.Row (or any mapping/sequence-by-name) to a RematchHint."""
+    def g(key, default=None):
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+    return RematchHint(
+        id=g("id"),
+        staged_path=g("staged_path") or "",
+        content_hash=g("content_hash"),
+        source=g("source") or "",
+        isrc=g("isrc"),
+        track_id=g("track_id"),
+        album_id=g("album_id"),
+        artist_id=g("artist_id"),
+        track_title=g("track_title"),
+        album_name=g("album_name"),
+        artist_name=g("artist_name"),
+        album_type=g("album_type"),
+        track_number=g("track_number"),
+        disc_number=g("disc_number"),
+        replace_track_id=g("replace_track_id"),
+        exempt_dedup=bool(g("exempt_dedup", 1)),
+        status=g("status") or "pending",
+    )
+
+
+def create_hint(cursor: Any, hint: RematchHint) -> int:
+    """Insert a pending hint; return its new id. Caller owns commit."""
+    placeholders = ", ".join("?" for _ in _FIELDS)
+    cursor.execute(
+        f"INSERT INTO rematch_hints ({', '.join(_FIELDS)}) VALUES ({placeholders})",
+        hint._values(),
+    )
+    new_id = cursor.lastrowid
+    hint.id = new_id
+    return new_id
+
+
+def find_hint_for_file(
+    cursor: Any,
+    staged_path: str,
+    content_hash: Optional[str] = None,
+) -> Optional[RematchHint]:
+    """Return the newest PENDING hint for a staged file, or ``None``.
+
+    Matched by exact ``staged_path`` first; if that misses and a ``content_hash``
+    is given, fall back to it (covers a staging watcher that renamed the file on
+    ingest). Only ``status='pending'`` rows are returned, so a consumed hint is
+    never reused."""
+    if staged_path:
+        cursor.execute(
+            "SELECT * FROM rematch_hints WHERE staged_path = ? AND status = 'pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (staged_path,),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return _row_to_hint(row)
+        # Try by basename too — the watcher may move the file into a different dir.
+        base = os.path.basename(staged_path)
+        if base and base != staged_path:
+            cursor.execute(
+                "SELECT * FROM rematch_hints WHERE staged_path LIKE ? AND status = 'pending' "
+                "ORDER BY id DESC LIMIT 1",
+                ("%/" + base,),
+            )
+            row = cursor.fetchone()
+            if row is not None:
+                return _row_to_hint(row)
+
+    if content_hash:
+        cursor.execute(
+            "SELECT * FROM rematch_hints WHERE content_hash = ? AND status = 'pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (content_hash,),
+        )
+        row = cursor.fetchone()
+        if row is not None:
+            return _row_to_hint(row)
+
+    return None
+
+
+def consume_hint(cursor: Any, hint_id: int) -> None:
+    """Mark a hint consumed (single-use). Caller owns commit."""
+    cursor.execute(
+        "UPDATE rematch_hints SET status = 'consumed', consumed_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?",
+        (hint_id,),
+    )
+
+
+def list_pending_hints(cursor: Any) -> list:
+    """All pending hints (newest first) — for a 'pending re-identify' view and
+    orphan recovery when a staged file never imports."""
+    cursor.execute("SELECT * FROM rematch_hints WHERE status = 'pending' ORDER BY id DESC")
+    return [_row_to_hint(r) for r in cursor.fetchall()]
+
+
+def quick_file_signature(path: str, *, chunk: int = 65536) -> Optional[str]:
+    """A cheap, rename-proof content fingerprint: size + first/last chunk, hashed.
+
+    Audio files are large, so a full hash is wasteful when we only need to re-bind
+    a hint to *this* file after a possible rename. Size + head + tail is plenty to
+    distinguish staged files in practice. Returns ``None`` if the file can't be
+    read (caller falls back to path-only binding)."""
+    import hashlib
+
+    try:
+        size = os.path.getsize(path)
+        h = hashlib.sha256()
+        h.update(str(size).encode())
+        with open(path, "rb") as f:
+            h.update(f.read(chunk))
+            if size > chunk:
+                f.seek(max(0, size - chunk))
+                h.update(f.read(chunk))
+        return h.hexdigest()
+    except OSError:
+        return None
+
+
+__all__ = [
+    "RematchHint",
+    "create_hint",
+    "find_hint_for_file",
+    "consume_hint",
+    "list_pending_hints",
+    "quick_file_signature",
+]
