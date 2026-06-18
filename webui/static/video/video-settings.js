@@ -212,6 +212,14 @@
                 if (t && d.tmdb_api_key != null) t.value = d.tmdb_api_key;
                 if (v && d.tvdb_api_key != null) v.value = d.tvdb_api_key;
                 if (o && d.omdb_api_key != null) o.value = d.omdb_api_key;
+                var fa = document.getElementById('fanart-api-key');
+                if (fa && d.fanart_api_key != null) fa.value = d.fanart_api_key;
+                var sub = document.getElementById('opensubtitles-api-key');
+                if (sub && d.opensubtitles_api_key != null) sub.value = d.opensubtitles_api_key;
+                var ryd = document.getElementById('video-ryd-enabled');
+                if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
+                var sb = document.getElementById('video-sponsorblock-enabled');
+                if (sb && d.sponsorblock_enabled != null) sb.checked = !!d.sponsorblock_enabled;
                 var ap = document.getElementById('video-billboard-autoplay');
                 if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
                 var wr = document.getElementById('video-watch-region');
@@ -237,12 +245,20 @@
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
         var o = document.getElementById('omdb-api-key');
+        var fa = document.getElementById('fanart-api-key');
+        var sub = document.getElementById('opensubtitles-api-key');
+        var ryd = document.getElementById('video-ryd-enabled');
+        var sb = document.getElementById('video-sponsorblock-enabled');
         return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
                 tmdb_api_key: t ? t.value : '', tvdb_api_key: v ? v.value : '',
                 omdb_api_key: o ? o.value : '',
+                fanart_api_key: fa ? fa.value : '',
+                opensubtitles_api_key: sub ? sub.value : '',
+                ryd_enabled: ryd ? ryd.checked : true,
+                sponsorblock_enabled: sb ? sb.checked : true,
             })
         }).then(function () { if (!silent) toast('API keys saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -284,7 +300,9 @@
             selects[i].addEventListener('change', function () { save(); });
         }
         // Enrichment keys save on blur/change (turns the workers on).
-        ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key'].forEach(function (id) {
+        ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
+            'fanart-api-key', 'opensubtitles-api-key',
+            'video-ryd-enabled', 'video-sponsorblock-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });
         });

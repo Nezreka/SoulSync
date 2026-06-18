@@ -50,6 +50,11 @@ def register_routes(bp):
             "tmdb_api_key": db.get_setting("tmdb_api_key") or "",
             "tvdb_api_key": db.get_setting("tvdb_api_key") or "",
             "omdb_api_key": db.get_setting("omdb_api_key") or "",
+            # Backfill-worker keys (free, optional) + no-key toggles.
+            "fanart_api_key": db.get_setting("fanart_api_key") or "",
+            "opensubtitles_api_key": db.get_setting("opensubtitles_api_key") or "",
+            "ryd_enabled": (db.get_setting("ryd_enabled") or "1") == "1",
+            "sponsorblock_enabled": (db.get_setting("sponsorblock_enabled") or "1") == "1",
             "billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1",
             "watch_region": (db.get_setting("watch_region") or "US").upper(),
         })
@@ -81,6 +86,12 @@ def register_routes(bp):
 
         put_key("tmdb_api_key")
         put_key("tvdb_api_key")
+        put_key("fanart_api_key")
+        put_key("opensubtitles_api_key")
+        # No-key worker on/off toggles (read live by the worker — no rebuild needed).
+        for flag in ("ryd_enabled", "sponsorblock_enabled"):
+            if flag in body:
+                db.set_setting(flag, "1" if body.get(flag) else "0")
         if "billboard_autoplay" in body:
             db.set_setting("billboard_autoplay", "1" if body.get("billboard_autoplay") else "0")
         if "watch_region" in body:
