@@ -5464,6 +5464,62 @@
                                         <button class="test-button" type="button" data-video-test-service="omdb">Test OMDb</button>
                                     </div>
                                 </div>
+                                <div class="api-service-frame stg-service" data-video-service="fanart">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #e4509a;"></span>
+                                        <h4 class="service-title">fanart.tv (Artwork)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="fanart-api-key" placeholder="fanart.tv API Key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get a free key from <a href="https://fanart.tv/get-an-api-key/" target="_blank" style="color: #e4509a;">fanart.tv</a></div>
+                                            <div class="callback-help">Clear logos, clearart, banners, posters &amp; backgrounds (gap-fills missing art).</div>
+                                        </div>
+                                        <button class="test-button" type="button" data-video-test-service="fanart">Test fanart.tv</button>
+                                    </div>
+                                </div>
+                                <div class="api-service-frame stg-service" data-video-service="opensubtitles">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #22a079;"></span>
+                                        <h4 class="service-title">OpenSubtitles (Subtitles)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key:</label>
+                                            <input type="password" id="opensubtitles-api-key" placeholder="OpenSubtitles API Key">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Get a free key from <a href="https://www.opensubtitles.com/en/consumers" target="_blank" style="color: #22a079;">OpenSubtitles</a> (register a consumer)</div>
+                                            <div class="callback-help">Records which subtitle languages exist per title.</div>
+                                        </div>
+                                        <button class="test-button" type="button" data-video-test-service="opensubtitles">Test OpenSubtitles</button>
+                                    </div>
+                                </div>
+                                <div class="api-service-frame stg-service" data-video-service="ytextras">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ef4444;"></span>
+                                        <h4 class="service-title">YouTube Extras (No Key)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <label class="vid-pref-row">
+                                            <input type="checkbox" id="video-ryd-enabled" checked>
+                                            <span>Return YouTube Dislike (like/dislike estimates)</span>
+                                        </label>
+                                        <label class="vid-pref-row">
+                                            <input type="checkbox" id="video-sponsorblock-enabled" checked>
+                                            <span>SponsorBlock (crowd-sourced segments)</span>
+                                        </label>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Free community APIs — no key needed. Enrich cached YouTube videos in the background.</div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             <!-- Server Connection — mirrors the music server picker, scoped
                                  to Plex/Jellyfin. The toggle BOTH selects the active video

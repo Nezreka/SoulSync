@@ -20,6 +20,11 @@
         { id: 'omdb', name: 'OMDb', color: '#f5c518', rgb: '245, 197, 24', kinds: ['movie', 'show'] },
         // The YouTube date enricher — no per-kind match queue; its own simple panel.
         { id: 'youtube', name: 'YouTube Dates', color: '#ff3b3b', rgb: '255, 59, 59', kinds: [], glyph: '▶' },
+        // Backfill workers — enrich already-identified items by id.
+        { id: 'fanart', name: 'fanart.tv', color: '#e4509a', rgb: '228, 80, 154', kinds: ['movie', 'show'], glyph: '🎨' },
+        { id: 'opensubtitles', name: 'OpenSubtitles', color: '#22a079', rgb: '34, 160, 121', kinds: ['movie', 'show'], glyph: '💬' },
+        { id: 'ryd', name: 'YouTube Votes', color: '#ef4444', rgb: '239, 68, 68', kinds: ['video'], glyph: '👍' },
+        { id: 'sponsorblock', name: 'SponsorBlock', color: '#00b4a0', rgb: '0, 180, 160', kinds: ['video'], glyph: '⏭' },
     ];
 
     function workerDef(id) {
@@ -34,8 +39,8 @@
         tmdb: 'https://www.themoviedb.org/assets/2/v4/logos/v2/blue_square_2-d537fb228cf3ded904ef09b136fe3fec72548ebc1fea3fbbd1ad9e36364db38b.svg',
         tvdb: 'https://www.svgrepo.com/show/443500/brand-tvdb.svg',
     };
-    var GLYPH = { movie: '🎬', show: '📺', episode: '🎞️' };
-    var KIND_LABEL = { movie: 'Movies', show: 'Shows', episode: 'Episodes' };
+    var GLYPH = { movie: '🎬', show: '📺', episode: '🎞️', video: '▶' };
+    var KIND_LABEL = { movie: 'Movies', show: 'Shows', episode: 'Episodes', video: 'Videos' };
 
     var state = {
         open: false, selected: 'tmdb', statuses: {}, breakdown: null,
