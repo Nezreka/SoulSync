@@ -69,7 +69,18 @@ def test_build_identification_maps_hint_fields():
     assert ident["track_number"] == 5
     assert ident["method"] == "rematch_hint"
     assert ident["identification_confidence"] == 1.0
+    # album_type 'album' → not a single, and force_album_match makes the matcher
+    # fetch the real album (year/track#/art) instead of the singles stub.
+    assert ident["is_single"] is False
+    assert ident["force_album_match"] is True
+
+
+def test_build_identification_single_release_still_forces_album_fetch():
+    # Even a chosen SINGLE release is fetched (it has a year too); is_single flags
+    # the type, force_album_match drives the album path regardless.
+    ident = build_identification_from_hint(_hint(album_type="single"))
     assert ident["is_single"] is True
+    assert ident["force_album_match"] is True
 
 
 # ── pure: safe replacement ────────────────────────────────────────────────────
@@ -99,6 +110,18 @@ def test_delete_replaced_track_noops_on_missing_id(conn):
     cur = conn.cursor()
     assert delete_replaced_track(cur, None) is None
     assert delete_replaced_track(cur, 999) is None    # no such row
+
+
+def test_delete_replaced_track_resolves_path_before_unlink(conn):
+    # The stored path is a server/Docker view this process can't read literally;
+    # resolve_fn maps it to the real file so we unlink the RIGHT path (not orphan it).
+    cur = conn.cursor()
+    cur.execute("INSERT INTO tracks (id, file_path) VALUES (7, '/mnt/serverview/Song.flac')")
+    removed = []
+    out = delete_replaced_track(cur, 7, unlink=lambda p: removed.append(p),
+                                resolve_fn=lambda stored: '/real/local/Song.flac')
+    assert out == '/real/local/Song.flac'
+    assert removed == ['/real/local/Song.flac']      # unlinked the RESOLVED path
 
 
 # patch os.path.exists so the unlink branch is reachable without real files
