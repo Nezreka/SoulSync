@@ -202,6 +202,19 @@ def test_album_matches_rejects_numeric_difference():
     assert art_lookup._album_matches("Taylor Swift", "1989", "Taylor Swift", "1989 (Deluxe)")
 
 
+def test_album_matches_rejects_cjk_trailing_sequel_digit():
+    """Sokhi #2: the sequel '2' is glued straight onto a CJK word
+    ('…サウンドトラック2'), and '第2期' (season 2) already puts a '2' on both
+    sides — so the digit-strip collapsed both to {'2'} and the cour-2
+    soundtrack's cover hung on the base soundtrack."""
+    ART = "藤澤慶昌"
+    OST = "『無職転生 〜異世界行ったら本気だす〜』 第2期 オリジナル・サウンドトラック"
+    assert not art_lookup._album_matches(ART, OST, ART, OST + "2")
+    assert not art_lookup._album_matches(ART, OST + "2", ART, OST)
+    # The genuine base-album hit still matches (incl. its shared 第2期).
+    assert art_lookup._album_matches(ART, OST, ART, OST)
+
+
 # ---------------------------------------------------------------------------
 # build_art_lookup — caching + guarding
 # ---------------------------------------------------------------------------
