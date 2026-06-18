@@ -24,6 +24,10 @@
         { sel: '[data-video-enrich="tvdb"]',    color: [168, 85, 247],  id: 'tvdb' },
         { sel: '[data-video-enrich="omdb"]',    color: [245, 197, 24],  id: 'omdb' },
         { sel: '[data-video-enrich="youtube"]', color: [255, 59, 59],   id: 'youtube' },
+        { sel: '[data-video-enrich="fanart"]',  color: [228, 80, 154],  id: 'fanart' },
+        { sel: '[data-video-enrich="opensubtitles"]', color: [34, 160, 121], id: 'opensubtitles' },
+        { sel: '[data-video-enrich="ryd"]',     color: [239, 68, 68],   id: 'ryd' },
+        { sel: '[data-video-enrich="sponsorblock"]', color: [0, 180, 160], id: 'sponsorblock' },
         { sel: '[data-video-manage-workers]',   color: [168, 85, 247],  hub: true },
     ];
 
