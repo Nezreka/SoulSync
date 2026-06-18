@@ -21,6 +21,15 @@
         return /youtube\.com\/(@[\w.\-]+|channel\/UC[\w\-]+|c\/[\w.\-]+|user\/[\w.\-]+)/i.test(q);
     }
 
+    // A pasted YouTube *playlist* link (or bare PL/OL/FL/UU id). Rejects mixes (RD…)
+    // and personal lists (WL/LL) — same rule as the backend parse_playlist_id.
+    function isPlaylistRef(q) {
+        q = (q || '').trim();
+        var m = /[?&]list=([A-Za-z0-9_-]+)/.exec(q);
+        var id = m ? m[1] : (/^(PL|OL|FL|UU)[A-Za-z0-9_-]{8,}$/.test(q) ? q : null);
+        return !!(id && !/^(RD|UL|LL|WL)/.test(id));
+    }
+
     function fmtDate(iso) {
         if (!iso) return '';
         var d = new Date(iso.length <= 10 ? iso + 'T00:00:00' : iso);
@@ -101,6 +110,28 @@
             'data-vyt-follow>' + (following ? '✓ Following' : '+ Follow') + '</button>';
     }
 
+    // A pasted-playlist result chip (mirrors searchCard): cover, title, owner +
+    // count, and an Add-to-watchlist toggle (data-vyt-follow-playlist).
+    function playlistCard(pl, following) {
+        var cover = pl.thumbnail_url
+            ? '<img class="vyt-chip-avatar" src="' + esc(img(pl.thumbnail_url)) + '" alt="" loading="lazy" ' +
+              'onerror="this.outerHTML=\'<span class=&quot;vyt-chip-avatar vyt-avatar--ph&quot;>▤</span>\'">'
+            : '<span class="vyt-chip-avatar vyt-avatar--ph">▤</span>';
+        var sub = [];
+        if (pl.channel_title) sub.push(esc(pl.channel_title));
+        if (pl.video_count != null) sub.push(esc(pl.video_count) + ' videos');
+        return '<div class="vyt-chip" data-vyt-playlist="' + esc(pl.playlist_id) + '">' +
+            '<div class="vyt-chip-head">' + cover +
+                '<div class="vyt-chip-meta">' +
+                    '<span class="vyt-chip-badge">YouTube playlist</span>' +
+                    '<span class="vyt-chip-title">' + esc(pl.title) + '</span>' +
+                    (sub.length ? '<span class="vyt-chip-sub">' + sub.join(' · ') + '</span>' : '') +
+                '</div>' +
+                '<button class="vyt-follow' + (following ? ' vyt-follow--on' : '') + '" type="button" ' +
+                'data-vyt-follow-playlist>' + (following ? '✓ Following' : '+ Follow') + '</button>' +
+            '</div></div>';
+    }
+
     function post(url, body) {
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body || {}) }).then(function (r) { return r.ok ? r.json() : null; });
@@ -114,6 +145,14 @@
             { channel: { youtube_id: ch.youtube_id, title: ch.title, avatar_url: ch.avatar_url } });
     }
     function unfollow(youtubeId) { return post('/api/video/youtube/unfollow', { youtube_id: youtubeId }); }
+    function followPlaylist(pl) {
+        var p = pl || {};
+        return post('/api/video/youtube/playlist/follow', { playlist: {
+            playlist_id: p.playlist_id, title: p.title, thumbnail_url: p.thumbnail_url } });
+    }
+    function unfollowPlaylist(playlistId) {
+        return post('/api/video/youtube/playlist/unfollow', { playlist_id: playlistId });
+    }
     function removeWish(scope, sourceId) {
         return post('/api/video/youtube/wishlist/remove', { scope: scope, source_id: sourceId });
     }
@@ -161,10 +200,11 @@
     }
 
     window.VideoYoutube = {
-        esc: esc, isChannelRef: isChannelRef, fmtDate: fmtDate, avatar: avatar, img: img,
+        esc: esc, isChannelRef: isChannelRef, isPlaylistRef: isPlaylistRef, fmtDate: fmtDate, avatar: avatar, img: img,
         fmtDuration: fmtDuration, compactCount: compactCount,
-        videoCard: videoCard, searchCard: searchCard, followBtn: followBtn,
-        follow: follow, unfollow: unfollow, removeWish: removeWish, addVideos: addVideos, resolve: resolve,
+        videoCard: videoCard, searchCard: searchCard, playlistCard: playlistCard, followBtn: followBtn,
+        follow: follow, unfollow: unfollow, followPlaylist: followPlaylist, unfollowPlaylist: unfollowPlaylist,
+        removeWish: removeWish, addVideos: addVideos, resolve: resolve,
         searchChannels: searchChannels, channelResultCard: channelResultCard,
     };
 })();
