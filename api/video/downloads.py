@@ -195,14 +195,16 @@ def register_routes(bp):
         want_season, want_episode, season_end = _search_ints(body)
 
         if source == "soulseek":
-            from core.video.slskd_search import build_query, start_search
+            from core.video.slskd_search import build_query, search_timeout_ms, start_search
             res = start_search(build_query(scope, title, year=body.get("year"),
                                            season=want_season, episode=want_episode))
             if not res.get("configured"):
                 return jsonify({"error": "slskd isn't configured — set its URL on Settings → Downloads."})
             if res.get("error"):
                 return jsonify({"error": "slskd: " + str(res["error"])})
-            return jsonify({"id": res["id"], "live": True, "complete": False})
+            # how long the client should keep polling (slskd keeps searching this long).
+            return jsonify({"id": res["id"], "live": True, "complete": False,
+                            "poll_ms": search_timeout_ms() + 8000})
         # mock sources resolve in one shot
         profile = load_profile(get_video_db())
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
@@ -216,16 +218,16 @@ def register_routes(bp):
         title, season?, episode?. The client polls until it stops growing or times out."""
         from . import get_video_db
         from core.video.quality_profile import load as load_profile
-        from core.video.slskd_search import poll_responses
+        from core.video.slskd_search import poll_search
         sid = request.args.get("id")
         scope = str(request.args.get("scope") or "movie").lower()
         want_season, want_episode, _ = _search_ints(request.args)
         if not sid:
-            return jsonify({"results": [], "live": True})
+            return jsonify({"results": [], "live": True, "total_files": 0})
         profile = load_profile(get_video_db())
-        raw = poll_responses(sid)
-        return jsonify({"live": True,
-                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
+        polled = poll_search(sid)
+        return jsonify({"live": True, "total_files": polled["total_files"],
+                        "results": _evaluate_hits(polled["hits"], profile, scope, want_season, want_episode)})
 
     @bp.route("/downloads/grab", methods=["POST"])
     def video_downloads_grab():
