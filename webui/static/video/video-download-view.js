@@ -168,14 +168,30 @@
         }).join('');
     }
 
-    // Scaffold: flip the targeted row(s) to a "coming soon" state. No backend yet.
+    // Scaffold: a satisfying faux-scan (animated) that resolves to "coming soon".
+    // No backend yet — this is the motion the real engine will drive.
+    function scanRow(row, i) {
+        if (row._scanning) return;
+        row._scanning = true;
+        var st = row.querySelector('[data-vdl-status]');
+        var btn = row.querySelector('[data-vdl-search]');
+        row.classList.add('vdl-src--scanning');
+        if (btn) btn.disabled = true;
+        if (st) { st.textContent = 'Searching'; st.className = 'vdl-src-status vdl-src-status--scanning'; }
+        setTimeout(function () {
+            if (!row.isConnected) { row._scanning = false; return; }
+            row.classList.remove('vdl-src--scanning');
+            row._scanning = false;
+            if (btn) btn.disabled = false;
+            var s = row.querySelector('[data-vdl-status]');
+            if (s) { s.textContent = 'Search engine coming soon'; s.className = 'vdl-src-status vdl-src-status--soon'; }
+        }, 1300 + i * 280);   // staggered finish so a "search all" ripples
+    }
+
     function stubSearch(container, which) {
         var sel = which === '*' ? '[data-vdl-src]' : '[data-vdl-src="' + which + '"]';
         var rows = container.querySelectorAll(sel);
-        for (var i = 0; i < rows.length; i++) {
-            var st = rows[i].querySelector('[data-vdl-status]');
-            if (st) { st.textContent = 'Search engine coming soon'; st.className = 'vdl-src-status vdl-src-status--soon'; }
-        }
+        for (var i = 0; i < rows.length; i++) scanRow(rows[i], i);
         toast('Automatic search isn’t wired up yet — coming soon', 'info');
     }
 
