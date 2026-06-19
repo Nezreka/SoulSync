@@ -156,8 +156,11 @@ def score_file_against_track(
     score = 0.0
 
     # Title similarity (TITLE_WEIGHT). Falls back to filename stem when
-    # the file has no title tag.
+    # the file has no title tag — strip a leading track-number prefix off that
+    # stem (#890) so "01 - Sun It Rises" scores against "Sun It Rises".
     title = file_tags.get('title') or os.path.splitext(os.path.basename(file_path))[0]
+    from core.imports.paths import strip_leading_track_number
+    title = strip_leading_track_number(title)
     track_name = track.get('name', '')
     score += similarity(title, track_name) * TITLE_WEIGHT
 

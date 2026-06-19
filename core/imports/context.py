@@ -183,7 +183,12 @@ def get_import_clean_title(
     if not title:
         track_info = get_import_track_info(context)
         title = _first_value(track_info, "name", "title", default="")
-    return str(title or default)
+    title = str(title or default)
+    # #890: strip a leading track-number prefix that leaked from a filename stem
+    # (e.g. "01 - Sun It Rises" → "Sun It Rises") so it matches the canonical title.
+    # Conservative — clean source titles ("7 Rings" etc.) pass through untouched.
+    from core.imports.paths import strip_leading_track_number
+    return strip_leading_track_number(title)
 
 
 def get_import_clean_album(
