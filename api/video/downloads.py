@@ -264,6 +264,9 @@ def register_routes(bp):
             "source": "soulseek", "username": username, "filename": filename,
             "size_bytes": int(body.get("size_bytes") or 0), "quality_label": body.get("quality_label"),
             "target_dir": target, "status": "downloading",
+            "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
+            "media_source": body.get("media_source"), "year": body.get("year"),
+            "poster_url": body.get("poster_url"),
         })
         ensure_started(get_video_db)
         return jsonify({"ok": True, "id": dl_id})

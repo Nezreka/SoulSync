@@ -530,6 +530,10 @@ CREATE TABLE IF NOT EXISTS video_downloads (
     filename      TEXT,                          -- slskd remote filename (full path)
     size_bytes    INTEGER DEFAULT 0,
     quality_label TEXT,
+    media_id      TEXT,                          -- the movie/show id (for the detail-page link)
+    media_source  TEXT,                          -- library | tmdb
+    year          INTEGER,
+    poster_url    TEXT,                          -- poster for the Downloads card
     target_dir    TEXT,                          -- destination library folder
     dest_path     TEXT,                          -- final moved path (set on completion)
     status        TEXT NOT NULL DEFAULT 'downloading',
