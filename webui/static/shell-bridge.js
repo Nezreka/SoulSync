@@ -20,7 +20,11 @@ function showLegacyPage(pageId) {
 }
 
 function setActivePageChrome(pageId) {
-    document.querySelectorAll('.nav-button').forEach(btn => {
+    // Only manage MUSIC nav buttons (they carry data-page). The video sidebar owns
+    // its own highlight via .nav-button[data-video-page]; clearing those here wiped
+    // the video selection on the first nav — it only re-stuck on a second click,
+    // which hits navigateToPage's same-page early-return so this never ran. (#sidebar)
+    document.querySelectorAll('.nav-button[data-page]').forEach(btn => {
         btn.classList.remove('active');
         btn.removeAttribute('aria-current');
     });
