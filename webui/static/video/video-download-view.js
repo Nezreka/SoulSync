@@ -58,7 +58,6 @@
                     '<button class="vdl-search-all" type="button" data-vdl-search-all>⌕ Search all</button>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
-                '<div class="vdl-foot-note">Automatic searching arrives with the download engine — this is the layout it\'ll drive.</div>' +
             '</div>';
     }
 
@@ -160,9 +159,12 @@
         box.innerHTML = list.map(function (s) {
             var m = SRC_META[s];
             return '<div class="vdl-src" data-vdl-src="' + s + '">' +
-                '<span class="vdl-src-emoji">' + m.emoji + '</span>' +
-                '<span class="vdl-src-name">' + esc(m.name) + '</span>' +
-                '<span class="vdl-src-status" data-vdl-status>Ready</span>' +
+                '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
+                '<span class="vdl-src-main">' +
+                    '<span class="vdl-src-name">' + esc(m.name) + '</span>' +
+                    '<span class="vdl-src-meta"><span class="vdl-src-dot"></span>' +
+                        '<span class="vdl-src-status" data-vdl-status>Ready</span></span>' +
+                '</span>' +
                 '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
                 '</div>';
         }).join('');
