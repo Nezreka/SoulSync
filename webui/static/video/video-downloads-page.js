@@ -1,10 +1,10 @@
 /*
  * SoulSync — Video Downloads page.
  *
- * Every grab from the video side lands here. Filter tabs (All / Active / Completed /
- * Failed), per-row cancel + retry, cancel-all and clear-finished — the depth of the
- * music downloads page. Cards are created ONCE and patched in place (no innerHTML
- * churn) so progress bars glide and nothing re-animates each tick.
+ * Reuses the music downloads page's .adl-* layout + look (full-width, segmented
+ * filter pills, compact rows, status dots) for visual parity, driven by video data
+ * via data-vdpg-* hooks. Filter tabs, per-row cancel + retry, cancel-all, clear.
+ * Rows are created ONCE and patched in place so progress glides and nothing blinks.
  */
 (function () {
     'use strict';
@@ -14,7 +14,7 @@
     var URL_CANCEL = '/api/video/downloads/cancel';
     var URL_RETRY = '/api/video/downloads/retry';
     var _timer = null, _wired = false, _filter = 'all';
-    var _cards = {};   // id -> card element (kept across polls for in-place updates)
+    var _cards = {};
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -31,12 +31,13 @@
     }
 
     var KIND_ICON = { movie: '🎬', show: '📺', episode: '📺', season: '📺', series: '📺', youtube: '▶️' };
+    // status -> { label, cls } where cls is the music .adl-row-/.adl-status-dot class
     var STATUS = {
-        downloading: { label: 'Downloading', st: 'dl' },
-        queued: { label: 'Queued', st: 'q' },
-        completed: { label: 'Completed', st: 'ok' },
-        failed: { label: 'Failed', st: 'fail' },
-        cancelled: { label: 'Cancelled', st: 'cancel' }
+        downloading: { label: 'Downloading', cls: 'active' },
+        queued: { label: 'Queued', cls: 'queued' },
+        completed: { label: 'Completed', cls: 'completed' },
+        failed: { label: 'Failed', cls: 'failed' },
+        cancelled: { label: 'Cancelled', cls: 'cancelled' }
     };
     function isActive(s) { return s === 'downloading' || s === 'queued'; }
     function isFail(s) { return s === 'failed' || s === 'cancelled'; }
@@ -44,79 +45,79 @@
         return _filter === 'all' || (_filter === 'active' && isActive(s)) ||
             (_filter === 'completed' && s === 'completed') || (_filter === 'failed' && isFail(s));
     }
-
     function fmtSize(bytes) {
         var gb = (bytes || 0) / (1024 * 1024 * 1024);
         return gb >= 0.1 ? (Math.round(gb * 10) / 10) + ' GB' : Math.round((bytes || 0) / (1024 * 1024)) + ' MB';
     }
-    function ago(ts) {
-        if (!ts) return '';
-        var t = Date.parse(String(ts).replace(' ', 'T') + 'Z');
-        if (isNaN(t)) return '';
-        var s = Math.max(0, Math.round((Date.now() - t) / 1000));
-        if (s < 60) return s + 's ago';
-        if (s < 3600) return Math.round(s / 60) + 'm ago';
-        if (s < 86400) return Math.round(s / 3600) + 'h ago';
-        return Math.round(s / 86400) + 'd ago';
-    }
+
+    var X_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    var R_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
 
     function makeCard(d) {
         var el = document.createElement('div');
-        el.className = 'vdpg-item';
+        el.className = 'adl-row';
         el.setAttribute('data-dl-id', d.id);
         el.innerHTML =
-            '<div class="vdpg-ic" data-f="ic"></div>' +
-            '<div class="vdpg-body">' +
-                '<div class="vdpg-row1"><span class="vdpg-name" data-f="name"></span>' +
-                    '<span class="vdpg-pill" data-f="pill"></span></div>' +
-                '<div class="vdpg-rel" data-f="rel"></div>' +
-                '<div class="vdpg-bar" data-f="bar"><div class="vdpg-bar-fill" data-f="fill"></div></div>' +
-                '<div class="vdpg-meta" data-f="meta"></div>' +
+            '<div class="adl-row-art adl-row-art-empty vdpg-art" data-f="ic"></div>' +
+            '<div class="adl-row-info">' +
+                '<div class="adl-row-title" data-f="name"></div>' +
+                '<div class="adl-row-meta" data-f="meta"></div>' +
+                '<div class="adl-row-error" data-f="error" style="display:none"></div>' +
+                '<div class="vdpg-prog" data-f="bar" style="display:none"><div class="vdpg-prog-fill" data-f="fill"></div></div>' +
             '</div>' +
-            '<div class="vdpg-actions" data-f="actions"></div>';
+            '<div class="adl-row-status" data-f="status"><span class="adl-status-dot" data-f="dot"></span><span data-f="label"></span></div>' +
+            '<div class="vdpg-rowact" data-f="actions"></div>';
         return el;
     }
 
     function patchCard(el, d) {
         var info = STATUS[d.status] || STATUS.downloading;
-        var active = isActive(d.status);
+        var cls = info.cls, active = isActive(d.status);
         var pct = Math.max(0, Math.min(100, d.progress || 0));
         var q = function (f) { return el.querySelector('[data-f="' + f + '"]'); };
 
-        if (el.getAttribute('data-st') !== info.st) el.setAttribute('data-st', info.st);
+        var want = 'adl-row adl-row-' + cls;
+        if (el.className !== want) el.className = want;
         var ic = q('ic'); var icon = KIND_ICON[(d.kind || '').toLowerCase()] || '🎬';
         if (ic.textContent !== icon) ic.textContent = icon;
         var name = d.title || d.release_title || 'Download';
         var nm = q('name'); if (nm.textContent !== name) nm.textContent = name;
-        var pill = q('pill');
-        if (pill.textContent !== info.label) pill.textContent = info.label;
-        if (pill.getAttribute('data-st') !== info.st) pill.setAttribute('data-st', info.st);
 
-        var rel = q('rel');
-        var relTxt = (d.release_title && d.release_title !== name) ? d.release_title : '';
-        if (rel.textContent !== relTxt) rel.textContent = relTxt;
+        // one compact meta line (music-style), context-dependent
+        var meta;
+        if (d.status === 'completed' && d.dest_path) meta = '→ ' + d.dest_path;
+        else {
+            var bits = [];
+            if (d.release_title && d.release_title !== name) bits.push(d.release_title);
+            else bits.push(fmtSize(d.size_bytes));
+            if (d.username) bits.push('👤 ' + d.username);
+            if (active) bits.push(Math.round(pct) + '%');
+            meta = bits.join('  ·  ');
+        }
+        var mt = q('meta');
+        if (mt.textContent !== meta) mt.textContent = meta;
+        mt.classList.toggle('vdpg-dest', d.status === 'completed' && !!d.dest_path);
 
-        q('bar').style.display = active ? '' : 'none';
+        var err = q('error');
+        var errTxt = isFail(d.status) && d.error ? d.error : '';
+        if (err.textContent !== errTxt) err.textContent = errTxt;
+        err.style.display = errTxt ? '' : 'none';
+
+        var bar = q('bar');
+        bar.style.display = active ? '' : 'none';
         if (active) q('fill').style.width = pct + '%';
 
-        var meta = [fmtSize(d.size_bytes)];
-        if (d.username) meta.push('👤 ' + d.username);
-        if (active) meta.push(Math.round(pct) + '%');
-        if (d.status === 'completed' && d.dest_path) meta.push('→ ' + d.dest_path);
-        else if (isFail(d.status) && d.error) meta.push(d.error);
-        else if (d.created_at) meta.push(ago(d.created_at));
-        var html = meta.map(function (m, i) {
-            var cls = (i === 0) ? 'vdpg-m' : (d.status === 'completed' && /^→/.test(m)) ? 'vdpg-m vdpg-dest'
-                : (isFail(d.status) && m === d.error) ? 'vdpg-m vdpg-err' : 'vdpg-m';
-            return '<span class="' + cls + '">' + esc(m) + '</span>';
-        }).join('');
-        var mt = q('meta'); if (mt.innerHTML !== html) mt.innerHTML = html;
+        var st = q('status'); var stWant = 'adl-row-status ' + cls;
+        if (st.className !== stWant) st.className = stWant;
+        var dot = q('dot'); var dotWant = 'adl-status-dot ' + cls;
+        if (dot.className !== dotWant) dot.className = dotWant;
+        var lab = q('label'); if (lab.textContent !== info.label) lab.textContent = info.label;
 
         var act = q('actions');
         var actHTML = active
-            ? '<button class="vdpg-act vdpg-act--cancel" type="button" data-vdpg-cancel="' + d.id + '" title="Cancel">✕</button>'
+            ? '<button class="adl-row-cancel" type="button" data-vdpg-cancel="' + d.id + '" title="Cancel">' + X_SVG + '</button>'
             : isFail(d.status)
-                ? '<button class="vdpg-act vdpg-act--retry" type="button" data-vdpg-retry="' + d.id + '" title="Retry">↻</button>'
+                ? '<button class="vdpg-row-retry" type="button" data-vdpg-retry="' + d.id + '" title="Retry">' + R_SVG + '</button>'
                 : '';
         if (act.innerHTML !== actHTML) act.innerHTML = actHTML;
     }
@@ -124,6 +125,7 @@
     function render(list) {
         var host = document.querySelector('[data-vdpg-list]'); if (!host) return;
         list = list || [];
+        var empty = host.querySelector('[data-vdpg-empty]');
 
         var counts = { all: list.length, active: 0, completed: 0, failed: 0 };
         list.forEach(function (d) {
@@ -131,63 +133,51 @@
             else if (d.status === 'completed') counts.completed++;
             else counts.failed++;
         });
-        ['all', 'active', 'completed', 'failed'].forEach(function (k) {
-            var n = document.querySelector('[data-vdpg-n="' + k + '"]'); if (n) n.textContent = counts[k];
-        });
-        var cancelAll = document.querySelector('[data-vdpg-cancel-all]'); if (cancelAll) cancelAll.hidden = counts.active === 0;
-        var clearBtn = document.querySelector('[data-vdpg-clear]'); if (clearBtn) clearBtn.hidden = (counts.completed + counts.failed) === 0;
+        var cancelAll = document.querySelector('[data-vdpg-cancel-all]'); if (cancelAll) cancelAll.style.display = counts.active ? '' : 'none';
+        var clearBtn = document.querySelector('[data-vdpg-clear]'); if (clearBtn) clearBtn.style.display = (counts.completed + counts.failed) ? '' : 'none';
         var sub = document.querySelector('[data-vdpg-sub]');
-        if (sub) sub.textContent = list.length ? (counts.active + ' active · ' + counts.completed + ' done · ' + counts.failed + ' failed')
-            : "Everything you've grabbed from the video side";
-
-        if (!list.length) {
-            _cards = {};
-            host.innerHTML = '<div class="vdpg-empty"><div class="vdpg-empty-ic">⤓</div>' +
-                '<div class="vdpg-empty-t">No downloads yet</div>' +
-                '<div class="vdpg-empty-s">Hit Grab on a search result and it\'ll show up here.</div></div>';
-            return;
+        if (sub) {
+            var parts = [];
+            if (counts.active) parts.push(counts.active + ' active');
+            if (counts.completed) parts.push(counts.completed + ' done');
+            if (counts.failed) parts.push(counts.failed + ' failed');
+            sub.textContent = parts.join('  ·  ');
         }
-        var empty = host.querySelector('.vdpg-empty'); if (empty) empty.remove();
 
         var seen = {}, shown = 0;
-        list.forEach(function (d, i) {
+        list.forEach(function (d) {
             seen[d.id] = true;
             var el = _cards[d.id] || (_cards[d.id] = makeCard(d));
             patchCard(el, d);
             var vis = matches(d.status);
             el.style.display = vis ? '' : 'none';
             if (vis) shown++;
-            var atPos = host.children[i];
-            if (atPos !== el) host.insertBefore(el, atPos || null);
+            host.appendChild(el);   // keep order = server order (active first); no re-anim
         });
         Object.keys(_cards).forEach(function (id) {
-            if (!seen[id]) { var el = _cards[id]; if (el && el.parentNode) el.parentNode.removeChild(el); delete _cards[id]; }
+            if (!seen[id]) { var e = _cards[id]; if (e && e.parentNode) e.parentNode.removeChild(e); delete _cards[id]; }
         });
 
-        var fe = host.querySelector('.vdpg-filter-empty');
-        if (shown === 0) {
-            if (!fe) { fe = document.createElement('div'); fe.className = 'vdpg-filter-empty'; host.appendChild(fe); }
-            fe.textContent = 'Nothing ' + (_filter === 'all' ? 'here' : _filter) + ' right now.';
-        } else if (fe) { fe.remove(); }
+        if (empty) {
+            host.appendChild(empty);   // keep the empty element last
+            empty.style.display = shown === 0 ? '' : 'none';
+            empty.textContent = !list.length ? "No downloads yet. Hit Grab on a search result and it'll show up here."
+                : 'Nothing ' + (_filter === 'all' ? 'here' : _filter) + ' right now.';
+        }
     }
 
     function setFilter(f) {
         _filter = f;
         Array.prototype.forEach.call(document.querySelectorAll('[data-vdpg-filter]'), function (b) {
-            b.classList.toggle('vdpg-pill-f--on', b.getAttribute('data-vdpg-filter') === f);
+            b.classList.toggle('active', b.getAttribute('data-vdpg-filter') === f);
         });
         getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); });
     }
 
-    function anyActive() { return !!document.querySelector('.vdpg-item[data-st="dl"], .vdpg-item[data-st="q"]'); }
+    function anyActive() { return !!document.querySelector('.adl-row.adl-row-active, .adl-row.adl-row-queued'); }
 
-    function poll() {
-        getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); schedule(); });
-    }
-    function schedule() {
-        if (_timer) clearTimeout(_timer);
-        _timer = setTimeout(poll, anyActive() ? 1500 : 6000);
-    }
+    function poll() { getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); schedule(); }); }
+    function schedule() { if (_timer) clearTimeout(_timer); _timer = setTimeout(poll, anyActive() ? 1500 : 6000); }
     function start() { wire(); if (_timer) clearTimeout(_timer); poll(); }
     function stop() { if (_timer) { clearTimeout(_timer); _timer = null; } }
 
@@ -212,7 +202,7 @@
         var list = document.querySelector('[data-vdpg-list]');
         if (list) list.addEventListener('click', function (e) {
             var c = e.target.closest('[data-vdpg-cancel]');
-            if (c) { c.disabled = true; postJSON(URL_CANCEL, { id: +c.getAttribute('data-vdpg-cancel') }).then(function () { poll(); }); return; }
+            if (c) { c.disabled = true; c.classList.add('adl-row-cancel-pending'); postJSON(URL_CANCEL, { id: +c.getAttribute('data-vdpg-cancel') }).then(function () { poll(); }); return; }
             var r = e.target.closest('[data-vdpg-retry]');
             if (r) { r.disabled = true; postJSON(URL_RETRY, { id: +r.getAttribute('data-vdpg-retry') }).then(function (res) {
                 if (res && res.ok) toast('Retrying', 'info'); else toast((res && res.error) || 'Retry failed', 'error'); poll(); }); }
