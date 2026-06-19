@@ -87,12 +87,14 @@
         if (o.kind === 'show') {
             // Shows get a wider modal + a season/episode picker (not the movie layout).
             VideoDownload.render(content, { kind: 'show', id: o.id, source: o.source || 'library',
-                detail: (modalState && modalState._detail) || null, tvId: (modalState && modalState._tvId) || null });
+                detail: (modalState && modalState._detail) || null, tvId: (modalState && modalState._tvId) || null,
+                poster: (modalState && modalState.poster) || null });
             ov.classList.add('vgm-mode-dl-show');
         } else {
             var file = (modalState && modalState.kind === 'movie' && modalState.owned) ? (modalState.file || null) : null;
             VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file,
-                title: (modalState && modalState.title) || o.title || '', year: (modalState && modalState.year) || null });
+                title: (modalState && modalState.title) || o.title || '', year: (modalState && modalState.year) || null,
+                poster: (modalState && modalState.poster) || null });
         }
         setDownloadMode(ov, true);
         dl.hidden = false;

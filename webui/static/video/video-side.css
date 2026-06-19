@@ -3320,13 +3320,24 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-wrap { padding: 4px 0 40px; }
 .adl-controls-right { display: flex; align-items: center; gap: 10px; }
 .vdpg-art { font-size: 22px; }                       /* emoji inside the .adl-row-art tile */
-.vdpg-rowact { flex-shrink: 0; display: flex; align-items: center; }
+.vdpg-art.vdpg-has-poster { background-size: cover; background-position: center; background-repeat: no-repeat; }
+.vdpg-rowact { flex-shrink: 0; display: flex; align-items: center; gap: 2px; }
 /* slim progress line inside the row (music rows have none; video files are big/slow) */
 .vdpg-prog { margin-top: 7px; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; }
 .vdpg-prog-fill { height: 100%; width: 0; border-radius: 999px;
     background: linear-gradient(90deg, rgba(var(--accent-rgb),0.7), rgb(var(--accent-rgb)));
     transition: width 1.4s cubic-bezier(0.3,0.8,0.3,1); }
-.adl-row-meta.vdpg-dest { color: #8fe7af; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* quality chip + context in the meta line */
+.vdpg-qchip { display: inline-block; font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 5px; vertical-align: middle; margin-right: 8px; color: #fff;
+    background: rgba(var(--accent-rgb), 0.16); border: 1px solid rgba(var(--accent-rgb), 0.32); }
+.vdpg-mctx { vertical-align: middle; }
+.vdpg-dest { color: #8fe7af; font-family: 'JetBrains Mono', ui-monospace, monospace; }
+/* open the movie/show page */
+.vdpg-open { flex-shrink: 0; width: 30px; height: 30px; display: inline-grid; place-items: center;
+    border-radius: 8px; cursor: pointer; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    color: rgba(255, 255, 255, 0.7); transition: all 0.15s ease; }
+.vdpg-open:hover { background: rgba(var(--accent-rgb), 0.2); border-color: rgba(var(--accent-rgb), 0.5); color: #fff; transform: translateY(-1px); }
 /* retry button — mirrors .adl-row-cancel's hover-reveal, accent themed */
 .vdpg-row-retry { flex-shrink: 0; width: 28px; height: 28px; margin-left: 8px; padding: 0; display: inline-flex;
     align-items: center; justify-content: center; border-radius: 50%; cursor: pointer; color: #fff;

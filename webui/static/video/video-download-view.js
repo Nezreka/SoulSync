@@ -279,10 +279,14 @@
         var r = panel._rows[parseInt(btn.getAttribute('data-vdl-grab'), 10)]; if (!r) return;
         var p = panel._search || {};
         btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
+        var container = panel.closest('[data-vgm-dl-content]');
+        var o = (container && (container._opts || container._dl)) || {};
         postJSON('/api/video/downloads/grab', {
             kind: p.scope || 'movie', title: p.title || '', release_title: r.title,
             source: 'soulseek', username: r.username, filename: r.filename,
-            size_bytes: r.size_bytes, quality_label: r.quality_label
+            size_bytes: r.size_bytes, quality_label: r.quality_label,
+            media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
+            year: o.year, poster_url: o.poster
         }).then(function (res) {
             btn.classList.remove('vdl-res-grab--busy');
             if (res && res.ok) {
@@ -366,7 +370,8 @@
             sel: new Set(), today: isoToday(),
             tvId: opts.tvId || d.tmdb_id || null, source: opts.source || 'library',
             sources: ['soulseek'], epMeta: {},
-            title: d.title || opts.title || '', maxSeason: maxSeason
+            title: d.title || opts.title || '', maxSeason: maxSeason,
+            mediaId: opts.id, mediaSource: opts.source, poster: opts.poster || null, year: d.year || null
         };
         container.innerHTML =
             '<div class="vdl-section"><div class="vdl-sec-label">Quality target</div>' +

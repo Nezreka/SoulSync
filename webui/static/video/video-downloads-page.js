@@ -52,6 +52,7 @@
 
     var X_SVG = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
     var R_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>';
+    var OPEN_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
     function makeCard(d) {
         var el = document.createElement('div');
@@ -78,25 +79,29 @@
 
         var want = 'adl-row adl-row-' + cls;
         if (el.className !== want) el.className = want;
-        var ic = q('ic'); var icon = KIND_ICON[(d.kind || '').toLowerCase()] || '🎬';
-        if (ic.textContent !== icon) ic.textContent = icon;
-        var name = d.title || d.release_title || 'Download';
+
+        // poster art tile (falls back to the kind emoji)
+        var ic = q('ic');
+        if (d.poster_url) {
+            if (ic._p !== d.poster_url) { ic._p = d.poster_url; ic.style.backgroundImage = "url('" + d.poster_url + "')"; }
+            ic.classList.add('vdpg-has-poster'); ic.textContent = '';
+        } else {
+            ic.classList.remove('vdpg-has-poster'); if (ic._p) { ic.style.backgroundImage = ''; ic._p = null; }
+            var icon = KIND_ICON[(d.kind || '').toLowerCase()] || '🎬';
+            if (ic.textContent !== icon) ic.textContent = icon;
+        }
+
+        var name = (d.title || d.release_title || 'Download') + (d.year ? '  (' + d.year + ')' : '');
         var nm = q('name'); if (nm.textContent !== name) nm.textContent = name;
 
-        // one compact meta line (music-style), context-dependent
-        var meta;
-        if (d.status === 'completed' && d.dest_path) meta = '→ ' + d.dest_path;
-        else {
-            var bits = [];
-            if (d.release_title && d.release_title !== name) bits.push(d.release_title);
-            else bits.push(fmtSize(d.size_bytes));
-            if (d.username) bits.push('👤 ' + d.username);
-            if (active) bits.push(Math.round(pct) + '%');
-            meta = bits.join('  ·  ');
-        }
-        var mt = q('meta');
-        if (mt.textContent !== meta) mt.textContent = meta;
-        mt.classList.toggle('vdpg-dest', d.status === 'completed' && !!d.dest_path);
+        // meta: quality chip + a context line (release / size·user·pct / dest)
+        var ctx;
+        if (d.status === 'completed' && d.dest_path) ctx = '→ ' + d.dest_path;
+        else if (active) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
+        else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
+        var chip = d.quality_label ? '<span class="vdpg-qchip">' + esc(d.quality_label) + '</span>' : '';
+        var metaHTML = chip + '<span class="vdpg-mctx' + (d.status === 'completed' && d.dest_path ? ' vdpg-dest' : '') + '">' + esc(ctx) + '</span>';
+        var mt = q('meta'); if (mt.innerHTML !== metaHTML) mt.innerHTML = metaHTML;
 
         var err = q('error');
         var errTxt = isFail(d.status) && d.error ? d.error : '';
@@ -114,11 +119,15 @@
         var lab = q('label'); if (lab.textContent !== info.label) lab.textContent = info.label;
 
         var act = q('actions');
-        var actHTML = active
+        var openBtn = d.media_id ? '<button class="vdpg-open" type="button" data-vdpg-open="' + esc(d.media_id) +
+            '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') +
+            '" title="Open ' + (d.kind === 'movie' ? 'movie' : 'show') + ' page">' + OPEN_SVG + '</button>' : '';
+        var stateBtn = active
             ? '<button class="adl-row-cancel" type="button" data-vdpg-cancel="' + d.id + '" title="Cancel">' + X_SVG + '</button>'
             : isFail(d.status)
                 ? '<button class="vdpg-row-retry" type="button" data-vdpg-retry="' + d.id + '" title="Retry">' + R_SVG + '</button>'
                 : '';
+        var actHTML = openBtn + stateBtn;
         if (act.innerHTML !== actHTML) act.innerHTML = actHTML;
     }
 
@@ -201,6 +210,15 @@
         });
         var list = document.querySelector('[data-vdpg-list]');
         if (list) list.addEventListener('click', function (e) {
+            var op = e.target.closest('[data-vdpg-open]');
+            if (op) {
+                var kind = op.getAttribute('data-kind') === 'movie' ? 'movie' : 'show';
+                var id = op.getAttribute('data-vdpg-open');
+                document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                    detail: { kind: kind, id: parseInt(id, 10) || id, source: op.getAttribute('data-source') || 'library' }
+                }));
+                return;
+            }
             var c = e.target.closest('[data-vdpg-cancel]');
             if (c) { c.disabled = true; c.classList.add('adl-row-cancel-pending'); postJSON(URL_CANCEL, { id: +c.getAttribute('data-vdpg-cancel') }).then(function () { poll(); }); return; }
             var r = e.target.closest('[data-vdpg-retry]');
