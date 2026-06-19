@@ -6011,9 +6011,23 @@
 
                         <!-- Right Column - Download Settings, Database, Metadata, Logging -->
                         <div class="settings-right-column">
-                            <!-- VIDEO Downloads (isolated; shown only on the video side). The
-                                 music download sections in this tab are hidden on the video side
-                                 via video-side.css; these data-video-only ones take their place. -->
+                            <!-- VIDEO Downloads (isolated; shown only on the video side). EVERY music
+                                 download element in this tab is hidden via video-side.css; these
+                                 data-video-only ones replace them. Order: folders → source → slskd → quality. -->
+                            <div class="settings-group" data-stg="downloads" data-video-only>
+                                <h3>Video Download Folders</h3>
+                                <div class="setting-help-text">
+                                    Where the video side lands downloads and where it moves finished files — SEPARATE from your Music paths.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input):</label>
+                                    <input type="text" id="video-download-path" placeholder="./video_downloads">
+                                </div>
+                                <div class="form-group">
+                                    <label>Transfer Folder (Output — Video Library):</label>
+                                    <input type="text" id="video-transfer-path" placeholder="./VideoLibrary">
+                                </div>
+                            </div>
                             <div class="settings-group" data-stg="downloads" data-video-only>
                                 <h3>Download Source</h3>
                                 <div class="setting-help-text">
@@ -6025,95 +6039,89 @@
                                         <option value="soulseek">Soulseek Only</option>
                                         <option value="torrent">Torrent Only (via Prowlarr)</option>
                                         <option value="usenet">Usenet Only (via Prowlarr)</option>
-                                        <option value="hybrid">Hybrid (try each in order)</option>
+                                        <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
                                 </div>
+                                <!-- Hybrid chain — reuses music's hybrid-source-list markup/CSS for
+                                     visual parity (minus the album/track badge, which is music-only). -->
                                 <div id="video-hybrid-container" style="display:none;">
-                                    <div class="vq-label" style="margin-top:14px;">Hybrid order <span class="vq-hint">best-first; toggle off any you don't want</span></div>
-                                    <div class="vq-rows" id="video-hybrid-rows"></div>
+                                    <div class="setting-help-text" style="margin-top:10px;">Use the arrows to order sources. Enable the ones you want — downloads try each enabled source in order.</div>
+                                    <div class="hybrid-source-list" id="video-hybrid-rows"></div>
                                 </div>
                             </div>
                             <!-- slskd connection — SHARED with Music (one slskd instance). Writes the
-                                 app-wide soulseek.* config, not video.db. Shown when soulseek is active. -->
+                                 app-wide soulseek.* config, not video.db. Collapsible; shown when soulseek
+                                 is active. Inner header/body carry no data-stg so the broad hide rule
+                                 doesn't catch them (the wrapping group is data-video-only). -->
                             <div class="settings-group" data-stg="downloads" data-video-only id="video-slskd-container" style="display:none;">
-                                <h3>Soulseek (slskd) Connection <span class="vq-hint">shared with Music</span></h3>
-                                <div class="setting-help-text">
-                                    These connect to your one slskd instance and are SHARED with the Music side — changing them here changes them for both.
+                                <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); var b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':'';">
+                                    <span class="settings-section-arrow">&#9660;</span>
+                                    <h3>Soulseek (slskd) Connection</h3>
+                                    <span class="settings-section-hint">shared with Music · URL, key, timeouts, peers</span>
                                 </div>
-                                <div class="form-group">
-                                    <label>slskd URL:</label>
-                                    <input type="text" id="video-slskd-url" placeholder="http://localhost:5030">
-                                </div>
-                                <div class="form-group">
-                                    <label>API Key:</label>
-                                    <input type="password" id="video-slskd-api-key" placeholder="slskd API Key">
-                                </div>
-                                <div class="form-group">
-                                    <label>Search Timeout (seconds):</label>
-                                    <input type="number" id="video-slskd-search-timeout" min="15" max="300">
-                                    <div class="setting-help-text">How long to search for results (15-300 seconds)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Search Timeout Buffer (seconds):</label>
-                                    <input type="number" id="video-slskd-search-timeout-buffer" min="5" max="60">
-                                    <div class="setting-help-text">Extra time to wait for late results (5-60 seconds)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Minimum Delay Between Searches (seconds):</label>
-                                    <input type="number" id="video-slskd-search-min-delay" min="0" max="60">
-                                    <div class="setting-help-text">Forces a gap between consecutive searches (0 disables).</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Minimum Peer Upload Speed (Mbps):</label>
-                                    <input type="number" id="video-slskd-min-peer-speed" min="0" max="50">
-                                    <div class="setting-help-text">Ignore results from peers slower than this</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Max Peer Queue Length:</label>
-                                    <input type="number" id="video-slskd-max-peer-queue" min="0">
-                                    <div class="setting-help-text">Skip peers with a queue longer than this (0 = no limit)</div>
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Timeout (minutes):</label>
-                                    <input type="number" id="video-slskd-download-timeout" min="2" max="60">
-                                    <div class="setting-help-text">Abandon stuck downloads after this many minutes</div>
-                                </div>
-                                <label class="vq-check">
-                                    <input type="checkbox" id="video-slskd-auto-clear">
-                                    <span class="vq-check-box"></span>
-                                    <span>Auto-clear slskd search history</span>
-                                </label>
-                            </div>
-                            <div class="settings-group" data-stg="downloads" data-video-only>
-                                <h3>Video Download Folders</h3>
-                                <div class="setting-help-text">
-                                    Where the video side lands downloads and where it moves finished files. These are SEPARATE from your Music paths — point them at wherever your video library lives.
-                                </div>
-                                <div class="form-group">
-                                    <label>Download Folder (Input):</label>
-                                    <input type="text" id="video-download-path" placeholder="./video_downloads">
-                                </div>
-                                <div class="form-group">
-                                    <label>Transfer Folder (Output — Video Library):</label>
-                                    <input type="text" id="video-transfer-path" placeholder="./VideoLibrary">
+                                <div class="settings-section-body collapsed" style="display:none;">
+                                    <div class="setting-help-text">These connect to your one slskd instance and are SHARED with the Music side — changing them here changes them for both.</div>
+                                    <div class="form-group">
+                                        <label>slskd URL:</label>
+                                        <input type="text" id="video-slskd-url" placeholder="http://localhost:5030">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>API Key:</label>
+                                        <input type="password" id="video-slskd-api-key" placeholder="slskd API Key">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout (seconds):</label>
+                                        <input type="number" id="video-slskd-search-timeout" min="15" max="300">
+                                        <div class="setting-help-text">How long to search for results (15-300 seconds)</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Search Timeout Buffer (seconds):</label>
+                                        <input type="number" id="video-slskd-search-timeout-buffer" min="5" max="60">
+                                        <div class="setting-help-text">Extra time to wait for late results (5-60 seconds)</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Minimum Delay Between Searches (seconds):</label>
+                                        <input type="number" id="video-slskd-search-min-delay" min="0" max="60">
+                                        <div class="setting-help-text">Forces a gap between consecutive searches (0 disables).</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Minimum Peer Upload Speed (Mbps):</label>
+                                        <input type="number" id="video-slskd-min-peer-speed" min="0" max="50">
+                                        <div class="setting-help-text">Ignore results from peers slower than this</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Max Peer Queue Length:</label>
+                                        <input type="number" id="video-slskd-max-peer-queue" min="0">
+                                        <div class="setting-help-text">Skip peers with a queue longer than this (0 = no limit)</div>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Download Timeout (minutes):</label>
+                                        <input type="number" id="video-slskd-download-timeout" min="2" max="60">
+                                        <div class="setting-help-text">Abandon stuck downloads after this many minutes</div>
+                                    </div>
+                                    <label class="vq-check">
+                                        <input type="checkbox" id="video-slskd-auto-clear">
+                                        <span class="vq-check-box"></span>
+                                        <span>Auto-clear slskd search history</span>
+                                    </label>
                                 </div>
                             </div>
                             <!-- VIDEO quality profile — one unified profile across slskd/torrent/usenet -->
                             <div class="settings-group" data-stg="downloads" data-video-only>
                                 <h3>Video Quality Profile</h3>
                                 <div class="setting-help-text">
-                                    One profile across slskd, torrent &amp; usenet — quality is read from the release name / filename. Toggle the tiers you want and order them best-first.
+                                    One profile for every video source. Quality is read from the release name / filename — choose what you'll accept, then how to break ties.
                                 </div>
                                 <div class="vq-block">
-                                    <div class="vq-label">Resolution <span class="vq-hint">order best-first with the arrows</span></div>
+                                    <div class="vq-label">Resolutions to accept <span class="vq-hint">toggle on what you want · order = preference (best first)</span></div>
                                     <div class="vq-rows" id="vq-resolution-rows"></div>
                                 </div>
                                 <div class="vq-block">
-                                    <div class="vq-label">Source preference</div>
+                                    <div class="vq-label">Preferred source <span class="vq-hint">tie-breaker when two releases match the same resolution</span></div>
                                     <div class="vq-rows" id="vq-source-rows"></div>
                                 </div>
                                 <div class="vq-grid">
-                                    <div class="vq-block">
+                                    <div class="vq-block" style="margin:0;">
                                         <div class="vq-label">Codec</div>
                                         <div class="vq-seg" id="vq-codec">
                                             <button type="button" data-vq-codec="any">Any</button>
