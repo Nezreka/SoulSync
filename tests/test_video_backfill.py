@@ -13,7 +13,7 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
-    VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
+    AniListWorker, VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
 
@@ -179,7 +179,7 @@ def test_get_stats_shape_matches_matcher_worker(db):
 
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
-        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze"}
+        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze", "anilist"}
 
 
 # ── Trakt (community rating backfill, keyed on imdb id) ────────────────────────
@@ -263,6 +263,45 @@ def test_tvmaze_fetch_parses_lookup(db, monkeypatch):
                         lambda url, params=None, headers=None, timeout=12: {"rating": {"average": 9.34}})
     out = TVmazeWorker(db).fetch({"kind": "show", "imdb_id": "tt0903747"})
     assert out == {"tvmaze_rating": 9.3}
+
+
+# ── AniList (no-key GraphQL, anime score, opt-in + title-match guard) ──────────
+def test_anilist_off_by_default(db):
+    w = AniListWorker(db)
+    assert w.enabled is False                            # opt-in (anime-niche)
+    db.set_setting("anilist_enabled", "1")
+    assert w.enabled is True
+
+
+def test_anilist_fetch_matches_title_and_scores(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    payload = {"data": {"Media": {"averageScore": 85,
+                                   "title": {"romaji": "Cowboy Bebop", "english": "Cowboy Bebop"}}}}
+    monkeypatch.setattr(bf, "_http_post_json", lambda url, body, headers=None, timeout=12: payload)
+    out = AniListWorker(db).fetch({"kind": "show", "title": "Cowboy Bebop"})
+    assert out == {"anilist_score": 85}
+
+
+def test_anilist_rejects_title_mismatch(db, monkeypatch):
+    # AniList returns SOME anime for a non-anime title → the guard must reject it.
+    import core.video.enrichment.backfill as bf
+    payload = {"data": {"Media": {"averageScore": 90,
+                                   "title": {"romaji": "Naruto", "english": "Naruto"}}}}
+    monkeypatch.setattr(bf, "_http_post_json", lambda url, body, headers=None, timeout=12: payload)
+    assert AniListWorker(db).fetch({"kind": "show", "title": "The Office"}) is None
+
+
+def test_anilist_worker_records_score(db):
+    with db.connect() as c:
+        c.execute("INSERT INTO shows (title, year) VALUES ('Bebop', 1998)")
+        sid = c.execute("SELECT id FROM shows WHERE title='Bebop'").fetchone()["id"]
+        c.commit()
+    w = AniListWorker(db)
+    w.fetch = lambda item: {"anilist_score": 87}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT anilist_score, anilist_status FROM shows WHERE id=?", (sid,)).fetchone()
+    assert r["anilist_score"] == 87 and r["anilist_status"] == "ok"
 
 
 def test_backfill_module_imports_nothing_from_music():

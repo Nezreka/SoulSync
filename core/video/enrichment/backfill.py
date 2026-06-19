@@ -17,6 +17,7 @@ Isolated: imports only video.db helpers + requests; no music code.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 
@@ -62,6 +63,37 @@ def _http_get_json(url, params=None, headers=None, timeout=12):
         return r.json()
     except Exception:
         return None
+
+
+def _http_post_json(url, json_body, headers=None, timeout=12):
+    """POST JSON → parsed JSON, with the same status semantics as _http_get_json
+    (for GraphQL services like AniList). 404 → None; 401/403 → _Unauthorized;
+    429 → _RateLimited; other non-2xx → raises."""
+    import requests
+    h = {"User-Agent": _UA, "Content-Type": "application/json", "Accept": "application/json"}
+    if headers:
+        h.update(headers)
+    r = requests.post(url, json=json_body, headers=h, timeout=timeout)
+    if r.status_code == 404:
+        return None
+    if r.status_code in (401, 403):
+        raise _Unauthorized()
+    if r.status_code == 429:
+        try:
+            ra = int(r.headers.get("Retry-After") or 60)
+        except (TypeError, ValueError):
+            ra = 60
+        raise _RateLimited(ra)
+    r.raise_for_status()
+    try:
+        return r.json()
+    except Exception:
+        return None
+
+
+def _norm_title(s):
+    """Lowercase alphanumerics only — for conservative title matching."""
+    return re.sub(r"[^a-z0-9]+", "", str(s or "").lower())
 
 
 # ── base worker (lifecycle + loop + status; mirrors VideoEnrichmentWorker) ────
@@ -603,9 +635,72 @@ class TVmazeWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("tvmaze")
 
 
+# ── AniList (no key, GraphQL) — anime average score ───────────────────────────
+_ANILIST_QUERY = (
+    "query($search:String){Media(search:$search,type:ANIME){"
+    "averageScore title{romaji english}}}"
+)
+
+
+class AniListWorker(VideoBackfillWorker):
+    BASE = "https://graphql.anilist.co"
+
+    def __init__(self, db):
+        super().__init__(db, "anilist", "AniList", interval=1.0)
+
+    def _enabled(self):
+        # OFF by default — anime-only + title-search matching, so it's opt-in to
+        # avoid touching every show in a non-anime library.
+        return str(self.db.get_setting("anilist_enabled") or "0") == "1"
+
+    def test(self):
+        try:
+            j = _http_post_json(self.BASE, {"query": _ANILIST_QUERY,
+                                            "variables": {"search": "Cowboy Bebop"}})
+            ok = isinstance(j, dict) and (j.get("data") or {}).get("Media") is not None
+            return (ok, "AniList reachable" if ok else "No response")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("anilist")
+
+    def fetch(self, item):
+        title = item.get("title")
+        if not title:
+            return None
+        j = _http_post_json(self.BASE, {"query": _ANILIST_QUERY, "variables": {"search": title}})
+        media = (j.get("data") or {}).get("Media") if isinstance(j, dict) else None
+        if not isinstance(media, dict):
+            return None
+        # Conservative guard: only accept when AniList's title actually matches ours
+        # (anime search is fuzzy and would otherwise score random non-anime shows).
+        names = media.get("title") or {}
+        want = _norm_title(title)
+        got = {_norm_title(names.get("romaji")), _norm_title(names.get("english"))}
+        if not any(g and (g == want or g in want or want in g) for g in got):
+            return None
+        score = media.get("averageScore")
+        if isinstance(score, int) and 0 < score <= 100:
+            return {"anilist_score": score}
+        return None
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("anilist", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("anilist", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("anilist", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("anilist")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
-        TraktWorker(db), TVmazeWorker(db),
+        TraktWorker(db), TVmazeWorker(db), AniListWorker(db),
     )}

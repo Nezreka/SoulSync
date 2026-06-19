@@ -95,6 +95,10 @@ _BACKFILL = {
         "show": ("shows", "tvmaze_status", "tvmaze_attempted",
                  "(imdb_id IS NOT NULL OR tvdb_id IS NOT NULL)"),
     },
+    "anilist": {  # anime-only, matched by title (shows only)
+        "show": ("shows", "anilist_status", "anilist_attempted",
+                 "title IS NOT NULL AND title <> ''"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -104,6 +108,7 @@ _BACKFILL_COLS = {
     "opensubtitles": {"subtitle_langs"},
     "trakt": {"trakt_rating", "trakt_votes"},
     "tvmaze": {"tvmaze_rating"},
+    "anilist": {"anilist_score"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -168,6 +173,9 @@ _COLUMN_MIGRATIONS = [
     # TVmaze community rating backfill (TV only)
     ("shows", "tvmaze_rating", "REAL"),
     ("shows", "tvmaze_status", "TEXT"), ("shows", "tvmaze_attempted", "TEXT"),
+    # AniList anime average score backfill (TV only, 0-100)
+    ("shows", "anilist_score", "INTEGER"),
+    ("shows", "anilist_status", "TEXT"), ("shows", "anilist_attempted", "TEXT"),
 ]
 
 
@@ -1582,6 +1590,7 @@ class VideoDatabase:
             "metacritic": show["metacritic"],
             "trakt_rating": show["trakt_rating"], "trakt_votes": show["trakt_votes"],
             "tvmaze_rating": show["tvmaze_rating"],
+            "anilist_score": show["anilist_score"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),

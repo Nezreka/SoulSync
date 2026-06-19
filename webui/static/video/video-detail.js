@@ -336,6 +336,10 @@
             items.push('<span class="vd-rt vd-rt--tvmaze"><span class="vd-rt-tag">TVmaze</span>' +
                 (Math.round(d.tvmaze_rating * 10) / 10) + '</span>');
         }
+        if (d.anilist_score) {
+            items.push('<span class="vd-rt vd-rt--anilist"><span class="vd-rt-tag">AniList</span>' +
+                d.anilist_score + '%</span>');
+        }
         host.innerHTML = items.join('');
         host.hidden = !items.length;
     }
