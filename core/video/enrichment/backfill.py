@@ -216,7 +216,7 @@ class VideoBackfillWorker:
         item = self.next_item()
         if not item:
             return False
-        self.current_item = {"type": item.get("kind"), "name": item.get("name")}
+        self.current_item = {"type": item.get("kind"), "name": item.get("title")}
         try:
             data = self.fetch(item)
         except _RateLimited as e:
@@ -230,7 +230,7 @@ class VideoBackfillWorker:
             logger.warning("%s rejected the API key — pausing until fixed", self.display_name)
             return False
         except Exception:
-            logger.exception("video backfill %s fetch failed for %s", self.service, item.get("name"))
+            logger.exception("video backfill %s fetch failed for %s", self.service, item.get("title"))
             self.stats["errors"] += 1
             self.record_error(item)
             return True
@@ -238,7 +238,7 @@ class VideoBackfillWorker:
         if data:
             self.record_ok(item, data)
             self.stats["matched"] += 1
-            logger.info("Enriched %s '%s' via %s", item.get("kind"), item.get("name"), self.display_name)
+            logger.info("Enriched %s '%s' via %s", item.get("kind"), item.get("title"), self.display_name)
         else:
             self.record_empty(item)
             self.stats["not_found"] += 1
