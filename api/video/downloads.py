@@ -32,17 +32,22 @@ def register_routes(bp):
     @bp.route("/downloads/config", methods=["GET"])
     def video_downloads_config():
         from . import get_video_db
+        from core.video.download_config import load as load_source
         db = get_video_db()
-        return jsonify({k: db.get_setting(k) or "" for k in _PATH_KEYS})
+        out = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
+        out.update(load_source(db))   # download_mode + hybrid_order
+        return jsonify(out)
 
     @bp.route("/downloads/config", methods=["POST"])
     def video_downloads_config_save():
         from . import get_video_db
+        from core.video.download_config import save as save_source
         db = get_video_db()
         body = request.get_json(silent=True) or {}
         for key in _PATH_KEYS:
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
+        save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
 
     @bp.route("/downloads/quality", methods=["GET"])

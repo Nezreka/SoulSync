@@ -366,14 +366,17 @@ def test_downloads_config_save_load(tmp_path):
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     client = app.test_client()
     try:
-        # Defaults are empty.
+        # Defaults: empty folders, soulseek mode.
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "", "transfer_path": ""}
+            "download_path": "", "transfer_path": "",
+            "download_mode": "soulseek", "hybrid_order": ["soulseek"]}
         # Round-trips + persists to video.db (separate from any music config).
         client.post("/api/video/downloads/config",
-                    json={"download_path": " /mnt/v/dl ", "transfer_path": "/mnt/v/lib"})
+                    json={"download_path": " /mnt/v/dl ", "transfer_path": "/mnt/v/lib",
+                          "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "/mnt/v/dl", "transfer_path": "/mnt/v/lib"}   # trimmed
+            "download_path": "/mnt/v/dl", "transfer_path": "/mnt/v/lib",   # trimmed
+            "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]}
         assert db.get_setting("download_path") == "/mnt/v/dl"
     finally:
         videoapi._video_db = None
