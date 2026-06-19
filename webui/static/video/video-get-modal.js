@@ -165,6 +165,8 @@
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
                     '<button class="discog-cancel-btn" type="button" data-vgm-open>Full page &rarr;</button>' +
+                    '<button class="discog-cancel-btn vgm-download-btn" type="button" data-vgm-download>' +
+                        '<span class="vgm-download-ic">⤓</span> Download</button>' +
                     '<button class="discog-submit-btn" type="button" data-vgm-wishlist>' +
                         '<span class="discog-submit-icon">⬇</span>' +
                         '<span class="discog-submit-text" data-vgm-add-label>+ Add to Wishlist</span>' +
@@ -196,6 +198,19 @@
                 if (opening && seasonEl.getAttribute('data-vgm-lazy') === '1' &&
                     !seasonEl.getAttribute('data-vgm-loaded')) {
                     loadSeason(seasonEl);
+                }
+                return;
+            }
+            if (e.target.closest('[data-vgm-download]')) {
+                // Hand off to the universal Download modal (movie/show/youtube). Pass
+                // what we know; it fetches its own detail + quality verdict.
+                var st = modalState || {};
+                closeModal();
+                if (window.VideoDownload) {
+                    VideoDownload.open({ kind: o.kind, id: o.id, source: o.source || 'library',
+                        title: st.title || o.title || '' });
+                } else {
+                    toast('Download module not loaded', 'error');
                 }
                 return;
             }
