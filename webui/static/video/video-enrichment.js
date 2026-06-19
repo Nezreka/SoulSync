@@ -18,7 +18,8 @@
     // 'enrichment:<svc>') — including the standalone YouTube date enricher — so the
     // browser never polls /api/video/enrichment/<svc>/status.
     var SERVICES = ['tmdb', 'tvdb', 'omdb', 'youtube',
-        'fanart', 'opensubtitles', 'ryd', 'sponsorblock', 'dearrow', 'trakt', 'tvmaze', 'anilist'];
+        'fanart', 'opensubtitles', 'ryd', 'sponsorblock', 'dearrow',
+        'trakt', 'tvmaze', 'anilist', 'wikidata'];
 
     function onVideoSide() {
         return document.body.getAttribute('data-side') === 'video';

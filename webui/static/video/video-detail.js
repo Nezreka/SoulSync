@@ -219,6 +219,7 @@
             if (d.tmdb_id) badges.push(badge(TMDB_LOGO, 'TMDB', 'TMDB',
                 'https://www.themoviedb.org/' + (d.kind === 'movie' ? 'movie' : 'tv') + '/' + d.tmdb_id));
             if (d.tvdb_id) badges.push(badge(TVDB_LOGO, 'TVDB', 'TVDB', 'https://thetvdb.com/?id=' + d.tvdb_id + '&tab=series'));
+            if (d.wikidata_url) badges.push(badge('', 'Official Site', 'Official Site', d.wikidata_url));
             l.innerHTML = badges.join('');
         }
         var g = q('[data-vd-genres]');
