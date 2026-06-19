@@ -64,6 +64,38 @@
         setTimeout(function () { if (el && el.parentNode) el.parentNode.removeChild(el); }, 220);
     }
 
+    // ── download view (in-place, same modal) ──────────────────────────────────
+    // Clicking "Download" swaps the detail body for the download view (target +
+    // owned verdict + per-source search) without leaving the modal; Back restores
+    // it. Selection-only sections collapse; the all-related movie bits stay.
+    var DL_HIDE = ['[data-vgm-eps]', '[data-vgm-next]', '[data-vgm-follow]'];
+
+    function setDownloadMode(ov, on) {
+        DL_HIDE.forEach(function (sel) {
+            var el = ov.querySelector(sel); if (!el) return;
+            if (on) { el.setAttribute('data-vgm-washidden', el.hidden ? '1' : '0'); el.hidden = true; }
+            else { el.hidden = el.getAttribute('data-vgm-washidden') === '1'; el.removeAttribute('data-vgm-washidden'); }
+        });
+        var act = ov.querySelector('.vgm-actions'); if (act) act.hidden = on;
+        ov.classList.toggle('vgm-mode-download', on);
+    }
+
+    function enterDownload(ov, o) {
+        var dl = ov.querySelector('[data-vgm-dl]');
+        var content = ov.querySelector('[data-vgm-dl-content]');
+        if (!dl || !content || !window.VideoDownload) { toast('Download module not loaded', 'error'); return; }
+        var file = (modalState && modalState.kind === 'movie' && modalState.owned) ? (modalState.file || null) : null;
+        VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file });
+        setDownloadMode(ov, true);
+        dl.hidden = false;
+        var modal = ov.querySelector('.vgm-modal'); if (modal) modal.scrollTop = 0;
+    }
+
+    function exitDownload(ov) {
+        var dl = ov.querySelector('[data-vgm-dl]'); if (dl) dl.hidden = true;
+        setDownloadMode(ov, false);
+    }
+
     // ── wishlist / watchlist writes ───────────────────────────────────────────
     function postJSON(url, body) {
         return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -161,6 +193,10 @@
                     '<div class="vgm-next" data-vgm-next hidden></div>' +
                     '<div class="vgm-eps" data-vgm-eps hidden></div>' +
                     '<div class="vgm-follow" data-vgm-follow hidden></div>' +
+                    '<div class="vgm-dl" data-vgm-dl hidden>' +
+                        '<button class="vgm-back" type="button" data-vgm-back>&larr; Back to details</button>' +
+                        '<div class="vgm-dl-content" data-vgm-dl-content></div>' +
+                    '</div>' +
                 '</div>' +
                 '<div class="vgm-actions">' +
                     '<span class="vgm-sel-count" data-vgm-count></span>' +
@@ -201,19 +237,8 @@
                 }
                 return;
             }
-            if (e.target.closest('[data-vgm-download]')) {
-                // Hand off to the universal Download modal (movie/show/youtube). Pass
-                // what we know; it fetches its own detail + quality verdict.
-                var st = modalState || {};
-                closeModal();
-                if (window.VideoDownload) {
-                    VideoDownload.open({ kind: o.kind, id: o.id, source: o.source || 'library',
-                        title: st.title || o.title || '' });
-                } else {
-                    toast('Download module not loaded', 'error');
-                }
-                return;
-            }
+            if (e.target.closest('[data-vgm-download]')) { enterDownload(ov, o); return; }
+            if (e.target.closest('[data-vgm-back]')) { exitDownload(ov); return; }
             if (e.target.closest('[data-vgm-wishlist]')) { submitWishlist(ov); }
         });
         ov.addEventListener('change', function (e) {
@@ -491,7 +516,8 @@
             }
         } else {
             modalState = { kind: 'movie', owned: !!d.owned, tmdbId: d.tmdb_id, title: d.title,
-                year: d.year || null, poster: pUrl || null, libraryId: libId };   // owned → re-download
+                year: d.year || null, poster: pUrl || null, libraryId: libId,
+                file: d.file || null };   // owned → re-download; file feeds the download verdict
             renderOwned(d);
         }
         updateFooter();
