@@ -260,6 +260,7 @@
     // ── Downloads tab: folders + source mode + hybrid chain ──
     var VIDEO_SOURCES = ['soulseek', 'torrent', 'usenet'];
     var SRC_DL_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
+    var SRC_DL_EMOJI = { soulseek: '🎵', torrent: '🧲', usenet: '📰' };
     var _videoMode = 'soulseek';
     var _videoHybrid = ['soulseek'];
 
@@ -297,33 +298,29 @@
           .catch(function () { /* ignore */ });
     }
 
-    // Hybrid chain: enabled sources (ordered) + disabled ones appended. No
-    // album-level/track-level distinction — that's a music-only concept.
+    // Hybrid chain — reuses music's .hybrid-source-item markup/CSS for visual
+    // parity. Enabled sources (ordered, numbered) first, disabled ones appended.
+    // No album-level/track-level badge — that's a music-only concept.
     function renderVideoHybrid() {
         var host = document.getElementById('video-hybrid-rows');
         if (!host) return;
         var enabled = _videoHybrid.filter(function (s) { return VIDEO_SOURCES.indexOf(s) >= 0; });
         var disabled = VIDEO_SOURCES.filter(function (s) { return enabled.indexOf(s) < 0; });
-        var rows = enabled.map(function (s, i) {
-            return '<div class="vq-row">' +
-                '<span class="vq-arrows">' +
-                '<button type="button" class="vq-arrow" data-vh-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
-                '<button type="button" class="vq-arrow" data-vh-move="' + s + '" data-dir="1"' + (i === enabled.length - 1 ? ' disabled' : '') + '>▼</button>' +
+        var visual = enabled.concat(disabled);
+        host.innerHTML = visual.map(function (s) {
+            var on = enabled.indexOf(s) >= 0;
+            var i = enabled.indexOf(s);
+            return '<div class="hybrid-source-item' + (on ? '' : ' disabled') + '">' +
+                '<span class="hybrid-source-arrows">' +
+                '<button type="button" class="hybrid-arrow-btn" data-vh-move="' + s + '" data-dir="-1"' + ((!on || i === 0) ? ' disabled' : '') + ' title="Move up">▲</button>' +
+                '<button type="button" class="hybrid-arrow-btn" data-vh-move="' + s + '" data-dir="1"' + ((!on || i === enabled.length - 1) ? ' disabled' : '') + ' title="Move down">▼</button>' +
                 '</span>' +
-                '<span class="vq-row-name">' + SRC_DL_LABEL[s] + '</span>' +
-                '<span class="vq-row-prio">' + (i + 1) + '</span>' +
-                '<label class="vq-toggle"><input type="checkbox" data-vh-toggle="' + s + '" checked><span class="vq-toggle-track"></span></label>' +
+                '<span class="hybrid-source-icon emoji-icon">' + (SRC_DL_EMOJI[s] || '') + '</span>' +
+                '<span class="hybrid-source-name">' + SRC_DL_LABEL[s] + '</span>' +
+                '<span class="hybrid-source-priority">' + (on ? (i + 1) : '') + '</span>' +
+                '<label class="hybrid-source-toggle"><input type="checkbox" data-vh-toggle="' + s + '"' + (on ? ' checked' : '') + '><span class="toggle-track"></span></label>' +
                 '</div>';
-        });
-        rows = rows.concat(disabled.map(function (s) {
-            return '<div class="vq-row vq-row--off">' +
-                '<span class="vq-arrows"><button type="button" class="vq-arrow" disabled>▲</button><button type="button" class="vq-arrow" disabled>▼</button></span>' +
-                '<span class="vq-row-name">' + SRC_DL_LABEL[s] + '</span>' +
-                '<span class="vq-row-prio"></span>' +
-                '<label class="vq-toggle"><input type="checkbox" data-vh-toggle="' + s + '"><span class="vq-toggle-track"></span></label>' +
-                '</div>';
-        }));
-        host.innerHTML = rows.join('');
+        }).join('');
     }
 
     function moveVH(s, dir) {
