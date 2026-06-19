@@ -7,8 +7,12 @@ never share a folder or collide. The actual download fulfillment engine (wishlis
 config the Settings → Downloads tab edits.
 
 Keys persisted here (all under video.db):
-  - ``download_path``  : input folder a video download lands in
-  - ``transfer_path``  : output folder finished video files move to (video library)
+  - ``download_path``        : input folder a video download lands in (shared by all types)
+  - ``movies_path``          : Movies library (finished movies move here)
+  - ``tv_path``              : TV Shows library
+  - ``youtube_path``         : YouTube library (kept separate from real TV)
+  The engine routes a finished download to the path matching its type. (Legacy single
+  ``transfer_path`` is migrated into ``movies_path`` on first read.)
 
 Connection settings that are genuinely SHARED with music (the slskd instance, the
 torrent/usenet clients, Prowlarr indexers) are NOT stored here — those live in the
@@ -24,8 +28,9 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_api.downloads")
 
-# Video-specific path keys (vs. the shared connection settings).
-_PATH_KEYS = ("download_path", "transfer_path")
+# Video-specific path keys (vs. the shared connection settings): one shared input
+# folder + a separate library folder per content type.
+_PATH_KEYS = ("download_path", "movies_path", "tv_path", "youtube_path")
 
 # slskd CONNECTION settings genuinely SHARED with music — one slskd instance serves
 # both sides, so these live in the app-wide config_manager (soulseek.*), NOT video.db.
@@ -52,6 +57,8 @@ def register_routes(bp):
         from core.video.download_config import load as load_source
         db = get_video_db()
         out = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
+        if not out["movies_path"]:        # migrate the legacy single transfer folder → Movies
+            out["movies_path"] = db.get_setting("transfer_path") or ""
         out.update(load_source(db))   # download_mode + hybrid_order
         return jsonify(out)
 
