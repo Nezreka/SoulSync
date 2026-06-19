@@ -146,6 +146,13 @@ body[data-side="video"] [data-stg="library"]:not([data-video-only]) {
 body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-only]) {
     display: none !important;
 }
+/* The Downloads tab is almost entirely music-specific (streaming sources, music
+   quality profile, retry logic). Hide the music download sections on the video
+   side; the video-only ones (folders, video hybrid, video quality) replace them.
+   The shared "Indexers & Downloaders" tab is NOT hidden — it's identical for both. */
+body[data-side="video"] .settings-group[data-stg="downloads"]:not([data-video-only]) {
+    display: none !important;
+}
 
 /* ── Dashboard header: match music, minus the sweep animation ──────────── */
 /* The header reuses music's .dashboard-header markup/CSS for an identical look;
