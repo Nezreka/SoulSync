@@ -356,9 +356,23 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
         videoapi._video_db = None
 
 
-def test_downloads_config_save_load(tmp_path):
+def test_downloads_config_save_load(tmp_path, monkeypatch):
     import api.video as videoapi
+    import config.settings as cfg
     from database.video_database import VideoDatabase
+
+    class _Cfg:   # fake shared app config so the test never touches real music config
+        def __init__(self):
+            self._d = {}
+
+        def get(self, key, default=None):
+            return self._d.get(key, default)
+
+        def set(self, key, value):
+            self._d[key] = value
+
+    fake = _Cfg()
+    monkeypatch.setattr(cfg, "config_manager", fake, raising=False)
 
     db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
     videoapi._video_db = db
@@ -366,11 +380,11 @@ def test_downloads_config_save_load(tmp_path):
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     client = app.test_client()
     try:
-        # Defaults: empty folders, soulseek mode. One shared input + per-type libraries.
+        # Defaults: empty folders, soulseek mode. Shared input + per-type libraries.
         assert client.get("/api/video/downloads/config").get_json() == {
             "download_path": "", "movies_path": "", "tv_path": "", "youtube_path": "",
             "download_mode": "soulseek", "hybrid_order": ["soulseek"]}
-        # Round-trips + persists to video.db (separate from any music config).
+        # Round-trips: libraries → video.db, the INPUT folder → the SHARED music key.
         client.post("/api/video/downloads/config",
                     json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
                           "tv_path": "/media/tv", "youtube_path": "/media/yt",
@@ -379,7 +393,12 @@ def test_downloads_config_save_load(tmp_path):
             "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
             "tv_path": "/media/tv", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]}
-        assert db.get_setting("download_path") == "/mnt/v/dl"
+        # The input folder is the SHARED soulseek.download_path (so music sees it too);
+        # it is NOT stored in video.db.
+        assert fake.get("soulseek.download_path") == "/mnt/v/dl"
+        assert db.get_setting("download_path") is None
+        # Library paths DO persist to video.db.
+        assert db.get_setting("movies_path") == "/media/movies"
         # Legacy single transfer_path migrates into Movies when movies_path is unset.
         db.set_setting("movies_path", "")
         db.set_setting("transfer_path", "/old/lib")

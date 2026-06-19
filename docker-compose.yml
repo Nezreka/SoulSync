@@ -32,10 +32,20 @@ services:
       # Persistent data volumes
       - ./config:/app/config
       - ./logs:/app/logs
+      # Shared INPUT folder — slskd / torrent / usenet drop downloads here, and BOTH
+      # the music and video sides read from it (Settings → Downloads uses one path).
       - ./downloads:/app/downloads
       - ./Staging:/app/Staging
       - ./MusicVideos:/app/MusicVideos
       - ./scripts:/app/scripts
+      # ─── Video libraries (OUTPUT) — one per content type ─────────────────
+      # The video Downloads tab sorts finished files into these by type. Point each
+      # at where Plex/Jellyfin reads from, then set the matching path on
+      # Settings → Downloads (the in-app placeholders match the in-container paths):
+      #   Movies → /media/movies   ·   TV → /media/tv   ·   YouTube → /media/youtube
+      - ./Movies:/media/movies
+      - ./TV:/media/tv
+      - ./YouTube:/media/youtube
       # Use named volume for database persistence (separate from host database)
       # NOTE: Changed from /app/database to /app/data to avoid overwriting Python package
       - soulsync_database:/app/data
