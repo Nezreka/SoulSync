@@ -191,8 +191,6 @@
         box.innerHTML = list.map(function (s) { return srcBlockHTML(s, false); }).join('');
     }
 
-    // Scaffold: a satisfying faux-scan (animated) that resolves to "coming soon".
-    // No backend yet — this is the motion the real engine will drive.
     // ── search + results ──────────────────────────────────────────────────────
     var SRC_LABEL = { remux: 'Remux', bluray: 'BluRay', 'web-dl': 'WEB-DL', webrip: 'WEBRip',
         hdtv: 'HDTV', dvd: 'DVD', cam: 'CAM', screener: 'Screener', workprint: 'Workprint' };
@@ -209,27 +207,69 @@
         });
     }
 
-    // Run a search (mock indexer → real parse/evaluate/rank) and render the cards.
+    // Render the result cards (shared by the immediate mock path and live polling).
+    function renderResults(resultsEl, params, rows, live, done) {
+        rows = rows || [];
+        if (!rows.length) {
+            resultsEl.innerHTML = done
+                ? '<div class="vdl-res-empty">No matching releases found.</div>'
+                : '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+            return;
+        }
+        resultsEl._rows = rows; resultsEl._search = params;   // for the Grab button
+        resultsEl.classList.toggle('vdl-res-noanim', !!live);   // live re-renders → no per-card blink
+        var okN = rows.filter(function (r) { return r.accepted; }).length;
+        var badge = !live ? '<span class="vdl-res-demo">demo data</span>'
+            : done ? '<span class="vdl-res-live">● live</span>'
+            : '<span class="vdl-res-searching"><span class="vdl-res-spin vdl-res-spin--sm"></span>searching…</span>';
+        resultsEl.innerHTML =
+            '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
+                ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' + badge + '</div>' +
+            rows.map(resultCardHTML).join('');
+    }
+
+    // Start a search; for Soulseek, stream results in (poll like the music side —
+    // results trickle in over ~30s, so a single short wait misses them).
     function searchInto(container, resultsEl, params, triggerRows) {
         if (!resultsEl) return;
         triggerRows = (triggerRows || []).filter(Boolean);
+        if (resultsEl._poll) { clearTimeout(resultsEl._poll); resultsEl._poll = null; }
         _setScanning(triggerRows, true);
         resultsEl.hidden = false;
+        resultsEl.classList.remove('vdl-res-noanim');
         resultsEl.innerHTML = '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
-        postJSON('/api/video/downloads/search', params).then(function (d) {
-            _setScanning(triggerRows, false);
-            if (!resultsEl.isConnected) return;
-            if (d && d.error) { resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
-            var rows = (d && d.results) || [];
-            if (!rows.length) { resultsEl.innerHTML = '<div class="vdl-res-empty">No matching releases found.</div>'; return; }
-            resultsEl._rows = rows; resultsEl._search = params;   // for the Grab button
-            var okN = rows.filter(function (r) { return r.accepted; }).length;
-            var live = d && d.live ? '<span class="vdl-res-live">● live</span>' : '<span class="vdl-res-demo">demo data</span>';
-            resultsEl.innerHTML =
-                '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
-                    ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' + live + '</div>' +
-                rows.map(resultCardHTML).join('');
+        postJSON('/api/video/downloads/search/start', params).then(function (d) {
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+            if (d && d.error) { _setScanning(triggerRows, false); resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
+            if (!d || !d.id) {   // mock / immediate
+                _setScanning(triggerRows, false);
+                renderResults(resultsEl, params, d ? d.results : [], !!(d && d.live), true);
+                return;
+            }
+            _pollSearch(resultsEl, params, d.id, triggerRows);
         });
+    }
+
+    function _pollSearch(resultsEl, params, id, triggerRows) {
+        var started = Date.now(), lastN = -1, stable = 0, MAX_MS = 32000;
+        function tick() {
+            if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+            var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
+                '&title=' + encodeURIComponent(params.title || '') +
+                (params.season != null ? '&season=' + params.season : '') +
+                (params.episode != null ? '&episode=' + params.episode : '');
+            getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
+                if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
+                var rows = (d && d.results) || [];
+                if (rows.length === lastN) { stable++; } else { stable = 0; lastN = rows.length; }
+                // done = timed out, OR results have plateaued for a few polls.
+                var done = (Date.now() - started >= MAX_MS) || (rows.length > 0 && stable >= 4);
+                renderResults(resultsEl, params, rows, true, done);
+                if (done) { _setScanning(triggerRows, false); resultsEl._poll = null; }
+                else { resultsEl._poll = setTimeout(tick, 1300); }
+            });
+        }
+        tick();
     }
 
     // Grab → start a real download (Soulseek only for now), then it lives on the

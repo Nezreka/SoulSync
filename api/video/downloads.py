@@ -54,6 +54,45 @@ _SLSKD_KEYS = {
 }
 
 
+def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
+    """Parse → evaluate → rank a list of raw indexer hits against the quality profile.
+    Shared by the mock search and the live slskd start/poll endpoints."""
+    from core.video.quality_eval import evaluate_release
+    from core.video.release_parse import parse_release
+    results = []
+    for hit in raw:
+        parsed = parse_release(hit.get("title"))
+        size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
+        verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
+                                   want_episode=want_episode, size_gb=size_gb)
+        avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
+        results.append({
+            "title": hit.get("title"), "size_gb": size_gb, "size_bytes": hit.get("size_bytes") or 0,
+            "seeders": hit.get("seeders"), "peers": hit.get("peers"),
+            "username": hit.get("username"), "slots": hit.get("slots"),
+            "filename": hit.get("filename"), "_avail": avail,
+            "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
+            "rejected": verdict["rejected"], "score": verdict["score"],
+            "resolution": parsed.get("resolution"), "source": parsed.get("source"),
+            "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
+            "audio": parsed.get("audio"), "group": parsed.get("group"),
+            "repack": parsed.get("repack") or parsed.get("proper"),
+        })
+    results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"]), reverse=True)
+    for r in results:
+        r.pop("_avail", None)
+    return results[:40]
+
+
+def _search_ints(body):
+    def _int(v):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+    return _int(body.get("season")), _int(body.get("episode")), _int(body.get("season_end"))
+
+
 def register_routes(bp):
     @bp.route("/downloads/config", methods=["GET"])
     def video_downloads_config():
@@ -117,28 +156,16 @@ def register_routes(bp):
         Body: {scope, title, year?, season?, episode?, season_end?}."""
         from . import get_video_db
         from core.video.mock_search import mock_search
-        from core.video.quality_eval import evaluate_release
         from core.video.quality_profile import load as load_profile
-        from core.video.release_parse import parse_release
 
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
         source = str(body.get("source") or "").lower()
-
-        def _int(v):
-            try:
-                return int(v)
-            except (TypeError, ValueError):
-                return None
-
-        want_season, want_episode = _int(body.get("season")), _int(body.get("episode"))
+        want_season, want_episode, season_end = _search_ints(body)
         profile = load_profile(get_video_db())
-
         live = False
         if source == "soulseek":
-            # REAL Soulseek search (slskd). Torrent/Usenet stay mocked until those
-            # indexers are wired. Same {title, size_bytes, …} shape downstream.
             from core.video.slskd_search import build_query, slskd_search
             sres = slskd_search(build_query(scope, title, year=body.get("year"),
                                             season=want_season, episode=want_episode))
@@ -149,33 +176,56 @@ def register_routes(bp):
             raw, live = sres["hits"], True
         else:
             raw = mock_search(scope, title, year=body.get("year"), season=want_season,
-                              episode=want_episode, season_end=_int(body.get("season_end")),
-                              source=source)
+                              episode=want_episode, season_end=season_end, source=source)
+        return jsonify({"scope": scope, "live": live,
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
 
-        results = []
-        for hit in raw:
-            parsed = parse_release(hit.get("title"))
-            size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
-            verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
-                                       want_episode=want_episode, size_gb=size_gb)
-            avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
-            results.append({
-                "title": hit.get("title"), "size_gb": size_gb, "size_bytes": hit.get("size_bytes") or 0,
-                "seeders": hit.get("seeders"), "peers": hit.get("peers"),
-                "username": hit.get("username"), "slots": hit.get("slots"),
-                "filename": hit.get("filename"), "_avail": avail,
-                "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
-                "rejected": verdict["rejected"], "score": verdict["score"],
-                "resolution": parsed.get("resolution"), "source": parsed.get("source"),
-                "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
-                "audio": parsed.get("audio"), "group": parsed.get("group"),
-                "repack": parsed.get("repack") or parsed.get("proper"),
-            })
-        # accepted first, then best score, then most availability (seeders/peers).
-        results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"]), reverse=True)
-        for r in results:
-            r.pop("_avail", None)
-        return jsonify({"scope": scope, "results": results[:40], "live": live})
+    @bp.route("/downloads/search/start", methods=["POST"])
+    def video_downloads_search_start():
+        """Begin a search. For mock sources the results come back immediately; for
+        Soulseek it returns a slskd search id to poll (results trickle in over ~30s,
+        like the music side) — fixes 'no results' from waiting too briefly."""
+        from . import get_video_db
+        from core.video.mock_search import mock_search
+        from core.video.quality_profile import load as load_profile
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or "movie").lower()
+        title = body.get("title") or ""
+        source = str(body.get("source") or "").lower()
+        want_season, want_episode, season_end = _search_ints(body)
+
+        if source == "soulseek":
+            from core.video.slskd_search import build_query, start_search
+            res = start_search(build_query(scope, title, year=body.get("year"),
+                                           season=want_season, episode=want_episode))
+            if not res.get("configured"):
+                return jsonify({"error": "slskd isn't configured — set its URL on Settings → Downloads."})
+            if res.get("error"):
+                return jsonify({"error": "slskd: " + str(res["error"])})
+            return jsonify({"id": res["id"], "live": True, "complete": False})
+        # mock sources resolve in one shot
+        profile = load_profile(get_video_db())
+        raw = mock_search(scope, title, year=body.get("year"), season=want_season,
+                          episode=want_episode, season_end=season_end, source=source)
+        return jsonify({"id": None, "live": False, "complete": True,
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
+
+    @bp.route("/downloads/search/poll", methods=["GET"])
+    def video_downloads_search_poll():
+        """Current ranked results for an in-flight slskd search. Query: id, scope,
+        title, season?, episode?. The client polls until it stops growing or times out."""
+        from . import get_video_db
+        from core.video.quality_profile import load as load_profile
+        from core.video.slskd_search import poll_responses
+        sid = request.args.get("id")
+        scope = str(request.args.get("scope") or "movie").lower()
+        want_season, want_episode, _ = _search_ints(request.args)
+        if not sid:
+            return jsonify({"results": [], "live": True})
+        profile = load_profile(get_video_db())
+        raw = poll_responses(sid)
+        return jsonify({"live": True,
+                        "results": _evaluate_hits(raw, profile, scope, want_season, want_episode)})
 
     @bp.route("/downloads/grab", methods=["POST"])
     def video_downloads_grab():
