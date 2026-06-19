@@ -317,13 +317,16 @@ CREATE TABLE IF NOT EXISTS youtube_channel_meta (
 --   sb_*   SponsorBlock            -> crowd-sourced segments (in youtube_video_segments)
 -- status columns: NULL = pending, 'ok' | 'not_found' | 'error'.
 CREATE TABLE IF NOT EXISTS youtube_video_stats (
-    youtube_id    TEXT PRIMARY KEY,
-    like_count    INTEGER,
-    dislike_count INTEGER,
-    ryd_status    TEXT,
-    ryd_attempted TEXT,
-    sb_status     TEXT,
-    sb_attempted  TEXT
+    youtube_id      TEXT PRIMARY KEY,
+    like_count      INTEGER,
+    dislike_count   INTEGER,
+    ryd_status      TEXT,
+    ryd_attempted   TEXT,
+    sb_status       TEXT,
+    sb_attempted    TEXT,
+    dearrow_title   TEXT,                  -- DeArrow crowd-sourced better title
+    dearrow_status  TEXT,
+    dearrow_attempted TEXT
 );
 
 -- SponsorBlock crowd segments (sponsor/intro/outro/selfpromo/…) for a video.

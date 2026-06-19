@@ -222,6 +222,8 @@
                 if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
                 var sb = document.getElementById('video-sponsorblock-enabled');
                 if (sb && d.sponsorblock_enabled != null) sb.checked = !!d.sponsorblock_enabled;
+                var dea = document.getElementById('video-dearrow-enabled');
+                if (dea && d.dearrow_enabled != null) dea.checked = !!d.dearrow_enabled;
                 var tvm = document.getElementById('video-tvmaze-enabled');
                 if (tvm && d.tvmaze_enabled != null) tvm.checked = !!d.tvmaze_enabled;
                 var anl = document.getElementById('video-anilist-enabled');
@@ -256,6 +258,7 @@
         var trakt = document.getElementById('trakt-api-key');
         var ryd = document.getElementById('video-ryd-enabled');
         var sb = document.getElementById('video-sponsorblock-enabled');
+        var dea = document.getElementById('video-dearrow-enabled');
         var tvm = document.getElementById('video-tvmaze-enabled');
         var anl = document.getElementById('video-anilist-enabled');
         return fetch(CONFIG_URL, {
@@ -269,6 +272,7 @@
                 trakt_api_key: trakt ? trakt.value : '',
                 ryd_enabled: ryd ? ryd.checked : true,
                 sponsorblock_enabled: sb ? sb.checked : true,
+                dearrow_enabled: dea ? dea.checked : true,
                 tvmaze_enabled: tvm ? tvm.checked : true,
                 anilist_enabled: anl ? anl.checked : false,
             })
@@ -314,7 +318,7 @@
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
             'fanart-api-key', 'opensubtitles-api-key', 'trakt-api-key',
-            'video-ryd-enabled', 'video-sponsorblock-enabled',
+            'video-ryd-enabled', 'video-sponsorblock-enabled', 'video-dearrow-enabled',
             'video-tvmaze-enabled', 'video-anilist-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });

@@ -698,9 +698,55 @@ class AniListWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("anilist")
 
 
+# ── DeArrow (no key) — crowd-sourced better titles for YouTube videos ─────────
+class DeArrowWorker(VideoBackfillWorker):
+    URL = "https://sponsor.ajay.app/api/branding"
+
+    def __init__(self, db):
+        super().__init__(db, "dearrow", "DeArrow", interval=0.6)
+
+    def _enabled(self):
+        return str(self.db.get_setting("dearrow_enabled") or "1") != "0"
+
+    def test(self):
+        try:
+            j = _http_get_json(self.URL, {"videoID": "dQw4w9WgXcQ"})
+            return (j is not None, "DeArrow reachable" if j is not None else "No response")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.youtube_enrich_next("dearrow_status")
+
+    def fetch(self, item):
+        j = _http_get_json(self.URL, {"videoID": item["youtube_id"]})
+        if not isinstance(j, dict):
+            return None
+        # DeArrow returns crowd titles in preference order; take the first that
+        # isn't the YouTube original.
+        for t in (j.get("titles") or []):
+            if isinstance(t, dict) and not t.get("original"):
+                title = (t.get("title") or "").strip()
+                if title:
+                    return {"title": title}
+        return None
+
+    def record_ok(self, item, data):
+        self.db.apply_youtube_dearrow(item["youtube_id"], data.get("title"), "ok")
+
+    def record_empty(self, item):
+        self.db.apply_youtube_dearrow(item["youtube_id"], None, "not_found")
+
+    def record_error(self, item):
+        self.db.apply_youtube_dearrow(item["youtube_id"], None, "error")
+
+    def breakdown(self):
+        return self.db.youtube_enrich_breakdown("dearrow_status")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
-        TraktWorker(db), TVmazeWorker(db), AniListWorker(db),
+        TraktWorker(db), TVmazeWorker(db), AniListWorker(db), DeArrowWorker(db),
     )}

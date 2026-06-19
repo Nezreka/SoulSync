@@ -322,6 +322,12 @@ def register_routes(bp):
             if not v or not v.get("youtube_id"):
                 return jsonify({"success": False, "error": "Video not found"}), 404
             db = get_video_db()
+            # DeArrow crowd-sourced better title (if enriched) — surfaced as an
+            # alternative on the detail page.
+            try:
+                v["dearrow_title"] = db.youtube_video_dearrow_title(v["youtube_id"])
+            except Exception:
+                v["dearrow_title"] = None
             if v.get("description"):
                 try:
                     db.set_wishlist_video_overview(v["youtube_id"], v["description"])

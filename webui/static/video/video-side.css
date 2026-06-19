@@ -790,6 +790,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt--trakt .vd-rt-tag { background: #ed1c24; color: #fff; }
 .vd-rt--tvmaze .vd-rt-tag { background: #3dd6c0; color: #00211d; }
 .vd-rt--anilist .vd-rt-tag { background: #02a9ff; color: #fff; }
+/* DeArrow crowd title (YouTube video expand panel) */
+.vd-dearrow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-weight: 600; color: #cfe0ff; }
+.vd-dearrow-tag { font-size: 10px; font-weight: 900; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 4px;
+    background: #1f77ce; color: #fff; }
 
 /* ── OMDb worker uses a ★ glyph (no clean brand logo) ─────────────────────── */
 .video-enrich-glyph {
