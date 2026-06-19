@@ -23,8 +23,16 @@
 
     var DASHBOARD_URL = '/api/video/dashboard';
 
-    // Fallback only — shown if the API call fails. (uptime/memory aren't in the
-    // video payload yet; they stay at their markup defaults for now.)
+    // System stats (uptime + memory) come from the SAME endpoint the music
+    // dashboard uses — it's one machine, so these figures are identical on both
+    // sides. Polled on the dashboard's 10s cadence for parity with music's push
+    // loop. (Reached over HTTP, not music's socket, so the isolation contract
+    // holds — no music-code reference.)
+    var SYSTEM_STATS_URL = '/api/system/stats';
+    var systemPollTimer = null;
+
+    // Fallback only — shown if the /api/video/dashboard call fails. (uptime/memory
+    // are NOT here — they come from the shared /api/system/stats via loadSystemStats.)
     var FALLBACK_STATS = {
         'active-downloads': '0',
         'finished-downloads': '0',
@@ -96,6 +104,39 @@
             .catch(function () { applyStats(FALLBACK_STATS); });
     }
 
+    // True when the video dashboard subpage is the one currently shown (subpages
+    // toggle via the `hidden` attribute in video-side.js).
+    function dashboardVisible() {
+        var el = document.querySelector('.video-subpage[data-video-subpage="' + DASHBOARD_ID + '"]');
+        return !!el && !el.hidden;
+    }
+
+    // Pull the shared system stats and reflect uptime + memory on the cards. The
+    // rest of the dashboard's figures (video downloads, library) come from
+    // /api/video/dashboard via loadStats(); only the machine-level numbers are
+    // shared. applyStats only touches the keys we pass, so nothing else is clobbered.
+    function loadSystemStats() {
+        fetch(SYSTEM_STATS_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                applyStats({
+                    'uptime': d.uptime != null ? String(d.uptime) : '--',
+                    'memory': d.memory_usage != null ? String(d.memory_usage) : '--'
+                });
+            })
+            .catch(function () { /* keep last-known values on a transient failure */ });
+    }
+
+    // Keep the system figures live while the dashboard is open — one 10s timer
+    // that no-ops cheaply whenever the dashboard isn't the visible page.
+    function startSystemStatsPolling() {
+        if (systemPollTimer) return;
+        systemPollTimer = setInterval(function () {
+            if (dashboardVisible()) loadSystemStats();
+        }, 10000);
+    }
+
     // Service "Test" buttons are inert until the video services exist. Mark them
     // honestly rather than firing a no-op that looks broken.
     var testWired = false;
@@ -115,6 +156,8 @@
         if (!e || e.detail !== DASHBOARD_ID) return;
         wireTestButtons();
         loadStats();
+        loadSystemStats();          // immediate fill (memory/uptime)
+        startSystemStatsPolling();  // then keep it live
     }
 
     // ── Library card: live scan progress (parity with the music dashboard) ──
