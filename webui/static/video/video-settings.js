@@ -281,10 +281,11 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d) return;
-                var dl = document.getElementById('video-download-path');
-                if (dl && d.download_path != null) dl.value = d.download_path;
-                var tr = document.getElementById('video-transfer-path');
-                if (tr && d.transfer_path != null) tr.value = d.transfer_path;
+                var setP = function (id, v) { var el = document.getElementById(id); if (el && v != null) el.value = v; };
+                setP('video-download-path', d.download_path);
+                setP('video-movies-path', d.movies_path);
+                setP('video-tv-path', d.tv_path);
+                setP('video-youtube-path', d.youtube_path);
                 _videoMode = d.download_mode || 'soulseek';
                 _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
                 var ms = document.getElementById('video-download-mode');
@@ -296,13 +297,14 @@
     }
 
     function saveDownloads(silent) {
-        var dl = document.getElementById('video-download-path');
-        var tr = document.getElementById('video-transfer-path');
+        var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
         return fetch(DOWNLOADS_URL, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
             body: JSON.stringify({
-                download_path: dl ? dl.value : '',
-                transfer_path: tr ? tr.value : '',
+                download_path: val('video-download-path'),
+                movies_path: val('video-movies-path'),
+                tv_path: val('video-tv-path'),
+                youtube_path: val('video-youtube-path'),
                 download_mode: _videoMode,
                 hybrid_order: _videoHybrid,
             })
@@ -440,7 +442,7 @@
             });
         }
         // Folder inputs save on change too.
-        ['video-download-path', 'video-transfer-path'].forEach(function (id) {
+        ['video-download-path', 'video-movies-path', 'video-tv-path', 'video-youtube-path'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
         });

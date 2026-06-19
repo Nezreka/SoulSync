@@ -366,18 +366,24 @@ def test_downloads_config_save_load(tmp_path):
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     client = app.test_client()
     try:
-        # Defaults: empty folders, soulseek mode.
+        # Defaults: empty folders, soulseek mode. One shared input + per-type libraries.
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "", "transfer_path": "",
+            "download_path": "", "movies_path": "", "tv_path": "", "youtube_path": "",
             "download_mode": "soulseek", "hybrid_order": ["soulseek"]}
         # Round-trips + persists to video.db (separate from any music config).
         client.post("/api/video/downloads/config",
-                    json={"download_path": " /mnt/v/dl ", "transfer_path": "/mnt/v/lib",
+                    json={"download_path": " /mnt/v/dl ", "movies_path": "/media/movies",
+                          "tv_path": "/media/tv", "youtube_path": "/media/yt",
                           "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]})
         assert client.get("/api/video/downloads/config").get_json() == {
-            "download_path": "/mnt/v/dl", "transfer_path": "/mnt/v/lib",   # trimmed
+            "download_path": "/mnt/v/dl", "movies_path": "/media/movies",   # trimmed
+            "tv_path": "/media/tv", "youtube_path": "/media/yt",
             "download_mode": "hybrid", "hybrid_order": ["torrent", "usenet"]}
         assert db.get_setting("download_path") == "/mnt/v/dl"
+        # Legacy single transfer_path migrates into Movies when movies_path is unset.
+        db.set_setting("movies_path", "")
+        db.set_setting("transfer_path", "/old/lib")
+        assert client.get("/api/video/downloads/config").get_json()["movies_path"] == "/old/lib"
     finally:
         videoapi._video_db = None
 

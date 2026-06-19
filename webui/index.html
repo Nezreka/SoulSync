@@ -6017,15 +6017,24 @@
                             <div class="settings-group" data-stg="downloads" data-video-only>
                                 <h3>Video Download Folders</h3>
                                 <div class="setting-help-text">
-                                    Where the video side lands downloads and where it moves finished files — SEPARATE from your Music paths.
+                                    One shared download folder (where slskd / torrent drop files), then a separate library folder per type — finished files are sorted to the right one automatically. SEPARATE from your Music paths.
                                 </div>
                                 <div class="form-group">
-                                    <label>Download Folder (Input):</label>
+                                    <label>Download Folder (Input — shared):</label>
                                     <input type="text" id="video-download-path" placeholder="./video_downloads">
+                                    <div class="setting-help-text">Where downloads land. Point this at the same folder as your slskd / torrent client.</div>
                                 </div>
                                 <div class="form-group">
-                                    <label>Transfer Folder (Output — Video Library):</label>
-                                    <input type="text" id="video-transfer-path" placeholder="./VideoLibrary">
+                                    <label>🎬 Movies Library:</label>
+                                    <input type="text" id="video-movies-path" placeholder="/media/movies">
+                                </div>
+                                <div class="form-group">
+                                    <label>📺 TV Shows Library:</label>
+                                    <input type="text" id="video-tv-path" placeholder="/media/tv">
+                                </div>
+                                <div class="form-group">
+                                    <label>▶️ YouTube Library:</label>
+                                    <input type="text" id="video-youtube-path" placeholder="/media/youtube">
                                 </div>
                             </div>
                             <div class="settings-group" data-stg="downloads" data-video-only>
