@@ -1158,6 +1158,14 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def get_video_download(self, dl_id: int) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM video_downloads WHERE id = ?", (int(dl_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
     def get_active_video_downloads(self) -> list:
         conn = self._get_connection()
         try:
@@ -1185,7 +1193,7 @@ class VideoDatabase:
     def clear_finished_video_downloads(self) -> int:
         conn = self._get_connection()
         try:
-            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed')")
+            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled')")
             conn.commit()
             return cur.rowcount
         finally:
