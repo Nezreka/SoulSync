@@ -3077,33 +3077,47 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-search-all::after { content: ''; position: absolute; inset: 0; transform: translateX(-130%);
     background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,0.5) 50%, transparent 65%); }
 .vdl-search-all:hover::after { animation: vdlSheen 0.7s ease 1; }
-.vdl-sources { display: flex; flex-direction: column; gap: 8px; }
-.vdl-src { position: relative; overflow: hidden; display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.07);
-    animation: vdlSlide 0.46s both; transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
-.vdl-src:hover { transform: translateX(3px); border-color: hsla(var(--vgm-h, 220), 55%, 60%, 0.4);
-    background: rgba(255, 255, 255, 0.06); }
-.vdl-src-emoji { font-size: 17px; flex-shrink: 0; transition: transform 0.2s ease; }
-.vdl-src:hover .vdl-src-emoji { transform: scale(1.18) rotate(-6deg); }
-.vdl-src-name { font-size: 14px; font-weight: 700; color: #fff; flex: 1; }
-.vdl-src-status { font-size: 11.5px; font-weight: 700; color: rgba(255, 255, 255, 0.4); white-space: nowrap; }
+.vdl-sources { display: flex; flex-direction: column; gap: 10px; }
+/* each source carries its own brand colour (--src) so the row glows in-brand */
+.vdl-src { --src: 130 130 150; position: relative; overflow: hidden; display: flex; align-items: center; gap: 13px;
+    padding: 12px 13px; border-radius: 14px; border: 1px solid rgba(var(--src), 0.22);
+    border-left: 3px solid rgb(var(--src));
+    background: linear-gradient(100deg, rgba(var(--src), 0.10), rgba(255, 255, 255, 0.025) 60%);
+    animation: vdlSlide 0.46s both; transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.25s ease; }
+.vdl-src[data-vdl-src="soulseek"] { --src: 74 163 255; }
+.vdl-src[data-vdl-src="torrent"] { --src: 245 158 11; }
+.vdl-src[data-vdl-src="usenet"] { --src: 168 85 247; }
+.vdl-src[data-vdl-src="youtube"] { --src: 255 64 64; }
+.vdl-src:hover { transform: translateY(-2px); border-color: rgba(var(--src), 0.55);
+    box-shadow: 0 12px 28px -12px rgba(var(--src), 0.75); }
+/* brand icon tile */
+.vdl-src-icon { flex-shrink: 0; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+    background: linear-gradient(140deg, rgba(var(--src), 0.38), rgba(var(--src), 0.12));
+    border: 1px solid rgba(var(--src), 0.45); box-shadow: 0 5px 16px -7px rgb(var(--src)); transition: transform 0.2s ease; }
+.vdl-src:hover .vdl-src-icon { transform: scale(1.08) rotate(-4deg); }
+.vdl-src-emoji { font-size: 19px; line-height: 1; }
+.vdl-src-main { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.vdl-src-name { font-size: 14.5px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.vdl-src-meta { display: inline-flex; align-items: center; gap: 7px; }
+.vdl-src-dot { width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--src)); flex-shrink: 0;
+    animation: vdlDot 2.2s ease-in-out infinite; }
+.vdl-src--scanning .vdl-src-dot { animation-duration: 0.7s; }
+.vdl-src-status { font-size: 11.5px; font-weight: 700; color: rgba(255, 255, 255, 0.45); white-space: nowrap; }
 .vdl-src-status--soon { color: #fbcd7a; }
-.vdl-src-status--scanning { color: hsla(var(--vgm-h, 220), 80%, 72%, 1); }
+.vdl-src-status--scanning { color: rgb(var(--src)); }
 .vdl-src-status--scanning::after { content: ''; animation: vdlDots 1.1s steps(1) infinite; }
-/* moving scan bar along the bottom of a row while "searching" */
+/* moving scan bar along the bottom of a row while "searching" — in the source brand */
 .vdl-src--scanning::before { content: ''; position: absolute; left: 0; bottom: 0; height: 2px; width: 38%;
-    border-radius: 2px; background: linear-gradient(90deg, transparent, hsl(var(--vgm-h, 220), 85%, 62%), transparent);
-    animation: vdlScan 0.9s ease-in-out infinite; }
-.vdl-src-search { padding: 6px 13px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
-    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: #fff;
+    border-radius: 2px; background: linear-gradient(90deg, transparent, rgb(var(--src)), transparent);
+    box-shadow: 0 0 10px 1px rgba(var(--src), 0.7); animation: vdlScan 0.9s ease-in-out infinite; }
+.vdl-src-search { flex-shrink: 0; padding: 7px 14px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 800;
+    background: rgba(var(--src), 0.16); border: 1px solid rgba(var(--src), 0.4); color: #fff;
     transition: all 0.15s; }
-.vdl-src-search:hover { background: rgba(var(--accent-rgb), 0.25); border-color: rgba(var(--accent-rgb), 0.5);
-    transform: translateY(-1px); }
-.vdl-src-search:disabled { opacity: 0.5; cursor: default; transform: none; }
+.vdl-src-search:hover { background: rgba(var(--src), 0.32); border-color: rgba(var(--src), 0.65);
+    box-shadow: 0 5px 14px -5px rgb(var(--src)); transform: translateY(-1px); }
+.vdl-src-search:disabled { opacity: 0.55; cursor: default; transform: none; box-shadow: none; }
 .vdl-src-empty { font-size: 13px; color: rgba(255, 255, 255, 0.5); padding: 12px 14px; border-radius: 12px;
     background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.12); }
-.vdl-foot-note { margin-top: 11px; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.38);
-    font-style: italic; }
 @media (max-width: 560px) {
     .vdl-src { flex-wrap: wrap; }
 }
@@ -3148,12 +3162,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @keyframes vdlBreathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 @keyframes vdlScan {
     0% { left: -38%; } 100% { left: 100%; } }
+@keyframes vdlDot {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--src), 0.55); }
+    50% { box-shadow: 0 0 0 5px rgba(var(--src), 0); } }
 @keyframes vdlDots {
     0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75%, 100% { content: '...'; } }
 
 /* respect reduced-motion: keep the layout, drop the motion */
 @media (prefers-reduced-motion: reduce) {
-    .vgm-dl, .vgm-dl-content > *, .vdl-chip, .vdl-src, .vdl-reason,
+    .vgm-dl, .vgm-dl-content > *, .vdl-chip, .vdl-src, .vdl-reason, .vdl-src-dot,
     .vdl-verdict--ok, .vdl-verdict--up, .vdl-verdict--pending, .vdl-search-all { animation: none !important; }
     .vdl-chip::after, .vdl-search-all::after, .vdl-src--scanning::before { display: none; }
 }
