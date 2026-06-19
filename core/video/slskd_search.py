@@ -26,6 +26,13 @@ VIDEO_EXTS = frozenset((
 ))
 
 
+def _conn():
+    from config.settings import config_manager
+    base = str(config_manager.get("soulseek.slskd_url", "") or "").rstrip("/")
+    key = config_manager.get("soulseek.api_key", "") or ""
+    return base, ({"X-API-Key": key} if key else {})
+
+
 def build_query(scope: str, title: Any, *, year: Any = None, season: Any = None,
                 episode: Any = None) -> str:
     """The text we hand slskd for a given scope (movie / episode / season / series)."""
@@ -98,6 +105,61 @@ def group_video_files(responses: Any) -> list:
                     "username": g["username"], "slots": g["slots"], "filename": g["filename"]})
     out.sort(key=lambda h: (h["peers"], h["size_bytes"]), reverse=True)
     return out
+
+
+def _min_speed_bytes() -> int:
+    from config.settings import config_manager
+    try:
+        return int(config_manager.get("soulseek.min_peer_upload_speed", 0) or 0) * 125000
+    except (TypeError, ValueError):
+        return 0
+
+
+def search_timeout_ms() -> int:
+    """How long to ask slskd to keep searching — the SAME ``soulseek.search_timeout``
+    the music side uses (default 60s), so results have time to arrive."""
+    from config.settings import config_manager
+    try:
+        secs = int(config_manager.get("soulseek.search_timeout", 60) or 60)
+    except (TypeError, ValueError):
+        secs = 60
+    return max(10, min(120, secs)) * 1000
+
+
+def start_search(query: str) -> dict:
+    """Kick off a slskd search (don't wait). Returns {configured[, id][, error]}.
+    The caller polls ``poll_responses(id)`` until satisfied (like the music side)."""
+    base, headers = _conn()
+    if not base:
+        return {"configured": False}
+    payload = {"searchText": query, "timeout": search_timeout_ms(), "filterResponses": True,
+               "minimumResponseFileCount": 1, "minimumPeerUploadSpeed": _min_speed_bytes()}
+    try:
+        r = requests.post(base + "/api/v0/searches", json=payload, headers=headers, timeout=15)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:   # noqa: BLE001 - surface any slskd/network failure to the UI
+        return {"configured": True, "error": str(e)}
+    sid = data.get("id") if isinstance(data, dict) else (
+        data[0].get("id") if isinstance(data, list) and data and isinstance(data[0], dict) else None)
+    if not sid:
+        return {"configured": True, "error": "slskd returned no search id"}
+    return {"configured": True, "id": sid}
+
+
+def poll_responses(search_id: str) -> list:
+    """Current grouped video hits for an in-flight search (cheap; call repeatedly)."""
+    base, headers = _conn()
+    if not base or not search_id:
+        return []
+    try:
+        r = requests.get(base + "/api/v0/searches/%s/responses" % search_id, headers=headers, timeout=15)
+        if not r.ok:
+            return []
+        data = r.json()
+    except Exception:   # noqa: BLE001, S110 - transient error → no new hits this poll
+        return []
+    return group_video_files(data)
 
 
 def slskd_search(query: str, *, max_seconds: int = 8, slskd_timeout_ms: int = 4500) -> dict:
