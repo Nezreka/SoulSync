@@ -328,16 +328,6 @@ const HELPER_CONTENT = {
         ],
         docsId: 'dashboard'
     },
-    '#quality-scanner-card': {
-        title: 'Quality Scanner',
-        description: 'Analyzes audio files for quality integrity. Calculates bitrate density to detect transcodes (e.g., an MP3 re-encoded as FLAC). Scope options: Full Library, New Only, or Single Artist.',
-        tips: [
-            '"Quality Met" = file quality matches its format claims',
-            '"Low Quality" = suspicious file flagged for review',
-            'Matched count shows tracks with verified metadata'
-        ],
-        docsId: 'dashboard'
-    },
     '#duplicate-cleaner-card': {
         title: 'Duplicate Cleaner',
         description: 'Scans your library for duplicate tracks by comparing title, artist, album, and file characteristics. Reviews duplicates before taking any action.',
@@ -2358,7 +2348,6 @@ const HELPER_TOURS = {
             // Tools — in page order
             { page: 'dashboard', selector: '#db-updater-card', title: 'Database Updater', description: 'Syncs your media server\'s library into SoulSync\'s database. Three modes: Incremental (fast, new content only), Full Refresh (rebuilds everything), Deep Scan (finds and removes stale entries).' },
             { page: 'dashboard', selector: '#metadata-updater-card', title: 'Metadata Enrichment', description: 'Background workers that enrich your library from 9 services — Spotify, MusicBrainz, Deezer, Last.fm, iTunes, AudioDB, Genius, Tidal, Qobuz. Runs automatically at the configured interval.' },
-            { page: 'dashboard', selector: '#quality-scanner-card', title: 'Quality Scanner', description: 'Analyzes audio files for quality integrity. Calculates bitrate density to detect transcodes (e.g., an MP3 re-encoded as FLAC). Scan by Full Library, New Only, or Single Artist.' },
             { page: 'dashboard', selector: '#duplicate-cleaner-card', title: 'Duplicate Cleaner', description: 'Finds and removes duplicate tracks by comparing title, artist, album, and audio characteristics. Always reviews before deleting.' },
             { page: 'dashboard', selector: '#discovery-pool-card', title: 'Discovery Pool', description: 'Tracks from similar artists found during watchlist scans. Matched tracks feed the Discover page playlists and genre browser. Fix failed matches manually.' },
             { page: 'dashboard', selector: '#retag-tool-card', title: 'Retag Tool', description: 'Queue of tracks needing metadata corrections. When enrichment detects better tags than what\'s in your files, they appear here for batch review.' },
@@ -3386,7 +3375,7 @@ function _guessPageFromSelector(selector) {
         'import':      ['import-page-'],
         'settings':    ['settings-', 'stg-tab', 'api-service', 'server-toggle', 'save-button', 'spotify-client', 'soulseek-url', 'quality-profile'],
         'issues':      ['issues-'],
-        'dashboard':   ['dashboard-', 'service-card', 'watchlist-button', 'wishlist-button', 'db-updater', 'metadata-updater', 'quality-scanner', 'duplicate-cleaner', 'discovery-pool-card', 'retag-tool', 'media-scan', 'backup-manager', 'metadata-cache'],
+        'dashboard':   ['dashboard-', 'service-card', 'watchlist-button', 'wishlist-button', 'db-updater', 'metadata-updater', 'duplicate-cleaner', 'discovery-pool-card', 'retag-tool', 'media-scan', 'backup-manager', 'metadata-cache'],
     };
 
     const selectorLower = selector.toLowerCase();
@@ -3415,21 +3404,16 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.2': [
-        { date: 'June 2026 — 2.7.2 release' },
-        { title: 'Organize playlists into folders', desc: 'optionally mirror each playlist into its own folder on disk — symlink (no extra space) or copy — so external players (plex / jellyfin / music assistant) see your soulsync playlists as real folders. rebuilds itself after every sync, prunes removed tracks, and there\'s a manual rebuild button in settings.', page: 'settings' },
-        { title: 'Export server playlists as M3U', desc: 'one-click "Export M3U" button in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist\'s tracks and downloads it to your browser. handy for music assistant and friends.', page: 'sync' },
-        { title: 'Follow-only watchlist', desc: 'each watchlist artist now has an "auto-download" toggle (on by default). turn it off to just follow an artist — scans still discover and surface new releases, they just don\'t get auto-added to the wishlist.', page: 'artists' },
-        { title: 'Download from a SoundCloud link (#865)', desc: 'paste a soundcloud track url — including unlisted / private share links — into manual search and it resolves + downloads directly.', page: 'downloads' },
-        { title: 'YouTube playlists keep the artist (#863)', desc: 'youtube / youtube-music playlists that used to import as "Unknown Artist" now recover the real artist from the track\'s music metadata, the "Artist - Title" pattern, or the uploading channel — and fall back to the matched artist when youtube gives nothing.', page: 'sync' },
-        { title: 'Rename mirrored playlists', desc: 'a mirrored playlist now has a rename (✏️) button — set a custom name that changes how it shows in soulsync and how it syncs, survives upstream refreshes, and still tracks the same server playlist.', page: 'sync' },
-        { title: 'New maintenance jobs', desc: 'ReplayGain Filler (#437) computes + writes missing replaygain tags across your library, and Empty Folder Cleaner sweeps out leftover empty directories. both under Tools → library maintenance.', page: 'tools' },
-        { title: 'Export your watchlist + library', desc: 'one Export button with a scope selector dumps your watchlist roster and/or whole library roster to JSON / CSV / text.', page: 'artists' },
-        { title: 'Custom completed-download path for Torrent/Usenet (#857)', desc: 'point soulsync at the in-container folder your torrent/usenet client drops finished files into (e.g. a category subfolder), so completed grabs are found instead of going missing.', page: 'settings' },
-        { title: 'HiFi instances: restore + new working instance', desc: 'a "Restore Defaults" button re-adds any built-in instances you removed (keeps your own), the ✔/✖ controls have bigger tap targets, and a freshly-confirmed working instance is auto-pushed to everyone (thanks Sokhi).', page: 'settings' },
-        { title: 'Artist DB Record inspector', desc: 'an artist\'s detail page can now show the raw "DB Record" — everything the database knows about that artist — for debugging metadata.', page: 'library' },
-        { title: 'Fixes', desc: 'a hung database update self-heals now instead of wedging on "Starting..." forever (#859); Library Reorganize finally works on media-server libraries by falling back to tag mode (#862); spotify (no-auth) shows as connected and the dashboard test reports it correctly instead of claiming deezer; navidrome reconnects itself instead of latching disconnected; the orphan detector hard-bails on a mass-orphan flood; plus more #852 lock-screen hardening and login-password management in Manage Profiles.', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.7.1 added download verification & a review queue (acoustid fingerprint-checks every download), closed the websocket login-bypass (#852), and the acoustid Relocate fix. 2.7.0 brought multi-user for real — per-profile streaming accounts, opt-in login, reverse-proxy support. before that the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.' },
+    '2.7.4': [
+        { date: 'June 2026 — 2.7.4 release' },
+        { title: 'Re-identify a track (#889)', desc: 'filed a track under the wrong release? a new ⇄ button in the library Enhanced view lets you re-identify it — search any source (tabs, defaults to your active one), see the same song across its single / EP / album with type badges, pick the right one, and soulsync re-files the file you already have under that release with the correct year, in-album track number, and art. replace the original or keep both.', page: 'artists' },
+        { title: 'Track titles no longer keep the "01 - " (#890)', desc: 'files with no embedded title tag used to import as "01 - Song Title" (the filename stem) — which never matched the canonical "Song Title", so the real track showed as a false "missing". the number prefix is now stripped, conservatively, so titles like "7 Rings" or "1-800-273-8255" are left alone.', page: 'library' },
+        { title: 'Clear dead cover-art folders (#891)', desc: 'a Library Reorganize that moves an album now sweeps the leftover cover.jpg / .lrc / sidecars from the old folder so it actually empties. plus an opt-in "Remove Residual Files" toggle on the Empty Folder Cleaner clears the image-/sidecar-only folders you already have.', page: 'tools' },
+        { title: 'AAC as an opt-in quality tier (#886)', desc: 'soulseek downloads can now include AAC (.m4a) as a selectable quality tier, ranked above MP3 and below FLAC. purely additive — off by default; every existing profile behaves exactly as before until you enable it.', page: 'settings' },
+        { title: 'Spotify Free enrichment status (#887)', desc: 'if you run enrichment on Spotify Free (no spotify auth), the dashboard button now reads "Running (Spotify Free)" instead of wrongly showing "Not Authenticated".', page: 'dashboard' },
+        { title: 'Cleaner album imports (Sokhi)', desc: 'songs from the same album now group under one canonical release id (no more split discographies or mixed cover art), a single can be matched to its parent album, a mid-enrichment crash on an art-less file no longer leaves it untagged, and a sequel digit glued to a CJK title no longer matches the wrong album.', page: 'library' },
+        { title: 'More fixes', desc: 'NZBGet imports from the finished location instead of the incomplete "….#NZBID" folder (#884); setting your timezone to Australia/Sydney no longer makes the cache-maintenance job loop every 5 seconds (#885); and the artist-detail header no longer bleeds the blurred artist photo behind it.', page: 'downloads' },
+        { title: 'Earlier versions', desc: '2.7.3 added the Quality Upgrade Finder (find + upgrade tracks you own in worse quality than available), a wishlist ignore-list (#874), quarantine duplicate-grouping (#876), the "Track 01" position fix, and Tidal discovery/favorites fixes (#867, #880). 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.' },
     ],
 };
 
@@ -3460,58 +3444,38 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Organize playlists into folders",
-        description: "soulsync can now mirror each of your playlists into its own folder on disk, so external players (plex / jellyfin / music assistant) see them as real folders instead of just living inside soulsync.",
+        title: "Re-identify a track (#889)",
+        description: "filed a track under the wrong release? re-identify it from the library without re-downloading — soulsync re-files the file you already have under the release you pick.",
         features: [
-            "symlink (no extra disk space) or copy — your choice",
-            "rebuilds itself after every sync and prunes tracks you removed",
-            "separate output root + a manual rebuild button in settings",
+            "a ⇄ button in the Enhanced library view opens a search across any configured source (tabs, defaults to your active one)",
+            "see the same song across its single / EP / album, each with a type badge, and pick the right collection",
+            "it re-files under that release with the correct year, in-album track number, and album art",
+            "replace the original entry or keep both — and it can never delete the file if you pick the release it's already in",
         ],
-        usage_note: "Settings → Playlists → organize into folders",
+        usage_note: "Library → an artist → Enhanced view → ⇄ on a track",
     },
     {
-        title: "Better YouTube & SoundCloud imports",
-        description: "the two weak spots in playlist/link importing got fixed.",
+        title: "Cleaner libraries & imports",
+        description: "a batch of fixes that keep the library tidy and matchable.",
         features: [
-            "#863 — youtube / youtube-music playlists that imported as \"Unknown Artist\" now recover the real artist from music metadata, the \"Artist - Title\" pattern, or the uploading channel (and fall back to the matched artist)",
-            "#865 — paste a soundcloud track link, including unlisted / private share urls, into manual search to download it directly",
-        ],
-    },
-    {
-        title: "Export server playlists as M3U",
-        description: "a one-click \"Export M3U\" button now sits in the Server Playlists compare/editor toolbar — writes a standard .m3u of the playlist and downloads it to your browser. great for music assistant.",
-        features: [],
-        usage_note: "Sync → Server Playlists → Export M3U",
-    },
-    {
-        title: "Follow-only watchlist + more",
-        description: "a grab-bag of requested features.",
-        features: [
-            "per-artist \"auto-download\" toggle: turn it off to just follow an artist — scans still surface new releases, they just don't auto-add to the wishlist",
-            "rename mirrored playlists (✏️): a custom name that changes the display + sync name, survives refreshes, still tracks the server playlist",
-            "export your watchlist and/or whole library roster to JSON / CSV / text",
-            "ReplayGain Filler (#437) and Empty Folder Cleaner library-maintenance jobs",
-            "custom in-container completed-download path for Torrent / Usenet sources (#857)",
-            "HiFi instances: Restore Defaults button, bigger tap targets, and a new confirmed-working instance pushed to everyone",
-            "Artist detail \"DB Record\" inspector for debugging metadata",
+            "#890 — track titles no longer keep the \"01 - \" from a filename (which caused false \"missing\" tracks); stripped conservatively so \"7 Rings\" / \"1-800-273-8255\" are left alone",
+            "#891 — a reorganize now sweeps leftover cover.jpg / .lrc from the old folder, plus an opt-in \"Remove Residual Files\" toggle clears image-only folders you already have",
+            "Sokhi — same-album songs group under one canonical release (no split discographies / mixed cover art); a single can match its parent album; a mid-enrichment crash no longer leaves a file untagged; a CJK-title sequel-digit no longer matches the wrong album",
         ],
     },
     {
-        title: "Fixes this release",
-        description: "a stack of issue fixes on top of 2.7.1.",
+        title: "Quality & sources",
+        description: "more control over downloads, plus a couple of source fixes.",
         features: [
-            "#859 — a hung database update self-heals instead of wedging on \"Starting...\" forever",
-            "#862 — Library Reorganize now works on media-server libraries (falls back to tag mode when there are no source IDs)",
-            "spotify (no-auth) shows as connected and the dashboard test reports it correctly, instead of claiming a deezer fallback",
-            "navidrome reconnects itself instead of latching \"disconnected\"",
-            "the orphan detector hard-bails on a mass-orphan flood instead of plowing ahead",
-            "more #852 lock-screen hardening + login-password management in Manage Profiles",
-            "Aria2 added to the torrent client list",
+            "#886 — AAC (.m4a) as an opt-in soulseek quality tier, ranked above MP3 and below FLAC; off by default so nothing changes until you enable it",
+            "#887 — enrichment on Spotify Free now reads \"Running (Spotify Free)\" instead of \"Not Authenticated\"",
+            "#884 — NZBGet imports from the finished location, not the incomplete \"….#NZBID\" folder",
+            "#885 — Australia/Sydney timezone no longer makes the cache-maintenance job loop every 5 seconds",
         ],
     },
     {
-        title: "Earlier in 2.7.1 / 2.7.0",
-        description: "2.7.1 added download verification & an unverified review queue (acoustid fingerprint-checks every download against what you asked for), closed the websocket login-bypass (#852), and added the acoustid Relocate fix action. 2.7.0 made multi-user real: per-profile streaming accounts (My Accounts), auto-sync running as its owner, opt-in username/password login with recovery, and reverse-proxy support. before that, the 2.6.x cycle brought the blocklist, the download-retry overhaul, Download Origins, Spotify-no-auth metadata, and Library Re-tag.",
+        title: "Earlier in 2.7.3 / 2.7.2 / 2.7.1 / 2.7.0",
+        description: "2.7.3 added the Quality Upgrade Finder (find + upgrade tracks you own in worse quality than available), a wishlist ignore-list (#874), quarantine duplicate-grouping (#876), the \"Track 01\" position fix, and Tidal discovery/favorites fixes (#867, #880). 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification (acoustid checks every download) + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.",
         features: [],
     },
 ];

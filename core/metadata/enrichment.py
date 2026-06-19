@@ -242,18 +242,25 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             logger.warning("[Metadata Debug] Artist: %s", artist.get("name", "MISSING") if artist else "None")
             logger.warning("[Metadata Debug] Album info: %s", album_info.get("album_name", "MISSING") if album_info else "None")
             logger.error("[Metadata Debug] Traceback:\n%s", traceback.format_exc())
-            # We cleared the file's art early; if the rewrite then crashed
-            # before re-embedding, the on-disk file (already saved cleared at
-            # the start) would be left art-less. Best-effort: put the original
-            # art back and persist it so a mid-enrichment crash never destroys
-            # the cover (#764). Guarded so a failure here can't mask the
-            # original error.
+            # The file was saved with tags CLEARED up front (so stale tags never
+            # linger), then the failure-prone enrichment ran. By the time most
+            # failures hit — the external source-id embed / cover-art fetch — the
+            # core tags (album/artist/title/track from the matched context) are
+            # already on the in-memory object but NOT yet on disk; the on-disk
+            # file is still the cleared one. Persist the in-memory tags now (and
+            # restore the original art too, #764) so a mid-enrichment crash leaves
+            # a correctly-tagged file instead of an UNTAGGED one (Sokhi: tracks
+            # landing in Rockbox's 'untagged' bucket after a 'processing failed').
+            #
+            # Previously this save was gated on there being original art to
+            # restore, so an art-less file lost its tags entirely on any crash.
+            # Guarded so a failure here can't mask the original error.
             try:
-                if audio_file is not None and art_snapshot and restore_embedded_art(
-                    audio_file, symbols, art_snapshot
-                ):
+                if audio_file is not None:
+                    if art_snapshot:
+                        restore_embedded_art(audio_file, symbols, art_snapshot)
                     save_audio_file(audio_file, symbols)
-                    logger.info("Restored original cover art after enrichment error.")
+                    logger.info("Persisted core tags (and restored art) after enrichment error.")
             except Exception as restore_exc:
-                logger.debug("Art restore after error failed: %s", restore_exc)
+                logger.debug("Tag/art persist after error failed: %s", restore_exc)
             return False

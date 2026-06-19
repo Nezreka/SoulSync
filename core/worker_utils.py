@@ -101,6 +101,108 @@ def accept_artist_match(database, id_column: str, source_id, artist_id,
     return True, ""
 
 
+# --- Same-name artist disambiguation by owned-catalog overlap -------------
+# The name gate (above) can't separate two artists who share a name ("Rone" has
+# ~5). The decisive signal is the library itself: the user owns albums by the
+# RIGHT one. So when several candidates clear the name gate, fetch each one's
+# catalog and pick the one whose releases overlap the albums actually owned.
+
+def normalize_release_title(title: str) -> str:
+    """Collapse an album/release title for tolerant comparison — drop edition
+    suffixes ('(Deluxe)', ' - Remastered'), punctuation, and case."""
+    t = (title or '').lower().strip()
+    t = re.sub(r'\s*\(.*?\)\s*', ' ', t)
+    t = re.sub(r'\s*\[.*?\]\s*', ' ', t)
+    t = re.sub(r'\s+[-–—]\s+.*$', '', t)
+    t = re.sub(r'[^\w\s]', '', t)
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+def catalog_overlap_score(owned_titles, candidate_titles, threshold: float = 0.85) -> int:
+    """How many OWNED album titles appear in the candidate's catalog (fuzzy,
+    edition-insensitive). The disambiguation signal — higher = better match."""
+    owned = {normalize_release_title(t) for t in (owned_titles or []) if t}
+    owned.discard('')
+    cand = {normalize_release_title(t) for t in (candidate_titles or []) if t}
+    cand.discard('')
+    if not owned or not cand:
+        return 0
+    score = 0
+    for o in owned:
+        if o in cand or any(SequenceMatcher(None, o, c).ratio() >= threshold for c in cand):
+            score += 1
+    return score
+
+
+def pick_artist_by_catalog(candidates, owned_titles, fetch_titles) -> tuple:
+    """Choose, among same-name candidates, the one whose catalog best overlaps the
+    OWNED albums. Returns ``(chosen, overlap_score)``.
+
+    ``candidates``   — artist objects already past the name gate (order = the
+                       worker's existing best-by-name order; candidates[0] is the
+                       current behavior's pick).
+    ``owned_titles`` — the library artist's owned album titles.
+    ``fetch_titles(candidate) -> list[str]`` — that candidate's album titles;
+                       called ONLY when disambiguation is actually needed (2+
+                       candidates and we have owned albums), so the common
+                       single-candidate path costs no extra API calls.
+
+    Falls back to candidates[0] (unchanged behavior) when there's nothing to
+    disambiguate or no candidate overlaps the owned catalog.
+    """
+    candidates = list(candidates or [])
+    if not candidates:
+        return None, 0
+    if len(candidates) == 1:
+        return candidates[0], 0
+    owned = [t for t in (owned_titles or []) if t]
+    if not owned:
+        return candidates[0], 0
+
+    best, best_score = None, 0
+    for cand in candidates:
+        try:
+            titles = fetch_titles(cand) or []
+        except Exception as exc:
+            logger.debug("catalog disambiguation: fetch_titles failed: %s", exc)
+            titles = []
+        score = catalog_overlap_score(owned, titles)
+        if score > best_score:
+            best, best_score = cand, score
+    if best is not None and best_score > 0:
+        return best, best_score
+    return candidates[0], 0  # no overlap signal → keep the best-by-name pick
+
+
+def owned_album_titles(database, artist_id) -> list:
+    """The album titles the library actually has for this artist — the ground
+    truth used to disambiguate same-name source artists."""
+    try:
+        with database._get_connection() as conn:
+            rows = conn.execute(
+                "SELECT title FROM albums WHERE artist_id = ?", (artist_id,)
+            ).fetchall()
+        return [r[0] for r in rows if r and r[0]]
+    except Exception as exc:
+        logger.debug("owned_album_titles(%s) failed: %s", artist_id, exc)
+        return []
+
+
+def release_titles(albums) -> list:
+    """Extract titles from a list of album objects/dicts (handles ``.title``/
+    ``.name`` / dict keys) — the candidate side of catalog disambiguation."""
+    out = []
+    for al in albums or []:
+        if isinstance(al, dict):
+            t = al.get('title') or al.get('name')
+        else:
+            t = getattr(al, 'title', None) or getattr(al, 'name', None)
+        if t:
+            out.append(t)
+    return out
+
+
 def interruptible_sleep(stop_event: threading.Event, seconds: float, step: float = 0.5) -> bool:
     """Sleep in chunks so shutdown can interrupt long waits."""
     if seconds <= 0:

@@ -714,6 +714,67 @@ def test_nzbget_parse_group_computes_progress() -> None:
     assert status.download_speed == 500_000
 
 
+def test_nzbget_queue_group_never_offers_a_save_path() -> None:
+    """A queued group's DestDir is the in-progress '….#NZBID' dir, which is gone
+    after the move — never expose it as a final save_path. Finalisation must come
+    from the HISTORY entry. (Swigs: imported from /…/incomplete/….#2141.)"""
+    adapter = _nzbget_with_config()
+    status = adapter._parse_group({
+        'NZBID': 2141, 'NZBName': 'xRepentancex-The.Sickness.Of.Eden',
+        'Status': 'DOWNLOADING',
+        'DestDir': '/data/usenet/incomplete/xRepentancex-The.Sickness.Of.Eden.#2141',
+        'Category': 'soulsync',
+    })
+    assert status.save_path is None
+
+
+def test_nzbget_pp_finished_group_is_completed_but_has_no_path() -> None:
+    """PP_FINISHED maps to 'completed' but is still a QUEUE group on the
+    in-progress dir — it must report no save_path so the plugin waits for the
+    history entry instead of finalising on the incomplete folder."""
+    adapter = _nzbget_with_config()
+    status = adapter._parse_group({
+        'NZBID': 2141, 'NZBName': 'Album', 'Status': 'PP_FINISHED',
+        'DestDir': '/data/usenet/incomplete/Album.#2141', 'Category': 'soulsync',
+    })
+    assert status.state == 'completed'
+    assert status.save_path is None
+
+
+def test_nzbget_history_prefers_finaldir_over_destdir() -> None:
+    """After a post-processing move, FinalDir is the real location; DestDir can
+    still be the intermediate dir. Swigs' exact case."""
+    adapter = _nzbget_with_config()
+    status = adapter._parse_history({
+        'NZBID': 2141, 'Name': 'xRepentancex-The.Sickness.Of.Eden',
+        'Status': 'SUCCESS/ALL',
+        'DestDir': '/data/usenet/incomplete/xRepentancex-The.Sickness.Of.Eden.#2141',
+        'FinalDir': '/data/soulseek/xRepentancex-The.Sickness.Of.Eden-CD-FLAC-2015-CATARACT',
+        'Category': 'soulsync',
+    })
+    assert status.state == 'completed'
+    assert status.save_path == '/data/soulseek/xRepentancex-The.Sickness.Of.Eden-CD-FLAC-2015-CATARACT'
+
+
+def test_nzbget_history_falls_back_to_destdir_when_no_finaldir() -> None:
+    """No PP move -> FinalDir empty -> use DestDir (the final dest in that case)."""
+    adapter = _nzbget_with_config()
+    status = adapter._parse_history({
+        'NZBID': 7, 'Name': 'Album', 'Status': 'SUCCESS/HEALTH',
+        'DestDir': '/data/usenet/completed/Album', 'FinalDir': '', 'Category': 'c',
+    })
+    assert status.save_path == '/data/usenet/completed/Album'
+
+
+def test_nzbget_history_empty_dirs_yield_none() -> None:
+    adapter = _nzbget_with_config()
+    status = adapter._parse_history({
+        'NZBID': 7, 'Name': 'Album', 'Status': 'SUCCESS/ALL',
+        'DestDir': '   ', 'FinalDir': '', 'Category': 'c',
+    })
+    assert status.save_path is None
+
+
 def test_nzbget_remove_rejects_non_numeric_id() -> None:
     """NZBGet IDs are ints; passing a string id like 'abc' must
     fail fast instead of corrupting the editqueue call."""

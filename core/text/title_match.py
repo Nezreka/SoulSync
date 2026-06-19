@@ -193,12 +193,38 @@ def numeric_tokens_differ(title_a: str, title_b: str) -> bool:
     string similarity ('Vol.4' vs 'Vol.4.5' = 0.97) and token-subset checks
     both wave these through, which hung volume 4.5's cover art on volume 4
     (Sokhi). Shared digits on both sides ('1989' vs '1989 (Deluxe)') are
-    fine."""
+    fine.
+
+    Tokenises on non-word runs but KEEPS word characters of every script, so a
+    digit glued to a non-latin word stays its own digit-bearing token. Stripping
+    to [a-z0-9] turned CJK into spaces, collapsing 'サウンドトラック2' to a bare
+    '2' that a shared number elsewhere ('第2期' = season 2) already covered — so
+    'Soundtrack' and 'Soundtrack2' both reduced to {'2'} and matched, hanging the
+    wrong cover (Sokhi again)."""
     def _digit_tokens(text: str) -> frozenset:
-        tokens = re.sub(r"[^a-z0-9]+", " ", (text or "").casefold()).split()
+        # \W is Unicode-aware for str: CJK/kana count as word chars, so a digit
+        # stays attached to its word instead of collapsing to a bare '2'.
+        tokens = re.sub(r"\W+", " ", (text or "").casefold()).split()
         return frozenset(t for t in tokens if any(c.isdigit() for c in t))
 
     return _digit_tokens(title_a) != _digit_tokens(title_b)
+
+
+def base_title_before_dash(title: str) -> str:
+    """The base title before Spotify's ' - <qualifier>' version separator.
+
+    Spotify renders versions as 'Calma - Remix' / 'Song - Radio Edit' /
+    'Track - Remastered 2019'. Libraries (and the files people actually have)
+    very often store just the base — 'Calma' — so a literal search for
+    'Calma - Remix' finds nothing and the OR-fuzzy fallback then floods on the
+    common qualifier word ('remix' matches every remix). This returns the base
+    ('Calma') for a base-title search fallback. Splits on the FIRST ' - ' (the
+    spaced hyphen is Spotify's separator; a bare hyphen inside a word is left
+    alone). Returns the title unchanged when there's no separator."""
+    if not title:
+        return title
+    idx = title.find(' - ')
+    return title[:idx].strip() if idx > 0 else title
 
 
 __all__ = [
@@ -206,4 +232,5 @@ __all__ = [
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",
+    "base_title_before_dash",
 ]

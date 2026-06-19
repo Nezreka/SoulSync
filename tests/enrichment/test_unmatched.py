@@ -187,6 +187,24 @@ def test_reset_builder_nulls_status_not_just_attempted():
     assert "WHERE spotify_match_status = 'not_found'" in sql
 
 
+def test_reset_builder_also_clears_artist_source_id():
+    # #868: a re-match must forget the stored id so the worker actually
+    # re-resolves (otherwise its existing-id short-circuit re-confirms the wrong
+    # same-name artist).
+    for service, col in [('spotify', 'spotify_artist_id'), ('itunes', 'itunes_artist_id'),
+                         ('deezer', 'deezer_id'), ('musicbrainz', 'musicbrainz_id')]:
+        sql, _ = build_reset_query(service, 'artist', 'item', entity_id=5)
+        assert f'{col} = NULL' in sql, f'{service}: expected {col} cleared'
+        assert f'{service}_match_status = NULL' in sql
+
+
+def test_reset_builder_does_not_clear_track_id():
+    # Tracks have no source-id column (ids live in tags) — must not emit one.
+    sql, _ = build_reset_query('spotify', 'track', 'item', entity_id=5)
+    assert 'spotify_match_status = NULL' in sql
+    assert 'spotify_track_id = NULL' not in sql
+
+
 def test_reset_item_requeues_to_pending(db):
     n = db.reset_enrichment('spotify', 'artist', 'item', entity_id='a2')  # was not_found
     assert n == 1

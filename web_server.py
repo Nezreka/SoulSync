@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.2"
+_SOULSYNC_BASE_VERSION = "2.7.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -990,21 +990,8 @@ def _set_db_update_automation_id(value):
     global _db_update_automation_id
     _db_update_automation_id = value
 
-# Quality Scanner state
-quality_scanner_state = {
-    "status": "idle",  # idle, running, finished, error
-    "phase": "Ready to scan",
-    "progress": 0,
-    "processed": 0,
-    "total": 0,
-    "quality_met": 0,
-    "low_quality": 0,
-    "matched": 0,
-    "error_message": "",
-    "results": [],  # List of low quality tracks with match status
-}
-quality_scanner_lock = threading.Lock()
-quality_scanner_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="QualityScanner")
+# Quality scanning is now the 'quality_upgrade' library-maintenance repair job
+# (core/repair_jobs/quality_upgrade.py) — no standalone state/executor here.
 
 # Duplicate Cleaner state
 duplicate_cleaner_state = {
@@ -1253,10 +1240,7 @@ def _register_automation_handlers():
         duplicate_cleaner_lock=duplicate_cleaner_lock,
         duplicate_cleaner_executor=duplicate_cleaner_executor,
         run_duplicate_cleaner=_run_duplicate_cleaner,
-        get_quality_scanner_state=lambda: quality_scanner_state,
-        quality_scanner_lock=quality_scanner_lock,
-        quality_scanner_executor=quality_scanner_executor,
-        run_quality_scanner=_run_quality_scanner,
+        run_repair_job_now=lambda job_id: repair_worker.run_job_now(job_id) if repair_worker else None,
         download_orchestrator=download_orchestrator,
         run_async=run_async,
         tasks_lock=tasks_lock,
@@ -1859,7 +1843,6 @@ def _shutdown_runtime_components():
     for executor, name in [
         (stream_executor, "stream executor"),
         (db_update_executor, "db update executor"),
-        (quality_scanner_executor, "quality scanner executor"),
         (duplicate_cleaner_executor, "duplicate cleaner executor"),
         (sync_executor, "sync executor"),
         (missing_download_executor, "missing download executor"),
@@ -7573,6 +7556,18 @@ def approve_quarantine_item(entry_id):
             docker_resolve_path(config_manager.get('soulseek.download_path', './downloads')),
             'Transfer',
         )
+        _req = request.get_json(silent=True) or {}
+        # #876: capture the sibling alternatives BEFORE approving — the approve
+        # restores (moves) this entry's file out of quarantine, after which its
+        # own group_key can no longer be looked up by id. Read-only here; the
+        # actual deletion happens only after the re-import is safely kicked off.
+        _sibling_ids = []
+        if _req.get('remove_siblings'):
+            from core.imports.quarantine import find_quarantine_siblings
+            try:
+                _sibling_ids = find_quarantine_siblings(_get_quarantine_dir(), entry_id)
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling lookup for {entry_id} failed: {sib_exc}")
         result = approve_quarantine_entry(_get_quarantine_dir(), entry_id, restore_dir)
         if result is None:
             return jsonify({
@@ -7591,7 +7586,6 @@ def approve_quarantine_item(entry_id):
         # context lost task_id/batch_id (the wrapper pops them before quarantine),
         # so we re-supply them here. Manager-tab approvals (no task_id) keep the
         # original inner-pipeline path.
-        _req = request.get_json(silent=True) or {}
         _task_id = (_req.get('task_id') or '').strip() or None
         _batch_id = None
         if _task_id:
@@ -7611,7 +7605,28 @@ def approve_quarantine_item(entry_id):
             _reprocess = lambda: _post_process_matched_download(context_key, context, restored_path)
         threading.Thread(target=_reprocess, daemon=True).start()
         logger.info(f"[Quarantine] Approved {entry_id} (original_trigger={trigger}, bypass=all, task={_task_id}) → re-running pipeline")
-        return jsonify({"success": True, "trigger_bypassed": "all", "original_trigger": trigger})
+        # #876: once one alternative for a song is accepted, the other
+        # quarantined attempts at the SAME intended target are redundant
+        # failed downloads of a track the user now owns. Delete the siblings
+        # captured above (scoped to the quarantine manager via `remove_siblings`
+        # — the download-modal chooser passes no flag and is unaffected).
+        removed_siblings = []
+        if _sibling_ids:
+            from core.imports.quarantine import delete_quarantine_entry
+            try:
+                for sib_id in _sibling_ids:
+                    if delete_quarantine_entry(_get_quarantine_dir(), sib_id):
+                        removed_siblings.append(sib_id)
+                if removed_siblings:
+                    logger.info(f"[Quarantine] Auto-removed {len(removed_siblings)} sibling alternative(s) of {entry_id}: {removed_siblings}")
+            except Exception as sib_exc:
+                logger.warning(f"[Quarantine] Sibling cleanup for {entry_id} failed: {sib_exc}")
+        return jsonify({
+            "success": True,
+            "trigger_bypassed": "all",
+            "original_trigger": trigger,
+            "removed_siblings": removed_siblings,
+        })
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -9131,7 +9146,11 @@ def get_artist_discography(artist_id):
                 effective_override_source = 'spotify'
 
         from core.metadata.lookup import MetadataLookupOptions
-        from core.metadata_service import get_artist_discography as _get_artist_discography
+        # #877: use the artist-DETAIL discography so the Download Discography modal
+        # gets the SAME release-type split (albums / eps / singles) the Artist
+        # Detail view shows — EPs were being lumped into singles before, leaving
+        # the modal's EPs toggle dead.
+        from core.metadata.discography import get_artist_detail_discography as _get_artist_discography
 
         # Server-side per-source ID resolution. Look up the library row
         # by ANY of the IDs the frontend might send: library DB id,
@@ -9209,6 +9228,7 @@ def get_artist_discography(artist_id):
         )
 
         album_list = discography['albums']
+        eps_list = discography.get('eps', [])
         singles_list = discography['singles']
         active_source = discography['source']
         source_priority = discography['source_priority']
@@ -9320,6 +9340,7 @@ def get_artist_discography(artist_id):
 
         return jsonify({
             "albums": album_list,
+            "eps": eps_list,
             "singles": singles_list,
             "source": active_source or (source_priority[0] if source_priority else "unknown"),
             "artist_info": artist_info,
@@ -10022,6 +10043,147 @@ def get_artist_enhanced_detail(artist_id):
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Re-identify an imported track (#889) ──
+@app.route('/api/reidentify/sources', methods=['GET'])
+def reidentify_sources():
+    """Source tabs for the Re-identify modal — every metadata source with a live
+    client, the active one flagged so the UI selects it by default."""
+    try:
+        from core.imports.rematch_search import available_sources
+        return jsonify({"success": True, "sources": available_sources()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "sources": []}), 500
+
+
+@app.route('/api/reidentify/search', methods=['GET'])
+def reidentify_search():
+    """Search one metadata source for the releases a track appears on.
+
+    Query params: ``source`` (defaults to the active source), ``q`` (the query),
+    ``limit``. Returns display rows — the SAME song across single/EP/album, each
+    with a type badge — for the user to pick. album_id is resolved later, only for
+    the chosen row."""
+    try:
+        from core.imports.rematch_search import available_sources, search_release_candidates
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        source = (request.args.get('source') or '').strip()
+        if not source:
+            actives = [s for s in available_sources() if s.get('active')]
+            source = actives[0]['source'] if actives else 'spotify'
+        try:
+            limit = max(1, min(50, int(request.args.get('limit', 25))))
+        except (TypeError, ValueError):
+            limit = 25
+        rows = search_release_candidates(source, query, limit=limit)
+        return jsonify({"success": True, "source": source, "results": rows})
+    except Exception as e:
+        logger.error(f"Re-identify search error: {e}")
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
+@app.route('/api/reidentify/apply', methods=['POST'])
+def reidentify_apply():
+    """Apply a re-identify: stage the track's library file + write a single-use hint
+    so the auto-import worker re-files it under the chosen release (Phase 2).
+
+    Body: ``{library_track_id, source, track_id, replace}``. Admin-only (mutates the
+    library). COPIES the file — the original is removed only after the re-import
+    succeeds, and only when ``replace`` is true."""
+    try:
+        database = get_database()
+        pid = get_current_profile_id()
+        prof = database.get_profile(pid) if pid else None
+        if not prof or not prof.get('is_admin'):
+            return jsonify({"success": False, "error": "Admin only"}), 403
+
+        data = request.get_json(silent=True) or {}
+        library_track_id = data.get('library_track_id')
+        source = (data.get('source') or '').strip()
+        track_id = (data.get('track_id') or '').strip()
+        replace = bool(data.get('replace', True))
+        if not library_track_id or not source or not track_id:
+            return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
+
+        from core.imports.rematch_search import resolve_hint_fields
+        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+        from core.imports.rematch_hints import create_hint
+
+        # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
+        hint_fields = resolve_hint_fields(source, track_id)
+        if not hint_fields:
+            return jsonify({"success": False, "error": "Could not resolve the selected release (no album id)"}), 400
+
+        # 2) Locate the library file for this track.
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(library_track_id),))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or not row['file_path']:
+            return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
+        stored_path = row['file_path']
+
+        # Resolve the stored DB path to a file THIS process can actually read, using
+        # the SAME strong resolver the rest of the app uses (transfer/download/library/
+        # Plex search + #833 confusable folding via find_on_disk).
+        real_path = _resolve_library_file_path(stored_path)
+        if not real_path:
+            # On a miss, run the diagnostic variant purely to tell us (and the user)
+            # what was tried — instead of failing on the raw, possibly-stale path.
+            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+            try:
+                _plex = media_server_engine.client('plex') if media_server_engine else None
+            except Exception:
+                _plex = None
+            _, attempt = resolve_library_file_path_with_diagnostic(
+                stored_path, config_manager=config_manager, plex_client=_plex)
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
+                           library_track_id, stored_path, attempt.raw_path_existed, searched)
+            return jsonify({"success": False, "error": (
+                f"SoulSync couldn't find this track's file on disk.\nStored path: {stored_path}\n"
+                f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
+                f"(or the stored path is stale), re-identify isn't available for it.")}), 404
+
+        # 3) Copy into staging + fingerprint the copy.
+        staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
+
+        # 4) Persist the single-use hint.
+        hint = build_reidentify_hint(library_track_id, hint_fields,
+                                     staged['staged_path'], staged['content_hash'], replace=replace)
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            hint_id = create_hint(cur, hint)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 5) Nudge the worker so it doesn't wait for the next timer tick.
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as _e:
+            logger.debug("Re-identify: scan nudge failed (worker will catch it on its timer): %s", _e)
+
+        logger.info("[Re-identify] staged track %s → %s '%s' (%s), replace=%s",
+                    library_track_id, hint.album_type or 'release', hint.album_name or '?',
+                    source, replace)
+        return jsonify({"success": True, "hint_id": hint_id, "staged_path": staged['staged_path'],
+                        "album_name": hint.album_name, "album_type": hint.album_type})
+    except FileNotFoundError as e:
+        return jsonify({"success": False, "error": f"Source file not found: {e}"}), 404
+    except Exception as e:
+        logger.error(f"Re-identify apply error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/library/artist/<artist_id>/quality-analysis')
 def get_artist_quality_analysis(artist_id):
@@ -16845,6 +17007,48 @@ def remove_batch_from_wishlist():
         logger.error(f"Error batch removing from wishlist: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/wishlist/ignore-list', methods=['GET'])
+def get_wishlist_ignore_list():
+    """#874: active (non-expired) wishlist ignore entries for this profile."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        entries = get_wishlist_service().database.get_wishlist_ignore(profile_id=runtime.profile_id)
+        from core.wishlist.ignore import IGNORE_TTL_DAYS
+        return jsonify({"success": True, "entries": entries, "ttl_days": IGNORE_TTL_DAYS})
+    except Exception as e:
+        logger.error(f"Error reading wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e), "entries": []}), 500
+
+@app.route('/api/wishlist/ignore-list/remove', methods=['POST'])
+def remove_from_wishlist_ignore_list():
+    """#874: un-ignore a track so it can be auto-acquired again."""
+    try:
+        data = request.get_json() or {}
+        track_id = data.get('track_id') or data.get('spotify_track_id')
+        if not track_id:
+            return jsonify({"success": False, "error": "No track_id provided"}), 400
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        ok = get_wishlist_service().database.remove_from_wishlist_ignore(
+            track_id, profile_id=runtime.profile_id)
+        return jsonify({"success": True, "removed": ok})
+    except Exception as e:
+        logger.error(f"Error removing from wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route('/api/wishlist/ignore-list/clear', methods=['POST'])
+def clear_wishlist_ignore_list():
+    """#874: clear the entire wishlist ignore-list for this profile."""
+    try:
+        from core.wishlist_service import get_wishlist_service
+        runtime = _build_wishlist_route_runtime()
+        count = get_wishlist_service().database.clear_wishlist_ignore(profile_id=runtime.profile_id)
+        return jsonify({"success": True, "cleared": count})
+    except Exception as e:
+        logger.error(f"Error clearing wishlist ignore-list: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 @app.route('/api/add-album-to-wishlist', methods=['POST'])
 def add_album_track_to_wishlist():
     """Endpoint to add a single track from an album to the wishlist."""
@@ -17686,30 +17890,7 @@ def _get_quality_tier_from_extension(file_path):
 
     return ('unknown', 999)
 
-# Quality scanner worker logic lives in core/discovery/quality_scanner.py.
-from core.discovery import quality_scanner as _discovery_quality_scanner
-
-
-def _build_quality_scanner_deps():
-    """Build the QualityScannerDeps bundle from web_server.py globals on each call."""
-    return _discovery_quality_scanner.QualityScannerDeps(
-        quality_scanner_state=quality_scanner_state,
-        quality_scanner_lock=quality_scanner_lock,
-        QUALITY_TIERS=QUALITY_TIERS,
-        matching_engine=matching_engine,
-        automation_engine=automation_engine,
-        get_quality_tier_from_extension=_get_quality_tier_from_extension,
-        add_activity_item=add_activity_item,
-        probe_audio_quality=_probe_audio_quality,
-        resolve_library_file_path=_resolve_library_file_path,
-    )
-
-
-def _run_quality_scanner(scope='watchlist', profile_id=1):
-    return _discovery_quality_scanner.run_quality_scanner(
-        scope, profile_id, _build_quality_scanner_deps()
-    )
-
+# (Quality scanning moved to the 'quality_upgrade' library-maintenance repair job.)
 
 from core.library.duplicate_cleaner import (
     _run_duplicate_cleaner,
@@ -17721,60 +17902,6 @@ _init_duplicate_cleaner(
     resolve_path_fn=docker_resolve_path,
     engine=automation_engine,
 )
-
-@app.route('/api/quality-scanner/start', methods=['POST'])
-def start_quality_scan():
-    """Start the quality scanner"""
-    with quality_scanner_lock:
-        if quality_scanner_state["status"] == "running":
-            return jsonify({"success": False, "error": "A scan is already in progress"}), 409
-
-        data = request.get_json() or {}
-        scope = data.get('scope', 'watchlist')  # 'watchlist' or 'all'
-
-        logger.info(f"[Quality Scanner API] Starting scan with scope: {scope}")
-
-        # Re-arm the path-resolve diagnostic so each scan logs the searched dirs
-        # once (otherwise it only ever fires on the first scan after a restart).
-        global _resolve_library_diag_logged
-        _resolve_library_diag_logged = False
-
-        # Reset state
-        quality_scanner_state["status"] = "running"
-        quality_scanner_state["phase"] = "Initializing..."
-        quality_scanner_state["progress"] = 0
-        quality_scanner_state["processed"] = 0
-        quality_scanner_state["total"] = 0
-        quality_scanner_state["quality_met"] = 0
-        quality_scanner_state["low_quality"] = 0
-        quality_scanner_state["matched"] = 0
-        quality_scanner_state["results"] = []
-        quality_scanner_state["error_message"] = ""
-
-        # Submit worker (capture profile_id before thread)
-        scan_profile_id = get_current_profile_id()
-        quality_scanner_executor.submit(_run_quality_scanner, scope, scan_profile_id)
-
-        add_activity_item("", "Quality Scan Started", f"Scanning {scope} tracks", "Now")
-
-        return jsonify({"success": True, "message": "Quality scan started"})
-
-@app.route('/api/quality-scanner/status', methods=['GET'])
-def get_quality_scanner_status():
-    """Get current quality scanner status"""
-    with quality_scanner_lock:
-        return jsonify(quality_scanner_state)
-
-@app.route('/api/quality-scanner/stop', methods=['POST'])
-def stop_quality_scan():
-    """Stop the quality scanner (sets a stop flag)"""
-    with quality_scanner_lock:
-        if quality_scanner_state["status"] == "running":
-            quality_scanner_state["status"] = "finished"
-            quality_scanner_state["phase"] = "Scan stopped by user"
-            return jsonify({"success": True, "message": "Stop request sent"})
-        else:
-            return jsonify({"success": False, "error": "No scan is currently running"}), 404
 
 @app.route('/api/duplicate-cleaner/start', methods=['POST'])
 def start_duplicate_cleaner():
@@ -19060,26 +19187,44 @@ def _check_batch_completion_v2(batch_id):
 
 
 def _add_cancelled_task_to_wishlist(task):
-    """
-    Helper function to add cancelled task to wishlist.
-    Separated for clarity and error isolation.
+    """Handle a user-cancelled download's wishlist state.
+
+    #874: a manual cancel means "stop auto-retrying this release". The
+    previous behaviour re-added the cancelled track to the wishlist, which
+    the auto-processor then re-downloaded → re-cancelled → re-added,
+    forever. Instead we record a TTL'd ignore entry (so the watchlist /
+    auto-processor skip it) and drop it from the active wishlist. The user
+    can still force-download it manually (manual paths bypass the gate),
+    and the ignore lapses after core.wishlist.ignore.IGNORE_TTL_DAYS so it
+    is reconsidered later. Error-isolated; never raises into the caller.
     """
     if not task:
         return
-        
+
     try:
         from core.wishlist_service import get_wishlist_service
+        from core.wishlist.ignore import extract_display, REASON_CANCELLED
         wishlist_service = get_wishlist_service()
-        payload = _build_cancelled_task_wishlist_payload(task, profile_id=get_current_profile_id())
-        success = wishlist_service.add_spotify_track_to_wishlist(**payload)
-        
-        if success:
-            logger.info(f"[Atomic Cancel] Added '{task.get('track_info', {}).get('name')}' to wishlist")
-        else:
-            logger.error(f"[Atomic Cancel] Failed to add '{task.get('track_info', {}).get('name')}' to wishlist")
-            
+        profile_id = get_current_profile_id()
+        track_info = task.get('track_info', {}) or {}
+        track_id = track_info.get('id')
+        name = track_info.get('name')
+
+        if not track_id:
+            logger.warning("[Atomic Cancel] No track id on cancelled task — cannot ignore '%s'", name)
+            return
+
+        disp_name, disp_artist = extract_display(track_info)
+        wishlist_service.database.add_to_wishlist_ignore(
+            track_id, track_name=disp_name, artist_name=disp_artist,
+            reason=REASON_CANCELLED, profile_id=profile_id)
+        # Drop it from the active wishlist so the auto-processor stops
+        # re-attempting it; the gate then blocks any automatic re-add.
+        wishlist_service.remove_track_from_wishlist(track_id, profile_id=profile_id)
+        logger.info("[Atomic Cancel] Ignored (TTL) + removed from wishlist: '%s'", name or track_id)
+
     except Exception as e:
-        logger.error(f"[Atomic Cancel] Critical error adding to wishlist: {e}")
+        logger.error(f"[Atomic Cancel] Critical error handling cancelled task: {e}")
 
 @app.route('/api/playlists/<batch_id>/cancel_batch', methods=['POST'])
 def cancel_batch(batch_id):
@@ -21720,7 +21865,10 @@ def deezer_download_test():
     """Test Deezer ARL token authentication."""
     try:
         data = request.get_json() or {}
-        arl = data.get('arl', '')
+        # An empty/redaction-sentinel value means "test the SAVED token" — the
+        # settings field round-trips a mask for a saved-but-untouched secret, so
+        # testing it must use the stored ARL, not the mask (#870).
+        arl = config_manager.resolve_secret('deezer_download.arl', data.get('arl'))
         if not arl:
             return jsonify({'success': False, 'error': 'No ARL token provided'})
 
@@ -37396,12 +37544,6 @@ def _emit_tool_progress_loop():
         # (which skipped HTTP polling while the socket was up) never learned
         # its stream was ready. Each client polls /api/stream/status instead,
         # which resolves its own session from the cookie.
-        # Quality Scanner
-        try:
-            with quality_scanner_lock:
-                socketio.emit('tool:quality-scanner', dict(quality_scanner_state))
-        except Exception as e:
-            logger.debug(f"Error emitting quality scanner status: {e}")
         # Duplicate Cleaner (add computed space_freed_mb)
         try:
             with duplicate_cleaner_lock:

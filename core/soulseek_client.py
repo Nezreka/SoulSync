@@ -427,8 +427,11 @@ class SoulseekClient(DownloadSourcePlugin):
                 if f'.{file_ext}' not in audio_extensions:
                     continue
                 
-                quality = file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
-                
+                # .m4a is the usual AAC container — bucket it as 'aac' (the
+                # quality filter treats AAC as an opt-in tier; off by default).
+                quality = 'aac' if file_ext == 'm4a' else (
+                    file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
+
                 # Create TrackResult
                 # Convert duration from seconds to milliseconds (slskd returns seconds, Spotify uses ms)
                 raw_duration = file_data.get('length')
@@ -1151,7 +1154,9 @@ class SoulseekClient(DownloadSourcePlugin):
             ext = Path(filename).suffix.lower()
             if ext not in audio_extensions:
                 continue
-            quality = ext.lstrip('.') if ext.lstrip('.') in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown'
+            _qext = ext.lstrip('.')
+            quality = 'aac' if _qext == 'm4a' else (
+                _qext if _qext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
             raw_duration = file_data.get('length')
             duration_ms = raw_duration * 1000 if raw_duration else None
             slskd_attrs = {a['type']: a['value'] for a in file_data.get('attributes', [])}
@@ -1965,6 +1970,7 @@ class SoulseekClient(DownloadSourcePlugin):
         'mp3_320': (1, 50),
         'mp3_256': (1, 40),
         'mp3_192': (1, 30),
+        'aac':     (1, 50),
         'other':   (0, 500),
     }
 
