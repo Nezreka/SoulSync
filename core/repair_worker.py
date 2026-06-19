@@ -1567,6 +1567,7 @@ class RepairWorker:
             resolved,
             junk_files=details.get('junk_files') or [],
             remove_junk=bool(details.get('remove_junk', True)),
+            remove_disposable=bool(details.get('remove_disposable', False)),
             root=self.transfer_folder,
             listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
             remove_file=os.remove, rmdir=os.rmdir,
