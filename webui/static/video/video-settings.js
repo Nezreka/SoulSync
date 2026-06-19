@@ -256,7 +256,12 @@
           .catch(function () { /* ignore */ });
     }
 
-    // ── Downloads tab: video-specific input/output folders ──
+    // ── Downloads tab: folders + source mode + hybrid chain ──
+    var VIDEO_SOURCES = ['soulseek', 'torrent', 'usenet'];
+    var SRC_DL_LABEL = { soulseek: 'Soulseek', torrent: 'Torrent', usenet: 'Usenet' };
+    var _videoMode = 'soulseek';
+    var _videoHybrid = ['soulseek'];
+
     function loadDownloads() {
         fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
@@ -266,6 +271,12 @@
                 if (dl && d.download_path != null) dl.value = d.download_path;
                 var tr = document.getElementById('video-transfer-path');
                 if (tr && d.transfer_path != null) tr.value = d.transfer_path;
+                _videoMode = d.download_mode || 'soulseek';
+                _videoHybrid = (d.hybrid_order && d.hybrid_order.length) ? d.hybrid_order : ['soulseek'];
+                var ms = document.getElementById('video-download-mode');
+                if (ms) ms.value = _videoMode;
+                renderVideoHybrid();
+                updateVideoSourceUI();
             })
             .catch(function () { /* ignore */ });
     }
@@ -278,9 +289,89 @@
             body: JSON.stringify({
                 download_path: dl ? dl.value : '',
                 transfer_path: tr ? tr.value : '',
+                download_mode: _videoMode,
+                hybrid_order: _videoHybrid,
             })
         }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
           .catch(function () { /* ignore */ });
+    }
+
+    // Hybrid chain: enabled sources (ordered) + disabled ones appended. No
+    // album-level/track-level distinction — that's a music-only concept.
+    function renderVideoHybrid() {
+        var host = document.getElementById('video-hybrid-rows');
+        if (!host) return;
+        var enabled = _videoHybrid.filter(function (s) { return VIDEO_SOURCES.indexOf(s) >= 0; });
+        var disabled = VIDEO_SOURCES.filter(function (s) { return enabled.indexOf(s) < 0; });
+        var rows = enabled.map(function (s, i) {
+            return '<div class="vq-row">' +
+                '<span class="vq-arrows">' +
+                '<button type="button" class="vq-arrow" data-vh-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+                '<button type="button" class="vq-arrow" data-vh-move="' + s + '" data-dir="1"' + (i === enabled.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                '</span>' +
+                '<span class="vq-row-name">' + SRC_DL_LABEL[s] + '</span>' +
+                '<span class="vq-row-prio">' + (i + 1) + '</span>' +
+                '<label class="vq-toggle"><input type="checkbox" data-vh-toggle="' + s + '" checked><span class="vq-toggle-track"></span></label>' +
+                '</div>';
+        });
+        rows = rows.concat(disabled.map(function (s) {
+            return '<div class="vq-row vq-row--off">' +
+                '<span class="vq-arrows"><button type="button" class="vq-arrow" disabled>▲</button><button type="button" class="vq-arrow" disabled>▼</button></span>' +
+                '<span class="vq-row-name">' + SRC_DL_LABEL[s] + '</span>' +
+                '<span class="vq-row-prio"></span>' +
+                '<label class="vq-toggle"><input type="checkbox" data-vh-toggle="' + s + '"><span class="vq-toggle-track"></span></label>' +
+                '</div>';
+        }));
+        host.innerHTML = rows.join('');
+    }
+
+    function moveVH(s, dir) {
+        var i = _videoHybrid.indexOf(s), j = i + dir;
+        if (i < 0 || j < 0 || j >= _videoHybrid.length) return;
+        _videoHybrid[i] = _videoHybrid[j]; _videoHybrid[j] = s;
+        renderVideoHybrid(); saveDownloads(true);
+    }
+
+    function toggleVH(s, on) {
+        if (on) {
+            if (_videoHybrid.indexOf(s) < 0) _videoHybrid.push(s);
+        } else {
+            if (_videoHybrid.length <= 1) { renderVideoHybrid(); return; }  // keep at least one
+            _videoHybrid = _videoHybrid.filter(function (x) { return x !== s; });
+        }
+        renderVideoHybrid(); saveDownloads(true);
+    }
+
+    function updateVideoSourceUI() {
+        var hc = document.getElementById('video-hybrid-container');
+        if (hc) hc.style.display = _videoMode === 'hybrid' ? 'block' : 'none';
+    }
+
+    function wireDownloads() {
+        var ms = document.getElementById('video-download-mode');
+        if (ms && !ms._vdWired) {
+            ms._vdWired = true;
+            ms.addEventListener('change', function () {
+                _videoMode = ms.value; updateVideoSourceUI(); saveDownloads(true);
+            });
+        }
+        var host = document.getElementById('video-hybrid-rows');
+        if (host && !host._vdWired) {
+            host._vdWired = true;
+            host.addEventListener('click', function (e) {
+                var mv = e.target.closest('[data-vh-move]');
+                if (mv) moveVH(mv.getAttribute('data-vh-move'), parseInt(mv.getAttribute('data-dir'), 10));
+            });
+            host.addEventListener('change', function (e) {
+                var tg = e.target.closest('[data-vh-toggle]');
+                if (tg) toggleVH(tg.getAttribute('data-vh-toggle'), tg.checked);
+            });
+        }
+        // Folder inputs save on change too.
+        ['video-download-path', 'video-transfer-path'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el && !el._vdWired) { el._vdWired = true; el.addEventListener('change', function () { saveDownloads(true); }); }
+        });
     }
 
     // ── Video quality profile (resolution tiers + source/codec/HDR/size) ──
@@ -458,6 +549,7 @@
         load();
         loadKeys();
         loadDownloads();
+        wireDownloads();
         loadQuality();
         wireQuality();
     }

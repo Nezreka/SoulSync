@@ -6015,6 +6015,25 @@
                                  music download sections in this tab are hidden on the video side
                                  via video-side.css; these data-video-only ones take their place. -->
                             <div class="settings-group" data-stg="downloads" data-video-only>
+                                <h3>Download Source</h3>
+                                <div class="setting-help-text">
+                                    Video downloads from slskd, torrent or usenet only. Hybrid tries each enabled source in order.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Source:</label>
+                                    <select id="video-download-mode" class="form-select">
+                                        <option value="soulseek">Soulseek Only</option>
+                                        <option value="torrent">Torrent Only (via Prowlarr)</option>
+                                        <option value="usenet">Usenet Only (via Prowlarr)</option>
+                                        <option value="hybrid">Hybrid (try each in order)</option>
+                                    </select>
+                                </div>
+                                <div id="video-hybrid-container" style="display:none;">
+                                    <div class="vq-label" style="margin-top:14px;">Hybrid order <span class="vq-hint">best-first; toggle off any you don't want</span></div>
+                                    <div class="vq-rows" id="video-hybrid-rows"></div>
+                                </div>
+                            </div>
+                            <div class="settings-group" data-stg="downloads" data-video-only>
                                 <h3>Video Download Folders</h3>
                                 <div class="setting-help-text">
                                     Where the video side lands downloads and where it moves finished files. These are SEPARATE from your Music paths — point them at wherever your video library lives.
