@@ -16,6 +16,10 @@
     var SERVER_URL = '/api/video/server';
     var CONN_URL = '/api/video/server-config';
     var DOWNLOADS_URL = '/api/video/downloads/config';
+    var QUALITY_URL = '/api/video/downloads/quality';
+    var _videoQuality = null;
+    var RES_LABEL = { '2160p': '4K (2160p)', '1080p': '1080p', '720p': '720p', '480p': '480p (SD)' };
+    var SRC_LABEL = { 'bluray': 'BluRay', 'web-dl': 'WEB-DL', 'webrip': 'WEBRip', 'hdtv': 'HDTV' };
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -279,6 +283,123 @@
           .catch(function () { /* ignore */ });
     }
 
+    // ── Video quality profile (resolution tiers + source/codec/HDR/size) ──
+    function loadQuality() {
+        fetch(QUALITY_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _videoQuality = d; renderQuality(); } })
+            .catch(function () { /* ignore */ });
+    }
+
+    function renderQuality() {
+        var p = _videoQuality;
+        if (!p) return;
+        var resHost = document.getElementById('vq-resolution-rows');
+        if (resHost) {
+            var keys = Object.keys(p.resolutions).sort(function (a, b) {
+                return p.resolutions[a].priority - p.resolutions[b].priority;
+            });
+            resHost.innerHTML = keys.map(function (k, i) {
+                var r = p.resolutions[k];
+                return '<div class="vq-row' + (r.enabled ? '' : ' vq-row--off') + '">' +
+                    '<span class="vq-arrows">' +
+                    '<button type="button" class="vq-arrow" data-vq-res-move="' + k + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+                    '<button type="button" class="vq-arrow" data-vq-res-move="' + k + '" data-dir="1"' + (i === keys.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                    '</span>' +
+                    '<span class="vq-row-name">' + (RES_LABEL[k] || k) + '</span>' +
+                    '<span class="vq-row-prio">' + (i + 1) + '</span>' +
+                    '<label class="vq-toggle"><input type="checkbox" data-vq-res-toggle="' + k + '"' + (r.enabled ? ' checked' : '') + '><span class="vq-toggle-track"></span></label>' +
+                    '</div>';
+            }).join('');
+        }
+        var srcHost = document.getElementById('vq-source-rows');
+        if (srcHost) {
+            srcHost.innerHTML = p.source_priority.map(function (s, i) {
+                return '<div class="vq-row">' +
+                    '<span class="vq-arrows">' +
+                    '<button type="button" class="vq-arrow" data-vq-src-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
+                    '<button type="button" class="vq-arrow" data-vq-src-move="' + s + '" data-dir="1"' + (i === p.source_priority.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                    '</span>' +
+                    '<span class="vq-row-name">' + (SRC_LABEL[s] || s) + '</span>' +
+                    '<span class="vq-row-prio">' + (i + 1) + '</span>' +
+                    '</div>';
+            }).join('');
+        }
+        var seg = document.getElementById('vq-codec');
+        if (seg) {
+            Array.prototype.forEach.call(seg.querySelectorAll('[data-vq-codec]'), function (b) {
+                b.classList.toggle('active', b.getAttribute('data-vq-codec') === p.codec);
+            });
+        }
+        var hdr = document.getElementById('vq-prefer-hdr'); if (hdr) hdr.checked = !!p.prefer_hdr;
+        var fb = document.getElementById('vq-fallback'); if (fb) fb.checked = p.fallback_enabled !== false;
+        var sl = document.getElementById('vq-max-size'); if (sl) sl.value = p.max_size_gb || 0;
+        var lab = document.getElementById('vq-size-label');
+        if (lab) lab.textContent = p.max_size_gb ? (p.max_size_gb + ' GB') : 'No limit';
+    }
+
+    function moveRes(k, dir) {
+        var p = _videoQuality; if (!p) return;
+        var keys = Object.keys(p.resolutions).sort(function (a, b) {
+            return p.resolutions[a].priority - p.resolutions[b].priority;
+        });
+        var i = keys.indexOf(k), j = i + dir;
+        if (j < 0 || j >= keys.length) return;
+        keys[i] = keys[j]; keys[j] = k;             // swap
+        keys.forEach(function (key, idx) { p.resolutions[key].priority = idx + 1; });
+        renderQuality(); saveQuality(true);
+    }
+
+    function moveSrc(s, dir) {
+        var p = _videoQuality; if (!p) return;
+        var arr = p.source_priority, i = arr.indexOf(s), j = i + dir;
+        if (j < 0 || j >= arr.length) return;
+        arr[i] = arr[j]; arr[j] = s;
+        renderQuality(); saveQuality(true);
+    }
+
+    function saveQuality(silent) {
+        if (!_videoQuality) return Promise.resolve();
+        return fetch(QUALITY_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(_videoQuality)
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { if (d) _videoQuality = d; if (!silent) toast('Quality profile saved', 'success'); })
+          .catch(function () { /* ignore */ });
+    }
+
+    // Delegated handlers for the quality profile (rows re-render, so delegate).
+    function wireQuality() {
+        var sec = document.getElementById('vq-resolution-rows');
+        if (!sec) return;
+        var card = sec.closest('.settings-group');
+        if (!card || card._vqWired) return;
+        card._vqWired = true;
+        card.addEventListener('click', function (e) {
+            var rm = e.target.closest('[data-vq-res-move]');
+            if (rm) { moveRes(rm.getAttribute('data-vq-res-move'), parseInt(rm.getAttribute('data-dir'), 10)); return; }
+            var sm = e.target.closest('[data-vq-src-move]');
+            if (sm) { moveSrc(sm.getAttribute('data-vq-src-move'), parseInt(sm.getAttribute('data-dir'), 10)); return; }
+            var cd = e.target.closest('[data-vq-codec]');
+            if (cd && _videoQuality) { _videoQuality.codec = cd.getAttribute('data-vq-codec'); renderQuality(); saveQuality(true); }
+        });
+        card.addEventListener('change', function (e) {
+            if (!_videoQuality) return;
+            var rt = e.target.closest('[data-vq-res-toggle]');
+            if (rt) { _videoQuality.resolutions[rt.getAttribute('data-vq-res-toggle')].enabled = rt.checked; renderQuality(); saveQuality(true); return; }
+            if (e.target.id === 'vq-prefer-hdr') { _videoQuality.prefer_hdr = e.target.checked; saveQuality(true); return; }
+            if (e.target.id === 'vq-fallback') { _videoQuality.fallback_enabled = e.target.checked; saveQuality(true); return; }
+            if (e.target.id === 'vq-max-size') { _videoQuality.max_size_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+        });
+        card.addEventListener('input', function (e) {
+            if (e.target.id === 'vq-max-size' && _videoQuality) {
+                var v = parseInt(e.target.value, 10) || 0;
+                var lab = document.getElementById('vq-size-label');
+                if (lab) lab.textContent = v ? (v + ' GB') : 'No limit';
+            }
+        });
+    }
+
     function saveKeys(silent) {
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
@@ -337,6 +458,8 @@
         load();
         loadKeys();
         loadDownloads();
+        loadQuality();
+        wireQuality();
     }
 
     function init() {
@@ -406,7 +529,7 @@
             if (!e.target.closest('#save-settings')) return;
             e.preventDefault();
             e.stopImmediatePropagation();
-            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true), saveDownloads(true)])
+            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true), saveDownloads(true), saveQuality(true)])
                 .then(function () { toast('Settings saved', 'success'); })
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);

@@ -379,6 +379,28 @@ def test_downloads_config_save_load(tmp_path):
         videoapi._video_db = None
 
 
+def test_quality_profile_endpoint_roundtrips(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        # Default profile served when unset.
+        d = client.get("/api/video/downloads/quality").get_json()
+        assert d["resolutions"]["1080p"]["enabled"] is True and d["codec"] == "any"
+        # POST normalizes + persists; bad codec rejected.
+        out = client.post("/api/video/downloads/quality",
+                          json={"codec": "bogus", "max_size_gb": 50, "prefer_hdr": True}).get_json()
+        assert out["codec"] == "any" and out["max_size_gb"] == 50 and out["prefer_hdr"] is True
+        assert client.get("/api/video/downloads/quality").get_json()["max_size_gb"] == 50
+    finally:
+        videoapi._video_db = None
+
+
 def test_video_api_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "api" / "video"
     for py in base.glob("*.py"):
