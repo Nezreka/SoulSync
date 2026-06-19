@@ -17,6 +17,7 @@ verbatim on first init.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import sqlite3
@@ -148,6 +149,19 @@ _COLUMN_MIGRATIONS = [
     ("shows", "subtitle_langs", "TEXT"),
     ("shows", "subs_status", "TEXT"), ("shows", "subs_attempted", "TEXT"),
 ]
+
+
+def _subtitle_langs_list(raw) -> list:
+    """Parse the stored OpenSubtitles ``subtitle_langs`` JSON array into a list of
+    language codes for the detail payload. Returns [] for null/garbage so the UI
+    can simply hide the row when empty."""
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        return [str(x) for x in v if x] if isinstance(v, list) else []
+    except (ValueError, TypeError):
+        return []
 
 
 def youtube_surrogate_id(source_id: str) -> int:
@@ -775,8 +789,8 @@ class VideoDatabase:
         out = {}
         try:
             for kind, tbl in (("movie", "movies"), ("show", "shows")):
-                def c(where):
-                    return conn.execute(f"SELECT COUNT(*) FROM {tbl} WHERE {where}").fetchone()[0]
+                def c(where, _tbl=tbl):   # bind tbl per-iteration (ruff B023)
+                    return conn.execute(f"SELECT COUNT(*) FROM {_tbl} WHERE {where}").fetchone()[0]
                 out[kind] = {
                     "matched": c("imdb_rating IS NOT NULL"),
                     "not_found": c("ratings_synced=1 AND imdb_rating IS NULL AND imdb_id IS NOT NULL"),
@@ -1550,6 +1564,7 @@ class VideoDatabase:
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
             "logo": show["logo_url"],
+            "subtitle_langs": _subtitle_langs_list(show["subtitle_langs"]),
             "episodes_synced": bool(show["episodes_synced"]),
             "monitored": bool(show["monitored"]),
             "season_count": len(out_seasons),
@@ -2597,6 +2612,7 @@ class VideoDatabase:
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
             "logo": m["logo_url"],
+            "subtitle_langs": _subtitle_langs_list(m["subtitle_langs"]),
             "owned": bool(m["has_file"]), "monitored": bool(m["monitored"]),
             "file": (dict(files[0]) if files else None),       # best version (compat)
             "files": [dict(x) for x in files],                 # all versions/editions

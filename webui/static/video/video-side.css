@@ -418,6 +418,18 @@ body[data-side="video"] .dashboard-header-sweep {
     color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
     backdrop-filter: blur(6px); }
 .vd-meta-rating { padding: 1px 7px; border: 1px solid rgba(255,255,255,0.35); border-radius: 4px; font-size: 12px; }
+
+/* Subtitle availability (OpenSubtitles backfill) — a labeled chip row of the
+   languages subtitles exist in. Cooler blue tint to read as "captions", distinct
+   from the neutral genre chips. */
+.vd-subs { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 12px; }
+.vd-sub-label { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.08em; text-transform: uppercase; color: rgba(120,170,255,0.9); margin-right: 2px; }
+.vd-sub-label::before { content: 'CC'; font: 700 9px/1.2 'JetBrains Mono', ui-monospace, monospace;
+    padding: 2px 4px; border-radius: 3px; background: rgba(120,170,255,0.18); border: 1px solid rgba(120,170,255,0.35); }
+.vd-sub { padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    color: rgba(200,220,255,0.92); background: rgba(120,170,255,0.1); border: 1px solid rgba(120,170,255,0.22); }
+.vd-sub--more { color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.12); }
 .vd-status { color: rgb(var(--vd-accent-rgb)); }
 .vd-overview { font-size: 16px; line-height: 1.6; color: rgba(255,255,255,0.86); margin: 0 0 22px; max-width: 640px;
     text-shadow: 0 2px 12px rgba(0,0,0,0.6);
