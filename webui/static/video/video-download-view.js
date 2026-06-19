@@ -58,14 +58,21 @@
                     '<button class="vdl-search-all" type="button" data-vdl-search-all>⌕ Search all</button>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
+                '<div class="vdl-results" data-vdl-results hidden></div>' +
             '</div>';
     }
 
     function onClick(e) {
         var container = e.currentTarget;
+        if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
+        var o = container._opts || {};
+        var params = { scope: 'movie', title: o.title || '', year: o.year || null };
+        var results = container.querySelector('[data-vdl-results]');
         var sb = e.target.closest('[data-vdl-search]');
-        if (sb) { stubSearch(container, sb.getAttribute('data-vdl-search')); return; }
-        if (e.target.closest('[data-vdl-search-all]')) { stubSearch(container, '*'); }
+        if (sb) { searchInto(container, results, params, [sb.closest('.vdl-src')]); return; }
+        if (e.target.closest('[data-vdl-search-all]')) {
+            searchInto(container, results, params, Array.prototype.slice.call(container.querySelectorAll('.vdl-src')));
+        }
     }
 
     // Render the download view into `container`. Re-callable (resets each time).
@@ -73,6 +80,7 @@
         if (!container) return;
         opts = opts || {};
         if (opts.kind === 'show') { renderShow(container, opts); return; }
+        container._opts = opts;
         container.innerHTML = contentHTML();
         if (!container._vdlWired) { container._vdlWired = true; container.addEventListener('click', onClick); }
 
@@ -173,29 +181,72 @@
 
     // Scaffold: a satisfying faux-scan (animated) that resolves to "coming soon".
     // No backend yet — this is the motion the real engine will drive.
-    function scanRow(row, i) {
-        if (row._scanning) return;
-        row._scanning = true;
-        var st = row.querySelector('[data-vdl-status]');
-        var btn = row.querySelector('[data-vdl-search]');
-        row.classList.add('vdl-src--scanning');
-        if (btn) btn.disabled = true;
-        if (st) { st.textContent = 'Searching'; st.className = 'vdl-src-status vdl-src-status--scanning'; }
-        setTimeout(function () {
-            if (!row.isConnected) { row._scanning = false; return; }
-            row.classList.remove('vdl-src--scanning');
-            row._scanning = false;
-            if (btn) btn.disabled = false;
+    // ── search + results ──────────────────────────────────────────────────────
+    var SRC_LABEL = { remux: 'Remux', bluray: 'BluRay', 'web-dl': 'WEB-DL', webrip: 'WEBRip',
+        hdtv: 'HDTV', dvd: 'DVD', cam: 'CAM', screener: 'Screener', workprint: 'Workprint' };
+    var RES_LABEL = { '2160p': '4K', '1080p': '1080p', '720p': '720p', '480p': 'SD' };
+
+    function _setScanning(rows, on) {
+        rows.forEach(function (row) {
+            if (!row) return;
+            if (row.matches && row.matches('button')) { row.disabled = on; row.classList.toggle('vdl-btn--busy', on); return; }
+            row.classList.toggle('vdl-src--scanning', on);
+            var b = row.querySelector('[data-vdl-search]'); if (b) b.disabled = on;
             var s = row.querySelector('[data-vdl-status]');
-            if (s) { s.textContent = 'Search engine coming soon'; s.className = 'vdl-src-status vdl-src-status--soon'; }
-        }, 1300 + i * 280);   // staggered finish so a "search all" ripples
+            if (s) { s.textContent = on ? 'Searching' : 'Ready'; s.className = 'vdl-src-status' + (on ? ' vdl-src-status--scanning' : ''); }
+        });
     }
 
-    function stubSearch(container, which) {
-        var sel = which === '*' ? '[data-vdl-src]' : '[data-vdl-src="' + which + '"]';
-        var rows = container.querySelectorAll(sel);
-        for (var i = 0; i < rows.length; i++) scanRow(rows[i], i);
-        toast('Automatic search isn’t wired up yet — coming soon', 'info');
+    // Run a search (mock indexer → real parse/evaluate/rank) and render the cards.
+    function searchInto(container, resultsEl, params, triggerRows) {
+        if (!resultsEl) return;
+        triggerRows = (triggerRows || []).filter(Boolean);
+        _setScanning(triggerRows, true);
+        resultsEl.hidden = false;
+        resultsEl.innerHTML = '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+        postJSON('/api/video/downloads/search', params).then(function (d) {
+            _setScanning(triggerRows, false);
+            if (!resultsEl.isConnected) return;
+            var rows = (d && d.results) || [];
+            if (!rows.length) { resultsEl.innerHTML = '<div class="vdl-res-empty">No matching releases found.</div>'; return; }
+            var okN = rows.filter(function (r) { return r.accepted; }).length;
+            resultsEl.innerHTML =
+                '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
+                    ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span></div>' +
+                rows.map(resultCardHTML).join('');
+        });
+    }
+
+    function scopeWord(s) {
+        return s === 'season' ? 'for the season pack' : s === 'series' ? 'for the full series'
+            : s === 'episode' ? 'this episode' : 'for the movie';
+    }
+
+    function rb(text, mod) { return '<span class="vdl-rb' + (mod ? ' vdl-rb--' + mod : '') + '">' + esc(text) + '</span>'; }
+
+    function resultCardHTML(r) {
+        var badges = [];
+        if (r.resolution) badges.push(rb(RES_LABEL[r.resolution] || r.resolution, 'res'));
+        if (r.source) badges.push(rb(SRC_LABEL[r.source] || r.source, 'src'));
+        if (r.codec) badges.push(rb(String(r.codec).toUpperCase()));
+        if (r.hdr) badges.push(rb(String(r.hdr).toUpperCase(), 'hdr'));
+        if (r.audio) badges.push(rb(String(r.audio).toUpperCase().replace('-', ' ')));
+        if (r.repack) badges.push(rb('REPACK'));
+        var verdict = r.accepted
+            ? '<span class="vdl-res-verdict vdl-res-verdict--ok">✓ Meets profile</span>'
+            : '<span class="vdl-res-verdict vdl-res-verdict--no">✕ ' + esc(r.rejected || 'Filtered') + '</span>';
+        return '<div class="vdl-res' + (r.accepted ? '' : ' vdl-res--rejected') + '">' +
+            '<div class="vdl-res-top">' +
+                '<div class="vdl-res-title" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
+                (r.accepted ? '<button class="vdl-res-grab" type="button" data-vdl-grab title="Grab this release">⤓</button>' : '') +
+            '</div>' +
+            '<div class="vdl-res-badges">' + badges.join('') + '</div>' +
+            '<div class="vdl-res-foot">' +
+                '<span class="vdl-res-stat">' + r.size_gb + ' GB</span>' +
+                '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + '</span>' +
+                verdict +
+            '</div>' +
+        '</div>';
     }
 
     // ── TV show download view ─────────────────────────────────────────────────
@@ -214,10 +265,13 @@
 
     function renderShow(container, opts) {
         var d = opts.detail || {};
+        var maxSeason = 0;
+        (d.seasons || []).forEach(function (s) { if ((s.season_number || 0) > maxSeason) maxSeason = s.season_number; });
         var st = container._dl = {
             sel: new Set(), today: isoToday(),
             tvId: opts.tvId || d.tmdb_id || null, source: opts.source || 'library',
-            sources: ['soulseek'], epMeta: {}
+            sources: ['soulseek'], epMeta: {},
+            title: d.title || opts.title || '', maxSeason: maxSeason
         };
         container.innerHTML =
             '<div class="vdl-section"><div class="vdl-sec-label">Quality target</div>' +
@@ -225,9 +279,9 @@
             '<div class="vdl-show-bar">' +
                 '<label class="vdl-allchk"><input type="checkbox" data-vdl-all><span class="vdl-allchk-txt">All</span></label>' +
                 '<span class="vdl-show-summary" data-vdl-summary>Loading episodes…</span>' +
-                '<button class="vdl-search-all vdl-search-sel" type="button" data-vdl-search-sel disabled>' +
-                    '⌕ Search <span data-vdl-selcount>0</span> selected</button>' +
+                '<button class="vdl-search-all" type="button" data-vdl-search-show>⌕ Search whole show</button>' +
             '</div>' +
+            '<div class="vdl-results" data-vdl-show-results hidden></div>' +
             '<div class="vdl-seasons" data-vdl-seasons></div>';
 
         if (!container._dlShowWired) {
@@ -266,7 +320,10 @@
                 '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season">⌕</button>' +
                 '<span class="vdl-season-chev" aria-hidden="true">⌄</span>' +
             '</div>' +
-            '<div class="vdl-season-body"><div class="vdl-season-eps"><div class="vdl-season-empty">Loading…</div></div></div>' +
+            '<div class="vdl-season-body">' +
+                '<div class="vdl-results vdl-results--season" data-vdl-season-results hidden></div>' +
+                '<div class="vdl-season-eps"><div class="vdl-season-empty">Loading…</div></div>' +
+            '</div>' +
         '</div>';
     }
 
@@ -325,16 +382,35 @@
     }
 
     function onShowClick(e) {
-        var container = e.currentTarget; if (!container._dl) return;
+        var container = e.currentTarget; var st = container._dl; if (!st) return;
+        if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
+        // Episode-scope search (a source row inside an expanded episode).
         var srch = e.target.closest('[data-vdl-search]');
-        if (srch) { var row = srch.closest('.vdl-src'); if (row) scanRow(row, 0); toast('Automatic search isn’t wired up yet — coming soon', 'info'); return; }
+        if (srch) {
+            var epEl = srch.closest('.vdl-ep'); if (!epEl) return;
+            var parts = (epEl.getAttribute('data-vdl-ep') || '').split('_');
+            searchInto(container, epEl.querySelector('[data-vdl-ep-results]'),
+                { scope: 'episode', title: st.title, season: +parts[0], episode: +parts[1] },
+                [srch.closest('.vdl-src')]);
+            return;
+        }
+        // Season-scope search → season PACK.
         var ss = e.target.closest('[data-vdl-season-search]');
         if (ss) {
-            var sc = container.querySelector('.vdl-season[data-vdl-season="' + ss.getAttribute('data-vdl-season-search') + '"]');
-            if (sc) sc.classList.add('vdl-season--open');   // reveal the rows being scanned
-            searchScope(container, sc); return;
+            var sn = ss.getAttribute('data-vdl-season-search');
+            var sc = container.querySelector('.vdl-season[data-vdl-season="' + sn + '"]');
+            if (sc) sc.classList.add('vdl-season--open');
+            searchInto(container, sc && sc.querySelector('[data-vdl-season-results]'),
+                { scope: 'season', title: st.title, season: +sn }, [ss]);
+            return;
         }
-        if (e.target.closest('[data-vdl-search-sel]')) { searchScope(container, container.querySelector('[data-vdl-seasons]')); return; }
+        // Whole-show search → complete-series pack.
+        if (e.target.closest('[data-vdl-search-show]')) {
+            searchInto(container, container.querySelector('[data-vdl-show-results]'),
+                { scope: 'series', title: st.title, season_end: st.maxSeason || 5 },
+                [e.target.closest('[data-vdl-search-show]')]);
+            return;
+        }
         var sh = e.target.closest('[data-vdl-season-toggle]');
         if (sh && !e.target.closest('.vdl-season-cb') && !e.target.closest('[data-vdl-season-search]')) {
             sh.closest('.vdl-season').classList.toggle('vdl-season--open'); return;
@@ -376,7 +452,8 @@
                     '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
                 '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
                 '</div>';
-        }).join('') + '</div>';
+        }).join('') + '</div>' +
+        '<div class="vdl-results" data-vdl-ep-results hidden></div>';
     }
 
     function setSeasonSel(container, sn, on) {
@@ -407,9 +484,6 @@
 
     function updateShowBar(container) {
         var st = container._dl; if (!st) return;
-        var n = st.sel.size;
-        var cnt = container.querySelector('[data-vdl-selcount]'); if (cnt) cnt.textContent = n;
-        var btn = container.querySelector('[data-vdl-search-sel]'); if (btn) btn.disabled = n === 0;
         var sum = container.querySelector('[data-vdl-summary]');
         if (sum) {
             var seasons = container.querySelectorAll('.vdl-season').length;
@@ -425,31 +499,6 @@
             master.checked = all.length > 0 && c === all.length;
             master.indeterminate = c > 0 && c < all.length;
         }
-    }
-
-    // Scan every SELECTED episode within a scope (a season card or the whole list).
-    function searchScope(container, scopeEl) {
-        if (!scopeEl || !container._dl) return;
-        var st = container._dl, eps = scopeEl.querySelectorAll('.vdl-ep'), picked = [];
-        for (var i = 0; i < eps.length; i++) { var k = eps[i].getAttribute('data-vdl-ep'); if (k && st.sel.has(k)) picked.push(eps[i]); }
-        if (!picked.length) { toast('Select at least one episode', 'info'); return; }
-        picked.forEach(function (epEl, i) { scanEp(epEl, i); });
-        toast('Automatic search isn’t wired up yet — coming soon', 'info');
-    }
-
-    function scanEp(epEl, i) {
-        if (epEl._scanning) return;
-        epEl._scanning = true;
-        epEl.classList.add('vdl-ep--scanning');
-        var s = epEl.querySelector('[data-vdl-ep-status]');
-        if (s) { s.textContent = 'Searching'; s.className = 'vdl-ep-status vdl-ep-status--scanning'; }
-        setTimeout(function () {
-            if (!epEl.isConnected) { epEl._scanning = false; return; }
-            epEl.classList.remove('vdl-ep--scanning');
-            epEl._scanning = false;
-            var x = epEl.querySelector('[data-vdl-ep-status]');
-            if (x) { x.textContent = 'Coming soon'; x.className = 'vdl-ep-status vdl-ep-status--soon'; }
-        }, 1100 + i * 180);
     }
 
     window.VideoDownload = { render: render };

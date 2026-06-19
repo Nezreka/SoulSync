@@ -91,7 +91,8 @@
             ov.classList.add('vgm-mode-dl-show');
         } else {
             var file = (modalState && modalState.kind === 'movie' && modalState.owned) ? (modalState.file || null) : null;
-            VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file });
+            VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file,
+                title: (modalState && modalState.title) || o.title || '', year: (modalState && modalState.year) || null });
         }
         setDownloadMode(ov, true);
         dl.hidden = false;
