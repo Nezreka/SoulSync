@@ -216,6 +216,8 @@
                 if (fa && d.fanart_api_key != null) fa.value = d.fanart_api_key;
                 var sub = document.getElementById('opensubtitles-api-key');
                 if (sub && d.opensubtitles_api_key != null) sub.value = d.opensubtitles_api_key;
+                var trakt = document.getElementById('trakt-api-key');
+                if (trakt && d.trakt_api_key != null) trakt.value = d.trakt_api_key;
                 var ryd = document.getElementById('video-ryd-enabled');
                 if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
                 var sb = document.getElementById('video-sponsorblock-enabled');
@@ -247,6 +249,7 @@
         var o = document.getElementById('omdb-api-key');
         var fa = document.getElementById('fanart-api-key');
         var sub = document.getElementById('opensubtitles-api-key');
+        var trakt = document.getElementById('trakt-api-key');
         var ryd = document.getElementById('video-ryd-enabled');
         var sb = document.getElementById('video-sponsorblock-enabled');
         return fetch(CONFIG_URL, {
@@ -257,6 +260,7 @@
                 omdb_api_key: o ? o.value : '',
                 fanart_api_key: fa ? fa.value : '',
                 opensubtitles_api_key: sub ? sub.value : '',
+                trakt_api_key: trakt ? trakt.value : '',
                 ryd_enabled: ryd ? ryd.checked : true,
                 sponsorblock_enabled: sb ? sb.checked : true,
             })
@@ -301,7 +305,7 @@
         }
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
-            'fanart-api-key', 'opensubtitles-api-key',
+            'fanart-api-key', 'opensubtitles-api-key', 'trakt-api-key',
             'video-ryd-enabled', 'video-sponsorblock-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });

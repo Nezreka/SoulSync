@@ -5566,6 +5566,24 @@
                                         <button class="test-button" type="button" data-video-test-service="opensubtitles">Test OpenSubtitles</button>
                                     </div>
                                 </div>
+                                <div class="api-service-frame stg-service" data-video-service="trakt">
+                                    <div class="stg-service-header" onclick="toggleStgService(this)">
+                                        <span class="stg-service-dot" style="color: #ed1c24;"></span>
+                                        <h4 class="service-title">Trakt (Audience Rating)</h4>
+                                        <span class="stg-service-chevron">›</span>
+                                    </div>
+                                    <div class="stg-service-body">
+                                        <div class="form-group">
+                                            <label>API Key (Client ID):</label>
+                                            <input type="password" id="trakt-api-key" placeholder="Trakt Client ID">
+                                        </div>
+                                        <div class="callback-info">
+                                            <div class="callback-help">Create a free API app at <a href="https://trakt.tv/oauth/applications" target="_blank" style="color: #ed1c24;">trakt.tv</a> and paste its <strong>Client ID</strong>.</div>
+                                            <div class="callback-help">Adds Trakt's community audience score (and vote count) to movies &amp; shows.</div>
+                                        </div>
+                                        <button class="test-button" type="button" data-video-test-service="trakt">Test Trakt</button>
+                                    </div>
+                                </div>
                                 <div class="api-service-frame stg-service" data-video-service="ytextras">
                                     <div class="stg-service-header" onclick="toggleStgService(this)">
                                         <span class="stg-service-dot" style="color: #ef4444;"></span>

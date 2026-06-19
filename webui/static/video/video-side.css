@@ -787,6 +787,7 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
 .vd-rt--mc-good .vd-rt-tag { background: #6c3; color: #000; }
 .vd-rt--mc-mid .vd-rt-tag { background: #fc3; color: #000; }
 .vd-rt--mc-bad .vd-rt-tag { background: #f00; color: #fff; }
+.vd-rt--trakt .vd-rt-tag { background: #ed1c24; color: #fff; }
 
 /* ── OMDb worker uses a ★ glyph (no clean brand logo) ─────────────────────── */
 .video-enrich-glyph {

@@ -12,7 +12,7 @@ import pytest
 
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
-    RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker,
+    RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker,
     VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
@@ -178,7 +178,51 @@ def test_get_stats_shape_matches_matcher_worker(db):
 
 
 def test_build_backfill_workers_set(db):
-    assert set(build_backfill_workers(db)) == {"ryd", "sponsorblock", "fanart", "opensubtitles"}
+    assert set(build_backfill_workers(db)) == {"ryd", "sponsorblock", "fanart", "opensubtitles", "trakt"}
+
+
+# ── Trakt (community rating backfill, keyed on imdb id) ────────────────────────
+def test_trakt_queue_keyed_on_imdb(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Fight Club", "year": 1999})
+    assert db.backfill_next("trakt") is None              # no imdb id → not queued
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt0137523' WHERE id=?", (mid,))
+        c.commit()
+    nxt = db.backfill_next("trakt")
+    assert nxt["kind"] == "movie" and nxt["imdb_id"] == "tt0137523"
+
+
+def test_trakt_worker_records_rating(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1' WHERE id=?", (mid,))
+        c.commit()
+    w = TraktWorker(db)
+    w.fetch = lambda item: {"trakt_rating": 8.2, "trakt_votes": 1234}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT trakt_rating, trakt_votes, trakt_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["trakt_rating"] == 8.2 and r["trakt_votes"] == 1234 and r["trakt_status"] == "ok"
+    assert db.backfill_breakdown("trakt")["movie"]["matched"] == 1
+
+
+def test_trakt_fetch_parses_summary(db, monkeypatch):
+    db.set_setting("trakt_api_key", "client-id")
+    import core.video.enrichment.backfill as bf
+    monkeypatch.setattr(bf, "_http_get_json",
+                        lambda url, params=None, headers=None, timeout=12: {"rating": 8.234, "votes": 5000})
+    w = TraktWorker(db)
+    out = w.fetch({"kind": "movie", "imdb_id": "tt0137523"})
+    assert out == {"trakt_rating": 8.2, "trakt_votes": 5000}   # rounded to 1dp
+
+
+def test_trakt_fetch_needs_imdb_and_key(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    monkeypatch.setattr(bf, "_http_get_json", lambda *a, **k: {"rating": 9})
+    w = TraktWorker(db)
+    assert w.fetch({"kind": "movie", "imdb_id": "tt1"}) is None   # no key configured
+    db.set_setting("trakt_api_key", "k")
+    assert w.fetch({"kind": "movie", "imdb_id": "550"}) is None   # not a tt-id
 
 
 def test_backfill_module_imports_nothing_from_music():

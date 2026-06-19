@@ -87,11 +87,18 @@ _BACKFILL = {
         "show": ("shows", "subs_status", "subs_attempted",
                  "(imdb_id IS NOT NULL OR tmdb_id IS NOT NULL)"),
     },
+    "trakt": {
+        "movie": ("movies", "trakt_status", "trakt_attempted", "imdb_id IS NOT NULL"),
+        "show": ("shows", "trakt_status", "trakt_attempted", "imdb_id IS NOT NULL"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
+# A worker visits each item once (status IS NULL), so these NULL columns are written
+# on that single pass.
 _BACKFILL_COLS = {
     "fanart": {"logo_url", "backdrop_url", "poster_url", "clearart_url", "banner_url"},
     "opensubtitles": {"subtitle_langs"},
+    "trakt": {"trakt_rating", "trakt_votes"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -148,6 +155,11 @@ _COLUMN_MIGRATIONS = [
     ("movies", "subs_status", "TEXT"), ("movies", "subs_attempted", "TEXT"),
     ("shows", "subtitle_langs", "TEXT"),
     ("shows", "subs_status", "TEXT"), ("shows", "subs_attempted", "TEXT"),
+    # Trakt community rating backfill (by imdb id) — a distinct audience score + vote count
+    ("movies", "trakt_rating", "REAL"), ("movies", "trakt_votes", "INTEGER"),
+    ("movies", "trakt_status", "TEXT"), ("movies", "trakt_attempted", "TEXT"),
+    ("shows", "trakt_rating", "REAL"), ("shows", "trakt_votes", "INTEGER"),
+    ("shows", "trakt_status", "TEXT"), ("shows", "trakt_attempted", "TEXT"),
 ]
 
 
@@ -1560,6 +1572,7 @@ class VideoDatabase:
             "first_air_date": show["first_air_date"], "last_air_date": show["last_air_date"],
             "imdb_rating": show["imdb_rating"], "rt_rating": show["rt_rating"],
             "metacritic": show["metacritic"],
+            "trakt_rating": show["trakt_rating"], "trakt_votes": show["trakt_votes"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
@@ -2608,6 +2621,7 @@ class VideoDatabase:
             "content_rating": m["content_rating"], "tagline": m["tagline"],
             "rating": m["rating"], "rating_critic": m["rating_critic"], "genres": genres,
             "imdb_rating": m["imdb_rating"], "rt_rating": m["rt_rating"], "metacritic": m["metacritic"],
+            "trakt_rating": m["trakt_rating"], "trakt_votes": m["trakt_votes"],
             "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
