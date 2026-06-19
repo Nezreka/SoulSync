@@ -80,6 +80,20 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
 
+    @bp.route("/downloads/youtube-quality", methods=["GET"])
+    def video_youtube_quality():
+        # Separate, smaller profile — YouTube is yt-dlp, not scene/p2p releases.
+        from . import get_video_db
+        from core.video.youtube_quality import load
+        return jsonify(load(get_video_db()))
+
+    @bp.route("/downloads/youtube-quality", methods=["POST"])
+    def video_youtube_quality_save():
+        from . import get_video_db
+        from core.video.youtube_quality import save
+        body = request.get_json(silent=True) or {}
+        return jsonify(save(get_video_db(), body))
+
     @bp.route("/downloads/slskd", methods=["GET"])
     def video_slskd_config():
         # SHARED with music — same slskd instance. Reads the app-wide config_manager.

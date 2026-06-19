@@ -17,8 +17,10 @@
     var CONN_URL = '/api/video/server-config';
     var DOWNLOADS_URL = '/api/video/downloads/config';
     var QUALITY_URL = '/api/video/downloads/quality';
+    var YT_QUALITY_URL = '/api/video/downloads/youtube-quality';
     var SLSKD_URL = '/api/video/downloads/slskd';
     var _videoQuality = null;
+    var _videoYtQuality = null;
     // Pretty labels for the source×resolution quality ladder (keys come from the backend).
     var TIER_LABEL = {
         'remux-2160p': 'Remux · 4K', 'bluray-2160p': 'BluRay · 4K', 'web-2160p': 'WEB · 4K',
@@ -581,6 +583,55 @@
         });
     }
 
+    // ── YouTube quality (separate, smaller yt-dlp profile) ────────────────────
+    function loadYtQuality() {
+        fetch(YT_QUALITY_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _videoYtQuality = d; renderYtQuality(); } })
+            .catch(function () { /* ignore */ });
+    }
+
+    function renderYtQuality() {
+        var p = _videoYtQuality;
+        if (!p) return;
+        var res = document.getElementById('yq-resolution'); if (res) res.value = p.max_resolution || '1080p';
+        _vqSeg('yq-codec', 'data-yq-codec', p.video_codec);
+        _vqSeg('yq-container', 'data-yq-container', p.container);
+        var fps = document.getElementById('yq-60fps'); if (fps) fps.checked = !!p.prefer_60fps;
+        var hdr = document.getElementById('yq-hdr'); if (hdr) hdr.checked = !!p.allow_hdr;
+    }
+
+    function saveYtQuality(silent) {
+        if (!_videoYtQuality) return Promise.resolve();
+        return fetch(YT_QUALITY_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(_videoYtQuality)
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { if (d) _videoYtQuality = d; if (!silent) toast('YouTube quality saved', 'success'); })
+          .catch(function () { /* ignore */ });
+    }
+
+    function wireYtQuality() {
+        var seg = document.getElementById('yq-codec');
+        if (!seg) return;
+        var card = seg.closest('.settings-group');
+        if (!card || card._yqWired) return;
+        card._yqWired = true;
+        card.addEventListener('click', function (e) {
+            if (!_videoYtQuality) return;
+            var cd = e.target.closest('[data-yq-codec]');
+            if (cd) { _videoYtQuality.video_codec = cd.getAttribute('data-yq-codec'); renderYtQuality(); saveYtQuality(true); return; }
+            var ct = e.target.closest('[data-yq-container]');
+            if (ct) { _videoYtQuality.container = ct.getAttribute('data-yq-container'); renderYtQuality(); saveYtQuality(true); return; }
+        });
+        card.addEventListener('change', function (e) {
+            if (!_videoYtQuality) return;
+            if (e.target.id === 'yq-resolution') { _videoYtQuality.max_resolution = e.target.value; saveYtQuality(true); return; }
+            if (e.target.id === 'yq-60fps') { _videoYtQuality.prefer_60fps = e.target.checked; saveYtQuality(true); return; }
+            if (e.target.id === 'yq-hdr') { _videoYtQuality.allow_hdr = e.target.checked; saveYtQuality(true); return; }
+        });
+    }
+
     function saveKeys(silent) {
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
@@ -642,6 +693,8 @@
         wireDownloads();
         loadQuality();
         wireQuality();
+        loadYtQuality();
+        wireYtQuality();
         loadSlskd();
         wireSlskd();
     }
@@ -714,7 +767,7 @@
             e.preventDefault();
             e.stopImmediatePropagation();
             Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
-                         saveDownloads(true), saveQuality(true), saveSlskd(true)])
+                         saveDownloads(true), saveQuality(true), saveYtQuality(true), saveSlskd(true)])
                 .then(function () { toast('Settings saved', 'success'); })
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);
