@@ -1284,7 +1284,16 @@
                                     <h1 class="vdpg-title">Downloads</h1>
                                     <p class="vdpg-sub" data-vdpg-sub>Everything you've grabbed from the video side</p>
                                 </div>
-                                <button class="vdpg-clear" type="button" data-vdpg-clear hidden>Clear finished</button>
+                                <div class="vdpg-head-actions">
+                                    <button class="vdpg-btn vdpg-btn--danger" type="button" data-vdpg-cancel-all hidden>Cancel all</button>
+                                    <button class="vdpg-btn" type="button" data-vdpg-clear hidden>Clear finished</button>
+                                </div>
+                            </div>
+                            <div class="vdpg-pills" data-vdpg-pills>
+                                <button class="vdpg-pill-f vdpg-pill-f--on" type="button" data-vdpg-filter="all">All <span class="vdpg-pill-n" data-vdpg-n="all">0</span></button>
+                                <button class="vdpg-pill-f" type="button" data-vdpg-filter="active">Active <span class="vdpg-pill-n" data-vdpg-n="active">0</span></button>
+                                <button class="vdpg-pill-f" type="button" data-vdpg-filter="completed">Completed <span class="vdpg-pill-n" data-vdpg-n="completed">0</span></button>
+                                <button class="vdpg-pill-f" type="button" data-vdpg-filter="failed">Failed <span class="vdpg-pill-n" data-vdpg-n="failed">0</span></button>
                             </div>
                         </div>
                         <div class="vdpg-list" data-vdpg-list></div>
