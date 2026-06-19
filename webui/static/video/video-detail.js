@@ -1103,7 +1103,11 @@
                     var yc = window.VideoYoutube, stats = [];
                     var lk = yc && yc.compactCount(v.like_count); if (lk) stats.push(lk + ' likes');
                     var vw = yc && yc.compactCount(v.view_count); if (vw) stats.push(vw + ' views');
-                    panel.innerHTML = '<div class="vd-ep-extra-body">' +
+                    var dearrow = v.dearrow_title
+                        ? '<div class="vd-dearrow"><span class="vd-dearrow-tag">DeArrow</span>' +
+                          esc(v.dearrow_title) + '</div>'
+                        : '';
+                    panel.innerHTML = '<div class="vd-ep-extra-body">' + dearrow +
                         (stats.length ? '<div class="vd-ep-extra-gh">' + esc(stats.join(' · ')) + '</div>' : '') +
                         '<p class="vd-ep-extra-ov">' + esc(v.description || 'No description.') + '</p></div>';
                 })

@@ -13,7 +13,8 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
-    AniListWorker, VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
+    AniListWorker, DeArrowWorker, VideoBackfillWorker, _RateLimited, _Unauthorized,
+    build_backfill_workers,
 )
 
 
@@ -179,7 +180,38 @@ def test_get_stats_shape_matches_matcher_worker(db):
 
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
-        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze", "anilist"}
+        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze", "anilist", "dearrow"}
+
+
+# ── DeArrow (no-key, YouTube crowd titles) ────────────────────────────────────
+def test_dearrow_queue_and_apply(db):
+    db.cache_channel_videos("UC1", [{"youtube_id": "v", "title": "clickbait TITLE!!!"}])
+    nxt = db.youtube_enrich_next("dearrow_status")
+    assert nxt and nxt["youtube_id"] == "v" and nxt["kind"] == "video"
+    db.apply_youtube_dearrow("v", "A calm, accurate title", "ok")
+    assert db.youtube_video_dearrow_title("v") == "A calm, accurate title"
+    assert db.youtube_enrich_breakdown("dearrow_status")["video"]["matched"] == 1
+
+
+def test_dearrow_worker_records_title(db):
+    db.cache_channel_videos("UC1", [{"youtube_id": "v", "title": "X"}])
+    w = DeArrowWorker(db)
+    assert w.enabled is True
+    w.fetch = lambda item: {"title": "Better Crowd Title"}
+    assert w.process_one() is True
+    assert db.youtube_video_dearrow_title("v") == "Better Crowd Title"
+
+
+def test_dearrow_fetch_parses_branding(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    branding = {"titles": [
+        {"title": "Original", "original": True},
+        {"title": "Crowd Title", "original": False},
+    ]}
+    monkeypatch.setattr(bf, "_http_get_json",
+                        lambda url, params=None, headers=None, timeout=12: branding)
+    out = DeArrowWorker(db).fetch({"youtube_id": "v"})
+    assert out == {"title": "Crowd Title"}
 
 
 # ── Trakt (community rating backfill, keyed on imdb id) ────────────────────────

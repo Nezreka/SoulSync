@@ -176,6 +176,10 @@ _COLUMN_MIGRATIONS = [
     # AniList anime average score backfill (TV only, 0-100)
     ("shows", "anilist_score", "INTEGER"),
     ("shows", "anilist_status", "TEXT"), ("shows", "anilist_attempted", "TEXT"),
+    # DeArrow crowd-sourced better titles for cached YouTube videos
+    ("youtube_video_stats", "dearrow_title", "TEXT"),
+    ("youtube_video_stats", "dearrow_status", "TEXT"),
+    ("youtube_video_stats", "dearrow_attempted", "TEXT"),
 ]
 
 
@@ -509,7 +513,7 @@ class VideoDatabase:
         """Next cached YouTube video missing a per-video enrichment. status_col is
         'ryd_status' or 'sb_status'. Distinct by youtube_id (a video shared across
         playlists is enriched once). Returns {kind:'video', id, name, youtube_id}."""
-        if status_col not in ("ryd_status", "sb_status"):
+        if status_col not in ("ryd_status", "sb_status", "dearrow_status"):
             return None
         conn = self._get_connection()
         try:
@@ -568,8 +572,38 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def apply_youtube_dearrow(self, youtube_id, title, status: str) -> None:
+        """Record DeArrow's crowd-sourced better title (+ status) for a video."""
+        yid = str(youtube_id or "").strip()
+        if not yid:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                "INSERT INTO youtube_video_stats (youtube_id, dearrow_title, dearrow_status, dearrow_attempted) "
+                "VALUES (?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(youtube_id) DO UPDATE SET "
+                "dearrow_title=COALESCE(excluded.dearrow_title, dearrow_title), "
+                "dearrow_status=excluded.dearrow_status, dearrow_attempted=CURRENT_TIMESTAMP",
+                (yid, title, status))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def youtube_video_dearrow_title(self, youtube_id) -> str | None:
+        """The DeArrow crowd title for a video, if one was recorded (detail UI)."""
+        yid = str(youtube_id or "").strip()
+        if not yid:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT dearrow_title FROM youtube_video_stats WHERE youtube_id=?", (yid,)).fetchone()
+            return row["dearrow_title"] if row and row["dearrow_title"] else None
+        finally:
+            conn.close()
+
     def youtube_enrich_breakdown(self, status_col: str) -> dict:
-        if status_col not in ("ryd_status", "sb_status"):
+        if status_col not in ("ryd_status", "sb_status", "dearrow_status"):
             return {}
         conn = self._get_connection()
         try:
