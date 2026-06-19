@@ -431,6 +431,28 @@ def test_youtube_quality_profile_endpoint_roundtrips(tmp_path):
         videoapi._video_db = None
 
 
+def test_quality_evaluate_endpoint_judges_owned_copy(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        # Default profile cuts off at 1080p → a 720p copy is below target.
+        below = client.post("/api/video/downloads/evaluate",
+                            json={"file": {"resolution": "720p", "video_codec": "x265"}}).get_json()
+        assert below["meets"] is False and below["resolution_label"] == "720p"
+        # A 1080p copy meets it.
+        ok = client.post("/api/video/downloads/evaluate",
+                         json={"file": {"resolution": "1920x1080", "video_codec": "x265"}}).get_json()
+        assert ok["meets"] is True
+    finally:
+        videoapi._video_db = None
+
+
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
     import config.settings as cfg
