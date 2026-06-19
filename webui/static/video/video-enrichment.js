@@ -43,7 +43,7 @@
 
         var tip = document.querySelector('[data-video-enrich-tooltip="' + svc + '"]');
         if (!tip) return;
-        var status = !d.enabled ? 'Not configured'
+        var status = !d.enabled ? (d.needs_key === false ? 'Disabled' : 'Not configured')
             : d.idle ? 'Complete'
                 : (d.running && !d.paused) ? 'Running'
                     : d.paused ? 'Paused' : 'Idle';

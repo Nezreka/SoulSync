@@ -173,7 +173,7 @@ def test_nokey_workers_enabled_by_default_and_toggle(db):
 def test_get_stats_shape_matches_matcher_worker(db):
     _seed_video(db)
     stats = RydWorker(db).get_stats()
-    assert set(stats) == {"enabled", "running", "paused", "idle", "current_item",
+    assert set(stats) == {"enabled", "needs_key", "running", "paused", "idle", "current_item",
                           "note", "cooldown", "stats", "progress", "breakdown"}
     assert set(stats["stats"]) == {"matched", "not_found", "errors", "pending"}
 

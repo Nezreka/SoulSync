@@ -99,6 +99,7 @@ def _norm_title(s):
 # ── base worker (lifecycle + loop + status; mirrors VideoEnrichmentWorker) ────
 class VideoBackfillWorker:
     is_ratings = False
+    requires_key = False   # True for workers gated on an API key (vs a keyless toggle)
 
     def __init__(self, db, service, display_name, interval=1.0):
         self.db = db
@@ -259,6 +260,7 @@ class VideoBackfillWorker:
                               "percent": round(done / total * 100) if total else 0}
         return {
             "enabled": self.enabled,
+            "needs_key": self.requires_key,   # key-gated → "Not configured"; keyless → "Disabled"
             "running": running,
             "paused": self.paused or cooling,
             "idle": idle,
@@ -379,6 +381,7 @@ def _fa_first(j, *keys):
 
 class FanartWorker(VideoBackfillWorker):
     BASE = "https://webservice.fanart.tv/v3"
+    requires_key = True
 
     def __init__(self, db):
         super().__init__(db, "fanart", "fanart.tv", interval=1.0)
@@ -451,6 +454,7 @@ class FanartWorker(VideoBackfillWorker):
 # ── OpenSubtitles (free key) — subtitle-language availability ─────────────────
 class OpenSubtitlesWorker(VideoBackfillWorker):
     BASE = "https://api.opensubtitles.com/api/v1"
+    requires_key = True
 
     def __init__(self, db):
         super().__init__(db, "opensubtitles", "OpenSubtitles", interval=1.5)
@@ -521,6 +525,7 @@ class OpenSubtitlesWorker(VideoBackfillWorker):
 # ── Trakt (free API key) — community audience rating + vote count ─────────────
 class TraktWorker(VideoBackfillWorker):
     BASE = "https://api.trakt.tv"
+    requires_key = True
 
     def __init__(self, db):
         super().__init__(db, "trakt", "Trakt", interval=1.0)
