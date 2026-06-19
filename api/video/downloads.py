@@ -80,6 +80,18 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
 
+    @bp.route("/downloads/evaluate", methods=["POST"])
+    def video_quality_evaluate():
+        """Judge a video file the user already owns against their quality profile —
+        powers the Download modal's 'In your library · … (below your target)' line.
+        Body: {"file": {resolution, video_codec, …}}."""
+        from . import get_video_db
+        from core.video.quality_eval import evaluate_owned
+        from core.video.quality_profile import load
+        body = request.get_json(silent=True) or {}
+        profile = load(get_video_db())
+        return jsonify(evaluate_owned(body.get("file"), profile))
+
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():
         # Separate, smaller profile — YouTube is yt-dlp, not scene/p2p releases.
