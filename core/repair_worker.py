@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from difflib import SequenceMatcher
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.metadata_service import (
@@ -585,13 +585,29 @@ class RepairWorker:
 
         logger.info("Repair worker thread finished")
 
+    @staticmethod
+    def _hours_since(finished_at_iso: str, now_utc: datetime) -> float:
+        """Hours between a stored ``finished_at`` and ``now_utc``, both in UTC.
+
+        ``finished_at`` is written by SQLite's CURRENT_TIMESTAMP, which is ALWAYS
+        UTC (and naive). #885: the scheduler compared it against ``datetime.now()``
+        (naive LOCAL), so the local↔UTC offset leaked into the elapsed time. For a
+        zone AHEAD of UTC (Australia/Sydney = +11) every job looked ~11h stale and
+        fired every poll; behind UTC (the Americas) it just waited too long. Parse
+        the naive timestamp AS UTC and subtract a UTC ``now`` so scheduling is
+        timezone-independent."""
+        dt = datetime.fromisoformat(finished_at_iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (now_utc - dt).total_seconds() / 3600
+
     def _pick_next_job(self) -> Optional[str]:
         """Pick the next job to run based on staleness priority.
 
         Returns job_id of the stalest job whose interval has elapsed,
         or None if nothing is due.
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         best_job_id = None
         best_staleness = -1
 
@@ -613,8 +629,7 @@ class RepairWorker:
                 continue
 
             try:
-                last_finished = datetime.fromisoformat(last_run['finished_at'])
-                elapsed_hours = (now - last_finished).total_seconds() / 3600
+                elapsed_hours = self._hours_since(last_run['finished_at'], now)
 
                 if elapsed_hours < interval_hours:
                     continue  # Not due yet
@@ -1552,6 +1567,7 @@ class RepairWorker:
             resolved,
             junk_files=details.get('junk_files') or [],
             remove_junk=bool(details.get('remove_junk', True)),
+            remove_disposable=bool(details.get('remove_disposable', False)),
             root=self.transfer_folder,
             listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
             remove_file=os.remove, rmdir=os.rmdir,

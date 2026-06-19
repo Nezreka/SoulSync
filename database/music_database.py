@@ -750,6 +750,41 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_status ON auto_import_history (status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_aih_folder_hash ON auto_import_history (folder_hash)")
 
+            # Re-identify hints (#889) — a user-designated, single-use answer to "which
+            # release does this track belong to". Written when the user picks a release in
+            # the Re-identify modal and the file is staged for auto-import; the import flow
+            # reads the hint at the TOP of matching (keyed by staged path, content_hash as a
+            # rename-proof fallback), expedites the match to these exact IDs, then consumes
+            # the row. `replace_track_id` (when set) is the library row to delete AFTER the
+            # re-import lands; `exempt_dedup` is always 1 because a re-identify is an explicit
+            # user action that must not be silently dropped by the quality dedup-skip.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rematch_hints (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    staged_path TEXT NOT NULL,
+                    content_hash TEXT,
+                    source TEXT NOT NULL,
+                    isrc TEXT,
+                    track_id TEXT,
+                    album_id TEXT,
+                    artist_id TEXT,
+                    track_title TEXT,
+                    album_name TEXT,
+                    artist_name TEXT,
+                    album_type TEXT,
+                    track_number INTEGER,
+                    disc_number INTEGER,
+                    replace_track_id INTEGER,
+                    exempt_dedup INTEGER NOT NULL DEFAULT 1,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    consumed_at TIMESTAMP
+                )
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_staged_path ON rematch_hints (staged_path)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_content_hash ON rematch_hints (content_hash)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_rmh_status ON rematch_hints (status)")
+
             # Sync history table — tracks the last 100 sync operations with cached context for re-trigger
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sync_history (
@@ -8676,6 +8711,15 @@ class MusicDatabase:
                     "min_kbps": 150,
                     "max_kbps": 300,
                     "priority": 4
+                },
+                # AAC (incl. .m4a): opt-in, OFF by default. Priority 1.5 sits it
+                # above MP3 but below FLAC (AAC is more efficient than MP3); the
+                # min_kbps gate keeps junk-bitrate AAC from beating a good MP3.
+                "aac": {
+                    "enabled": False,
+                    "min_kbps": 128,
+                    "max_kbps": 400,
+                    "priority": 1.5
                 }
             },
             "fallback_enabled": True
@@ -8725,6 +8769,12 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 4
+                    },
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 1.5
                     }
                 },
                 "fallback_enabled": False
@@ -8757,6 +8807,12 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 4
+                    },
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 1.5
                     }
                 },
                 "fallback_enabled": True
@@ -8789,6 +8845,14 @@ class MusicDatabase:
                         "min_kbps": 150,
                         "max_kbps": 300,
                         "priority": 3
+                    },
+                    # Space-saver favours small files, where AAC shines — but it
+                    # still ships OFF (opt-in). Priority 0.5 puts it above MP3.
+                    "aac": {
+                        "enabled": False,
+                        "min_kbps": 128,
+                        "max_kbps": 400,
+                        "priority": 0.5
                     }
                 },
                 "fallback_enabled": True
