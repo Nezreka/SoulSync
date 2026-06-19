@@ -2971,12 +2971,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     color: rgba(255,255,255,0.4); }
 /* Quality ladder rows reuse music's .hybrid-source-item styling (set in the shared
    style.css) for parity with the Download Source list — no custom row CSS. The
-   cutoff tier gets a subtle accent rail + tag. */
-.hybrid-source-item.vq-cut { border-left: 3px solid rgb(var(--accent-rgb));
-    background: rgba(var(--accent-rgb),0.07); }
-.vq-cut-tag { display: inline-block; margin-left: 9px; padding: 2px 8px; border-radius: 999px;
-    font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
-    background: rgb(var(--accent-rgb)); color: #06210f; vertical-align: middle; }
+   cutoff is a separate loose resolution dropdown (not a per-row marker). */
 /* cutoff dropdown */
 .vq-select { width: 100%; max-width: 360px; padding: 10px 13px; border-radius: 10px;
     background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff;

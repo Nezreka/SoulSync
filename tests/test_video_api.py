@@ -395,14 +395,14 @@ def test_quality_profile_endpoint_roundtrips(tmp_path):
         # Default profile served when unset (rich-curated model: tier ladder + cutoff).
         d = client.get("/api/video/downloads/quality").get_json()
         assert [t["key"] for t in d["tiers"]][0] == "remux-2160p"
-        assert d["cutoff"] == "bluray-1080p" and d["prefer_codec"] == "hevc"
-        # POST normalizes + persists; bad codec rejected, valid cutoff kept.
+        assert d["cutoff_resolution"] == "1080p" and d["prefer_codec"] == "hevc"
+        # POST normalizes + persists; bad codec rejected, loose 4K cutoff kept.
         out = client.post("/api/video/downloads/quality",
-                          json={"prefer_codec": "bogus", "max_size_gb": 50,
-                                "cutoff": "web-720p", "prefer_hdr": "require"}).get_json()
-        assert out["prefer_codec"] == "hevc" and out["max_size_gb"] == 50
-        assert out["cutoff"] == "web-720p" and out["prefer_hdr"] == "require"
-        assert client.get("/api/video/downloads/quality").get_json()["max_size_gb"] == 50
+                          json={"prefer_codec": "bogus", "max_movie_gb": 50,
+                                "cutoff_resolution": "2160p", "prefer_hdr": "require"}).get_json()
+        assert out["prefer_codec"] == "hevc" and out["max_movie_gb"] == 50
+        assert out["cutoff_resolution"] == "2160p" and out["prefer_hdr"] == "require"
+        assert client.get("/api/video/downloads/quality").get_json()["max_movie_gb"] == 50
     finally:
         videoapi._video_db = None
 

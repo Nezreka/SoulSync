@@ -13,6 +13,7 @@ from core.video.quality_profile import (
     HDR_MODES,
     MAX_SIZE_CAP_GB,
     REJECTS,
+    RESOLUTIONS,
     TIERS,
     default_profile,
     load,
@@ -32,11 +33,11 @@ def test_default_shape():
     on = {t["key"] for t in d["tiers"] if t["enabled"]}
     assert "bluray-1080p" in on and "web-720p" in on     # 1080p/720p on
     assert "remux-2160p" not in on and "sdtv" not in on  # 4K + SD off by default
-    assert d["cutoff"] == "bluray-1080p"
+    assert d["cutoff_resolution"] == "1080p"          # loose resolution target
     assert "cam" in d["rejects"] and "x264" not in d["rejects"]   # junk blocked, x264 allowed
     assert d["prefer_codec"] == "hevc" and d["prefer_hdr"] == "prefer"
     assert d["prefer_audio"] == "any" and d["prefer_repack"] is True
-    assert d["min_size_gb"] == 0 and d["max_size_gb"] == 0
+    assert d["max_movie_gb"] == 0 and d["max_episode_gb"] == 0
 
 
 def test_normalize_garbage_returns_default():
@@ -61,9 +62,11 @@ def test_normalize_tiers_preserves_order_completes_and_coerces():
     assert by["bluray-1080p"] is True            # untouched default stays on
 
 
-def test_normalize_cutoff_must_be_a_known_tier():
-    assert normalize({"cutoff": "web-720p"})["cutoff"] == "web-720p"
-    assert normalize({"cutoff": "nonsense"})["cutoff"] == "bluray-1080p"   # falls back
+def test_normalize_cutoff_is_a_loose_resolution_target():
+    assert normalize({"cutoff_resolution": "2160p"})["cutoff_resolution"] == "2160p"
+    assert normalize({"cutoff_resolution": ""})["cutoff_resolution"] == ""        # best/always-upgrade
+    assert normalize({"cutoff_resolution": "nonsense"})["cutoff_resolution"] == "1080p"  # falls back
+    assert "2160p" in RESOLUTIONS                                                 # 4K always offered
 
 
 def test_normalize_rejects_keep_canonical_order_and_drop_junk():
@@ -82,13 +85,11 @@ def test_normalize_soft_prefs_validate():
     assert bad["prefer_audio"] == "any"
 
 
-def test_normalize_size_clamps_and_pins_min_to_cap():
-    assert normalize({"max_size_gb": -5})["max_size_gb"] == 0
-    assert normalize({"max_size_gb": 99999})["max_size_gb"] == MAX_SIZE_CAP_GB
-    out = normalize({"min_size_gb": 50, "max_size_gb": 20})   # min above the cap
-    assert out["min_size_gb"] == 20 and out["max_size_gb"] == 20
-    keep = normalize({"min_size_gb": 5, "max_size_gb": 0})    # 0 cap = no limit, min stays
-    assert keep["min_size_gb"] == 5 and keep["max_size_gb"] == 0
+def test_normalize_size_splits_movie_and_episode_and_clamps():
+    assert normalize({"max_movie_gb": -5})["max_movie_gb"] == 0          # negative clamped
+    assert normalize({"max_movie_gb": 99999})["max_movie_gb"] == MAX_SIZE_CAP_GB   # capped
+    out = normalize({"max_movie_gb": 40, "max_episode_gb": 5})           # independent caps
+    assert out["max_movie_gb"] == 40 and out["max_episode_gb"] == 5
 
 
 def test_constants():
@@ -116,10 +117,10 @@ def test_load_default_when_unset():
 
 def test_save_then_load_roundtrips_normalized():
     db = _FakeDB()
-    saved = save(db, {"prefer_codec": "av1", "max_size_gb": 40, "cutoff": "web-720p",
+    saved = save(db, {"prefer_codec": "av1", "max_movie_gb": 40, "cutoff_resolution": "2160p",
                       "tiers": [{"key": "remux-2160p", "enabled": True}]})
-    assert saved["prefer_codec"] == "av1" and saved["max_size_gb"] == 40
-    assert saved["cutoff"] == "web-720p"
+    assert saved["prefer_codec"] == "av1" and saved["max_movie_gb"] == 40
+    assert saved["cutoff_resolution"] == "2160p"
     assert json.loads(db.get_setting("quality_profile"))["prefer_codec"] == "av1"
     assert load(db) == saved
 

@@ -474,28 +474,21 @@
         var host = document.getElementById('vq-tier-rows');
         if (host) {
             host.innerHTML = tiers.map(function (t, i) {
-                var cut = (p.cutoff === t.key);
-                return '<div class="hybrid-source-item' + (t.enabled ? '' : ' disabled') + (cut ? ' vq-cut' : '') + '">' +
+                return '<div class="hybrid-source-item' + (t.enabled ? '' : ' disabled') + '">' +
                     '<span class="hybrid-source-arrows">' +
                     '<button type="button" class="hybrid-arrow-btn" data-vq-tier-move="' + t.key + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
                     '<button type="button" class="hybrid-arrow-btn" data-vq-tier-move="' + t.key + '" data-dir="1"' + (i === tiers.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
                     '</span>' +
-                    '<span class="hybrid-source-name">' + (TIER_LABEL[t.key] || t.key) + (cut ? ' <span class="vq-cut-tag">cutoff</span>' : '') + '</span>' +
+                    '<span class="hybrid-source-name">' + (TIER_LABEL[t.key] || t.key) + '</span>' +
                     '<span class="hybrid-source-priority">' + (i + 1) + '</span>' +
                     '<label class="hybrid-source-toggle"><input type="checkbox" data-vq-tier-toggle="' + t.key + '"' + (t.enabled ? ' checked' : '') + '><span class="toggle-track"></span></label>' +
                     '</div>';
             }).join('');
         }
 
-        // Cutoff dropdown — only the enabled tiers are sensible upgrade targets.
+        // Cutoff — a loose resolution target (static <option>s); "" = always upgrade.
         var cut = document.getElementById('vq-cutoff');
-        if (cut) {
-            var enabled = tiers.filter(function (t) { return t.enabled; });
-            cut.innerHTML = enabled.map(function (t) {
-                return '<option value="' + t.key + '"' + (p.cutoff === t.key ? ' selected' : '') + '>' + (TIER_LABEL[t.key] || t.key) + '</option>';
-            }).join('');
-            if (!enabled.length) cut.innerHTML = '<option value="">— enable a tier first —</option>';
-        }
+        if (cut) cut.value = (p.cutoff_resolution == null ? '1080p' : p.cutoff_resolution);
 
         // Hard rejects — toggle chips (on = blocked).
         var rj = document.getElementById('vq-rejects');
@@ -513,11 +506,11 @@
         _vqSeg('vq-audio', 'data-vq-audio', p.prefer_audio);
         var rep = document.getElementById('vq-prefer-repack'); if (rep) rep.checked = !!p.prefer_repack;
 
-        // Size guard.
-        var mn = document.getElementById('vq-min-size'); if (mn) mn.value = p.min_size_gb || 0;
-        var mx = document.getElementById('vq-max-size'); if (mx) mx.value = p.max_size_gb || 0;
-        _vqSizeLabel('vq-min-label', p.min_size_gb || 0);
-        _vqSizeLabel('vq-max-label', p.max_size_gb || 0);
+        // Size guard — split by runtime so a movie and an episode aren't judged the same.
+        var mv = document.getElementById('vq-movie-size'); if (mv) mv.value = p.max_movie_gb || 0;
+        var ep = document.getElementById('vq-episode-size'); if (ep) ep.value = p.max_episode_gb || 0;
+        _vqSizeLabel('vq-movie-label', p.max_movie_gb || 0);
+        _vqSizeLabel('vq-episode-label', p.max_episode_gb || 0);
     }
 
     function moveTier(k, dir) {
@@ -577,14 +570,14 @@
                 for (var n = 0; n < arr.length; n++) { if (arr[n].key === key) { arr[n].enabled = tt.checked; break; } }
                 renderQuality(); saveQuality(true); return;
             }
-            if (e.target.id === 'vq-cutoff') { _videoQuality.cutoff = e.target.value; renderQuality(); saveQuality(true); return; }
+            if (e.target.id === 'vq-cutoff') { _videoQuality.cutoff_resolution = e.target.value; saveQuality(true); return; }
             if (e.target.id === 'vq-prefer-repack') { _videoQuality.prefer_repack = e.target.checked; saveQuality(true); return; }
-            if (e.target.id === 'vq-min-size') { _videoQuality.min_size_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
-            if (e.target.id === 'vq-max-size') { _videoQuality.max_size_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-movie-size') { _videoQuality.max_movie_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
+            if (e.target.id === 'vq-episode-size') { _videoQuality.max_episode_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
         });
         card.addEventListener('input', function (e) {
-            if (e.target.id === 'vq-min-size') { _vqSizeLabel('vq-min-label', parseInt(e.target.value, 10) || 0); return; }
-            if (e.target.id === 'vq-max-size') { _vqSizeLabel('vq-max-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-movie-size') { _vqSizeLabel('vq-movie-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-episode-size') { _vqSizeLabel('vq-episode-label', parseInt(e.target.value, 10) || 0); return; }
         });
     }
 
