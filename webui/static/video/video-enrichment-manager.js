@@ -89,7 +89,11 @@
     }
 
     function statusInfo(s) {
-        if (!s || !s.enabled) return { cls: 'disabled', label: 'Not configured' };
+        // Keyless workers that are simply toggled off read "Disabled", not the
+        // key-implying "Not configured".
+        if (!s || !s.enabled) {
+            return { cls: 'disabled', label: (s && s.needs_key === false) ? 'Disabled' : 'Not configured' };
+        }
         if (s.running && !s.paused && !s.idle) return { cls: 'running', label: 'Running' };
         if (s.paused) return { cls: 'paused', label: 'Paused' };
         if (s.idle) return { cls: 'idle', label: 'Complete' };
@@ -106,7 +110,7 @@
         return t ? Math.round(m / t * 100) : 0;
     }
     function railSub(s, id) {
-        if (!s || !s.enabled) return 'Not configured';
+        if (!s || !s.enabled) return (s && s.needs_key === false) ? 'Off — enable in Settings' : 'Not configured';
         if (id === 'youtube') {
             if (s.running && s.current_item && s.current_item.name) return s.current_item.name;
             if (s.queued) return s.queued + ' queued';

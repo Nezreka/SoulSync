@@ -290,6 +290,7 @@ class VideoEnrichmentWorker:
                               "percent": round(done / total * 100) if total else 0}
         return {
             "enabled": self.enabled,
+            "needs_key": True,   # matchers (TMDB/TVDB/OMDb) always require an API key
             "running": running,
             "paused": self.paused or cooling,    # cooldown reads as paused in the UI
             "idle": idle,
