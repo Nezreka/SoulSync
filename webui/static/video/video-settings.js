@@ -19,8 +19,18 @@
     var QUALITY_URL = '/api/video/downloads/quality';
     var SLSKD_URL = '/api/video/downloads/slskd';
     var _videoQuality = null;
-    var RES_LABEL = { '2160p': '4K (2160p)', '1080p': '1080p', '720p': '720p', '480p': '480p (SD)' };
-    var SRC_LABEL = { 'bluray': 'BluRay', 'web-dl': 'WEB-DL', 'webrip': 'WEBRip', 'hdtv': 'HDTV' };
+    // Pretty labels for the source×resolution quality ladder (keys come from the backend).
+    var TIER_LABEL = {
+        'remux-2160p': 'Remux · 4K', 'bluray-2160p': 'BluRay · 4K', 'web-2160p': 'WEB · 4K',
+        'remux-1080p': 'Remux · 1080p', 'bluray-1080p': 'BluRay · 1080p', 'web-1080p': 'WEB-DL · 1080p',
+        'webrip-1080p': 'WEBRip · 1080p', 'hdtv-1080p': 'HDTV · 1080p',
+        'bluray-720p': 'BluRay · 720p', 'web-720p': 'WEB-DL · 720p', 'hdtv-720p': 'HDTV · 720p',
+        'dvd': 'DVD', 'sdtv': 'SDTV'
+    };
+    var REJECT_LABEL = {
+        'cam': 'CAM / TS', 'screener': 'Screener', 'workprint': 'Workprint', '3d': '3D', 'x264': 'x264 / AVC'
+    };
+    var REJECT_ORDER = ['cam', 'screener', 'workprint', '3d', 'x264'];
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -442,70 +452,89 @@
             .catch(function () { /* ignore */ });
     }
 
+    function _vqSizeLabel(id, v) {
+        var lab = document.getElementById(id);
+        if (lab) lab.textContent = v ? (v + ' GB') : 'No limit';
+    }
+
+    function _vqSeg(id, attr, value) {
+        var seg = document.getElementById(id);
+        if (!seg) return;
+        Array.prototype.forEach.call(seg.querySelectorAll('[' + attr + ']'), function (b) {
+            b.classList.toggle('active', b.getAttribute(attr) === value);
+        });
+    }
+
     function renderQuality() {
         var p = _videoQuality;
         if (!p) return;
-        var resHost = document.getElementById('vq-resolution-rows');
-        if (resHost) {
-            var keys = Object.keys(p.resolutions).sort(function (a, b) {
-                return p.resolutions[a].priority - p.resolutions[b].priority;
-            });
-            resHost.innerHTML = keys.map(function (k, i) {
-                var r = p.resolutions[k];
-                return '<div class="hybrid-source-item' + (r.enabled ? '' : ' disabled') + '">' +
+        var tiers = Array.isArray(p.tiers) ? p.tiers : [];
+
+        // Quality ladder — ranked, toggleable (same .hybrid-source-item styling as Download Source).
+        var host = document.getElementById('vq-tier-rows');
+        if (host) {
+            host.innerHTML = tiers.map(function (t, i) {
+                var cut = (p.cutoff === t.key);
+                return '<div class="hybrid-source-item' + (t.enabled ? '' : ' disabled') + (cut ? ' vq-cut' : '') + '">' +
                     '<span class="hybrid-source-arrows">' +
-                    '<button type="button" class="hybrid-arrow-btn" data-vq-res-move="' + k + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
-                    '<button type="button" class="hybrid-arrow-btn" data-vq-res-move="' + k + '" data-dir="1"' + (i === keys.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-tier-move="' + t.key + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-tier-move="' + t.key + '" data-dir="1"' + (i === tiers.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
                     '</span>' +
-                    '<span class="hybrid-source-name">' + (RES_LABEL[k] || k) + '</span>' +
+                    '<span class="hybrid-source-name">' + (TIER_LABEL[t.key] || t.key) + (cut ? ' <span class="vq-cut-tag">cutoff</span>' : '') + '</span>' +
                     '<span class="hybrid-source-priority">' + (i + 1) + '</span>' +
-                    '<label class="hybrid-source-toggle"><input type="checkbox" data-vq-res-toggle="' + k + '"' + (r.enabled ? ' checked' : '') + '><span class="toggle-track"></span></label>' +
+                    '<label class="hybrid-source-toggle"><input type="checkbox" data-vq-tier-toggle="' + t.key + '"' + (t.enabled ? ' checked' : '') + '><span class="toggle-track"></span></label>' +
                     '</div>';
             }).join('');
         }
-        var srcHost = document.getElementById('vq-source-rows');
-        if (srcHost) {
-            srcHost.innerHTML = p.source_priority.map(function (s, i) {
-                return '<div class="hybrid-source-item">' +
-                    '<span class="hybrid-source-arrows">' +
-                    '<button type="button" class="hybrid-arrow-btn" data-vq-src-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
-                    '<button type="button" class="hybrid-arrow-btn" data-vq-src-move="' + s + '" data-dir="1"' + (i === p.source_priority.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
-                    '</span>' +
-                    '<span class="hybrid-source-name">' + (SRC_LABEL[s] || s) + '</span>' +
-                    '<span class="hybrid-source-priority">' + (i + 1) + '</span>' +
-                    '</div>';
+
+        // Cutoff dropdown — only the enabled tiers are sensible upgrade targets.
+        var cut = document.getElementById('vq-cutoff');
+        if (cut) {
+            var enabled = tiers.filter(function (t) { return t.enabled; });
+            cut.innerHTML = enabled.map(function (t) {
+                return '<option value="' + t.key + '"' + (p.cutoff === t.key ? ' selected' : '') + '>' + (TIER_LABEL[t.key] || t.key) + '</option>';
+            }).join('');
+            if (!enabled.length) cut.innerHTML = '<option value="">— enable a tier first —</option>';
+        }
+
+        // Hard rejects — toggle chips (on = blocked).
+        var rj = document.getElementById('vq-rejects');
+        if (rj) {
+            var set = Array.isArray(p.rejects) ? p.rejects : [];
+            rj.innerHTML = REJECT_ORDER.map(function (k) {
+                var on = set.indexOf(k) !== -1;
+                return '<button type="button" class="vq-chip' + (on ? ' on' : '') + '" data-vq-reject="' + k + '">' + (REJECT_LABEL[k] || k) + '</button>';
             }).join('');
         }
-        var seg = document.getElementById('vq-codec');
-        if (seg) {
-            Array.prototype.forEach.call(seg.querySelectorAll('[data-vq-codec]'), function (b) {
-                b.classList.toggle('active', b.getAttribute('data-vq-codec') === p.codec);
-            });
-        }
-        var hdr = document.getElementById('vq-prefer-hdr'); if (hdr) hdr.checked = !!p.prefer_hdr;
-        var fb = document.getElementById('vq-fallback'); if (fb) fb.checked = p.fallback_enabled !== false;
-        var sl = document.getElementById('vq-max-size'); if (sl) sl.value = p.max_size_gb || 0;
-        var lab = document.getElementById('vq-size-label');
-        if (lab) lab.textContent = p.max_size_gb ? (p.max_size_gb + ' GB') : 'No limit';
+
+        // Soft preferences.
+        _vqSeg('vq-codec', 'data-vq-codec', p.prefer_codec);
+        _vqSeg('vq-hdr', 'data-vq-hdr', p.prefer_hdr);
+        _vqSeg('vq-audio', 'data-vq-audio', p.prefer_audio);
+        var rep = document.getElementById('vq-prefer-repack'); if (rep) rep.checked = !!p.prefer_repack;
+
+        // Size guard.
+        var mn = document.getElementById('vq-min-size'); if (mn) mn.value = p.min_size_gb || 0;
+        var mx = document.getElementById('vq-max-size'); if (mx) mx.value = p.max_size_gb || 0;
+        _vqSizeLabel('vq-min-label', p.min_size_gb || 0);
+        _vqSizeLabel('vq-max-label', p.max_size_gb || 0);
     }
 
-    function moveRes(k, dir) {
-        var p = _videoQuality; if (!p) return;
-        var keys = Object.keys(p.resolutions).sort(function (a, b) {
-            return p.resolutions[a].priority - p.resolutions[b].priority;
-        });
-        var i = keys.indexOf(k), j = i + dir;
-        if (j < 0 || j >= keys.length) return;
-        keys[i] = keys[j]; keys[j] = k;             // swap
-        keys.forEach(function (key, idx) { p.resolutions[key].priority = idx + 1; });
+    function moveTier(k, dir) {
+        var p = _videoQuality; if (!p || !Array.isArray(p.tiers)) return;
+        var arr = p.tiers, i = -1;
+        for (var n = 0; n < arr.length; n++) { if (arr[n].key === k) { i = n; break; } }
+        var j = i + dir;
+        if (i < 0 || j < 0 || j >= arr.length) return;
+        var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;   // swap
         renderQuality(); saveQuality(true);
     }
 
-    function moveSrc(s, dir) {
+    function toggleReject(k) {
         var p = _videoQuality; if (!p) return;
-        var arr = p.source_priority, i = arr.indexOf(s), j = i + dir;
-        if (j < 0 || j >= arr.length) return;
-        arr[i] = arr[j]; arr[j] = s;
+        if (!Array.isArray(p.rejects)) p.rejects = [];
+        var i = p.rejects.indexOf(k);
+        if (i === -1) p.rejects.push(k); else p.rejects.splice(i, 1);
         renderQuality(); saveQuality(true);
     }
 
@@ -521,33 +550,41 @@
 
     // Delegated handlers for the quality profile (rows re-render, so delegate).
     function wireQuality() {
-        var sec = document.getElementById('vq-resolution-rows');
+        var sec = document.getElementById('vq-tier-rows');
         if (!sec) return;
         var card = sec.closest('.settings-group');
         if (!card || card._vqWired) return;
         card._vqWired = true;
         card.addEventListener('click', function (e) {
-            var rm = e.target.closest('[data-vq-res-move]');
-            if (rm) { moveRes(rm.getAttribute('data-vq-res-move'), parseInt(rm.getAttribute('data-dir'), 10)); return; }
-            var sm = e.target.closest('[data-vq-src-move]');
-            if (sm) { moveSrc(sm.getAttribute('data-vq-src-move'), parseInt(sm.getAttribute('data-dir'), 10)); return; }
+            var tm = e.target.closest('[data-vq-tier-move]');
+            if (tm) { moveTier(tm.getAttribute('data-vq-tier-move'), parseInt(tm.getAttribute('data-dir'), 10)); return; }
+            var rj = e.target.closest('[data-vq-reject]');
+            if (rj) { toggleReject(rj.getAttribute('data-vq-reject')); return; }
+            if (!_videoQuality) return;
             var cd = e.target.closest('[data-vq-codec]');
-            if (cd && _videoQuality) { _videoQuality.codec = cd.getAttribute('data-vq-codec'); renderQuality(); saveQuality(true); }
+            if (cd) { _videoQuality.prefer_codec = cd.getAttribute('data-vq-codec'); renderQuality(); saveQuality(true); return; }
+            var hd = e.target.closest('[data-vq-hdr]');
+            if (hd) { _videoQuality.prefer_hdr = hd.getAttribute('data-vq-hdr'); renderQuality(); saveQuality(true); return; }
+            var au = e.target.closest('[data-vq-audio]');
+            if (au) { _videoQuality.prefer_audio = au.getAttribute('data-vq-audio'); renderQuality(); saveQuality(true); return; }
         });
         card.addEventListener('change', function (e) {
             if (!_videoQuality) return;
-            var rt = e.target.closest('[data-vq-res-toggle]');
-            if (rt) { _videoQuality.resolutions[rt.getAttribute('data-vq-res-toggle')].enabled = rt.checked; renderQuality(); saveQuality(true); return; }
-            if (e.target.id === 'vq-prefer-hdr') { _videoQuality.prefer_hdr = e.target.checked; saveQuality(true); return; }
-            if (e.target.id === 'vq-fallback') { _videoQuality.fallback_enabled = e.target.checked; saveQuality(true); return; }
+            var tt = e.target.closest('[data-vq-tier-toggle]');
+            if (tt) {
+                var key = tt.getAttribute('data-vq-tier-toggle');
+                var arr = _videoQuality.tiers || [];
+                for (var n = 0; n < arr.length; n++) { if (arr[n].key === key) { arr[n].enabled = tt.checked; break; } }
+                renderQuality(); saveQuality(true); return;
+            }
+            if (e.target.id === 'vq-cutoff') { _videoQuality.cutoff = e.target.value; renderQuality(); saveQuality(true); return; }
+            if (e.target.id === 'vq-prefer-repack') { _videoQuality.prefer_repack = e.target.checked; saveQuality(true); return; }
+            if (e.target.id === 'vq-min-size') { _videoQuality.min_size_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
             if (e.target.id === 'vq-max-size') { _videoQuality.max_size_gb = parseInt(e.target.value, 10) || 0; saveQuality(true); return; }
         });
         card.addEventListener('input', function (e) {
-            if (e.target.id === 'vq-max-size' && _videoQuality) {
-                var v = parseInt(e.target.value, 10) || 0;
-                var lab = document.getElementById('vq-size-label');
-                if (lab) lab.textContent = v ? (v + ' GB') : 'No limit';
-            }
+            if (e.target.id === 'vq-min-size') { _vqSizeLabel('vq-min-label', parseInt(e.target.value, 10) || 0); return; }
+            if (e.target.id === 'vq-max-size') { _vqSizeLabel('vq-max-label', parseInt(e.target.value, 10) || 0); return; }
         });
     }
 
