@@ -108,6 +108,7 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         scope = str(body.get("scope") or "movie").lower()
         title = body.get("title") or ""
+        source = str(body.get("source") or "").lower()
 
         def _int(v):
             try:
@@ -117,9 +118,23 @@ def register_routes(bp):
 
         want_season, want_episode = _int(body.get("season")), _int(body.get("episode"))
         profile = load_profile(get_video_db())
-        raw = mock_search(scope, title, year=body.get("year"), season=want_season,
-                          episode=want_episode, season_end=_int(body.get("season_end")),
-                          source=body.get("source"))
+
+        live = False
+        if source == "soulseek":
+            # REAL Soulseek search (slskd). Torrent/Usenet stay mocked until those
+            # indexers are wired. Same {title, size_bytes, …} shape downstream.
+            from core.video.slskd_search import build_query, slskd_search
+            sres = slskd_search(build_query(scope, title, year=body.get("year"),
+                                            season=want_season, episode=want_episode))
+            if not sres.get("configured"):
+                return jsonify({"scope": scope, "results": [], "error": "slskd isn't configured — set its URL on Settings → Downloads."})
+            if sres.get("error"):
+                return jsonify({"scope": scope, "results": [], "error": "slskd: " + str(sres["error"])})
+            raw, live = sres["hits"], True
+        else:
+            raw = mock_search(scope, title, year=body.get("year"), season=want_season,
+                              episode=want_episode, season_end=_int(body.get("season_end")),
+                              source=source)
 
         results = []
         for hit in raw:
@@ -127,8 +142,12 @@ def register_routes(bp):
             size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
             verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                        want_episode=want_episode, size_gb=size_gb)
+            avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
             results.append({
-                "title": hit.get("title"), "size_gb": size_gb, "seeders": hit.get("seeders", 0),
+                "title": hit.get("title"), "size_gb": size_gb,
+                "seeders": hit.get("seeders"), "peers": hit.get("peers"),
+                "username": hit.get("username"), "slots": hit.get("slots"),
+                "filename": hit.get("filename"), "_avail": avail,
                 "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
                 "rejected": verdict["rejected"], "score": verdict["score"],
                 "resolution": parsed.get("resolution"), "source": parsed.get("source"),
@@ -136,9 +155,11 @@ def register_routes(bp):
                 "audio": parsed.get("audio"), "group": parsed.get("group"),
                 "repack": parsed.get("repack") or parsed.get("proper"),
             })
-        # accepted first, then best score, then most seeders.
-        results.sort(key=lambda r: (r["accepted"], r["score"], r["seeders"]), reverse=True)
-        return jsonify({"scope": scope, "results": results})
+        # accepted first, then best score, then most availability (seeders/peers).
+        results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"]), reverse=True)
+        for r in results:
+            r.pop("_avail", None)
+        return jsonify({"scope": scope, "results": results[:40], "live": live})
 
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():
