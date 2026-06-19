@@ -6110,40 +6110,65 @@
                             <div class="settings-group" data-stg="downloads" data-video-only>
                                 <h3>Video Quality Profile</h3>
                                 <div class="setting-help-text">
-                                    One profile for every video source. Quality is read from the release name / filename — choose what you'll accept, then how to break ties.
+                                    One profile for every video source (slskd · torrent · usenet). Quality is read from the release name — pick the ladder you'll accept, where to stop upgrading, what to reject outright, then the soft tie-breakers.
                                 </div>
                                 <div class="vq-block">
-                                    <div class="vq-label">Resolutions to accept <span class="vq-hint">toggle on what you want · order = preference (best first)</span></div>
-                                    <div class="hybrid-source-list" id="vq-resolution-rows"></div>
+                                    <div class="vq-label">Quality ladder <span class="vq-hint">toggle what you'll accept · rank best&rarr;worst with the arrows</span></div>
+                                    <div class="hybrid-source-list" id="vq-tier-rows"></div>
                                 </div>
                                 <div class="vq-block">
-                                    <div class="vq-label">Preferred source <span class="vq-hint">tie-breaker when two releases match the same resolution</span></div>
-                                    <div class="hybrid-source-list" id="vq-source-rows"></div>
+                                    <div class="vq-label">Upgrade until <span class="vq-hint">once the library holds this tier (or better) stop grabbing upgrades</span></div>
+                                    <select id="vq-cutoff" class="vq-select"></select>
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Never grab <span class="vq-hint">hard rejects &mdash; skipped no matter what else matches</span></div>
+                                    <div class="vq-chips" id="vq-rejects"></div>
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Preferences <span class="vq-hint">soft tie-breakers &mdash; they rank candidates, they never reject on their own</span></div>
+                                    <div class="vq-prefs">
+                                        <div class="vq-pref-row">
+                                            <span class="vq-pref-name">Codec</span>
+                                            <div class="vq-seg" id="vq-codec">
+                                                <button type="button" data-vq-codec="any">Any</button>
+                                                <button type="button" data-vq-codec="hevc">HEVC / x265</button>
+                                                <button type="button" data-vq-codec="av1">AV1</button>
+                                            </div>
+                                        </div>
+                                        <div class="vq-pref-row">
+                                            <span class="vq-pref-name">HDR</span>
+                                            <div class="vq-seg" id="vq-hdr">
+                                                <button type="button" data-vq-hdr="off">Don't care</button>
+                                                <button type="button" data-vq-hdr="prefer">Prefer</button>
+                                                <button type="button" data-vq-hdr="require">Require</button>
+                                            </div>
+                                        </div>
+                                        <div class="vq-pref-row">
+                                            <span class="vq-pref-name">Audio</span>
+                                            <div class="vq-seg" id="vq-audio">
+                                                <button type="button" data-vq-audio="any">Any</button>
+                                                <button type="button" data-vq-audio="surround">Surround</button>
+                                                <button type="button" data-vq-audio="lossless">Lossless</button>
+                                                <button type="button" data-vq-audio="atmos">Atmos</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <label class="vq-check" style="margin-top:12px;">
+                                        <input type="checkbox" id="vq-prefer-repack">
+                                        <span class="vq-check-box"></span>
+                                        <span>Prefer REPACK / PROPER re-releases</span>
+                                    </label>
                                 </div>
                                 <div class="vq-grid">
                                     <div class="vq-block" style="margin:0;">
-                                        <div class="vq-label">Codec</div>
-                                        <div class="vq-seg" id="vq-codec">
-                                            <button type="button" data-vq-codec="any">Any</button>
-                                            <button type="button" data-vq-codec="x265">x265 / HEVC</button>
-                                            <button type="button" data-vq-codec="x264">x264</button>
-                                        </div>
+                                        <div class="vq-label">Min size per item <span class="vq-hint" id="vq-min-label">No limit</span></div>
+                                        <input type="range" id="vq-min-size" class="vq-slider" min="0" max="200" step="1" value="0">
                                     </div>
-                                    <label class="vq-check">
-                                        <input type="checkbox" id="vq-prefer-hdr">
-                                        <span class="vq-check-box"></span>
-                                        <span>Prefer HDR / Dolby Vision</span>
-                                    </label>
+                                    <div class="vq-block" style="margin:0;">
+                                        <div class="vq-label">Max size per item <span class="vq-hint" id="vq-max-label">No limit</span></div>
+                                        <input type="range" id="vq-max-size" class="vq-slider" min="0" max="200" step="1" value="0">
+                                    </div>
                                 </div>
-                                <div class="vq-block">
-                                    <div class="vq-label">Max size per item <span class="vq-hint" id="vq-size-label">No limit</span></div>
-                                    <input type="range" id="vq-max-size" class="vq-slider" min="0" max="200" step="1" value="0">
-                                </div>
-                                <label class="vq-check">
-                                    <input type="checkbox" id="vq-fallback">
-                                    <span class="vq-check-box"></span>
-                                    <span>Allow lower-quality fallback when nothing in your enabled tiers is found</span>
-                                </label>
                             </div>
                             <!-- Download Settings -->
                             <div class="settings-group" data-stg="downloads">

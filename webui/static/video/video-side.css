@@ -2969,8 +2969,33 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     color: rgba(255,255,255,0.65); margin-bottom: 9px; display: flex; align-items: center; gap: 10px; }
 .vq-hint { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0;
     color: rgba(255,255,255,0.4); }
-/* Resolution + source rows reuse music's .hybrid-source-item styling (set in the
-   shared style.css) for parity with the Download Source list — no custom row CSS. */
+/* Quality ladder rows reuse music's .hybrid-source-item styling (set in the shared
+   style.css) for parity with the Download Source list — no custom row CSS. The
+   cutoff tier gets a subtle accent rail + tag. */
+.hybrid-source-item.vq-cut { border-left: 3px solid rgb(var(--accent-rgb));
+    background: rgba(var(--accent-rgb),0.07); }
+.vq-cut-tag { display: inline-block; margin-left: 9px; padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase;
+    background: rgb(var(--accent-rgb)); color: #06210f; vertical-align: middle; }
+/* cutoff dropdown */
+.vq-select { width: 100%; max-width: 360px; padding: 10px 13px; border-radius: 10px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff;
+    font-size: 13.5px; font-weight: 600; cursor: pointer; outline: none; transition: border-color 0.15s; }
+.vq-select:hover, .vq-select:focus { border-color: rgba(var(--accent-rgb),0.6); }
+.vq-select option { background: #14181f; color: #fff; }
+/* hard-reject chips (on = blocked) */
+.vq-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.vq-chip { padding: 7px 14px; border-radius: 999px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.6); transition: all 0.15s; }
+.vq-chip:hover { color: #fff; border-color: rgba(255,255,255,0.25); }
+.vq-chip.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.55); color: #fecaca; }
+.vq-chip.on::before { content: '⊘ '; font-weight: 800; }
+/* preference rows (label + segmented control) */
+.vq-prefs { display: flex; flex-direction: column; gap: 11px; }
+.vq-pref-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vq-pref-name { font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.75);
+    min-width: 56px; }
 /* codec + hdr row */
 .vq-grid { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; margin: 16px 0; }
 .vq-seg { display: inline-flex; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
