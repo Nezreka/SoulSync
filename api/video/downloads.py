@@ -6,13 +6,15 @@ never share a folder or collide. The actual download fulfillment engine (wishlis
 → search → grab) is a later roadmap phase; these endpoints just store/serve the
 config the Settings → Downloads tab edits.
 
-Keys persisted here (all under video.db):
-  - ``download_path``        : input folder a video download lands in (shared by all types)
-  - ``movies_path``          : Movies library (finished movies move here)
-  - ``tv_path``              : TV Shows library
-  - ``youtube_path``         : YouTube library (kept separate from real TV)
-  The engine routes a finished download to the path matching its type. (Legacy single
-  ``transfer_path`` is migrated into ``movies_path`` on first read.)
+Folders:
+  - INPUT (download) folder is SHARED with the music side — it's the same
+    ``config_manager`` key the music Download Settings use (``soulseek.download_path``),
+    so changing it on either side changes both (one physical download dir, simpler
+    Docker mounts). We only READ/WRITE that shared key; no music code is touched.
+  - OUTPUT (library) folders are video-specific and live in video.db, one per type:
+      ``movies_path`` / ``tv_path`` / ``youtube_path``.
+  The engine routes a finished download to the library path matching its type. (Legacy
+  single video ``transfer_path`` is migrated into ``movies_path`` on first read.)
 
 Connection settings that are genuinely SHARED with music (the slskd instance, the
 torrent/usenet clients, Prowlarr indexers) are NOT stored here — those live in the
@@ -28,9 +30,11 @@ from utils.logging_config import get_logger
 
 logger = get_logger("video_api.downloads")
 
-# Video-specific path keys (vs. the shared connection settings): one shared input
-# folder + a separate library folder per content type.
-_PATH_KEYS = ("download_path", "movies_path", "tv_path", "youtube_path")
+# Video-specific OUTPUT library folders (video.db). The INPUT folder is the shared
+# music key below — not in this list.
+_PATH_KEYS = ("movies_path", "tv_path", "youtube_path")
+# The shared input/download dir — the SAME config key the music side reads/writes.
+_SHARED_DOWNLOAD_KEY = "soulseek.download_path"
 
 # slskd CONNECTION settings genuinely SHARED with music — one slskd instance serves
 # both sides, so these live in the app-wide config_manager (soulseek.*), NOT video.db.
@@ -55,10 +59,12 @@ def register_routes(bp):
     def video_downloads_config():
         from . import get_video_db
         from core.video.download_config import load as load_source
+        from config.settings import config_manager
         db = get_video_db()
         out = {k: db.get_setting(k) or "" for k in _PATH_KEYS}
         if not out["movies_path"]:        # migrate the legacy single transfer folder → Movies
             out["movies_path"] = db.get_setting("transfer_path") or ""
+        out["download_path"] = config_manager.get(_SHARED_DOWNLOAD_KEY, "") or ""   # shared w/ music
         out.update(load_source(db))   # download_mode + hybrid_order
         return jsonify(out)
 
@@ -71,6 +77,9 @@ def register_routes(bp):
         for key in _PATH_KEYS:
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
+        if "download_path" in body:   # SHARED with music — write the same config key
+            from config.settings import config_manager
+            config_manager.set(_SHARED_DOWNLOAD_KEY, (str(body.get("download_path") or "")).strip())
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
 
