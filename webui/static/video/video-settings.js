@@ -17,6 +17,7 @@
     var CONN_URL = '/api/video/server-config';
     var DOWNLOADS_URL = '/api/video/downloads/config';
     var QUALITY_URL = '/api/video/downloads/quality';
+    var SLSKD_URL = '/api/video/downloads/slskd';
     var _videoQuality = null;
     var RES_LABEL = { '2160p': '4K (2160p)', '1080p': '1080p', '720p': '720p', '480p': '480p (SD)' };
     var SRC_LABEL = { 'bluray': 'BluRay', 'web-dl': 'WEB-DL', 'webrip': 'WEBRip', 'hdtv': 'HDTV' };
@@ -342,9 +343,71 @@
         renderVideoHybrid(); saveDownloads(true);
     }
 
+    function soulseekActive() {
+        return _videoMode === 'soulseek' ||
+            (_videoMode === 'hybrid' && _videoHybrid.indexOf('soulseek') >= 0);
+    }
+
     function updateVideoSourceUI() {
         var hc = document.getElementById('video-hybrid-container');
         if (hc) hc.style.display = _videoMode === 'hybrid' ? 'block' : 'none';
+        // slskd connection only matters when soulseek is in play.
+        var sc = document.getElementById('video-slskd-container');
+        if (sc) sc.style.display = soulseekActive() ? 'block' : 'none';
+    }
+
+    // ── Shared slskd connection (writes the app-wide soulseek.* — affects Music too) ──
+    function _byId(id) { return document.getElementById(id); }
+    function loadSlskd() {
+        fetch(SLSKD_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                if (_byId('video-slskd-url')) _byId('video-slskd-url').value = d.slskd_url || '';
+                if (_byId('video-slskd-api-key')) _byId('video-slskd-api-key').value = d.api_key || '';
+                if (_byId('video-slskd-search-timeout')) _byId('video-slskd-search-timeout').value = d.search_timeout != null ? d.search_timeout : 60;
+                if (_byId('video-slskd-search-timeout-buffer')) _byId('video-slskd-search-timeout-buffer').value = d.search_timeout_buffer != null ? d.search_timeout_buffer : 15;
+                if (_byId('video-slskd-search-min-delay')) _byId('video-slskd-search-min-delay').value = d.search_min_delay_seconds != null ? d.search_min_delay_seconds : 0;
+                if (_byId('video-slskd-min-peer-speed')) _byId('video-slskd-min-peer-speed').value = d.min_peer_upload_speed != null ? d.min_peer_upload_speed : 0;
+                if (_byId('video-slskd-max-peer-queue')) _byId('video-slskd-max-peer-queue').value = d.max_peer_queue != null ? d.max_peer_queue : 0;
+                // config stores seconds; UI shows minutes.
+                if (_byId('video-slskd-download-timeout')) _byId('video-slskd-download-timeout').value = Math.round((d.download_timeout != null ? d.download_timeout : 600) / 60);
+                if (_byId('video-slskd-auto-clear')) _byId('video-slskd-auto-clear').checked = d.auto_clear_searches !== false;
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function _num(id, dflt) { var el = _byId(id); var v = el ? parseInt(el.value, 10) : NaN; return Number.isFinite(v) ? v : dflt; }
+
+    function saveSlskd(silent) {
+        var url = _byId('video-slskd-url');
+        if (!url) return Promise.resolve();   // section not in DOM
+        return fetch(SLSKD_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                slskd_url: url.value,
+                api_key: _byId('video-slskd-api-key') ? _byId('video-slskd-api-key').value : '',
+                search_timeout: _num('video-slskd-search-timeout', 60),
+                search_timeout_buffer: _num('video-slskd-search-timeout-buffer', 15),
+                search_min_delay_seconds: _num('video-slskd-search-min-delay', 0),
+                min_peer_upload_speed: _num('video-slskd-min-peer-speed', 0),
+                max_peer_queue: _num('video-slskd-max-peer-queue', 0),
+                download_timeout: _num('video-slskd-download-timeout', 10) * 60,   // minutes → seconds
+                auto_clear_searches: _byId('video-slskd-auto-clear') ? _byId('video-slskd-auto-clear').checked : true,
+            })
+        }).then(function () { if (!silent) toast('slskd settings saved (shared with Music)', 'success'); })
+          .catch(function () { /* ignore */ });
+    }
+
+    function wireSlskd() {
+        var ids = ['video-slskd-url', 'video-slskd-api-key', 'video-slskd-search-timeout',
+            'video-slskd-search-timeout-buffer', 'video-slskd-search-min-delay',
+            'video-slskd-min-peer-speed', 'video-slskd-max-peer-queue',
+            'video-slskd-download-timeout', 'video-slskd-auto-clear'];
+        ids.forEach(function (id) {
+            var el = _byId(id);
+            if (el && !el._vsWired) { el._vsWired = true; el.addEventListener('change', function () { saveSlskd(true); }); }
+        });
     }
 
     function wireDownloads() {
@@ -552,6 +615,8 @@
         wireDownloads();
         loadQuality();
         wireQuality();
+        loadSlskd();
+        wireSlskd();
     }
 
     function init() {
@@ -621,7 +686,8 @@
             if (!e.target.closest('#save-settings')) return;
             e.preventDefault();
             e.stopImmediatePropagation();
-            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true), saveDownloads(true), saveQuality(true)])
+            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true),
+                         saveDownloads(true), saveQuality(true), saveSlskd(true)])
                 .then(function () { toast('Settings saved', 'success'); })
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);

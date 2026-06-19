@@ -27,6 +27,23 @@ logger = get_logger("video_api.downloads")
 # Video-specific path keys (vs. the shared connection settings).
 _PATH_KEYS = ("download_path", "transfer_path")
 
+# slskd CONNECTION settings genuinely SHARED with music — one slskd instance serves
+# both sides, so these live in the app-wide config_manager (soulseek.*), NOT video.db.
+# Deliberately excludes the music download/transfer PATHS and source mode/quality —
+# those are video-specific (stored in video.db). Maps the video field name -> the
+# shared config key + default. (config_manager is shared app config, not music code.)
+_SLSKD_KEYS = {
+    "slskd_url": ("soulseek.slskd_url", "http://localhost:5030"),
+    "api_key": ("soulseek.api_key", ""),
+    "search_timeout": ("soulseek.search_timeout", 60),
+    "search_timeout_buffer": ("soulseek.search_timeout_buffer", 15),
+    "search_min_delay_seconds": ("soulseek.search_min_delay_seconds", 0),
+    "min_peer_upload_speed": ("soulseek.min_peer_upload_speed", 0),
+    "max_peer_queue": ("soulseek.max_peer_queue", 0),
+    "download_timeout": ("soulseek.download_timeout", 600),   # seconds (UI shows minutes)
+    "auto_clear_searches": ("soulseek.auto_clear_searches", True),
+}
+
 
 def register_routes(bp):
     @bp.route("/downloads/config", methods=["GET"])
@@ -62,3 +79,19 @@ def register_routes(bp):
         from core.video.quality_profile import save
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
+
+    @bp.route("/downloads/slskd", methods=["GET"])
+    def video_slskd_config():
+        # SHARED with music — same slskd instance. Reads the app-wide config_manager.
+        from config.settings import config_manager
+        return jsonify({k: config_manager.get(cfg, default)
+                        for k, (cfg, default) in _SLSKD_KEYS.items()})
+
+    @bp.route("/downloads/slskd", methods=["POST"])
+    def video_slskd_config_save():
+        from config.settings import config_manager
+        body = request.get_json(silent=True) or {}
+        for k, (cfg, _default) in _SLSKD_KEYS.items():
+            if k in body:
+                config_manager.set(cfg, body.get(k))
+        return jsonify({"status": "saved", "shared": True})

@@ -404,6 +404,46 @@ def test_quality_profile_endpoint_roundtrips(tmp_path):
         videoapi._video_db = None
 
 
+def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
+    import api.video as videoapi
+    import config.settings as cfg
+    from database.video_database import VideoDatabase
+
+    class _Cfg:
+        def __init__(self):
+            self._d = {}
+
+        def get(self, key, default=None):
+            return self._d.get(key, default)
+
+        def set(self, key, value):
+            self._d[key] = value
+
+    fake = _Cfg()
+    monkeypatch.setattr(cfg, "config_manager", fake, raising=False)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        d = client.get("/api/video/downloads/slskd").get_json()
+        assert d["slskd_url"] == "http://localhost:5030" and d["search_timeout"] == 60
+        # Writes the SHARED soulseek.* keys (so the music side sees the same slskd).
+        client.post("/api/video/downloads/slskd",
+                    json={"slskd_url": "http://nas:5030", "search_timeout": 90,
+                          "auto_clear_searches": False})
+        assert fake.get("soulseek.slskd_url") == "http://nas:5030"
+        assert fake.get("soulseek.search_timeout") == 90
+        assert fake.get("soulseek.auto_clear_searches") is False
+        # NOT the video-specific paths (those live in video.db, never config_manager).
+        assert fake.get("soulseek.download_path") is None
+        assert client.get("/api/video/downloads/slskd").get_json()["slskd_url"] == "http://nas:5030"
+    finally:
+        videoapi._video_db = None
+
+
 def test_video_api_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "api" / "video"
     for py in base.glob("*.py"):
