@@ -118,7 +118,8 @@ def register_routes(bp):
         want_season, want_episode = _int(body.get("season")), _int(body.get("episode"))
         profile = load_profile(get_video_db())
         raw = mock_search(scope, title, year=body.get("year"), season=want_season,
-                          episode=want_episode, season_end=_int(body.get("season_end")))
+                          episode=want_episode, season_end=_int(body.get("season_end")),
+                          source=body.get("source"))
 
         results = []
         for hit in raw:

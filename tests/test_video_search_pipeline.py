@@ -64,6 +64,16 @@ def test_mock_search_scopes_are_shaped_right():
 
 
 def test_mock_search_is_deterministic():
-    a = mock_search("episode", "Severance", season=1, episode=4)
-    b = mock_search("episode", "Severance", season=1, episode=4)
+    a = mock_search("episode", "Severance", season=1, episode=4, source="torrent")
+    b = mock_search("episode", "Severance", season=1, episode=4, source="torrent")
     assert a == b   # no RNG → stable across calls/reloads
+
+
+def test_mock_search_differs_by_source():
+    sl = mock_search("movie", "The Matrix", year=1999, source="soulseek")
+    to = mock_search("movie", "The Matrix", year=1999, source="usenet")
+    # different sources → different release sets (not the identical list)
+    assert [h["title"] for h in sl] != [h["title"] for h in to]
+    # soulseek drops the top remux; usenet drops the cam — both realistic
+    assert not any("REMUX" in h["title"] for h in sl)
+    assert not any("HDCAM" in h["title"] for h in to)
