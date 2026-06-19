@@ -13,7 +13,7 @@ import pytest
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
     RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
-    AniListWorker, DeArrowWorker, VideoBackfillWorker, _RateLimited, _Unauthorized,
+    AniListWorker, DeArrowWorker, WikidataWorker, VideoBackfillWorker, _RateLimited, _Unauthorized,
     build_backfill_workers,
 )
 
@@ -180,7 +180,46 @@ def test_get_stats_shape_matches_matcher_worker(db):
 
 def test_build_backfill_workers_set(db):
     assert set(build_backfill_workers(db)) == {
-        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze", "anilist", "dearrow"}
+        "ryd", "sponsorblock", "fanart", "opensubtitles",
+        "trakt", "tvmaze", "anilist", "dearrow", "wikidata"}
+
+
+# ── Wikidata (no-key, official-website lookup by imdb id) ─────────────────────
+def test_wikidata_queue_keyed_on_imdb(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "Fight Club", "year": 1999})
+    assert db.backfill_next("wikidata") is None              # no imdb id → not queued
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt0137523' WHERE id=?", (mid,))
+        c.commit()
+    assert db.backfill_next("wikidata")["kind"] == "movie"
+
+
+def test_wikidata_worker_records_url(db):
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1' WHERE id=?", (mid,))
+        c.commit()
+    w = WikidataWorker(db)
+    assert w.enabled is True
+    w.fetch = lambda item: {"wikidata_url": "https://example.com"}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT wikidata_url, wikidata_status FROM movies WHERE id=?", (mid,)).fetchone()
+    assert r["wikidata_url"] == "https://example.com" and r["wikidata_status"] == "ok"
+
+
+def test_wikidata_fetch_two_step_lookup(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+
+    def fake(url, params=None, headers=None, timeout=12):
+        if (params or {}).get("action") == "query":
+            return {"query": {"search": [{"title": "Q190050"}]}}
+        return {"entities": {"Q190050": {"claims": {"P856": [
+            {"mainsnak": {"datavalue": {"value": "https://officialsite.example"}}}]}}}}
+
+    monkeypatch.setattr(bf, "_http_get_json", fake)
+    out = WikidataWorker(db).fetch({"kind": "movie", "imdb_id": "tt0137523"})
+    assert out == {"wikidata_url": "https://officialsite.example"}
 
 
 # ── DeArrow (no-key, YouTube crowd titles) ────────────────────────────────────

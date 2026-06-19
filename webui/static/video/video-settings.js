@@ -228,6 +228,8 @@
                 if (tvm && d.tvmaze_enabled != null) tvm.checked = !!d.tvmaze_enabled;
                 var anl = document.getElementById('video-anilist-enabled');
                 if (anl && d.anilist_enabled != null) anl.checked = !!d.anilist_enabled;
+                var wkd = document.getElementById('video-wikidata-enabled');
+                if (wkd && d.wikidata_enabled != null) wkd.checked = !!d.wikidata_enabled;
                 var ap = document.getElementById('video-billboard-autoplay');
                 if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
                 var wr = document.getElementById('video-watch-region');
@@ -261,6 +263,7 @@
         var dea = document.getElementById('video-dearrow-enabled');
         var tvm = document.getElementById('video-tvmaze-enabled');
         var anl = document.getElementById('video-anilist-enabled');
+        var wkd = document.getElementById('video-wikidata-enabled');
         return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -275,6 +278,7 @@
                 dearrow_enabled: dea ? dea.checked : true,
                 tvmaze_enabled: tvm ? tvm.checked : true,
                 anilist_enabled: anl ? anl.checked : false,
+                wikidata_enabled: wkd ? wkd.checked : true,
             })
         }).then(function () { if (!silent) toast('API keys saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -319,7 +323,8 @@
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
             'fanart-api-key', 'opensubtitles-api-key', 'trakt-api-key',
             'video-ryd-enabled', 'video-sponsorblock-enabled', 'video-dearrow-enabled',
-            'video-tvmaze-enabled', 'video-anilist-enabled'].forEach(function (id) {
+            'video-tvmaze-enabled', 'video-anilist-enabled',
+            'video-wikidata-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });
         });

@@ -744,9 +744,66 @@ class DeArrowWorker(VideoBackfillWorker):
         return self.db.youtube_enrich_breakdown("dearrow_status")
 
 
+# ── Wikidata (no key) — the title's official website ──────────────────────────
+class WikidataWorker(VideoBackfillWorker):
+    API = "https://www.wikidata.org/w/api.php"
+
+    def __init__(self, db):
+        super().__init__(db, "wikidata", "Wikidata", interval=1.0)
+
+    def _enabled(self):
+        return str(self.db.get_setting("wikidata_enabled") or "1") != "0"
+
+    def _entity_for_imdb(self, imdb):
+        s = _http_get_json(self.API, {"action": "query", "list": "search",
+                                      "srsearch": "haswbstatement:P345=" + imdb,
+                                      "srlimit": 1, "format": "json"})
+        hits = (((s or {}).get("query") or {}).get("search") or [])
+        return hits[0].get("title") if hits else None
+
+    def test(self):
+        try:
+            ok = self._entity_for_imdb("tt0137523") is not None  # Fight Club
+            return (ok, "Wikidata reachable" if ok else "No response")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("wikidata")
+
+    def fetch(self, item):
+        imdb = str(item.get("imdb_id") or "").strip()
+        if not imdb.lower().startswith("tt"):
+            return None
+        qid = self._entity_for_imdb(imdb)
+        if not qid:
+            return None
+        e = _http_get_json(self.API, {"action": "wbgetentities", "ids": qid,
+                                      "props": "claims", "format": "json"})
+        claims = (((e or {}).get("entities") or {}).get(qid) or {}).get("claims") or {}
+        for c in (claims.get("P856") or []):   # P856 = official website
+            url = ((c.get("mainsnak") or {}).get("datavalue") or {}).get("value")
+            if isinstance(url, str) and url.startswith("http"):
+                return {"wikidata_url": url}
+        return None
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("wikidata", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("wikidata", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("wikidata", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("wikidata")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
         TraktWorker(db), TVmazeWorker(db), AniListWorker(db), DeArrowWorker(db),
+        WikidataWorker(db),
     )}

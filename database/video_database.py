@@ -99,6 +99,10 @@ _BACKFILL = {
         "show": ("shows", "anilist_status", "anilist_attempted",
                  "title IS NOT NULL AND title <> ''"),
     },
+    "wikidata": {  # official website lookup by imdb id (movies + shows)
+        "movie": ("movies", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
+        "show": ("shows", "wikidata_status", "wikidata_attempted", "imdb_id IS NOT NULL"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -109,6 +113,7 @@ _BACKFILL_COLS = {
     "trakt": {"trakt_rating", "trakt_votes"},
     "tvmaze": {"tvmaze_rating"},
     "anilist": {"anilist_score"},
+    "wikidata": {"wikidata_url"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -176,6 +181,11 @@ _COLUMN_MIGRATIONS = [
     # AniList anime average score backfill (TV only, 0-100)
     ("shows", "anilist_score", "INTEGER"),
     ("shows", "anilist_status", "TEXT"), ("shows", "anilist_attempted", "TEXT"),
+    # Wikidata official-website backfill (movies + shows)
+    ("movies", "wikidata_url", "TEXT"),
+    ("movies", "wikidata_status", "TEXT"), ("movies", "wikidata_attempted", "TEXT"),
+    ("shows", "wikidata_url", "TEXT"),
+    ("shows", "wikidata_status", "TEXT"), ("shows", "wikidata_attempted", "TEXT"),
     # DeArrow crowd-sourced better titles for cached YouTube videos
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),
@@ -1625,6 +1635,7 @@ class VideoDatabase:
             "trakt_rating": show["trakt_rating"], "trakt_votes": show["trakt_votes"],
             "tvmaze_rating": show["tvmaze_rating"],
             "anilist_score": show["anilist_score"],
+            "wikidata_url": show["wikidata_url"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),
@@ -2674,6 +2685,7 @@ class VideoDatabase:
             "rating": m["rating"], "rating_critic": m["rating_critic"], "genres": genres,
             "imdb_rating": m["imdb_rating"], "rt_rating": m["rt_rating"], "metacritic": m["metacritic"],
             "trakt_rating": m["trakt_rating"], "trakt_votes": m["trakt_votes"],
+            "wikidata_url": m["wikidata_url"],
             "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": m["tmdb_id"], "imdb_id": m["imdb_id"],
             "has_poster": bool(m["poster_url"]), "has_backdrop": bool(m["backdrop_url"]),
