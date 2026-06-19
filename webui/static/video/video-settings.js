@@ -452,27 +452,27 @@
             });
             resHost.innerHTML = keys.map(function (k, i) {
                 var r = p.resolutions[k];
-                return '<div class="vq-row' + (r.enabled ? '' : ' vq-row--off') + '">' +
-                    '<span class="vq-arrows">' +
-                    '<button type="button" class="vq-arrow" data-vq-res-move="' + k + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
-                    '<button type="button" class="vq-arrow" data-vq-res-move="' + k + '" data-dir="1"' + (i === keys.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                return '<div class="hybrid-source-item' + (r.enabled ? '' : ' disabled') + '">' +
+                    '<span class="hybrid-source-arrows">' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-res-move="' + k + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-res-move="' + k + '" data-dir="1"' + (i === keys.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
                     '</span>' +
-                    '<span class="vq-row-name">' + (RES_LABEL[k] || k) + '</span>' +
-                    '<span class="vq-row-prio">' + (i + 1) + '</span>' +
-                    '<label class="vq-toggle"><input type="checkbox" data-vq-res-toggle="' + k + '"' + (r.enabled ? ' checked' : '') + '><span class="vq-toggle-track"></span></label>' +
+                    '<span class="hybrid-source-name">' + (RES_LABEL[k] || k) + '</span>' +
+                    '<span class="hybrid-source-priority">' + (i + 1) + '</span>' +
+                    '<label class="hybrid-source-toggle"><input type="checkbox" data-vq-res-toggle="' + k + '"' + (r.enabled ? ' checked' : '') + '><span class="toggle-track"></span></label>' +
                     '</div>';
             }).join('');
         }
         var srcHost = document.getElementById('vq-source-rows');
         if (srcHost) {
             srcHost.innerHTML = p.source_priority.map(function (s, i) {
-                return '<div class="vq-row">' +
-                    '<span class="vq-arrows">' +
-                    '<button type="button" class="vq-arrow" data-vq-src-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + '>▲</button>' +
-                    '<button type="button" class="vq-arrow" data-vq-src-move="' + s + '" data-dir="1"' + (i === p.source_priority.length - 1 ? ' disabled' : '') + '>▼</button>' +
+                return '<div class="hybrid-source-item">' +
+                    '<span class="hybrid-source-arrows">' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-src-move="' + s + '" data-dir="-1"' + (i === 0 ? ' disabled' : '') + ' title="Move up">▲</button>' +
+                    '<button type="button" class="hybrid-arrow-btn" data-vq-src-move="' + s + '" data-dir="1"' + (i === p.source_priority.length - 1 ? ' disabled' : '') + ' title="Move down">▼</button>' +
                     '</span>' +
-                    '<span class="vq-row-name">' + (SRC_LABEL[s] || s) + '</span>' +
-                    '<span class="vq-row-prio">' + (i + 1) + '</span>' +
+                    '<span class="hybrid-source-name">' + (SRC_LABEL[s] || s) + '</span>' +
+                    '<span class="hybrid-source-priority">' + (i + 1) + '</span>' +
                     '</div>';
             }).join('');
         }
