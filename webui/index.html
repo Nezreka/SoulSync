@@ -5631,6 +5631,13 @@
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label">
+                                                <input type="checkbox" id="single-to-album-enabled">
+                                                Match singles to their parent album
+                                            </label>
+                                            <small class="settings-hint">When a track matches a single release, look up the album that contains it and tag it as that album — so every song in an album gets the same (album) cover instead of some getting the single's art. Off by default: adds an extra metadata lookup per single-matched track.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
                                                 <input type="checkbox" id="lrclib-enabled" checked>
                                                 Generate .lrc lyrics files (LRClib)
                                             </label>
@@ -6754,49 +6761,6 @@
                             </div>
                         </div>
 
-                        <div class="tool-card" id="quality-scanner-card">
-                            <div class="tool-card-header">
-                                <h4 class="tool-card-title">Quality Scanner</h4>
-                                <button class="tool-help-button" data-tool="quality-scanner"
-                                    title="Learn more about this tool">?</button>
-                            </div>
-                            <p class="tool-card-info">Scan library for tracks below quality preferences</p>
-                            <div class="tool-card-stats">
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Processed:</span>
-                                    <span class="stat-item-value" id="quality-stat-processed">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Quality Met:</span>
-                                    <span class="stat-item-value" id="quality-stat-met">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Low Quality:</span>
-                                    <span class="stat-item-value" id="quality-stat-low">0</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-item-label">Matched:</span>
-                                    <span class="stat-item-value" id="quality-stat-matched">0</span>
-                                </div>
-                            </div>
-                            <div class="tool-card-controls">
-                                <select id="quality-scan-scope">
-                                    <option value="watchlist">Watchlist Artists Only</option>
-                                    <option value="all">All Library Tracks</option>
-                                </select>
-                                <button id="quality-scan-button">Scan Library</button>
-                            </div>
-                            <div class="tool-card-progress-section">
-                                <p class="progress-phase-label" id="quality-phase-label">Ready to scan</p>
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-fill" id="quality-progress-bar" style="width: 0%;">
-                                    </div>
-                                </div>
-                                <p class="progress-details-label" id="quality-progress-label">0 / 0 tracks scanned
-                                    (0.0%)</p>
-                            </div>
-                        </div>
-
                         <div class="tool-card" id="reconcile-ids-card">
                             <div class="tool-card-header">
                                 <h4 class="tool-card-title">Import IDs from File Tags</h4>
@@ -7666,6 +7630,50 @@
                             Add to Wishlist
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Re-identify Track Modal (#889) -->
+    <div class="modal-overlay hidden" id="reid-modal-overlay" onclick="if(event.target===this)closeReidentifyModal()">
+        <div class="reid-modal" id="reid-modal">
+            <div class="reid-hero">
+                <div class="reid-hero-decor">
+                    <div class="reid-hero-bg" id="reid-hero-bg"></div>
+                    <div class="reid-hero-overlay"></div>
+                </div>
+                <span class="reid-close" onclick="closeReidentifyModal()">&times;</span>
+                <div class="reid-hero-content">
+                    <div class="reid-hero-art" id="reid-hero-art"></div>
+                    <div class="reid-hero-meta">
+                        <div class="reid-hero-eyebrow">Re-identify track</div>
+                        <div class="reid-hero-title" id="reid-hero-title">Track</div>
+                        <div class="reid-hero-sub" id="reid-hero-sub"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reid-tabs" id="reid-tabs"></div>
+
+            <div class="reid-search">
+                <svg class="reid-search-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+                <input type="text" id="reid-search-input" class="reid-search-input"
+                    placeholder="Search for the track…" onkeydown="if(event.key==='Enter')runReidentifySearch()" />
+                <button class="reid-search-btn" id="reid-search-btn" onclick="runReidentifySearch()">Search</button>
+            </div>
+
+            <div class="reid-results" id="reid-results"></div>
+
+            <div class="reid-footer">
+                <label class="reid-replace" title="When on, the original file is deleted after the track is re-filed under the new release.">
+                    <input type="checkbox" id="reid-replace" checked />
+                    <span class="reid-replace-box"></span>
+                    <span class="reid-replace-text">Replace the original file <em>(recommended)</em></span>
+                </label>
+                <div class="reid-footer-actions">
+                    <button class="btn btn--secondary" onclick="closeReidentifyModal()">Cancel</button>
+                    <button class="btn btn--primary" id="reid-confirm-btn" disabled onclick="confirmReidentify()">Re-identify</button>
                 </div>
             </div>
         </div>

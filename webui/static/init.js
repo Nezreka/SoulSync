@@ -1116,6 +1116,15 @@ function updateProfileIndicator() {
     const statusSection = document.querySelector('.status-section--clickable');
     if (statusSection) statusSection.classList.toggle('status-section--locked', !currentProfile.is_admin);
 
+    // My Accounts (per-profile streaming OAuth) and My Settings (per-profile
+    // server library) are inert for admin — admin uses the global app account
+    // for every service and the full Settings page. Hide both for admin; keep
+    // them for non-admins, who actually get a connect/library UI.
+    const myAccountsBtn = document.getElementById('my-accounts-btn');
+    const personalSettingsBtn = document.getElementById('personal-settings-btn');
+    if (myAccountsBtn) myAccountsBtn.style.display = currentProfile.is_admin ? 'none' : '';
+    if (personalSettingsBtn) personalSettingsBtn.style.display = currentProfile.is_admin ? 'none' : '';
+
     indicator.onclick = async () => {
         const res = await fetch('/api/profiles');
         const data = await res.json();

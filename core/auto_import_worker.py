@@ -660,8 +660,13 @@ class AutoImportWorker:
             auto_process = self._config_manager.get('auto_import.auto_process', True)
 
         try:
-            # Phase 3: Identify
-            identification = self._identify_folder(candidate)
+            # Phase 3: Identify.
+            # Re-identify (#889): if the user designated this exact file's release in
+            # the Re-identify modal, a hint short-circuits the guessing — we match
+            # straight against the chosen album. No hint → byte-identical to before.
+            rematch_hint, identification = self._resolve_rematch_hint(candidate)
+            if identification is None:
+                identification = self._identify_folder(candidate)
             if not identification:
                 self._record_result(candidate, 'needs_identification', 0.0,
                                     error_message='Could not identify album from tags, folder name, or fingerprint')
@@ -690,7 +695,10 @@ class AutoImportWorker:
             high_conf_matches = [m for m in match_result.get('matches', []) if m['confidence'] >= 0.8]
             has_strong_individual_matches = len(high_conf_matches) > 0
 
-            if (confidence >= threshold or has_strong_individual_matches) and auto_process:
+            # A re-identify is an explicit user choice — let it auto-process like a
+            # strong match (still gated on the global auto_process preference).
+            if (confidence >= threshold or has_strong_individual_matches
+                    or rematch_hint is not None) and auto_process:
                 # Phase 5: Auto-process — insert an in-progress row
                 # so the UI sees the import the moment it starts,
                 # then update it with the final status when done.
@@ -709,6 +717,13 @@ class AutoImportWorker:
                 confidence = max(confidence, effective_conf)
                 if success:
                     self._bump_stat('auto_processed')
+                    # Re-identify (#889): only NOW that the new home exists do we
+                    # consume the hint and (if replace was chosen) delete the old
+                    # row + file — so a failed import never loses the original. Pass
+                    # the landing paths so we never delete a file the re-import landed
+                    # at the SAME place (picking the release it's already in).
+                    if rematch_hint is not None:
+                        self._finalize_rematch_hint(rematch_hint, getattr(candidate, '_reid_final_paths', None))
                 else:
                     self._bump_stat('failed')
 
@@ -1002,6 +1017,75 @@ class AutoImportWorker:
             return row and row['status'] in ('completed', 'pending_review', 'needs_identification', 'failed', 'rejected')
         except Exception:
             return False
+
+    # ── Re-identify hints (#889) ──
+
+    def _resolve_rematch_hint(self, candidate: 'FolderCandidate'):
+        """If this staged file carries a user-designated re-identify hint, return
+        ``(hint, identification)`` so matching skips the guessing tiers; otherwise
+        ``(None, None)`` and the caller falls back to normal identification.
+
+        Fail-safe: ANY error (no table, DB hiccup) returns ``(None, None)`` so a
+        re-identify problem can never break ordinary auto-import. Only single-file
+        candidates are eligible — a re-identify always stages exactly one track."""
+        try:
+            files = candidate.audio_files or []
+            if len(files) != 1:
+                return None, None
+            from core.imports.rematch_hints import (
+                build_identification_from_hint,
+                find_hint_for_file,
+                quick_file_signature,
+            )
+            file_path = files[0]
+            sig = quick_file_signature(file_path)
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                hint = find_hint_for_file(cursor, file_path, sig)
+            finally:
+                conn.close()
+            if hint is None:
+                return None, None
+            logger.info("[Auto-Import] Re-identify hint for %s → %s '%s' (%s)",
+                        candidate.name, hint.album_type or 'release',
+                        hint.album_name or '?', hint.source)
+            return hint, build_identification_from_hint(hint)
+        except Exception as e:
+            logger.debug("[Auto-Import] rematch-hint lookup skipped: %s", e)
+            return None, None
+
+    def _finalize_rematch_hint(self, hint, new_paths=None) -> None:
+        """Post-success: delete the replaced library row + file (if the user chose
+        replace) and consume the hint so it's single-use. ``new_paths`` are where the
+        re-import landed — passed through so the same-home guard never deletes a file
+        the import wrote at the old location. Best-effort — a cleanup failure is
+        logged, never raised, since the re-import already succeeded."""
+        try:
+            from core.imports.rematch_hints import consume_hint, delete_replaced_track
+
+            def _resolve_old(stored):
+                # The old row's path is a STORED path (Docker/media-server view) — map
+                # it to a file this process can actually unlink, same as everywhere else.
+                try:
+                    from core.library.path_resolver import resolve_library_file_path
+                    return resolve_library_file_path(stored, config_manager=getattr(self, '_config_manager', None))
+                except Exception:
+                    return None
+
+            conn = self.database._get_connection()
+            try:
+                cursor = conn.cursor()
+                removed = delete_replaced_track(cursor, hint.replace_track_id,
+                                                resolve_fn=_resolve_old, new_paths=new_paths)
+                consume_hint(cursor, hint.id)
+                conn.commit()
+            finally:
+                conn.close()
+            if removed:
+                logger.info("[Auto-Import] Re-identify replaced old track — removed %s", removed)
+        except Exception as e:
+            logger.warning("[Auto-Import] rematch-hint finalize failed (import still OK): %s", e)
 
     # ── Identification ──
 
@@ -1431,8 +1515,11 @@ class AutoImportWorker:
 
     def _match_tracks(self, candidate: FolderCandidate, identification: Dict) -> Optional[Dict]:
         """Match staging files to the identified album's tracklist."""
-        # Singles: no album tracklist to match against — the file IS the match
-        if candidate.is_single or identification.get('is_single'):
+        # Singles: no album tracklist to match against — the file IS the match.
+        # force_album_match (set by a re-identify hint) overrides this: even a lone
+        # staged file is matched INTO the chosen album, so it inherits the album's
+        # year / track number / art instead of the bare singles stub (#889).
+        if not identification.get('force_album_match') and (candidate.is_single or identification.get('is_single')):
             conf = identification.get('identification_confidence', 0.7)
             track_data = {
                 'name': identification.get('track_name', identification.get('album_name', '')),
@@ -1600,6 +1687,7 @@ class AutoImportWorker:
 
         processed = 0
         errors = []
+        reid_final_paths = []   # #889: where the pipeline landed each file (same-home guard)
         all_matches = list(match_result.get('matches', []))
 
         # Album total duration — sum of every matched track's duration.
@@ -1780,6 +1868,11 @@ class AutoImportWorker:
 
                 self._process_callback(context_key, context, file_path)
                 processed += 1
+                # Capture where the pipeline actually landed the file (#889 same-home
+                # guard) — the pipeline writes it back into the mutable context.
+                _landed = context.get('_final_processed_path')
+                if _landed:
+                    reid_final_paths.append(_landed)
                 logger.info(f"[Auto-Import] Processed: {track_number}. {track_name}")
 
             except Exception as e:
@@ -1802,6 +1895,13 @@ class AutoImportWorker:
                 })
             except Exception as e:
                 logger.debug("automation emit failed: %s", e)
+
+        # Stash landing paths on the candidate so _finalize_rematch_hint can avoid
+        # deleting a file the re-import landed at the SAME place (#889).
+        try:
+            candidate._reid_final_paths = reid_final_paths
+        except Exception as e:
+            logger.debug("could not stash reid final paths: %s", e)
 
         return processed > 0
 

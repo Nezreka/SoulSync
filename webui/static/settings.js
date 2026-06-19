@@ -45,6 +45,9 @@ function debouncedAutoSaveSettings() {
     // fields on load — those aren't user edits and must not trigger a full
     // save (which re-initializes every backend service client).
     if (window._suppressSettingsAutoSave) return;
+    // #879: never auto-save while the last settings load failed — the form is
+    // showing defaults, not the real config, so saving would wipe it.
+    if (window._settingsLoadFailed) return;
     // #827: the Logs tab has no savable settings — its live-viewer controls
     // (source picker, filters, auto-scroll) were tripping the auto-save and
     // flooding app.log with "Settings saved" lines, drowning out the logs the
@@ -976,6 +979,18 @@ async function loadSettingsData() {
         const response = await fetch(API.settings);
         const settings = await response.json();
 
+        // #879: a failed GET /api/settings returns an error body (e.g. {"error":
+        // "..."} on a 500), NOT real settings. Populating from it blanks every
+        // field to its default ('settings.spotify?.x || ""'), and the next
+        // (auto)save then overwrites the user's real config. Abort BEFORE
+        // touching any field and flag it so saves stay blocked until a good load.
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) {
+            window._settingsLoadFailed = true;
+            throw new Error('settings load failed (HTTP ' + response.status + '): ' +
+                ((settings && settings.error) || 'unexpected response'));
+        }
+        window._settingsLoadFailed = false;  // good load → saving is safe again
+
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
         document.getElementById('spotify-client-secret').value = settings.spotify?.client_secret || '';
@@ -1217,6 +1232,7 @@ async function loadSettingsData() {
         document.getElementById('embed-album-art').checked = settings.metadata_enhancement?.embed_album_art !== false;
         document.getElementById('cover-art-download').checked = settings.metadata_enhancement?.cover_art_download !== false;
         document.getElementById('prefer-caa-art').checked = settings.metadata_enhancement?.prefer_caa_art === true;
+        document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
@@ -1460,7 +1476,10 @@ async function loadSettingsData() {
 
     } catch (error) {
         console.error('Error loading settings:', error);
-        showToast('Failed to load settings', 'error');
+        // #879: any load failure → block saves so a blank/partial form can't be
+        // written over the real config. Cleared on the next successful load.
+        window._settingsLoadFailed = true;
+        showToast('Failed to load settings — reload the page before saving (your saved config is untouched)', 'error');
     }
 }
 
@@ -2799,6 +2818,16 @@ function _getTagConfig(path) {
 }
 
 async function saveSettings(quiet = false) {
+    // #879: refuse to save if the settings never loaded successfully — the form
+    // is showing defaults, not the user's real config, so saving would wipe it.
+    // Cleared automatically on the next successful load (reload the page).
+    if (window._settingsLoadFailed) {
+        if (!quiet && typeof showToast === 'function') {
+            showToast("Settings didn't load — reload the page before saving (your config is untouched)", 'error');
+        }
+        return;
+    }
+
     // Validate file organization templates before saving
     const validationErrors = validateFileOrganizationTemplates();
     if (validationErrors.length > 0) {
@@ -3010,6 +3039,7 @@ async function saveSettings(quiet = false) {
             cover_art_download: document.getElementById('cover-art-download').checked,
             prefer_caa_art: document.getElementById('prefer-caa-art').checked,
             album_art_order: getArtOrder(),
+            single_to_album: document.getElementById('single-to-album-enabled').checked,
             lrclib_enabled: document.getElementById('lrclib-enabled').checked,
             tags: {
                 quality_tag: _getTagConfig('metadata_enhancement.tags.quality_tag'),
@@ -4240,13 +4270,11 @@ async function testDeezerDownloadConnection() {
     statusEl.textContent = 'Checking...';
     statusEl.style.color = '#aaa';
     try {
-        // Save the ARL first so the backend can use it
-        const arl = document.getElementById('deezer-download-arl')?.value || '';
-        if (!arl) {
-            statusEl.textContent = 'No ARL token provided';
-            statusEl.style.color = '#ff9800';
-            return;
-        }
+        let arl = document.getElementById('deezer-download-arl')?.value || '';
+        // An untouched field holds the redaction sentinel (a token IS saved) —
+        // send empty so the backend tests the SAVED token instead of the mask,
+        // which the source would reject (#870).
+        if (arl === REDACTED_SECRET_SENTINEL) arl = '';
         const resp = await fetch('/api/deezer-download/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

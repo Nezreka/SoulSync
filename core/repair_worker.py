@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from difflib import SequenceMatcher
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.metadata_service import (
@@ -585,13 +585,29 @@ class RepairWorker:
 
         logger.info("Repair worker thread finished")
 
+    @staticmethod
+    def _hours_since(finished_at_iso: str, now_utc: datetime) -> float:
+        """Hours between a stored ``finished_at`` and ``now_utc``, both in UTC.
+
+        ``finished_at`` is written by SQLite's CURRENT_TIMESTAMP, which is ALWAYS
+        UTC (and naive). #885: the scheduler compared it against ``datetime.now()``
+        (naive LOCAL), so the local↔UTC offset leaked into the elapsed time. For a
+        zone AHEAD of UTC (Australia/Sydney = +11) every job looked ~11h stale and
+        fired every poll; behind UTC (the Americas) it just waited too long. Parse
+        the naive timestamp AS UTC and subtract a UTC ``now`` so scheduling is
+        timezone-independent."""
+        dt = datetime.fromisoformat(finished_at_iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (now_utc - dt).total_seconds() / 3600
+
     def _pick_next_job(self) -> Optional[str]:
         """Pick the next job to run based on staleness priority.
 
         Returns job_id of the stalest job whose interval has elapsed,
         or None if nothing is due.
         """
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         best_job_id = None
         best_staleness = -1
 
@@ -613,8 +629,7 @@ class RepairWorker:
                 continue
 
             try:
-                last_finished = datetime.fromisoformat(last_run['finished_at'])
-                elapsed_hours = (now - last_finished).total_seconds() / 3600
+                elapsed_hours = self._hours_since(last_run['finished_at'], now)
 
                 if elapsed_hours < interval_hours:
                     continue  # Not due yet
@@ -982,6 +997,7 @@ class RepairWorker:
             'quality_upgrade': self._fix_quality_upgrade,
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
+            'quality_upgrade': self._fix_quality_upgrade,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1005,6 +1021,36 @@ class RepairWorker:
                 return {'success': True, 'action': 'added_to_wishlist',
                         'message': f"Added '{track_name}' to wishlist"}
             return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist)"}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
+        """Add the matched higher-quality version to the wishlist (with album
+        context). Applying a Quality Upgrade finding is the user-approved step
+        that the old auto-acting Quality Scanner did without review."""
+        track_data = details.get('matched_track_data')
+        if not track_data:
+            return {'success': False, 'error': 'No matched track in finding'}
+        try:
+            success = self.db.add_to_wishlist(
+                spotify_track_data=track_data,
+                failure_reason=f"Quality upgrade — current file is {details.get('current_format', 'low quality')}",
+                source_type='repair',
+                source_info={
+                    'job': 'quality_upgrade',
+                    'original_file_path': file_path,
+                    'original_format': details.get('current_format'),
+                    'original_bitrate': details.get('current_bitrate'),
+                    'album_title': details.get('album_title'),
+                    'match_confidence': details.get('match_confidence'),
+                    'provider': details.get('provider'),
+                },
+            )
+            track_name = track_data.get('name', '?')
+            if success:
+                return {'success': True, 'action': 'added_to_wishlist',
+                        'message': f"Added '{track_name}' to wishlist for re-download"}
+            return {'success': False, 'error': f"Could not add '{track_name}' to wishlist (may already exist or be blocklisted)"}
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
@@ -1522,6 +1568,7 @@ class RepairWorker:
             resolved,
             junk_files=details.get('junk_files') or [],
             remove_junk=bool(details.get('remove_junk', True)),
+            remove_disposable=bool(details.get('remove_disposable', False)),
             root=self.transfer_folder,
             listdir=os.listdir, isdir=os.path.isdir, islink=os.path.islink,
             remove_file=os.remove, rmdir=os.rmdir,

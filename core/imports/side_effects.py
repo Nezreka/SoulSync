@@ -569,19 +569,22 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # ── Album row: same insert-or-fill-empty-fields shape ──
             album_source_col = source_columns.get("album")
 
-            cursor.execute(
-                "SELECT id FROM albums WHERE id = ? AND server_source = 'soulsync'",
-                (album_id,),
+            # Group by CANONICAL release id when we have one (not just the name
+            # string), so differently-named imports of the SAME release land in
+            # one album row instead of splitting — which left the repair jobs
+            # dressing each split row in its own cover art (Sokhi). Precedence:
+            # name-hash id -> source release id -> (title, artist). Falls back to
+            # the legacy name match, so nothing that grouped before stops now.
+            from core.imports.album_grouping import find_existing_soulsync_album_id
+            existing_album_id = find_existing_soulsync_album_id(
+                cursor, name_key_id=album_id, artist_id=artist_id, album_name=album_name,
+                album_source_col=album_source_col, album_source_id=album_source_id,
             )
-            row = cursor.fetchone()
-            if not row:
-                cursor.execute(
-                    "SELECT id FROM albums WHERE title COLLATE NOCASE = ? AND artist_id = ? AND server_source = 'soulsync' LIMIT 1",
-                    (album_name, artist_id),
-                )
-                row = cursor.fetchone()
-                if row:
-                    album_id = row[0]
+            if existing_album_id is not None:
+                album_id = existing_album_id
+                row = (album_id,)
+            else:
+                row = None
 
             if row:
                 _fill_empty_columns(

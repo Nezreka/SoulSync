@@ -455,11 +455,14 @@ function updateSpotifyEnrichmentStatusFromData(data) {
     const button = document.getElementById('spotify-enrich-button');
     if (!button) return;
 
-    const notAuthenticated = data.authenticated === false;
     const isRateLimited = data.rate_limited === true;
-    // The real API is banned but the worker is still matching via the no-creds
-    // Spotify Free source — treat it as running, not stuck (#798 bridge).
+    // The real API is unauthed/banned but the worker is still matching via the
+    // no-creds Spotify Free source — treat it as running, not stuck (#798/#887).
     const bridgingFree = data.using_free === true;
+    // #887: a no-auth user whose enrichment runs on Spotify Free is NOT "not
+    // authenticated" for status purposes — the worker IS enriching. Only flag
+    // Not Authenticated when Free isn't carrying it.
+    const notAuthenticated = data.authenticated === false && !bridgingFree;
     const rateLimitedStuck = isRateLimited && !bridgingFree;
     // Budget is a real-API cap; when bridging to free it no longer applies, so
     // only treat the budget as a stop when we're NOT serving via free (#798).

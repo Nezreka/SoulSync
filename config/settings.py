@@ -662,7 +662,12 @@ class ConfigManager:
                 # source whose art is smaller is skipped so the next source is
                 # tried — stops a low-res Cover Art Archive upload from winning.
                 # 0 disables the size gate.
-                "min_art_size": 1000
+                "min_art_size": 1000,
+                # When a track matches a SINGLE release, look up the parent ALBUM
+                # that contains it and tag it as that album, so it groups with its
+                # album-mates and gets the album cover (not the single's). Off by
+                # default — it's an extra per-import metadata lookup.
+                "single_to_album": False
             },
             "musicbrainz": {
                 "embed_tags": True
@@ -881,6 +886,20 @@ class ConfigManager:
 
         config[keys[-1]] = value
         self._save_config()
+
+    def resolve_secret(self, key: str, posted: Any) -> str:
+        """Resolve a secret value coming back from the settings UI.
+
+        The UI renders a saved-but-untouched secret as the REDACTED_SENTINEL (shown
+        masked); empty or that sentinel means "use the stored value", while a real
+        string is a genuine new secret. A connection-test endpoint should test the
+        EFFECTIVE secret, not the mask — otherwise testing a saved-but-untouched
+        token sends the sentinel and the source rejects it (#870)."""
+        if isinstance(posted, str):
+            posted = posted.strip()
+        if not posted or posted == self.REDACTED_SENTINEL:
+            return self.get(key, '') or ''
+        return posted
 
     def get_spotify_config(self) -> Dict[str, str]:
         return self.get('spotify', {})

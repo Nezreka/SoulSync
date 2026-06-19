@@ -693,9 +693,17 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # See ``core/imports/track_number.py`` for the resolution
         # chain — pure function, unit-tested in isolation, single
         # place to fix the rule.
-        from core.imports.track_number import resolve_track_number
+        from core.imports.track_number import resolve_track_number, read_embedded_track_number
         track_info_for_resolve = context.get('track_info') if isinstance(context, dict) else None
-        track_number = resolve_track_number(album_info, track_info_for_resolve, file_path)
+        # "Track 01" bug: a single Deezer track is matched via an endpoint
+        # that omits track_position, so the context never carried the real
+        # number. The downloaded file itself does (deemix/source wrote it),
+        # so read it as a source between metadata and the filename guess.
+        embedded_track_number = read_embedded_track_number(file_path)
+        track_number = resolve_track_number(
+            album_info, track_info_for_resolve, file_path,
+            embedded_track_number=embedded_track_number,
+        )
         logger.debug(
             "Final track_number processing: source=%s album_info=%s resolved=%s",
             album_info.get('source', 'unknown'),

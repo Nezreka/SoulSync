@@ -5,9 +5,11 @@ from core.imports.quarantine import (
     approve_quarantine_entry,
     delete_quarantine_entry,
     entry_id_from_quarantined_filename,
+    find_quarantine_siblings,
     get_quarantine_entry_stream_info,
     get_quarantined_source_keys,
     list_quarantine_entries,
+    quarantine_group_key,
     recover_to_staging,
     serialize_quarantine_context,
 )
@@ -71,18 +73,20 @@ def test_serialize_round_trips_through_json():
 # list_quarantine_entries
 # ──────────────────────────────────────────────────────────────────────
 
-def _write_entry(quarantine_dir, entry_id, original_name, *, with_context=False, trigger="integrity", reason="boom", file_bytes=b"X" * 100):
+def _write_entry(quarantine_dir, entry_id, original_name, *, with_context=False, trigger="integrity", reason="boom", file_bytes=b"X" * 100, expected_track="Track", expected_artist="Artist", context=None):
     qfile = quarantine_dir / f"{entry_id}_{original_name}.quarantined"
     qfile.write_bytes(file_bytes)
     sidecar = {
         "original_filename": original_name,
         "quarantine_reason": reason,
-        "expected_track": "Track",
-        "expected_artist": "Artist",
+        "expected_track": expected_track,
+        "expected_artist": expected_artist,
         "timestamp": "2026-05-14T12:00:00",
         "trigger": trigger,
     }
-    if with_context:
+    if context is not None:
+        sidecar["context"] = context
+    elif with_context:
         sidecar["context"] = {"track_info": {"name": "Track"}, "context_key": entry_id}
     sidecar_path = quarantine_dir / f"{entry_id}_{os.path.splitext(original_name)[0]}.json"
     sidecar_path.write_text(json.dumps(sidecar))
@@ -454,3 +458,95 @@ def test_move_with_retry_returns_false_on_missing_source(tmp_path):
     # attempts=1 keeps the test fast (no retry sleeps)
     assert _move_with_retry(str(tmp_path / "nope.flac"), str(tmp_path / "dst.flac"),
                             attempts=1, delay=0) is False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# #876: grouping alternatives for one song — quarantine_group_key /
+# find_quarantine_siblings, and the group_key field on list entries.
+# ──────────────────────────────────────────────────────────────────────
+
+def test_group_key_prefers_isrc_over_everything():
+    ctx = {"track_info": {"isrc": "USRC12345678", "id": "spid", "uri": "spotify:track:x"}}
+    assert quarantine_group_key("Artist", "Track", ctx) == "isrc:usrc12345678"
+
+
+def test_group_key_falls_back_to_source_id_then_uri():
+    assert quarantine_group_key("A", "T", {"track_info": {"id": "abc123"}}) == "id:abc123"
+    assert quarantine_group_key("A", "T", {"track_info": {"uri": "spotify:track:z"}}) == "uri:spotify:track:z"
+
+
+def test_group_key_falls_back_to_normalized_name_without_context():
+    # Trivial case/whitespace differences still collapse to one key.
+    k1 = quarantine_group_key("Kendrick  Lamar", "DNA.")
+    k2 = quarantine_group_key("kendrick lamar", "dna.")
+    assert k1 == k2 == "nm:kendrick lamar|dna."
+
+
+def test_group_key_none_when_nothing_identifies_target():
+    assert quarantine_group_key("", "", {}) is None
+    assert quarantine_group_key("", "", None) is None
+
+
+def test_list_entries_carry_group_key(tmp_path):
+    _write_entry(tmp_path, "20260514_120000", "a.flac",
+                 context={"track_info": {"isrc": "USABC1234567"}})
+    entries = list_quarantine_entries(str(tmp_path))
+    assert entries[0]["group_key"] == "isrc:usabc1234567"
+
+
+def test_find_siblings_returns_same_target_attempts(tmp_path):
+    # Two failed source attempts at the SAME target track (same isrc) + an
+    # unrelated entry. Siblings of #2 = {#1}, never the unrelated one.
+    same = {"track_info": {"isrc": "USAAA0000001"}}
+    other = {"track_info": {"isrc": "USZZZ9999999"}}
+    q1, _ = _write_entry(tmp_path, "20260514_120000", "src1.flac", context=same)
+    q2, _ = _write_entry(tmp_path, "20260514_120001", "src2.flac", context=same)
+    _write_entry(tmp_path, "20260514_120002", "diff.flac", context=other)
+
+    id1 = entry_id_from_quarantined_filename(q1.name)
+    id2 = entry_id_from_quarantined_filename(q2.name)
+    assert find_quarantine_siblings(str(tmp_path), id2) == [id1]
+
+
+def test_find_siblings_groups_by_intended_target_not_file_tags(tmp_path):
+    # Same intended target (isrc) even though the bad files differ — that's
+    # the whole point: the file metadata is wrong, the target is constant.
+    same = {"track_info": {"isrc": "USAAA0000001", "name": "Whatever"}}
+    q1, _ = _write_entry(tmp_path, "20260514_120000", "garbage_wrong_song.flac", context=same)
+    q2, _ = _write_entry(tmp_path, "20260514_120001", "another_bad_rip.flac", context=same)
+    id1 = entry_id_from_quarantined_filename(q1.name)
+    id2 = entry_id_from_quarantined_filename(q2.name)
+    assert find_quarantine_siblings(str(tmp_path), id1) == [id2]
+
+
+def test_find_siblings_empty_for_ungroupable_entry(tmp_path):
+    # No id and blank expected fields -> None key -> never grouped.
+    q1, _ = _write_entry(tmp_path, "20260514_120000", "orphan.flac",
+                         expected_track="", expected_artist="")
+    id1 = entry_id_from_quarantined_filename(q1.name)
+    assert find_quarantine_siblings(str(tmp_path), id1) == []
+
+
+def test_find_siblings_empty_for_missing_entry(tmp_path):
+    _write_entry(tmp_path, "20260514_120000", "a.flac")
+    assert find_quarantine_siblings(str(tmp_path), "does_not_exist") == []
+
+
+def test_siblings_must_be_captured_before_accepted_entry_leaves_quarantine(tmp_path):
+    # Regression for the approve-endpoint ordering: approving RESTORES (moves)
+    # the accepted entry out of quarantine, after which an id-based sibling
+    # lookup for that id can't resolve its group_key and returns []. The
+    # endpoint therefore captures siblings BEFORE approving. This pins that
+    # invariant: lookup-before == sibling found, lookup-after == empty.
+    same = {"track_info": {"isrc": "USAAA0000001"}}
+    q1, _ = _write_entry(tmp_path, "20260514_120000", "a.flac", context=same)
+    q2, _ = _write_entry(tmp_path, "20260514_120001", "b.flac", context=same)
+    id1 = entry_id_from_quarantined_filename(q1.name)
+    id2 = entry_id_from_quarantined_filename(q2.name)
+
+    captured = find_quarantine_siblings(str(tmp_path), id1)  # while id1 present
+    assert captured == [id2]
+
+    delete_quarantine_entry(str(tmp_path), id1)  # simulate approve restoring it
+
+    assert find_quarantine_siblings(str(tmp_path), id1) == []  # too late now

@@ -12,6 +12,9 @@ from core.spotify_client import SpotifyClient, SpotifyRateLimitError
 from core.worker_utils import (
     ARTIST_NAME_MATCH_THRESHOLD,
     interruptible_sleep,
+    owned_album_titles,
+    pick_artist_by_catalog,
+    release_titles,
     set_album_api_track_count,
     source_id_conflict,
 )
@@ -43,6 +46,12 @@ class SpotifyWorker:
 
         # Current item being processed (for UI tooltip)
         self.current_item = None
+
+        # Whether the worker is serving via the no-creds Spotify Free source as of
+        # its last loop iteration. Cached from the loop's _free_active() probe so
+        # get_stats() can report it without an auth API call (#887: a no-auth user
+        # whose enrichment runs on Free was shown "Not Authenticated").
+        self._serving_via_free = False
 
         # Statistics
         self.stats = {
@@ -133,8 +142,14 @@ class SpotifyWorker:
             # real-API daily budget (the worker set _budget_exhausted_use_free —
             # a cheap attribute read). Lets the UI show "Running (Spotify Free)"
             # instead of a misleading "rate limited" / "daily limit reached".
+            # #887: the loop's cached _free_active() result is the comprehensive
+            # signal — it's True for a no-auth user enriching via Spotify Free by
+            # default (prefer-free is on unless disabled), not just the rate-limit
+            # / budget bridges. The extra terms stay as a fallback for the brief
+            # window before the loop's first iteration sets the cache.
             using_free = bool(
-                (rate_limited and self.client.is_spotify_metadata_available())
+                getattr(self, '_serving_via_free', False)
+                or (rate_limited and self.client.is_spotify_metadata_available())
                 or getattr(self.client, '_budget_exhausted_use_free', False)
             )
         except Exception:
@@ -261,6 +276,9 @@ class SpotifyWorker:
                     free_serving = self.client._free_active()
                 except Exception:
                     free_serving = False
+                # Cache for get_stats() so the dashboard status reflects that the
+                # worker IS enriching via Free even with no official auth (#887).
+                self._serving_via_free = free_serving
 
                 # Daily budget guard — pause ONLY when the budget is spent AND we
                 # can't serve via free (no free available). Otherwise free took over.
@@ -563,16 +581,23 @@ class SpotifyWorker:
             logger.debug(f"No Spotify results for artist '{artist_name}'")
             return
 
-        # Find best fuzzy match — score all candidates, pick highest above the
-        # (stricter, artist-specific) threshold so short-name false positives
-        # like "ODESZA"/"odessa" don't slip through.
-        best_obj = None
-        best_score = 0
-        for artist_obj in results:
-            score = self._name_similarity(artist_name, artist_obj.name)
-            if score >= ARTIST_NAME_MATCH_THRESHOLD and score > best_score:
-                best_obj = artist_obj
-                best_score = score
+        # Candidates clearing the (stricter, artist-specific) name gate, best
+        # name-score first so [0] is the legacy "first/highest" pick.
+        scored = [
+            (self._name_similarity(artist_name, a.name), a)
+            for a in results
+        ]
+        gated = [a for score, a in sorted(scored, key=lambda s: s[0], reverse=True)
+                 if score >= ARTIST_NAME_MATCH_THRESHOLD]
+
+        # Same-name disambiguation: when more than one "Rone" clears the gate,
+        # pick the one whose catalog overlaps the albums this library owns.
+        best_obj, _overlap = pick_artist_by_catalog(
+            gated,
+            owned_album_titles(self.db, artist_id),
+            lambda a: release_titles(self.client.get_artist_albums(a.id)),
+        )
+        best_score = self._name_similarity(artist_name, best_obj.name) if best_obj else 0
 
         if best_obj:
             if not self._is_spotify_id(best_obj.id):

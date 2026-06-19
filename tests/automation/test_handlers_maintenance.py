@@ -89,10 +89,7 @@ def _build_deps(**overrides) -> AutomationDeps:
         duplicate_cleaner_lock=threading.Lock(),
         duplicate_cleaner_executor=None,
         run_duplicate_cleaner=lambda: None,
-        get_quality_scanner_state=lambda: {},
-        quality_scanner_lock=threading.Lock(),
-        quality_scanner_executor=None,
-        run_quality_scanner=lambda *a, **k: None,
+        run_repair_job_now=lambda *a, **k: True,
         download_orchestrator=None,
         run_async=lambda coro: None,
         tasks_lock=threading.Lock(),
@@ -185,11 +182,18 @@ class TestDuplicateCleaner:
 
 
 class TestQualityScanner:
-    def test_already_running_returns_skipped(self):
-        state = {'status': 'running'}
-        deps = _build_deps(get_quality_scanner_state=lambda: state)
+    def test_triggers_quality_upgrade_repair_job(self):
+        triggered = []
+        deps = _build_deps(run_repair_job_now=lambda job_id: triggered.append(job_id) or True)
         result = auto_start_quality_scan({}, deps)
-        assert result == {'status': 'skipped', 'reason': 'Quality scan already running'}
+        assert triggered == ['quality_upgrade']
+        assert result['status'] == 'completed'
+        assert result['triggered'] is True
+
+    def test_error_when_worker_unavailable(self):
+        deps = _build_deps(run_repair_job_now=lambda job_id: None)
+        result = auto_start_quality_scan({}, deps)
+        assert result['status'] == 'error'
 
 
 # ─── clear_quarantine ────────────────────────────────────────────────
