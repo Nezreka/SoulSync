@@ -28,6 +28,11 @@
         { sel: '[data-video-enrich="opensubtitles"]', color: [34, 160, 121], id: 'opensubtitles' },
         { sel: '[data-video-enrich="ryd"]',     color: [239, 68, 68],   id: 'ryd' },
         { sel: '[data-video-enrich="sponsorblock"]', color: [0, 180, 160], id: 'sponsorblock' },
+        { sel: '[data-video-enrich="dearrow"]', color: [31, 119, 206],  id: 'dearrow' },
+        { sel: '[data-video-enrich="trakt"]',   color: [237, 28, 36],   id: 'trakt' },
+        { sel: '[data-video-enrich="tvmaze"]',  color: [61, 214, 192],  id: 'tvmaze' },
+        { sel: '[data-video-enrich="anilist"]', color: [2, 169, 255],   id: 'anilist' },
+        { sel: '[data-video-enrich="wikidata"]', color: [51, 153, 102], id: 'wikidata' },
         { sel: '[data-video-manage-workers]',   color: [168, 85, 247],  hub: true },
     ];
 
