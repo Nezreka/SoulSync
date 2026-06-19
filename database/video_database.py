@@ -91,6 +91,10 @@ _BACKFILL = {
         "movie": ("movies", "trakt_status", "trakt_attempted", "imdb_id IS NOT NULL"),
         "show": ("shows", "trakt_status", "trakt_attempted", "imdb_id IS NOT NULL"),
     },
+    "tvmaze": {  # TV-only: TVmaze has no movie database
+        "show": ("shows", "tvmaze_status", "tvmaze_attempted",
+                 "(imdb_id IS NOT NULL OR tvdb_id IS NOT NULL)"),
+    },
 }
 # Columns each backfill service may gap-fill (whitelist; never clobbers server data).
 # A worker visits each item once (status IS NULL), so these NULL columns are written
@@ -99,6 +103,7 @@ _BACKFILL_COLS = {
     "fanart": {"logo_url", "backdrop_url", "poster_url", "clearart_url", "banner_url"},
     "opensubtitles": {"subtitle_langs"},
     "trakt": {"trakt_rating", "trakt_votes"},
+    "tvmaze": {"tvmaze_rating"},
 }
 
 # Columns ensured on existing DBs (ALTER TABLE ADD COLUMN; idempotent).
@@ -160,6 +165,9 @@ _COLUMN_MIGRATIONS = [
     ("movies", "trakt_status", "TEXT"), ("movies", "trakt_attempted", "TEXT"),
     ("shows", "trakt_rating", "REAL"), ("shows", "trakt_votes", "INTEGER"),
     ("shows", "trakt_status", "TEXT"), ("shows", "trakt_attempted", "TEXT"),
+    # TVmaze community rating backfill (TV only)
+    ("shows", "tvmaze_rating", "REAL"),
+    ("shows", "tvmaze_status", "TEXT"), ("shows", "tvmaze_attempted", "TEXT"),
 ]
 
 
@@ -1573,6 +1581,7 @@ class VideoDatabase:
             "imdb_rating": show["imdb_rating"], "rt_rating": show["rt_rating"],
             "metacritic": show["metacritic"],
             "trakt_rating": show["trakt_rating"], "trakt_votes": show["trakt_votes"],
+            "tvmaze_rating": show["tvmaze_rating"],
             "genres": genres, "cast": credits["cast"], "crew": credits["crew"],
             "tmdb_id": show["tmdb_id"], "tvdb_id": show["tvdb_id"], "imdb_id": show["imdb_id"],
             "has_poster": bool(show["poster_url"]), "has_backdrop": bool(show["backdrop_url"]),

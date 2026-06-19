@@ -552,9 +552,60 @@ class TraktWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("trakt")
 
 
+# ── TVmaze (no key) — TV community rating ─────────────────────────────────────
+class TVmazeWorker(VideoBackfillWorker):
+    BASE = "https://api.tvmaze.com"
+
+    def __init__(self, db):
+        super().__init__(db, "tvmaze", "TVmaze", interval=0.8)
+
+    def _enabled(self):
+        # Free, keyless — on by default; user can switch it off in settings.
+        return str(self.db.get_setting("tvmaze_enabled") or "1") != "0"
+
+    def test(self):
+        try:
+            j = _http_get_json(self.BASE + "/lookup/shows", {"imdb": "tt0903747"})  # Breaking Bad
+            return (j is not None, "TVmaze reachable" if j is not None else "No response")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("tvmaze")
+
+    def fetch(self, item):
+        imdb = str(item.get("imdb_id") or "").strip()
+        tvdb = item.get("tvdb_id")
+        if imdb.lower().startswith("tt"):
+            params = {"imdb": imdb}
+        elif tvdb:
+            params = {"thetvdb": tvdb}
+        else:
+            return None
+        j = _http_get_json(self.BASE + "/lookup/shows", params)
+        if not isinstance(j, dict):
+            return None
+        rating = (j.get("rating") or {}).get("average")
+        if isinstance(rating, (int, float)) and rating > 0:
+            return {"tvmaze_rating": round(float(rating), 1)}
+        return None
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("tvmaze", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("tvmaze", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("tvmaze", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("tvmaze")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
-        TraktWorker(db),
+        TraktWorker(db), TVmazeWorker(db),
     )}
