@@ -54,23 +54,29 @@ HDR_MODES = ("off", "prefer", "require")     # require = HDR-only (a real filter
 AUDIO_MODES = ("any", "surround", "lossless", "atmos")
 MAX_SIZE_CAP_GB = 200                        # slider ceiling; 0 means "no limit"
 
+# The cutoff is a LOOSE resolution target (Radarr-style "upgrade until"): once the
+# library holds an item at this resolution or better, stop chasing upgrades. ""
+# (empty) means "best available — always upgrade". Always offered in full, regardless
+# of which specific tiers are toggled on.
+RESOLUTIONS = ("2160p", "1080p", "720p", "480p")
+
 _TIER_SET = frozenset(TIERS)
 
 
 def default_profile() -> dict:
-    """A sensible best-in-class default: full 1080p/720p ladder, cutoff at
-    BluRay-1080p, junk rejected, HEVC + HDR preferred (soft)."""
+    """A sensible best-in-class default: full 1080p/720p ladder, loose cutoff at
+    1080p, junk rejected, HEVC + HDR preferred (soft)."""
     return {
         "version": 2,
         "tiers": [{"key": k, "enabled": k in _DEFAULT_ON} for k in TIERS],
-        "cutoff": "bluray-1080p",
+        "cutoff_resolution": "1080p",
         "rejects": ["cam", "screener", "workprint", "3d"],
         "prefer_codec": "hevc",
         "prefer_hdr": "prefer",
         "prefer_audio": "any",
         "prefer_repack": True,
-        "min_size_gb": 0,
-        "max_size_gb": 0,
+        "max_movie_gb": 0,      # per-item size guard, split by runtime (0 = no limit)
+        "max_episode_gb": 0,
     }
 
 
@@ -116,9 +122,10 @@ def normalize(raw: Any) -> dict:
 
     d["tiers"] = normalize_tiers(raw.get("tiers"))
 
-    cut = str(raw.get("cutoff") or "").strip().lower()
-    if cut in _TIER_SET:
-        d["cutoff"] = cut
+    if "cutoff_resolution" in raw:
+        cr = str(raw.get("cutoff_resolution") or "").strip().lower()
+        if cr in RESOLUTIONS or cr == "":   # "" = best available / always upgrade
+            d["cutoff_resolution"] = cr
 
     rj = raw.get("rejects")
     if isinstance(rj, list):
@@ -133,12 +140,8 @@ def normalize(raw: Any) -> dict:
         d["prefer_audio"] = raw["prefer_audio"]
     d["prefer_repack"] = bool(raw.get("prefer_repack", d["prefer_repack"]))
 
-    mn = _clamp_size(raw.get("min_size_gb"))
-    mx = _clamp_size(raw.get("max_size_gb"))
-    if mx and mn > mx:        # a min above a real cap is nonsense — pin it to the cap
-        mn = mx
-    d["min_size_gb"] = mn
-    d["max_size_gb"] = mx
+    d["max_movie_gb"] = _clamp_size(raw.get("max_movie_gb"))
+    d["max_episode_gb"] = _clamp_size(raw.get("max_episode_gb"))
     return d
 
 
@@ -161,6 +164,6 @@ def save(db, raw: Any) -> dict:
 
 
 __all__ = [
-    "TIERS", "REJECTS", "CODECS", "HDR_MODES", "AUDIO_MODES", "MAX_SIZE_CAP_GB",
-    "default_profile", "normalize", "normalize_tiers", "load", "save",
+    "TIERS", "REJECTS", "CODECS", "HDR_MODES", "AUDIO_MODES", "RESOLUTIONS",
+    "MAX_SIZE_CAP_GB", "default_profile", "normalize", "normalize_tiers", "load", "save",
 ]

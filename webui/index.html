@@ -6117,8 +6117,14 @@
                                     <div class="hybrid-source-list" id="vq-tier-rows"></div>
                                 </div>
                                 <div class="vq-block">
-                                    <div class="vq-label">Upgrade until <span class="vq-hint">once the library holds this tier (or better) stop grabbing upgrades</span></div>
-                                    <select id="vq-cutoff" class="vq-select"></select>
+                                    <div class="vq-label">Upgrade until <span class="vq-hint">once you have this resolution (or better) stop chasing upgrades</span></div>
+                                    <select id="vq-cutoff" class="vq-select">
+                                        <option value="2160p">4K · 2160p</option>
+                                        <option value="1080p">1080p</option>
+                                        <option value="720p">720p</option>
+                                        <option value="480p">480p (SD)</option>
+                                        <option value="">Best available — never stop upgrading</option>
+                                    </select>
                                 </div>
                                 <div class="vq-block">
                                     <div class="vq-label">Never grab <span class="vq-hint">hard rejects &mdash; skipped no matter what else matches</span></div>
@@ -6159,14 +6165,17 @@
                                         <span>Prefer REPACK / PROPER re-releases</span>
                                     </label>
                                 </div>
-                                <div class="vq-grid">
-                                    <div class="vq-block" style="margin:0;">
-                                        <div class="vq-label">Min size per item <span class="vq-hint" id="vq-min-label">No limit</span></div>
-                                        <input type="range" id="vq-min-size" class="vq-slider" min="0" max="200" step="1" value="0">
-                                    </div>
-                                    <div class="vq-block" style="margin:0;">
-                                        <div class="vq-label">Max size per item <span class="vq-hint" id="vq-max-label">No limit</span></div>
-                                        <input type="range" id="vq-max-size" class="vq-slider" min="0" max="200" step="1" value="0">
+                                <div class="vq-block">
+                                    <div class="vq-label">Max size <span class="vq-hint">skip anything bigger — set per type so a movie and an episode aren't judged the same</span></div>
+                                    <div class="vq-grid">
+                                        <div class="vq-block" style="margin:0;">
+                                            <div class="vq-label">Movie <span class="vq-hint" id="vq-movie-label">No limit</span></div>
+                                            <input type="range" id="vq-movie-size" class="vq-slider" min="0" max="200" step="1" value="0">
+                                        </div>
+                                        <div class="vq-block" style="margin:0;">
+                                            <div class="vq-label">TV episode <span class="vq-hint" id="vq-episode-label">No limit</span></div>
+                                            <input type="range" id="vq-episode-size" class="vq-slider" min="0" max="200" step="1" value="0">
+                                        </div>
                                     </div>
                                 </div>
                             </div>
