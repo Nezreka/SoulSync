@@ -719,9 +719,11 @@ class AutoImportWorker:
                     self._bump_stat('auto_processed')
                     # Re-identify (#889): only NOW that the new home exists do we
                     # consume the hint and (if replace was chosen) delete the old
-                    # row + file — so a failed import never loses the original.
+                    # row + file — so a failed import never loses the original. Pass
+                    # the landing paths so we never delete a file the re-import landed
+                    # at the SAME place (picking the release it's already in).
                     if rematch_hint is not None:
-                        self._finalize_rematch_hint(rematch_hint)
+                        self._finalize_rematch_hint(rematch_hint, getattr(candidate, '_reid_final_paths', None))
                 else:
                     self._bump_stat('failed')
 
@@ -1053,10 +1055,12 @@ class AutoImportWorker:
             logger.debug("[Auto-Import] rematch-hint lookup skipped: %s", e)
             return None, None
 
-    def _finalize_rematch_hint(self, hint) -> None:
+    def _finalize_rematch_hint(self, hint, new_paths=None) -> None:
         """Post-success: delete the replaced library row + file (if the user chose
-        replace) and consume the hint so it's single-use. Best-effort — a cleanup
-        failure is logged, never raised, since the re-import already succeeded."""
+        replace) and consume the hint so it's single-use. ``new_paths`` are where the
+        re-import landed — passed through so the same-home guard never deletes a file
+        the import wrote at the old location. Best-effort — a cleanup failure is
+        logged, never raised, since the re-import already succeeded."""
         try:
             from core.imports.rematch_hints import consume_hint, delete_replaced_track
 
@@ -1072,7 +1076,8 @@ class AutoImportWorker:
             conn = self.database._get_connection()
             try:
                 cursor = conn.cursor()
-                removed = delete_replaced_track(cursor, hint.replace_track_id, resolve_fn=_resolve_old)
+                removed = delete_replaced_track(cursor, hint.replace_track_id,
+                                                resolve_fn=_resolve_old, new_paths=new_paths)
                 consume_hint(cursor, hint.id)
                 conn.commit()
             finally:
@@ -1682,6 +1687,7 @@ class AutoImportWorker:
 
         processed = 0
         errors = []
+        reid_final_paths = []   # #889: where the pipeline landed each file (same-home guard)
         all_matches = list(match_result.get('matches', []))
 
         # Album total duration — sum of every matched track's duration.
@@ -1862,6 +1868,11 @@ class AutoImportWorker:
 
                 self._process_callback(context_key, context, file_path)
                 processed += 1
+                # Capture where the pipeline actually landed the file (#889 same-home
+                # guard) — the pipeline writes it back into the mutable context.
+                _landed = context.get('_final_processed_path')
+                if _landed:
+                    reid_final_paths.append(_landed)
                 logger.info(f"[Auto-Import] Processed: {track_number}. {track_name}")
 
             except Exception as e:
@@ -1884,6 +1895,13 @@ class AutoImportWorker:
                 })
             except Exception as e:
                 logger.debug("automation emit failed: %s", e)
+
+        # Stash landing paths on the candidate so _finalize_rematch_hint can avoid
+        # deleting a file the re-import landed at the SAME place (#889).
+        try:
+            candidate._reid_final_paths = reid_final_paths
+        except Exception as e:
+            logger.debug("could not stash reid final paths: %s", e)
 
         return processed > 0
 

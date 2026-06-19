@@ -112,6 +112,32 @@ def test_delete_replaced_track_noops_on_missing_id(conn):
     assert delete_replaced_track(cur, 999) is None    # no such row
 
 
+def test_delete_replaced_track_same_home_is_noop(conn):
+    # THE data-loss bug: re-identify to the release it's already in → the import
+    # reuses the same file/row, so deleting it would orphan the file. Guard: no-op.
+    cur = conn.cursor()
+    cur.execute("INSERT INTO tracks (id, file_path) VALUES (7, '/lib/Album1/05 - Song.flac')")
+    removed = []
+    out = delete_replaced_track(cur, 7, unlink=lambda p: removed.append(p),
+                                new_paths=['/lib/Album1/05 - Song.flac'])
+    assert out is None and removed == []           # NOTHING unlinked
+    cur.execute("SELECT 1 FROM tracks WHERE id = 7")
+    assert cur.fetchone() is not None              # row PRESERVED (it's the re-imported track)
+
+
+def test_delete_replaced_track_different_home_still_deletes(conn):
+    # Genuinely re-homed (new path differs) → old row + file removed as intended.
+    cur = conn.cursor()
+    cur.execute("INSERT INTO tracks (id, file_path) VALUES (7, '/lib/EP1/05 - Song.flac')")
+    removed = []
+    out = delete_replaced_track(cur, 7, unlink=lambda p: removed.append(p),
+                                new_paths=['/lib/Album1/05 - Song.flac'])
+    assert out == '/lib/EP1/05 - Song.flac'
+    assert removed == ['/lib/EP1/05 - Song.flac']
+    cur.execute("SELECT 1 FROM tracks WHERE id = 7")
+    assert cur.fetchone() is None
+
+
 def test_delete_replaced_track_resolves_path_before_unlink(conn):
     # The stored path is a server/Docker view this process can't read literally;
     # resolve_fn maps it to the real file so we unlink the RIGHT path (not orphan it).

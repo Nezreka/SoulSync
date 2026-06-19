@@ -222,27 +222,41 @@ def build_identification_from_hint(hint: RematchHint) -> dict:
     }
 
 
+def _canonical(path: Optional[str]) -> str:
+    """Canonical form of a path for same-file comparison (symlinks + case + sep)."""
+    if not path:
+        return ""
+    try:
+        return os.path.normcase(os.path.realpath(path))
+    except OSError:
+        return os.path.normcase(os.path.normpath(path))
+
+
 def delete_replaced_track(
     cursor: Any,
     replace_track_id: Any,
     *,
     unlink=os.remove,
     resolve_fn: Optional[Callable[[str], Optional[str]]] = None,
+    new_paths: Optional[list] = None,
 ) -> Optional[str]:
     """Remove the OLD library row a re-identify replaces, and its file.
 
     Called only AFTER the re-import has landed the track at its new home, so the
-    original is never lost on failure. Safe by construction: the file is unlinked
-    only if it still exists and **no other track row references it** (guards against
-    yanking a file a different row legitimately points to). Returns the path it
-    removed, or ``None`` if there was nothing to do. ``unlink`` is injectable for
-    tests. Assumes the new home differs from the old — the Re-identify modal never
-    offers the track's current release as a target, so this holds.
+    original is never lost on failure. Safe by construction:
 
-    ``resolve_fn`` maps the STORED DB path to the file's actual on-disk location
-    before the exists/unlink check — essential because the stored path may be a
-    Docker/media-server view this process can't read literally (without it we'd
-    delete the row but orphan the file)."""
+    * **Same-home guard (CRITICAL):** if the re-import landed at the SAME file as the
+      old one (``new_paths`` — the paths the import actually wrote), this is a no-op:
+      we DON'T delete the row or the file, because that file IS the re-imported track.
+      This is what stops "re-identify to the release it's already in" from deleting
+      the file (the import reuses the same row, so deleting it would orphan the file).
+    * the file is unlinked only if it still exists and **no other track row references
+      it** (guards against yanking a file a different row legitimately points to).
+
+    Returns the path it removed, or ``None`` if there was nothing to do. ``unlink`` is
+    injectable for tests. ``resolve_fn`` maps the STORED DB path to the file's actual
+    on-disk location (the stored path may be a Docker/media-server view this process
+    can't read literally — without it we'd delete the row but orphan the file)."""
     if not replace_track_id:
         return None
     cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (replace_track_id,))
@@ -250,25 +264,34 @@ def delete_replaced_track(
     if row is None:
         return None
     old_path = (row["file_path"] if not isinstance(row, (tuple, list)) else row[0]) or ""
-
-    cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
-
     if not old_path:
+        cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
         return None
-    # Only unlink if no surviving row still points at this file (rows store the
-    # stored path, so compare against the stored path, not the resolved one).
-    cursor.execute("SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1", (old_path,))
-    if cursor.fetchone() is not None:
-        return None
-    # Resolve to the real on-disk path before touching the filesystem.
+
+    # Resolve the old stored path to its real on-disk location up front.
     real_path = old_path
     if resolve_fn is not None:
         try:
             real_path = resolve_fn(old_path) or old_path
         except Exception:
             real_path = old_path
+
+    # Same-home guard: if the re-import wrote to this very file, do NOTHING — the row
+    # is the re-imported track's row and the file is its file. Deleting either would
+    # be data loss (the "picked the same release" bug).
+    if new_paths:
+        landed = {_canonical(p) for p in new_paths if p}
+        if _canonical(real_path) in landed or _canonical(old_path) in landed:
+            return None
+
+    cursor.execute("DELETE FROM tracks WHERE id = ?", (replace_track_id,))
+    # Only unlink if no surviving row still points at this file (rows store the
+    # stored path, so compare against the stored path, not the resolved one).
+    cursor.execute("SELECT 1 FROM tracks WHERE file_path = ? LIMIT 1", (old_path,))
+    if cursor.fetchone() is not None:
+        return None
     try:
-        if os.path.exists(real_path):
+        if os.path.exists(real_path):   # real_path resolved above
             unlink(real_path)
             return real_path
     except OSError:
