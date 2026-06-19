@@ -44,3 +44,16 @@ def register_routes(bp):
             if key in body:
                 db.set_setting(key, (str(body.get(key) or "")).strip())
         return jsonify({"status": "saved"})
+
+    @bp.route("/downloads/quality", methods=["GET"])
+    def video_quality_profile():
+        from . import get_video_db
+        from core.video.quality_profile import load
+        return jsonify(load(get_video_db()))
+
+    @bp.route("/downloads/quality", methods=["POST"])
+    def video_quality_profile_save():
+        from . import get_video_db
+        from core.video.quality_profile import save
+        body = request.get_json(silent=True) or {}
+        return jsonify(save(get_video_db(), body))

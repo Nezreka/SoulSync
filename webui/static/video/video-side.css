@@ -2958,3 +2958,58 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vem-yt-num { display: block; font-size: 28px; font-weight: 900; color: #fff; line-height: 1; }
 .vem-yt-lbl { display: block; margin-top: 7px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.02em;
     color: rgba(255,255,255,0.45); }
+
+/* =========================================================================
+   Video Quality Profile (Settings → Downloads, video side)
+   ========================================================================= */
+.vq-block { margin: 16px 0; }
+.vq-label { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: rgba(255,255,255,0.65); margin-bottom: 9px; display: flex; align-items: center; gap: 10px; }
+.vq-hint { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0;
+    color: rgba(255,255,255,0.4); }
+.vq-rows { display: flex; flex-direction: column; gap: 7px; }
+.vq-row { display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px;
+    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07);
+    transition: background 0.15s, opacity 0.15s; }
+.vq-row--off { opacity: 0.5; }
+.vq-arrows { display: inline-flex; flex-direction: column; gap: 1px; }
+.vq-arrow { width: 22px; height: 15px; display: grid; place-items: center; cursor: pointer;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
+    color: rgba(255,255,255,0.6); font-size: 8px; line-height: 1; padding: 0; transition: all 0.12s; }
+.vq-arrow:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.25); color: #fff; }
+.vq-arrow:disabled { opacity: 0.25; cursor: default; }
+.vq-row-name { flex: 1; font-size: 14px; font-weight: 600; color: #fff; }
+.vq-row-prio { font: 700 11px/1 'JetBrains Mono', ui-monospace, monospace; color: rgba(255,255,255,0.4);
+    min-width: 18px; text-align: center; }
+/* pill toggle */
+.vq-toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 40px; cursor: pointer; }
+.vq-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.vq-toggle-track { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,0.13);
+    transition: background 0.18s; }
+.vq-toggle-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; transition: transform 0.18s; }
+.vq-toggle input:checked + .vq-toggle-track { background: rgb(var(--accent-rgb)); }
+.vq-toggle input:checked + .vq-toggle-track::after { transform: translateX(18px); }
+/* codec + hdr row */
+.vq-grid { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; margin: 16px 0; }
+.vq-seg { display: inline-flex; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px; padding: 3px; gap: 2px; }
+.vq-seg button { padding: 7px 14px; border: none; background: none; border-radius: 7px; cursor: pointer;
+    font-size: 12.5px; font-weight: 600; color: rgba(255,255,255,0.6); transition: all 0.15s; }
+.vq-seg button:hover { color: #fff; }
+.vq-seg button.active { background: rgb(var(--accent-rgb)); color: #06210f; }
+/* custom checkbox (matches the rematch-modal feel) */
+.vq-check { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none;
+    color: rgba(255,255,255,0.85); font-size: 13.5px; }
+.vq-check input { display: none; }
+.vq-check-box { width: 20px; height: 20px; flex: 0 0 20px; border-radius: 6px;
+    border: 2px solid rgba(255,255,255,0.2); display: grid; place-items: center; transition: all 0.15s; }
+.vq-check input:checked + .vq-check-box { background: rgb(var(--accent-rgb)); border-color: transparent; }
+.vq-check input:checked + .vq-check-box::after { content: '✓'; color: #06210f; font-size: 13px; font-weight: 900; }
+/* size slider */
+.vq-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 999px;
+    background: rgba(255,255,255,0.12); outline: none; cursor: pointer; }
+.vq-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: rgb(var(--accent-rgb)); cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+.vq-slider::-moz-range-thumb { width: 18px; height: 18px; border: none; border-radius: 50%;
+    background: rgb(var(--accent-rgb)); cursor: pointer; }

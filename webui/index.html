@@ -6028,6 +6028,45 @@
                                     <input type="text" id="video-transfer-path" placeholder="./VideoLibrary">
                                 </div>
                             </div>
+                            <!-- VIDEO quality profile — one unified profile across slskd/torrent/usenet -->
+                            <div class="settings-group" data-stg="downloads" data-video-only>
+                                <h3>Video Quality Profile</h3>
+                                <div class="setting-help-text">
+                                    One profile across slskd, torrent &amp; usenet — quality is read from the release name / filename. Toggle the tiers you want and order them best-first.
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Resolution <span class="vq-hint">order best-first with the arrows</span></div>
+                                    <div class="vq-rows" id="vq-resolution-rows"></div>
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Source preference</div>
+                                    <div class="vq-rows" id="vq-source-rows"></div>
+                                </div>
+                                <div class="vq-grid">
+                                    <div class="vq-block">
+                                        <div class="vq-label">Codec</div>
+                                        <div class="vq-seg" id="vq-codec">
+                                            <button type="button" data-vq-codec="any">Any</button>
+                                            <button type="button" data-vq-codec="x265">x265 / HEVC</button>
+                                            <button type="button" data-vq-codec="x264">x264</button>
+                                        </div>
+                                    </div>
+                                    <label class="vq-check">
+                                        <input type="checkbox" id="vq-prefer-hdr">
+                                        <span class="vq-check-box"></span>
+                                        <span>Prefer HDR / Dolby Vision</span>
+                                    </label>
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Max size per item <span class="vq-hint" id="vq-size-label">No limit</span></div>
+                                    <input type="range" id="vq-max-size" class="vq-slider" min="0" max="200" step="1" value="0">
+                                </div>
+                                <label class="vq-check">
+                                    <input type="checkbox" id="vq-fallback">
+                                    <span class="vq-check-box"></span>
+                                    <span>Allow lower-quality fallback when nothing in your enabled tiers is found</span>
+                                </label>
+                            </div>
                             <!-- Download Settings -->
                             <div class="settings-group" data-stg="downloads">
                                 <h3>Download Settings</h3>
