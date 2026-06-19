@@ -6,8 +6,8 @@ APIs — those are music-only). ``download_mode`` is one of those three, or
 the (later-phase) engine tries in turn.
 
 Pure normalize here (no DB, no network) so it's unit-tested in isolation. Stored in
-video.db's ``video_settings`` (``download_mode`` + ``hybrid_order`` JSON). Isolated
-from the music side — imports only json/typing.
+video.db's ``video_settings`` (``download_mode`` + ``hybrid_order`` JSON). Isolated:
+imports only json/typing, and the music side never imports it.
 """
 
 from __future__ import annotations
