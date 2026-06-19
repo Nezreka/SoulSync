@@ -177,6 +177,60 @@ def register_routes(bp):
             r.pop("_avail", None)
         return jsonify({"scope": scope, "results": results[:40], "live": live})
 
+    @bp.route("/downloads/grab", methods=["POST"])
+    def video_downloads_grab():
+        """Start a real download of a chosen release and track it. v1: Soulseek only.
+        Body: {kind, title, release_title, source, username, filename, size_bytes,
+        quality_label}."""
+        from . import get_video_db
+        from config.settings import config_manager
+        from core.video.download_monitor import ensure_started
+        from core.video.download_pipeline import target_dir_for
+        from core.video.slskd_download import start_download
+
+        body = request.get_json(silent=True) or {}
+        source = str(body.get("source") or "soulseek").lower()
+        if source != "soulseek":
+            return jsonify({"ok": False, "error": "Only Soulseek grabs are wired up so far."}), 400
+        username, filename = body.get("username"), body.get("filename")
+        if not username or not filename:
+            return jsonify({"ok": False, "error": "Missing the release's source info."}), 400
+
+        db = get_video_db()
+        paths = {k: db.get_setting(k) or "" for k in ("movies_path", "tv_path", "youtube_path")}
+        if not paths["movies_path"]:
+            paths["movies_path"] = db.get_setting("transfer_path") or ""
+        target = target_dir_for(body.get("kind"), paths)
+        if not target:
+            return jsonify({"ok": False, "error": "Set the library folder for this type on Settings → Downloads."}), 400
+
+        started = start_download(username, filename, body.get("size_bytes") or 0)
+        if not started.get("ok"):
+            return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
+
+        dl_id = db.add_video_download({
+            "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
+            "release_title": body.get("release_title") or body.get("filename"),
+            "source": "soulseek", "username": username, "filename": filename,
+            "size_bytes": int(body.get("size_bytes") or 0), "quality_label": body.get("quality_label"),
+            "target_dir": target, "status": "downloading",
+        })
+        ensure_started(get_video_db)
+        return jsonify({"ok": True, "id": dl_id})
+
+    @bp.route("/downloads/active", methods=["GET"])
+    def video_downloads_active():
+        from . import get_video_db
+        from core.video.download_monitor import ensure_started
+        db = get_video_db()
+        ensure_started(get_video_db)   # also (re)start the monitor when the page is open
+        return jsonify({"downloads": db.list_video_downloads()})
+
+    @bp.route("/downloads/clear", methods=["POST"])
+    def video_downloads_clear():
+        from . import get_video_db
+        return jsonify({"cleared": get_video_db().clear_finished_video_downloads()})
+
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():
         # Separate, smaller profile — YouTube is yt-dlp, not scene/p2p releases.

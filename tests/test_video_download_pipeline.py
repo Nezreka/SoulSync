@@ -83,3 +83,64 @@ def test_video_downloads_crud(tmp_path):
     assert listed[0]["status"] == "completed" and listed[0]["dest_path"] == "/media/movies/m.mkv"
     assert db.clear_finished_video_downloads() == 1
     assert db.list_video_downloads() == []
+
+
+# ── monitor decision (pure, injected fs) ──────────────────────────────────────
+def _dl(**kw):
+    base = {"id": 1, "username": "neo", "filename": r"@@a\Folder\movie.mkv", "target_dir": "/media/movies"}
+    base.update(kw)
+    return base
+
+
+def _xfer(state, **kw):
+    base = {"username": "neo", "filename": r"@@a\Folder\movie.mkv", "state": state, "size": 100, "transferred": 40}
+    base.update(kw)
+    return base
+
+
+def test_process_download_active_reports_progress():
+    from core.video.download_monitor import process_download
+    upd = process_download(_dl(), [_xfer("InProgress")], "/dl",
+                           lister=lambda d: [], mover=lambda s, d: None)
+    assert upd == {"status": "downloading", "progress": 40.0}
+
+
+def test_process_download_failed():
+    from core.video.download_monitor import process_download
+    upd = process_download(_dl(), [_xfer("Completed, Errored")], "/dl",
+                           lister=lambda d: [], mover=lambda s, d: None)
+    assert upd["status"] == "failed"
+
+
+def test_process_download_no_transfer_yet():
+    from core.video.download_monitor import process_download
+    assert process_download(_dl(), [], "/dl", lister=lambda d: [], mover=lambda s, d: None) is None
+
+
+def test_process_download_completed_moves_file():
+    from core.video.download_monitor import process_download
+    moved = {}
+    upd = process_download(
+        _dl(), [_xfer("Completed, Succeeded")], "/dl",
+        lister=lambda d: ["/dl/Folder/movie.mkv"],
+        mover=lambda s, d: moved.update(src=s, dest=d))
+    assert upd == {"status": "completed", "progress": 100.0, "dest_path": "/media/movies/movie.mkv"}
+    assert moved == {"src": "/dl/Folder/movie.mkv", "dest": "/media/movies/movie.mkv"}
+
+
+def test_process_download_completed_but_file_not_settled():
+    from core.video.download_monitor import process_download
+    upd = process_download(_dl(), [_xfer("Completed, Succeeded")], "/dl",
+                           lister=lambda d: [], mover=lambda s, d: None)
+    assert upd == {"progress": 100.0}   # no status change — retries next tick
+
+
+def test_process_download_move_failure_marks_failed():
+    from core.video.download_monitor import process_download
+
+    def boom(s, d):
+        raise OSError("disk full")
+
+    upd = process_download(_dl(), [_xfer("Completed, Succeeded")], "/dl",
+                           lister=lambda d: ["/dl/Folder/movie.mkv"], mover=boom)
+    assert upd["status"] == "failed" and "disk full" in upd["error"]

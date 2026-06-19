@@ -503,6 +503,44 @@ def test_downloads_search_endpoint_ranks_and_filters(tmp_path):
         videoapi._video_db = None
 
 
+def test_downloads_grab_and_active(tmp_path, monkeypatch):
+    import api.video as videoapi
+    import core.video.download_monitor as mon
+    import core.video.slskd_download as slskd
+    from database.video_database import VideoDatabase
+
+    monkeypatch.setattr(slskd, "start_download", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(mon, "ensure_started", lambda *a, **k: None)   # don't spawn the thread
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", "/media/movies")
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        r = client.post("/api/video/downloads/grab", json={
+            "kind": "movie", "title": "The Matrix", "source": "soulseek",
+            "username": "neo", "filename": r"@@a\x\m.mkv", "size_bytes": 8, "quality_label": "1080p"})
+        out = r.get_json()
+        assert out["ok"] is True and out["id"] > 0
+        # tracked + routed to the Movies library.
+        act = client.get("/api/video/downloads/active").get_json()["downloads"]
+        assert len(act) == 1 and act[0]["status"] == "downloading"
+        assert act[0]["target_dir"] == "/media/movies" and act[0]["kind"] == "movie"
+        # missing source info → 400.
+        assert client.post("/api/video/downloads/grab",
+                           json={"kind": "movie", "source": "soulseek"}).status_code == 400
+        # non-soulseek not wired yet → 400.
+        assert client.post("/api/video/downloads/grab",
+                           json={"kind": "movie", "source": "torrent", "username": "u",
+                                 "filename": "f"}).status_code == 400
+        # clear removes only finished (none yet).
+        assert client.post("/api/video/downloads/clear").get_json()["cleared"] == 0
+    finally:
+        videoapi._video_db = None
+
+
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
     import config.settings as cfg
