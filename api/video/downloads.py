@@ -160,7 +160,7 @@ def register_routes(bp):
                                        want_episode=want_episode, size_gb=size_gb)
             avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
             results.append({
-                "title": hit.get("title"), "size_gb": size_gb,
+                "title": hit.get("title"), "size_gb": size_gb, "size_bytes": hit.get("size_bytes") or 0,
                 "seeders": hit.get("seeders"), "peers": hit.get("peers"),
                 "username": hit.get("username"), "slots": hit.get("slots"),
                 "filename": hit.get("filename"), "_avail": avail,

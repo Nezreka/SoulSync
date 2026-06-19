@@ -1273,6 +1273,23 @@
                         </div>
                     </div>
                 </section>
+                <!-- Downloads page — every grab from the video side lives here (live status).
+                     Isolated: built by video/video-downloads-page.js, styled by .vdpg-*. -->
+                <section class="video-subpage" data-video-subpage="video-downloads" hidden>
+                    <div class="vdpg-page">
+                        <div class="vdpg-head">
+                            <div class="vdpg-head-glow" aria-hidden="true"></div>
+                            <div class="vdpg-head-row">
+                                <div class="vdpg-head-titles">
+                                    <h1 class="vdpg-title">Downloads</h1>
+                                    <p class="vdpg-sub" data-vdpg-sub>Everything you've grabbed from the video side</p>
+                                </div>
+                                <button class="vdpg-clear" type="button" data-vdpg-clear hidden>Clear finished</button>
+                            </div>
+                        </div>
+                        <div class="vdpg-list" data-vdpg-list></div>
+                    </div>
+                </section>
                 <!-- TV-show detail (drill-in from a show card; not a nav page).
                      Isolated: built by video/video-detail.js, styled by .vd-* in
                      video-side.css. Inspired by the music artist-detail vibe. -->
@@ -10222,6 +10239,8 @@
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
+    <!-- Downloads page (isolated): live status of every grab from the video side -->
+    <script src="{{ url_for('static', filename='video/video-downloads-page.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
