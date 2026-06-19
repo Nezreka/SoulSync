@@ -6011,6 +6011,23 @@
 
                         <!-- Right Column - Download Settings, Database, Metadata, Logging -->
                         <div class="settings-right-column">
+                            <!-- VIDEO Downloads (isolated; shown only on the video side). The
+                                 music download sections in this tab are hidden on the video side
+                                 via video-side.css; these data-video-only ones take their place. -->
+                            <div class="settings-group" data-stg="downloads" data-video-only>
+                                <h3>Video Download Folders</h3>
+                                <div class="setting-help-text">
+                                    Where the video side lands downloads and where it moves finished files. These are SEPARATE from your Music paths — point them at wherever your video library lives.
+                                </div>
+                                <div class="form-group">
+                                    <label>Download Folder (Input):</label>
+                                    <input type="text" id="video-download-path" placeholder="./video_downloads">
+                                </div>
+                                <div class="form-group">
+                                    <label>Transfer Folder (Output — Video Library):</label>
+                                    <input type="text" id="video-transfer-path" placeholder="./VideoLibrary">
+                                </div>
+                            </div>
                             <!-- Download Settings -->
                             <div class="settings-group" data-stg="downloads">
                                 <h3>Download Settings</h3>

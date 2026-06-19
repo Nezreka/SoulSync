@@ -50,6 +50,7 @@ def create_video_blueprint() -> Blueprint:
     from .watchlist import register_routes as reg_watchlist
     from .wishlist import register_routes as reg_wishlist
     from .youtube import register_routes as reg_youtube
+    from .downloads import register_routes as reg_downloads
     reg_dashboard(bp)
     reg_scan(bp)
     reg_library(bp)
@@ -63,5 +64,6 @@ def create_video_blueprint() -> Blueprint:
     reg_watchlist(bp)
     reg_wishlist(bp)
     reg_youtube(bp)
+    reg_downloads(bp)
 
     return bp

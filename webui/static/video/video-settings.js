@@ -15,6 +15,7 @@
     var CONFIG_URL = '/api/video/enrichment/config';
     var SERVER_URL = '/api/video/server';
     var CONN_URL = '/api/video/server-config';
+    var DOWNLOADS_URL = '/api/video/downloads/config';
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -251,6 +252,33 @@
           .catch(function () { /* ignore */ });
     }
 
+    // ── Downloads tab: video-specific input/output folders ──
+    function loadDownloads() {
+        fetch(DOWNLOADS_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                if (!d) return;
+                var dl = document.getElementById('video-download-path');
+                if (dl && d.download_path != null) dl.value = d.download_path;
+                var tr = document.getElementById('video-transfer-path');
+                if (tr && d.transfer_path != null) tr.value = d.transfer_path;
+            })
+            .catch(function () { /* ignore */ });
+    }
+
+    function saveDownloads(silent) {
+        var dl = document.getElementById('video-download-path');
+        var tr = document.getElementById('video-transfer-path');
+        return fetch(DOWNLOADS_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({
+                download_path: dl ? dl.value : '',
+                transfer_path: tr ? tr.value : '',
+            })
+        }).then(function () { if (!silent) toast('Download folders saved', 'success'); })
+          .catch(function () { /* ignore */ });
+    }
+
     function saveKeys(silent) {
         var t = document.getElementById('tmdb-api-key');
         var v = document.getElementById('tvdb-api-key');
@@ -308,6 +336,7 @@
         loadConn();
         load();
         loadKeys();
+        loadDownloads();
     }
 
     function init() {
@@ -377,7 +406,7 @@
             if (!e.target.closest('#save-settings')) return;
             e.preventDefault();
             e.stopImmediatePropagation();
-            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true)])
+            Promise.all([saveConn(true), save(true), saveKeys(true), savePrefs(true), saveDownloads(true)])
                 .then(function () { toast('Settings saved', 'success'); })
                 .catch(function () { toast('Some settings could not be saved', 'error'); });
         }, true);

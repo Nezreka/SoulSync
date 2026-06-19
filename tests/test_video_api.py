@@ -356,6 +356,29 @@ def test_enrichment_config_save_load(tmp_path, monkeypatch):
         videoapi._video_db = None
 
 
+def test_downloads_config_save_load(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        # Defaults are empty.
+        assert client.get("/api/video/downloads/config").get_json() == {
+            "download_path": "", "transfer_path": ""}
+        # Round-trips + persists to video.db (separate from any music config).
+        client.post("/api/video/downloads/config",
+                    json={"download_path": " /mnt/v/dl ", "transfer_path": "/mnt/v/lib"})
+        assert client.get("/api/video/downloads/config").get_json() == {
+            "download_path": "/mnt/v/dl", "transfer_path": "/mnt/v/lib"}   # trimmed
+        assert db.get_setting("download_path") == "/mnt/v/dl"
+    finally:
+        videoapi._video_db = None
+
+
 def test_video_api_imports_nothing_from_music():
     base = Path(__file__).resolve().parent.parent / "api" / "video"
     for py in base.glob("*.py"):
