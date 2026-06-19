@@ -88,7 +88,8 @@
 
     function onClick(e) {
         var container = e.currentTarget;
-        if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
+        var grab = e.target.closest('[data-vdl-grab]');
+        if (grab) { doGrab(grab); return; }
         var sb = e.target.closest('[data-vdl-search]');
         if (sb) { _movieSearch(container, sb.closest('[data-vdl-src-block]')); return; }
         if (e.target.closest('[data-vdl-search-all]')) {
@@ -221,12 +222,37 @@
             if (d && d.error) { resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
             var rows = (d && d.results) || [];
             if (!rows.length) { resultsEl.innerHTML = '<div class="vdl-res-empty">No matching releases found.</div>'; return; }
+            resultsEl._rows = rows; resultsEl._search = params;   // for the Grab button
             var okN = rows.filter(function (r) { return r.accepted; }).length;
             var live = d && d.live ? '<span class="vdl-res-live">● live</span>' : '<span class="vdl-res-demo">demo data</span>';
             resultsEl.innerHTML =
                 '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
                     ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' + live + '</div>' +
                 rows.map(resultCardHTML).join('');
+        });
+    }
+
+    // Grab → start a real download (Soulseek only for now), then it lives on the
+    // Downloads page. Reads the card's row + the panel's search context.
+    function doGrab(btn) {
+        var panel = btn.closest('.vdl-results'); if (!panel || !panel._rows) return;
+        var r = panel._rows[parseInt(btn.getAttribute('data-vdl-grab'), 10)]; if (!r) return;
+        var p = panel._search || {};
+        btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
+        postJSON('/api/video/downloads/grab', {
+            kind: p.scope || 'movie', title: p.title || '', release_title: r.title,
+            source: 'soulseek', username: r.username, filename: r.filename,
+            size_bytes: r.size_bytes, quality_label: r.quality_label
+        }).then(function (res) {
+            btn.classList.remove('vdl-res-grab--busy');
+            if (res && res.ok) {
+                btn.textContent = '✓'; btn.classList.add('vdl-res-grab--done');
+                toast('Sent to Downloads', 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+            } else {
+                btn.disabled = false; btn.textContent = '⤓';
+                toast((res && res.error) || 'Couldn’t start the download', 'error');
+            }
         });
     }
 
@@ -250,7 +276,7 @@
 
     // Readable card: a big resolution tile anchors it, a plain-English quality summary
     // leads, the raw release name is demoted to a muted one-liner, then size/seeders.
-    function resultCardHTML(r) {
+    function resultCardHTML(r, i) {
         var summary = [SRC_LABEL[r.source] || r.source,
             r.codec ? String(r.codec).toUpperCase() : '',
             r.audio ? String(r.audio).toUpperCase().replace('-', ' ') : ''].filter(Boolean).join('  ·  ');
@@ -274,7 +300,7 @@
                     (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
                 '</div>' +
             '</div>' +
-            (r.accepted ? '<button class="vdl-res-grab" type="button" data-vdl-grab title="Grab this release">⤓</button>' : '') +
+            (r.accepted && r.username ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Grab this release">⤓</button>' : '') +
         '</div>';
     }
 
@@ -412,7 +438,8 @@
 
     function onShowClick(e) {
         var container = e.currentTarget; var st = container._dl; if (!st) return;
-        if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
+        var grab = e.target.closest('[data-vdl-grab]');
+        if (grab) { doGrab(grab); return; }
         // Episode-scope search (a source row inside an expanded episode → its own panel).
         var srch = e.target.closest('[data-vdl-search]');
         if (srch) {
