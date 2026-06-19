@@ -224,6 +224,8 @@
                 if (sb && d.sponsorblock_enabled != null) sb.checked = !!d.sponsorblock_enabled;
                 var tvm = document.getElementById('video-tvmaze-enabled');
                 if (tvm && d.tvmaze_enabled != null) tvm.checked = !!d.tvmaze_enabled;
+                var anl = document.getElementById('video-anilist-enabled');
+                if (anl && d.anilist_enabled != null) anl.checked = !!d.anilist_enabled;
                 var ap = document.getElementById('video-billboard-autoplay');
                 if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
                 var wr = document.getElementById('video-watch-region');
@@ -255,6 +257,7 @@
         var ryd = document.getElementById('video-ryd-enabled');
         var sb = document.getElementById('video-sponsorblock-enabled');
         var tvm = document.getElementById('video-tvmaze-enabled');
+        var anl = document.getElementById('video-anilist-enabled');
         return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -267,6 +270,7 @@
                 ryd_enabled: ryd ? ryd.checked : true,
                 sponsorblock_enabled: sb ? sb.checked : true,
                 tvmaze_enabled: tvm ? tvm.checked : true,
+                anilist_enabled: anl ? anl.checked : false,
             })
         }).then(function () { if (!silent) toast('API keys saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -310,7 +314,8 @@
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
             'fanart-api-key', 'opensubtitles-api-key', 'trakt-api-key',
-            'video-ryd-enabled', 'video-sponsorblock-enabled', 'video-tvmaze-enabled'].forEach(function (id) {
+            'video-ryd-enabled', 'video-sponsorblock-enabled',
+            'video-tvmaze-enabled', 'video-anilist-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });
         });

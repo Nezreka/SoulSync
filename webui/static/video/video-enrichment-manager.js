@@ -27,6 +27,7 @@
         { id: 'sponsorblock', name: 'SponsorBlock', color: '#00b4a0', rgb: '0, 180, 160', kinds: ['video'], glyph: '⏭' },
         { id: 'trakt', name: 'Trakt', color: '#ed1c24', rgb: '237, 28, 36', kinds: ['movie', 'show'], glyph: '★' },
         { id: 'tvmaze', name: 'TVmaze', color: '#3dd6c0', rgb: '61, 214, 192', kinds: ['show'], glyph: '📺' },
+        { id: 'anilist', name: 'AniList', color: '#02a9ff', rgb: '2, 169, 255', kinds: ['show'], glyph: '🎌' },
     ];
 
     function workerDef(id) {
