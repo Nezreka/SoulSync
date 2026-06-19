@@ -218,12 +218,14 @@
         postJSON('/api/video/downloads/search', params).then(function (d) {
             _setScanning(triggerRows, false);
             if (!resultsEl.isConnected) return;
+            if (d && d.error) { resultsEl.innerHTML = '<div class="vdl-res-empty vdl-res-err">⚠ ' + esc(d.error) + '</div>'; return; }
             var rows = (d && d.results) || [];
             if (!rows.length) { resultsEl.innerHTML = '<div class="vdl-res-empty">No matching releases found.</div>'; return; }
             var okN = rows.filter(function (r) { return r.accepted; }).length;
+            var live = d && d.live ? '<span class="vdl-res-live">● live</span>' : '<span class="vdl-res-demo">demo data</span>';
             resultsEl.innerHTML =
                 '<div class="vdl-res-head"><strong>' + rows.length + '</strong> result' + (rows.length === 1 ? '' : 's') +
-                    ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span></div>' +
+                    ' · <span class="vdl-res-okn">' + okN + ' meet your profile</span>' + live + '</div>' +
                 rows.map(resultCardHTML).join('');
         });
     }
@@ -235,6 +237,15 @@
 
     function resKind(res) {
         return res === '2160p' ? '4k' : res === '1080p' ? '1080' : res === '720p' ? '720' : 'sd';
+    }
+
+    // Availability differs by source: slskd has a peer (uploader); torrent/usenet seeders.
+    function resAvailHTML(r) {
+        if (r.username) {
+            return '<span class="vdl-res-stat vdl-res-seed"><span class="vdl-res-ico">👤</span>' + esc(r.username) +
+                (r.peers > 1 ? ' · ' + r.peers + ' peers' : '') + (r.slots ? ' · ' + r.slots + ' slots' : '') + '</span>';
+        }
+        return '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + ' seeders</span>';
     }
 
     // Readable card: a big resolution tile anchors it, a plain-English quality summary
@@ -259,7 +270,7 @@
                 '<div class="vdl-res-name" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
                 '<div class="vdl-res-meta">' +
                     '<span class="vdl-res-stat"><span class="vdl-res-ico">💾</span>' + r.size_gb + ' GB</span>' +
-                    '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + ' seeders</span>' +
+                    resAvailHTML(r) +
                     (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
                 '</div>' +
             '</div>' +
