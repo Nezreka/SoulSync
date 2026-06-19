@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.3"
+_SOULSYNC_BASE_VERSION = "2.7.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -10043,6 +10043,147 @@ def get_artist_enhanced_detail(artist_id):
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Re-identify an imported track (#889) ──
+@app.route('/api/reidentify/sources', methods=['GET'])
+def reidentify_sources():
+    """Source tabs for the Re-identify modal — every metadata source with a live
+    client, the active one flagged so the UI selects it by default."""
+    try:
+        from core.imports.rematch_search import available_sources
+        return jsonify({"success": True, "sources": available_sources()})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e), "sources": []}), 500
+
+
+@app.route('/api/reidentify/search', methods=['GET'])
+def reidentify_search():
+    """Search one metadata source for the releases a track appears on.
+
+    Query params: ``source`` (defaults to the active source), ``q`` (the query),
+    ``limit``. Returns display rows — the SAME song across single/EP/album, each
+    with a type badge — for the user to pick. album_id is resolved later, only for
+    the chosen row."""
+    try:
+        from core.imports.rematch_search import available_sources, search_release_candidates
+        query = (request.args.get('q') or '').strip()
+        if not query:
+            return jsonify({"success": True, "results": []})
+        source = (request.args.get('source') or '').strip()
+        if not source:
+            actives = [s for s in available_sources() if s.get('active')]
+            source = actives[0]['source'] if actives else 'spotify'
+        try:
+            limit = max(1, min(50, int(request.args.get('limit', 25))))
+        except (TypeError, ValueError):
+            limit = 25
+        rows = search_release_candidates(source, query, limit=limit)
+        return jsonify({"success": True, "source": source, "results": rows})
+    except Exception as e:
+        logger.error(f"Re-identify search error: {e}")
+        return jsonify({"success": False, "error": str(e), "results": []}), 500
+
+
+@app.route('/api/reidentify/apply', methods=['POST'])
+def reidentify_apply():
+    """Apply a re-identify: stage the track's library file + write a single-use hint
+    so the auto-import worker re-files it under the chosen release (Phase 2).
+
+    Body: ``{library_track_id, source, track_id, replace}``. Admin-only (mutates the
+    library). COPIES the file — the original is removed only after the re-import
+    succeeds, and only when ``replace`` is true."""
+    try:
+        database = get_database()
+        pid = get_current_profile_id()
+        prof = database.get_profile(pid) if pid else None
+        if not prof or not prof.get('is_admin'):
+            return jsonify({"success": False, "error": "Admin only"}), 403
+
+        data = request.get_json(silent=True) or {}
+        library_track_id = data.get('library_track_id')
+        source = (data.get('source') or '').strip()
+        track_id = (data.get('track_id') or '').strip()
+        replace = bool(data.get('replace', True))
+        if not library_track_id or not source or not track_id:
+            return jsonify({"success": False, "error": "library_track_id, source and track_id are required"}), 400
+
+        from core.imports.rematch_search import resolve_hint_fields
+        from core.imports.rematch_apply import stage_file_for_reidentify, build_reidentify_hint
+        from core.imports.rematch_hints import create_hint
+
+        # 1) Resolve the picked release → the IDs the hint needs (album_id critically).
+        hint_fields = resolve_hint_fields(source, track_id)
+        if not hint_fields:
+            return jsonify({"success": False, "error": "Could not resolve the selected release (no album id)"}), 400
+
+        # 2) Locate the library file for this track.
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT file_path FROM tracks WHERE id = ?", (str(library_track_id),))
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        if not row or not row['file_path']:
+            return jsonify({"success": False, "error": "Library track has no file on disk"}), 404
+        stored_path = row['file_path']
+
+        # Resolve the stored DB path to a file THIS process can actually read, using
+        # the SAME strong resolver the rest of the app uses (transfer/download/library/
+        # Plex search + #833 confusable folding via find_on_disk).
+        real_path = _resolve_library_file_path(stored_path)
+        if not real_path:
+            # On a miss, run the diagnostic variant purely to tell us (and the user)
+            # what was tried — instead of failing on the raw, possibly-stale path.
+            from core.library.path_resolver import resolve_library_file_path_with_diagnostic
+            try:
+                _plex = media_server_engine.client('plex') if media_server_engine else None
+            except Exception:
+                _plex = None
+            _, attempt = resolve_library_file_path_with_diagnostic(
+                stored_path, config_manager=config_manager, plex_client=_plex)
+            searched = ", ".join(attempt.base_dirs_tried) or "(no library/transfer/download dirs configured)"
+            logger.warning("[Re-identify] could not locate track %s file — stored=%s raw_exists=%s searched=[%s]",
+                           library_track_id, stored_path, attempt.raw_path_existed, searched)
+            return jsonify({"success": False, "error": (
+                f"SoulSync couldn't find this track's file on disk.\nStored path: {stored_path}\n"
+                f"Searched: {searched}.\nIf the file lives on a media server SoulSync can't read directly "
+                f"(or the stored path is stale), re-identify isn't available for it.")}), 404
+
+        # 3) Copy into staging + fingerprint the copy.
+        staging_dir = docker_resolve_path(config_manager.get('import.staging_path', './Staging'))
+        staged = stage_file_for_reidentify(real_path, staging_dir, library_track_id)
+
+        # 4) Persist the single-use hint.
+        hint = build_reidentify_hint(library_track_id, hint_fields,
+                                     staged['staged_path'], staged['content_hash'], replace=replace)
+        conn = database._get_connection()
+        try:
+            cur = conn.cursor()
+            hint_id = create_hint(cur, hint)
+            conn.commit()
+        finally:
+            conn.close()
+
+        # 5) Nudge the worker so it doesn't wait for the next timer tick.
+        try:
+            if auto_import_worker is not None:
+                auto_import_worker.trigger_scan()
+        except Exception as _e:
+            logger.debug("Re-identify: scan nudge failed (worker will catch it on its timer): %s", _e)
+
+        logger.info("[Re-identify] staged track %s → %s '%s' (%s), replace=%s",
+                    library_track_id, hint.album_type or 'release', hint.album_name or '?',
+                    source, replace)
+        return jsonify({"success": True, "hint_id": hint_id, "staged_path": staged['staged_path'],
+                        "album_name": hint.album_name, "album_type": hint.album_type})
+    except FileNotFoundError as e:
+        return jsonify({"success": False, "error": f"Source file not found: {e}"}), 404
+    except Exception as e:
+        logger.error(f"Re-identify apply error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 @app.route('/api/library/artist/<artist_id>/quality-analysis')
 def get_artist_quality_analysis(artist_id):

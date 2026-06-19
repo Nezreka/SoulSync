@@ -5135,6 +5135,37 @@
                                     </div>
                                 </div>
 
+                                <!-- AAC Quality (opt-in; Soulseek/torrents — off by default) -->
+                                <div class="quality-tier">
+                                    <div class="quality-tier-header">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="quality-aac-enabled"
+                                                onchange="toggleQuality('aac')">
+                                            <span class="quality-tier-name">AAC <span style="opacity:.6;font-weight:400;">(.m4a/.aac — Soulseek)</span></span>
+                                        </label>
+                                        <span class="quality-tier-priority" id="priority-aac">Priority: 1.5</span>
+                                    </div>
+                                    <div class="quality-tier-sliders" id="sliders-aac">
+                                        <div class="slider-group">
+                                            <label>Bitrate Range:</label>
+                                            <div class="dual-slider-container">
+                                                <input type="range" class="range-slider range-slider-min"
+                                                    id="aac-min" min="0" max="400" value="128" step="10"
+                                                    oninput="updateQualityRange('aac')">
+                                                <input type="range" class="range-slider range-slider-max"
+                                                    id="aac-max" min="0" max="400" value="400" step="10"
+                                                    oninput="updateQualityRange('aac')">
+                                                <div class="range-slider-track"></div>
+                                            </div>
+                                            <div class="slider-values">
+                                                <span id="aac-min-value">128 kbps</span>
+                                                <span>-</span>
+                                                <span id="aac-max-value">400 kbps</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- MP3 320 Quality -->
                                 <div class="quality-tier">
                                     <div class="quality-tier-header">
@@ -5729,6 +5760,13 @@
                                             <label class="checkbox-label" style="cursor:default;">Preferred album art sources</label>
                                             <small class="settings-hint">Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior.</small>
                                             <div class="hybrid-source-list" id="art-source-list"></div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="single-to-album-enabled">
+                                                Match singles to their parent album
+                                            </label>
+                                            <small class="settings-hint">When a track matches a single release, look up the album that contains it and tag it as that album — so every song in an album gets the same (album) cover instead of some getting the single's art. Off by default: adds an extra metadata lookup per single-matched track.</small>
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label">
@@ -7700,6 +7738,50 @@
                             Add to Wishlist
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Re-identify Track Modal (#889) -->
+    <div class="modal-overlay hidden" id="reid-modal-overlay" onclick="if(event.target===this)closeReidentifyModal()">
+        <div class="reid-modal" id="reid-modal">
+            <div class="reid-hero">
+                <div class="reid-hero-decor">
+                    <div class="reid-hero-bg" id="reid-hero-bg"></div>
+                    <div class="reid-hero-overlay"></div>
+                </div>
+                <span class="reid-close" onclick="closeReidentifyModal()">&times;</span>
+                <div class="reid-hero-content">
+                    <div class="reid-hero-art" id="reid-hero-art"></div>
+                    <div class="reid-hero-meta">
+                        <div class="reid-hero-eyebrow">Re-identify track</div>
+                        <div class="reid-hero-title" id="reid-hero-title">Track</div>
+                        <div class="reid-hero-sub" id="reid-hero-sub"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="reid-tabs" id="reid-tabs"></div>
+
+            <div class="reid-search">
+                <svg class="reid-search-icon" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+                <input type="text" id="reid-search-input" class="reid-search-input"
+                    placeholder="Search for the track…" onkeydown="if(event.key==='Enter')runReidentifySearch()" />
+                <button class="reid-search-btn" id="reid-search-btn" onclick="runReidentifySearch()">Search</button>
+            </div>
+
+            <div class="reid-results" id="reid-results"></div>
+
+            <div class="reid-footer">
+                <label class="reid-replace" title="When on, the original file is deleted after the track is re-filed under the new release.">
+                    <input type="checkbox" id="reid-replace" checked />
+                    <span class="reid-replace-box"></span>
+                    <span class="reid-replace-text">Replace the original file <em>(recommended)</em></span>
+                </label>
+                <div class="reid-footer-actions">
+                    <button class="btn btn--secondary" onclick="closeReidentifyModal()">Cancel</button>
+                    <button class="btn btn--primary" id="reid-confirm-btn" disabled onclick="confirmReidentify()">Re-identify</button>
                 </div>
             </div>
         </div>

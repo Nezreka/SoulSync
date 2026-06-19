@@ -1847,14 +1847,8 @@ def _prune_empty_album_dirs(artist_dir: str) -> None:
 # Sidecars that live alongside ONE audio file (same filename stem).
 _TRACK_SIDECAR_EXTS = ('.lrc', '.nfo', '.txt', '.cue', '.json')
 
-# Sidecars that live at the ALBUM level (one per directory).
-_ALBUM_SIDECARS = (
-    'cover.jpg', 'cover.jpeg', 'cover.png',
-    'folder.jpg', 'folder.png',
-    'front.jpg', 'front.png',
-    'album.jpg', 'album.png',
-    'artwork.jpg', 'artwork.png',
-)
+# Album-level leftovers (cover images, .lrc, etc.) are classified by the shared
+# `core.library.residual_files.is_disposable` predicate — see `_delete_album_sidecars`.
 
 # Audio extensions used to decide whether a source directory still has
 # tracks the user might care about (i.e. a per-track failure left audio
@@ -1954,16 +1948,30 @@ def _delete_track_sidecars(audio_path: str) -> None:
 
 
 def _delete_album_sidecars(src_dir: str) -> None:
-    """Delete album-level sidecars (cover.jpg, folder.jpg, etc.) from
-    `src_dir`. Used during end-of-run cleanup when no audio files remain
-    in the directory. Best-effort — individual failures are debug-logged."""
-    for name in _ALBUM_SIDECARS:
-        sidecar = os.path.join(src_dir, name)
-        if os.path.isfile(sidecar):
+    """Delete album-level *residual* files from ``src_dir`` — any cover/scan image,
+    lyric/metadata sidecar (.lrc/.nfo/.cue/.m3u), or OS junk. Called during
+    end-of-run cleanup ONLY when no audio remains in the directory, so everything
+    here is leftover from the album that just moved (#891 — previously this only
+    removed a fixed list of cover names, so ``back.jpg`` / ``disc.jpg`` / ``.webp``
+    survived and kept the folder un-prunable).
+
+    Uses the shared ``is_disposable`` predicate so it agrees with the Empty Folder
+    Cleaner on what's a dead leftover; anything unrecognized (a booklet ``.pdf``, a
+    video) is deliberately LEFT. Best-effort — individual failures are debug-logged."""
+    from core.library.residual_files import is_disposable
+    try:
+        entries = os.listdir(src_dir)
+    except OSError:
+        return
+    for name in entries:
+        if not is_disposable(name):
+            continue
+        full = os.path.join(src_dir, name)
+        if os.path.isfile(full):
             try:
-                os.remove(sidecar)
+                os.remove(full)
             except OSError as e:
-                logger.debug(f"[Reorganize] Couldn't remove album sidecar {sidecar}: {e}")
+                logger.debug(f"[Reorganize] Couldn't remove residual file {full}: {e}")
 
 
 def _has_remaining_audio(directory: str) -> bool:
