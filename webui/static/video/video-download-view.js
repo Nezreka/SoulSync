@@ -208,12 +208,17 @@
     }
 
     // Render the result cards (shared by the immediate mock path and live polling).
-    function renderResults(resultsEl, params, rows, live, done) {
+    function renderResults(resultsEl, params, rows, live, done, totalFiles) {
         rows = rows || [];
         if (!rows.length) {
-            resultsEl.innerHTML = done
-                ? '<div class="vdl-res-empty">No matching releases found.</div>'
-                : '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+            if (!done) {
+                resultsEl.innerHTML = '<div class="vdl-res-loading"><span class="vdl-res-spin"></span>Searching ' + esc(scopeWord(params.scope)) + '…</div>';
+            } else if (totalFiles > 0) {
+                resultsEl.innerHTML = '<div class="vdl-res-empty">Soulseek returned ' + totalFiles + ' file' + (totalFiles === 1 ? '' : 's') +
+                    ', but none are video releases — likely audio/other for this title. Try a different title or source.</div>';
+            } else {
+                resultsEl.innerHTML = '<div class="vdl-res-empty">No matching releases found.</div>';
+            }
             return;
         }
         resultsEl._rows = rows; resultsEl._search = params;   // for the Grab button
@@ -246,12 +251,16 @@
                 renderResults(resultsEl, params, d ? d.results : [], !!(d && d.live), true);
                 return;
             }
-            _pollSearch(resultsEl, params, d.id, triggerRows);
+            _pollSearch(resultsEl, params, d.id, triggerRows, d.poll_ms);
         });
     }
 
-    function _pollSearch(resultsEl, params, id, triggerRows) {
-        var started = Date.now(), lastN = -1, stable = 0, MAX_MS = 32000;
+    function _pollSearch(resultsEl, params, id, triggerRows, pollMs) {
+        // slskd keeps searching for the whole search_timeout (~60s) and results
+        // trickle in over ~50s — poll that long (the music side does), streaming
+        // results as they arrive. Stop early only once results clearly plateau.
+        var started = Date.now(), lastN = -1, stable = 0, total = 0;
+        var MAX_MS = Math.min(80000, pollMs || 60000);
         function tick() {
             if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
             var qs = '?id=' + encodeURIComponent(id) + '&scope=' + encodeURIComponent(params.scope || 'movie') +
@@ -261,12 +270,14 @@
             getJSON('/api/video/downloads/search/poll' + qs).then(function (d) {
                 if (!resultsEl.isConnected) { _setScanning(triggerRows, false); return; }
                 var rows = (d && d.results) || [];
+                total = (d && d.total_files) || total;
                 if (rows.length === lastN) { stable++; } else { stable = 0; lastN = rows.length; }
-                // done = timed out, OR results have plateaued for a few polls.
-                var done = (Date.now() - started >= MAX_MS) || (rows.length > 0 && stable >= 4);
-                renderResults(resultsEl, params, rows, true, done);
+                var elapsed = Date.now() - started;
+                // done = full timeout, OR plenty of results, OR results plateaued after ≥20s.
+                var done = elapsed >= MAX_MS || rows.length >= 25 || (rows.length > 0 && elapsed > 20000 && stable >= 6);
+                renderResults(resultsEl, params, rows, true, done, total);
                 if (done) { _setScanning(triggerRows, false); resultsEl._poll = null; }
-                else { resultsEl._poll = setTimeout(tick, 1300); }
+                else { resultsEl._poll = setTimeout(tick, 1500); }
             });
         }
         tick();

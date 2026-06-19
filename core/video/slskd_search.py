@@ -149,17 +149,29 @@ def start_search(query: str) -> dict:
 
 def poll_responses(search_id: str) -> list:
     """Current grouped video hits for an in-flight search (cheap; call repeatedly)."""
+    return poll_search(search_id)["hits"]
+
+
+def poll_search(search_id: str) -> dict:
+    """Poll an in-flight search → {hits (grouped video releases), total_files (every
+    file slskd returned, incl. non-video)}. total_files lets the UI distinguish
+    'nothing back yet' from 'plenty back but it's all audio/junk, no video'."""
     base, headers = _conn()
     if not base or not search_id:
-        return []
+        return {"hits": [], "total_files": 0}
     try:
         r = requests.get(base + "/api/v0/searches/%s/responses" % search_id, headers=headers, timeout=15)
         if not r.ok:
-            return []
+            return {"hits": [], "total_files": 0}
         data = r.json()
     except Exception:   # noqa: BLE001, S110 - transient error → no new hits this poll
-        return []
-    return group_video_files(data)
+        return {"hits": [], "total_files": 0}
+    total = 0
+    for u in (data if isinstance(data, list) else []):
+        if isinstance(u, dict):
+            for d in (u.get("directories") or []):
+                total += len(d.get("files") or [])
+    return {"hits": group_video_files(data), "total_files": total}
 
 
 def slskd_search(query: str, *, max_seconds: int = 8, slskd_timeout_ms: int = 4500) -> dict:
@@ -205,4 +217,5 @@ def slskd_search(query: str, *, max_seconds: int = 8, slskd_timeout_ms: int = 45
     return {"configured": True, "hits": group_video_files(responses)}
 
 
-__all__ = ["VIDEO_EXTS", "build_query", "group_video_files", "slskd_search"]
+__all__ = ["VIDEO_EXTS", "build_query", "group_video_files", "slskd_search",
+           "start_search", "poll_responses", "poll_search", "search_timeout_ms"]
