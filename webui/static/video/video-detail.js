@@ -227,10 +227,43 @@
                 return '<span class="vd-genre">' + esc(gn) + '</span>';
             }).join('');
         }
+        renderSubtitles(d);
         renderRatings(d);
         renderCrewLine(d);
         renderNextEpisode(d);
         renderCast(d);
+    }
+
+    // Subtitle availability (OpenSubtitles backfill, #video-enrichment): a chip row
+    // of the languages subtitles EXIST in for this title, so you know before you grab
+    // it. Hidden entirely when we have no data.
+    var SUB_LANG_NAMES = {
+        en: 'English', es: 'Spanish', fr: 'French', de: 'German', it: 'Italian',
+        pt: 'Portuguese', 'pt-br': 'Portuguese (BR)', nl: 'Dutch', pl: 'Polish',
+        ru: 'Russian', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', 'zh-cn': 'Chinese',
+        ar: 'Arabic', tr: 'Turkish', sv: 'Swedish', da: 'Danish', fi: 'Finnish',
+        no: 'Norwegian', cs: 'Czech', el: 'Greek', he: 'Hebrew', hi: 'Hindi',
+        hu: 'Hungarian', ro: 'Romanian', th: 'Thai', uk: 'Ukrainian', vi: 'Vietnamese',
+        id: 'Indonesian'
+    };
+    function subLangLabel(code) {
+        var c = String(code || '').toLowerCase();
+        return SUB_LANG_NAMES[c] || code.toUpperCase();
+    }
+    function renderSubtitles(d) {
+        var el = q('[data-vd-subs]');
+        if (!el) return;
+        var langs = (d && d.subtitle_langs) || [];
+        if (!langs.length) { el.hidden = true; el.innerHTML = ''; return; }
+        var shown = langs.slice(0, 12);
+        var chips = shown.map(function (c) {
+            return '<span class="vd-sub" title="' + esc(subLangLabel(c)) + '">' + esc(subLangLabel(c)) + '</span>';
+        });
+        if (langs.length > shown.length) {
+            chips.push('<span class="vd-sub vd-sub--more">+' + (langs.length - shown.length) + '</span>');
+        }
+        el.innerHTML = '<span class="vd-sub-label">Subtitles</span>' + chips.join('');
+        el.hidden = false;
     }
 
     // "Directed by …" (movie) / "Created by …" (show) surfaced in the hero.
