@@ -58,20 +58,42 @@
                     '<button class="vdl-search-all" type="button" data-vdl-search-all>⌕ Search all</button>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
-                '<div class="vdl-results" data-vdl-results hidden></div>' +
             '</div>';
+    }
+
+    // One source = a row + its OWN results panel (so each source shows its own hits).
+    function srcRowHTML(s, mini) {
+        var m = SRC_META[s];
+        return '<div class="vdl-src' + (mini ? ' vdl-src--mini' : '') + '" data-vdl-src="' + s + '">' +
+            '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
+            '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
+                '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
+            '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
+            '</div>';
+    }
+    function srcBlockHTML(s, mini) {
+        return '<div class="vdl-src-block" data-vdl-src-block="' + s + '">' +
+            srcRowHTML(s, mini) +
+            '<div class="vdl-results" data-vdl-results-for="' + s + '" hidden></div>' +
+        '</div>';
+    }
+
+    function _movieSearch(container, block) {
+        var o = container._opts || {};
+        var s = block.getAttribute('data-vdl-src-block');
+        searchInto(container, block.querySelector('[data-vdl-results-for="' + s + '"]'),
+            { scope: 'movie', title: o.title || '', year: o.year || null, source: s },
+            [block.querySelector('.vdl-src')]);
     }
 
     function onClick(e) {
         var container = e.currentTarget;
         if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
-        var o = container._opts || {};
-        var params = { scope: 'movie', title: o.title || '', year: o.year || null };
-        var results = container.querySelector('[data-vdl-results]');
         var sb = e.target.closest('[data-vdl-search]');
-        if (sb) { searchInto(container, results, params, [sb.closest('.vdl-src')]); return; }
+        if (sb) { _movieSearch(container, sb.closest('[data-vdl-src-block]')); return; }
         if (e.target.closest('[data-vdl-search-all]')) {
-            searchInto(container, results, params, Array.prototype.slice.call(container.querySelectorAll('.vdl-src')));
+            Array.prototype.forEach.call(container.querySelectorAll('[data-vdl-src-block]'),
+                function (block) { _movieSearch(container, block); });
         }
     }
 
@@ -165,18 +187,7 @@
             box.innerHTML = '<div class="vdl-src-empty">No download source configured — pick one on Settings → Downloads.</div>';
             return;
         }
-        box.innerHTML = list.map(function (s) {
-            var m = SRC_META[s];
-            return '<div class="vdl-src" data-vdl-src="' + s + '">' +
-                '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
-                '<span class="vdl-src-main">' +
-                    '<span class="vdl-src-name">' + esc(m.name) + '</span>' +
-                    '<span class="vdl-src-meta"><span class="vdl-src-dot"></span>' +
-                        '<span class="vdl-src-status" data-vdl-status>Ready</span></span>' +
-                '</span>' +
-                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
-                '</div>';
-        }).join('');
+        box.innerHTML = list.map(function (s) { return srcBlockHTML(s, false); }).join('');
     }
 
     // Scaffold: a satisfying faux-scan (animated) that resolves to "coming soon".
@@ -222,30 +233,37 @@
             : s === 'episode' ? 'this episode' : 'for the movie';
     }
 
-    function rb(text, mod) { return '<span class="vdl-rb' + (mod ? ' vdl-rb--' + mod : '') + '">' + esc(text) + '</span>'; }
+    function resKind(res) {
+        return res === '2160p' ? '4k' : res === '1080p' ? '1080' : res === '720p' ? '720' : 'sd';
+    }
 
+    // Readable card: a big resolution tile anchors it, a plain-English quality summary
+    // leads, the raw release name is demoted to a muted one-liner, then size/seeders.
     function resultCardHTML(r) {
-        var badges = [];
-        if (r.resolution) badges.push(rb(RES_LABEL[r.resolution] || r.resolution, 'res'));
-        if (r.source) badges.push(rb(SRC_LABEL[r.source] || r.source, 'src'));
-        if (r.codec) badges.push(rb(String(r.codec).toUpperCase()));
-        if (r.hdr) badges.push(rb(String(r.hdr).toUpperCase(), 'hdr'));
-        if (r.audio) badges.push(rb(String(r.audio).toUpperCase().replace('-', ' ')));
-        if (r.repack) badges.push(rb('REPACK'));
+        var summary = [SRC_LABEL[r.source] || r.source,
+            r.codec ? String(r.codec).toUpperCase() : '',
+            r.audio ? String(r.audio).toUpperCase().replace('-', ' ') : ''].filter(Boolean).join('  ·  ');
+        var tags = '';
+        if (r.hdr) tags += '<span class="vdl-res-tag vdl-res-tag--hdr">' + esc(String(r.hdr).toUpperCase()) + '</span>';
+        if (r.repack) tags += '<span class="vdl-res-tag">REPACK</span>';
         var verdict = r.accepted
             ? '<span class="vdl-res-verdict vdl-res-verdict--ok">✓ Meets profile</span>'
-            : '<span class="vdl-res-verdict vdl-res-verdict--no">✕ ' + esc(r.rejected || 'Filtered') + '</span>';
+            : '<span class="vdl-res-verdict vdl-res-verdict--no" title="' + esc(r.rejected || '') + '">✕ ' + esc(r.rejected || 'Filtered') + '</span>';
         return '<div class="vdl-res' + (r.accepted ? '' : ' vdl-res--rejected') + '">' +
-            '<div class="vdl-res-top">' +
-                '<div class="vdl-res-title" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
-                (r.accepted ? '<button class="vdl-res-grab" type="button" data-vdl-grab title="Grab this release">⤓</button>' : '') +
+            '<div class="vdl-res-res vdl-res-res--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</div>' +
+            '<div class="vdl-res-body">' +
+                '<div class="vdl-res-line1">' +
+                    '<span class="vdl-res-summary">' + esc(summary) + '</span>' + tags +
+                    verdict +
+                '</div>' +
+                '<div class="vdl-res-name" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
+                '<div class="vdl-res-meta">' +
+                    '<span class="vdl-res-stat"><span class="vdl-res-ico">💾</span>' + r.size_gb + ' GB</span>' +
+                    '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + ' seeders</span>' +
+                    (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
+                '</div>' +
             '</div>' +
-            '<div class="vdl-res-badges">' + badges.join('') + '</div>' +
-            '<div class="vdl-res-foot">' +
-                '<span class="vdl-res-stat">' + r.size_gb + ' GB</span>' +
-                '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + '</span>' +
-                verdict +
-            '</div>' +
+            (r.accepted ? '<button class="vdl-res-grab" type="button" data-vdl-grab title="Grab this release">⤓</button>' : '') +
         '</div>';
     }
 
@@ -384,13 +402,15 @@
     function onShowClick(e) {
         var container = e.currentTarget; var st = container._dl; if (!st) return;
         if (e.target.closest('[data-vdl-grab]')) { toast('Grabbing isn’t wired up yet — coming soon', 'info'); return; }
-        // Episode-scope search (a source row inside an expanded episode).
+        // Episode-scope search (a source row inside an expanded episode → its own panel).
         var srch = e.target.closest('[data-vdl-search]');
         if (srch) {
             var epEl = srch.closest('.vdl-ep'); if (!epEl) return;
             var parts = (epEl.getAttribute('data-vdl-ep') || '').split('_');
-            searchInto(container, epEl.querySelector('[data-vdl-ep-results]'),
-                { scope: 'episode', title: st.title, season: +parts[0], episode: +parts[1] },
+            var s = srch.getAttribute('data-vdl-search');
+            var block = srch.closest('[data-vdl-src-block]');
+            searchInto(container, block.querySelector('[data-vdl-results-for="' + s + '"]'),
+                { scope: 'episode', title: st.title, season: +parts[0], episode: +parts[1], source: s },
                 [srch.closest('.vdl-src')]);
             return;
         }
@@ -444,16 +464,7 @@
         var panel = epEl.querySelector('[data-vdl-ep-search]'); if (!panel) return;
         var srcs = (container._dl.sources || []).filter(function (s) { return SRC_META[s]; });
         if (!srcs.length) { panel.innerHTML = '<div class="vdl-ep-srcs"><div class="vdl-src-empty">No source configured.</div></div>'; return; }
-        panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) {
-            var m = SRC_META[s];
-            return '<div class="vdl-src vdl-src--mini" data-vdl-src="' + s + '">' +
-                '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
-                '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
-                    '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
-                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
-                '</div>';
-        }).join('') + '</div>' +
-        '<div class="vdl-results" data-vdl-ep-results hidden></div>';
+        panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) { return srcBlockHTML(s, true); }).join('') + '</div>';
     }
 
     function setSeasonSel(container, sn, on) {
