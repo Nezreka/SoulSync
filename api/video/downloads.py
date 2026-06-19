@@ -92,6 +92,53 @@ def register_routes(bp):
         profile = load(get_video_db())
         return jsonify(evaluate_owned(body.get("file"), profile))
 
+    @bp.route("/downloads/search", methods=["POST"])
+    def video_downloads_search():
+        """Search a scope (movie / episode / season / series) and return candidates
+        ranked + filtered against the stored quality profile. The indexer is mocked
+        for now (core.video.mock_search) — the parse→evaluate→rank pipeline is real,
+        so swapping in slskd/Prowlarr later needs no change here.
+        Body: {scope, title, year?, season?, episode?, season_end?}."""
+        from . import get_video_db
+        from core.video.mock_search import mock_search
+        from core.video.quality_eval import evaluate_release
+        from core.video.quality_profile import load as load_profile
+        from core.video.release_parse import parse_release
+
+        body = request.get_json(silent=True) or {}
+        scope = str(body.get("scope") or "movie").lower()
+        title = body.get("title") or ""
+
+        def _int(v):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return None
+
+        want_season, want_episode = _int(body.get("season")), _int(body.get("episode"))
+        profile = load_profile(get_video_db())
+        raw = mock_search(scope, title, year=body.get("year"), season=want_season,
+                          episode=want_episode, season_end=_int(body.get("season_end")))
+
+        results = []
+        for hit in raw:
+            parsed = parse_release(hit.get("title"))
+            size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
+            verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
+                                       want_episode=want_episode, size_gb=size_gb)
+            results.append({
+                "title": hit.get("title"), "size_gb": size_gb, "seeders": hit.get("seeders", 0),
+                "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
+                "rejected": verdict["rejected"], "score": verdict["score"],
+                "resolution": parsed.get("resolution"), "source": parsed.get("source"),
+                "codec": parsed.get("codec"), "hdr": parsed.get("hdr"),
+                "audio": parsed.get("audio"), "group": parsed.get("group"),
+                "repack": parsed.get("repack") or parsed.get("proper"),
+            })
+        # accepted first, then best score, then most seeders.
+        results.sort(key=lambda r: (r["accepted"], r["score"], r["seeders"]), reverse=True)
+        return jsonify({"scope": scope, "results": results})
+
     @bp.route("/downloads/youtube-quality", methods=["GET"])
     def video_youtube_quality():
         # Separate, smaller profile — YouTube is yt-dlp, not scene/p2p releases.

@@ -96,4 +96,113 @@ def evaluate_owned(file: Any, profile: Any) -> dict:
     }
 
 
-__all__ = ["resolution_rank", "resolution_label", "meets_cutoff", "evaluate_owned"]
+# ── release (search hit) evaluation ───────────────────────────────────────────
+# Map a parsed source → the tier-key prefix used in the quality profile's ladder.
+_SRC_TIER = {"remux": "remux", "bluray": "bluray", "web-dl": "web",
+             "webrip": "webrip", "hdtv": "hdtv", "dvd": "dvd"}
+_RES_SCORE = {"2160p": 400, "1080p": 300, "720p": 200, "480p": 100}
+_SRC_SCORE = {"remux": 90, "bluray": 70, "web-dl": 55, "webrip": 40, "hdtv": 25, "dvd": 10}
+
+
+def tier_key(source, resolution) -> str:
+    """The quality-ladder key for a parsed (source, resolution), or '' if it isn't a
+    ladder tier (junk sources like cam/screener have no tier)."""
+    pre = _SRC_TIER.get(source)
+    if not pre:
+        return ""
+    if pre == "dvd":
+        return "dvd"
+    return (pre + "-" + resolution) if resolution else ""
+
+
+def _scope_ok(parsed, scope, want_season, want_episode):
+    """Validate a hit actually matches what was searched (Sonarr-style): an episode
+    search wants SxxExx, a season search wants the whole season PACK, a show search
+    wants a complete-series pack."""
+    season, episode = parsed.get("season"), parsed.get("episode")
+    if scope == "movie":
+        return (None, None) if season is None else (None, "This is a TV release, not the movie")
+    if scope == "episode":
+        if episode is None:
+            return None, "Not a single episode"
+        if want_season is not None and season != want_season:
+            return None, "Wrong season"
+        if want_episode is not None and episode != want_episode:
+            return None, "Wrong episode"
+        return None, None
+    if scope == "season":
+        if not parsed.get("is_season_pack"):
+            return None, "Not a full-season pack"
+        if want_season is not None and season != want_season:
+            return None, "Wrong season"
+        return None, None
+    if scope == "series":
+        return (None, None) if parsed.get("is_series_pack") else (None, "Not a complete-series pack")
+    return None, None
+
+
+def evaluate_release(parsed, profile, *, scope="movie", want_season=None,
+                     want_episode=None, size_gb=None) -> dict:
+    """Judge a parsed search hit against the quality profile + the search scope.
+
+    Returns ``{accepted, score, rejected, tier, quality_label}`` — ``accepted`` False
+    means it's filtered out (``rejected`` says why); ``score`` ranks the keepers."""
+    parsed = parsed if isinstance(parsed, dict) else {}
+    profile = profile if isinstance(profile, dict) else {}
+    res, source = parsed.get("resolution"), parsed.get("source")
+    rejects = profile.get("rejects") or []
+    rejected = None
+
+    # 1) hard rejects — junk source / 3D / rejected codec
+    if source in ("cam", "screener", "workprint") and source in rejects:
+        rejected = source + " is on your reject list"
+    fam = _codec_family(parsed.get("codec"))
+    if not rejected and fam and fam in rejects:
+        rejected = fam + " codec is on your reject list"
+    if not rejected and parsed.get("three_d") and "3d" in rejects:
+        rejected = "3D is on your reject list"
+
+    # 2) must be an enabled ladder tier
+    tier = tier_key(source, res)
+    if not rejected:
+        enabled = {t.get("key") for t in (profile.get("tiers") or []) if t.get("enabled")}
+        if not tier:
+            rejected = "Unknown / unsupported quality"
+        elif tier not in enabled:
+            rejected = (resolution_label(res) or "This quality") + " " + (source or "") + " isn't in your enabled tiers"
+
+    # 3) HDR required (a real filter when set)
+    if not rejected and profile.get("prefer_hdr") == "require" and not parsed.get("hdr"):
+        rejected = "HDR required but this is SDR"
+
+    # 4) scope validation (episode vs season pack vs series pack)
+    if not rejected:
+        _, scope_reason = _scope_ok(parsed, scope, want_season, want_episode)
+        if scope_reason:
+            rejected = scope_reason
+
+    # 5) size guard (movie/episode only — packs are legitimately large)
+    if not rejected and size_gb:
+        cap = profile.get("max_movie_gb") if scope == "movie" else (profile.get("max_episode_gb") if scope == "episode" else 0)
+        if cap and size_gb > cap:
+            rejected = "Over your " + str(cap) + " GB size cap"
+
+    # score the keepers (higher = better)
+    score = _RES_SCORE.get(res, 0) + _SRC_SCORE.get(source, 0)
+    if profile.get("prefer_codec") not in (None, "any") and fam == profile.get("prefer_codec"):
+        score += 40
+    if parsed.get("hdr") and profile.get("prefer_hdr") in ("prefer", "require"):
+        score += 30
+    if parsed.get("audio") in ("atmos", "truehd", "dts-hd"):
+        score += 15
+    if profile.get("prefer_repack") and (parsed.get("repack") or parsed.get("proper")):
+        score += 10
+
+    label = " · ".join([x for x in [resolution_label(res),
+                        (source or "").upper() if source else "", fam.upper() if fam else ""] if x])
+    return {"accepted": rejected is None, "score": score, "rejected": rejected,
+            "tier": tier, "quality_label": label}
+
+
+__all__ = ["resolution_rank", "resolution_label", "meets_cutoff", "evaluate_owned",
+           "tier_key", "evaluate_release"]

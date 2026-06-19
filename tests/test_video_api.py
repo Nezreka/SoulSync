@@ -453,6 +453,31 @@ def test_quality_evaluate_endpoint_judges_owned_copy(tmp_path):
         videoapi._video_db = None
 
 
+def test_downloads_search_endpoint_ranks_and_filters(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        d = client.post("/api/video/downloads/search",
+                        json={"scope": "movie", "title": "The Matrix", "year": 1999}).get_json()
+        assert d["scope"] == "movie" and d["results"]
+        # accepted hits sort ahead of rejected ones; the cam hit is rejected.
+        accepted = [r for r in d["results"] if r["accepted"]]
+        assert accepted and d["results"][0]["accepted"] is True
+        assert any(r["rejected"] and "reject" in r["rejected"] for r in d["results"])   # the HDCAM
+        # a season search returns season packs (validated against the profile/scope).
+        s = client.post("/api/video/downloads/search",
+                        json={"scope": "season", "title": "The Wire", "season": 2}).get_json()
+        assert s["results"] and all(".S02" in r["title"] for r in s["results"])
+    finally:
+        videoapi._video_db = None
+
+
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
     import config.settings as cfg
