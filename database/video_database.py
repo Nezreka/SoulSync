@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1123,6 +1123,71 @@ class VideoDatabase:
                 (key, value),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    # ── video downloads (the grab → transfer pipeline) ────────────────────────
+    _DL_FIELDS = ("kind", "title", "release_title", "source", "username", "filename",
+                  "size_bytes", "quality_label", "target_dir", "status")
+
+    def add_video_download(self, rec: dict) -> int:
+        """Insert a download row (status defaults to 'downloading'); returns its id."""
+        rec = rec or {}
+        cols = [f for f in self._DL_FIELDS if f in rec]
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "INSERT INTO video_downloads (" + ", ".join(cols) + ") VALUES (" +
+                ", ".join("?" for _ in cols) + ")",
+                tuple(rec[c] for c in cols),
+            )
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+
+    def list_video_downloads(self, limit: int = 100) -> list:
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_downloads ORDER BY "
+                "CASE status WHEN 'downloading' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, "
+                "id DESC LIMIT ?", (int(limit),)
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_active_video_downloads(self) -> list:
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_downloads WHERE status IN ('queued', 'downloading') ORDER BY id"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def update_video_download(self, dl_id: int, **fields) -> None:
+        """Patch a download row; ``updated_at`` is always bumped."""
+        if not fields:
+            return
+        keys = list(fields.keys())
+        sets = ", ".join(k + " = ?" for k in keys) + ", updated_at = datetime('now')"
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE video_downloads SET " + sets + " WHERE id = ?",
+                         tuple(fields[k] for k in keys) + (int(dl_id),))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def clear_finished_video_downloads(self) -> int:
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed')")
+            conn.commit()
+            return cur.rowcount
         finally:
             conn.close()
 
