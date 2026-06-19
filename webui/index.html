@@ -6179,6 +6179,58 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- VIDEO youtube quality — separate, smaller yt-dlp profile -->
+                            <div class="settings-group" data-stg="downloads" data-video-only>
+                                <h3>YouTube Quality</h3>
+                                <div class="setting-help-text">
+                                    A separate, simpler profile for the channels you follow — YouTube is grabbed with yt-dlp, so it's just a resolution ceiling, a codec preference and a container.
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Max resolution <span class="vq-hint">the most yt-dlp will grab &mdash; it steps down to the next available below this</span></div>
+                                    <select id="yq-resolution" class="vq-select">
+                                        <option value="best">Best available</option>
+                                        <option value="4320p">8K · 4320p</option>
+                                        <option value="2160p">4K · 2160p</option>
+                                        <option value="1440p">1440p</option>
+                                        <option value="1080p">1080p</option>
+                                        <option value="720p">720p</option>
+                                        <option value="480p">480p</option>
+                                        <option value="360p">360p</option>
+                                    </select>
+                                </div>
+                                <div class="vq-block">
+                                    <div class="vq-label">Preferences <span class="vq-hint">codec is a soft preference; container is the final muxed file</span></div>
+                                    <div class="vq-prefs">
+                                        <div class="vq-pref-row">
+                                            <span class="vq-pref-name">Codec</span>
+                                            <div class="vq-seg" id="yq-codec">
+                                                <button type="button" data-yq-codec="any">Best</button>
+                                                <button type="button" data-yq-codec="av1">AV1</button>
+                                                <button type="button" data-yq-codec="vp9">VP9</button>
+                                                <button type="button" data-yq-codec="h264">H.264</button>
+                                            </div>
+                                        </div>
+                                        <div class="vq-pref-row">
+                                            <span class="vq-pref-name">Container</span>
+                                            <div class="vq-seg" id="yq-container">
+                                                <button type="button" data-yq-container="mp4">MP4</button>
+                                                <button type="button" data-yq-container="mkv">MKV</button>
+                                                <button type="button" data-yq-container="webm">WebM</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <label class="vq-check" style="margin-top:12px;">
+                                        <input type="checkbox" id="yq-60fps">
+                                        <span class="vq-check-box"></span>
+                                        <span>Prefer 60fps when available</span>
+                                    </label>
+                                    <label class="vq-check" style="margin-top:10px;">
+                                        <input type="checkbox" id="yq-hdr">
+                                        <span class="vq-check-box"></span>
+                                        <span>Allow HDR (off = always grab SDR)</span>
+                                    </label>
+                                </div>
+                            </div>
                             <!-- Download Settings -->
                             <div class="settings-group" data-stg="downloads">
                                 <h3>Download Settings</h3>

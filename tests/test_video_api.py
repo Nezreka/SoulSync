@@ -407,6 +407,30 @@ def test_quality_profile_endpoint_roundtrips(tmp_path):
         videoapi._video_db = None
 
 
+def test_youtube_quality_profile_endpoint_roundtrips(tmp_path):
+    import api.video as videoapi
+    from database.video_database import VideoDatabase
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        # Separate, smaller yt-dlp-shaped profile (no ladder/cutoff/rejects).
+        d = client.get("/api/video/downloads/youtube-quality").get_json()
+        assert d["max_resolution"] == "1080p" and d["container"] == "mp4"
+        # POST normalizes + persists; bad container rejected, valid resolution kept.
+        out = client.post("/api/video/downloads/youtube-quality",
+                          json={"max_resolution": "2160p", "container": "avi",
+                                "video_codec": "av1"}).get_json()
+        assert out["max_resolution"] == "2160p" and out["container"] == "mp4"
+        assert out["video_codec"] == "av1"
+        assert client.get("/api/video/downloads/youtube-quality").get_json()["max_resolution"] == "2160p"
+    finally:
+        videoapi._video_db = None
+
+
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
     import config.settings as cfg
