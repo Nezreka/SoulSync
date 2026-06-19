@@ -516,3 +516,27 @@ CREATE VIEW IF NOT EXISTS v_calendar AS
            v.title AS title, c.title AS parent_title
       FROM channel_videos v JOIN channels c ON c.id = v.channel_id
      WHERE v.published_at IS NOT NULL;
+
+-- DOWNLOADS — every grab initiated from the video side lands here (movies/tv/youtube).
+-- The pipeline starts the download, watches it, and on completion moves the file to the
+-- per-type library folder and marks it completed. Status: queued|downloading|completed|failed.
+CREATE TABLE IF NOT EXISTS video_downloads (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind          TEXT NOT NULL,                 -- movie | show | youtube
+    title         TEXT,                          -- human title (e.g. the movie name)
+    release_title TEXT,                          -- the release/file being grabbed
+    source        TEXT,                          -- soulseek | torrent | usenet
+    username      TEXT,                          -- slskd uploader (for the grab + status)
+    filename      TEXT,                          -- slskd remote filename (full path)
+    size_bytes    INTEGER DEFAULT 0,
+    quality_label TEXT,
+    target_dir    TEXT,                          -- destination library folder
+    dest_path     TEXT,                          -- final moved path (set on completion)
+    status        TEXT NOT NULL DEFAULT 'downloading',
+    progress      REAL DEFAULT 0,
+    error         TEXT,
+    created_at    TEXT DEFAULT (datetime('now')),
+    updated_at    TEXT DEFAULT (datetime('now')),
+    completed_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_video_downloads_status ON video_downloads(status);
