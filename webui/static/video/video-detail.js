@@ -327,6 +327,11 @@
             items.push('<span class="vd-rt vd-rt--mc vd-rt--mc-' + cls + '">' +
                 '<span class="vd-rt-tag">MC</span>' + d.metacritic + '</span>');
         }
+        if (d.trakt_rating) {
+            var tv = d.trakt_votes ? ' title="' + esc(d.trakt_votes) + ' Trakt votes"' : '';
+            items.push('<span class="vd-rt vd-rt--trakt"' + tv + '><span class="vd-rt-tag">Trakt</span>' +
+                (Math.round(d.trakt_rating * 10) / 10) + '</span>');
+        }
         host.innerHTML = items.join('');
         host.hidden = !items.length;
     }

@@ -486,8 +486,75 @@ class OpenSubtitlesWorker(VideoBackfillWorker):
         return self.db.backfill_breakdown("opensubtitles")
 
 
+# ── Trakt (free API key) — community audience rating + vote count ─────────────
+class TraktWorker(VideoBackfillWorker):
+    BASE = "https://api.trakt.tv"
+
+    def __init__(self, db):
+        super().__init__(db, "trakt", "Trakt", interval=1.0)
+
+    def _key(self):
+        return (self.db.get_setting("trakt_api_key") or "").strip()
+
+    def _enabled(self):
+        return bool(self._key())
+
+    def _headers(self):
+        return {"trakt-api-key": self._key(), "trakt-api-version": "2",
+                "Content-Type": "application/json"}
+
+    def test(self):
+        if not self._key():
+            return (False, "No Trakt API key")
+        try:
+            j = _http_get_json(self.BASE + "/shows/trending", {"limit": 1}, headers=self._headers())
+            return (j is not None, "Trakt key OK" if j is not None else "No response")
+        except _Unauthorized:
+            return (False, "Trakt rejected the API key (check the Client ID)")
+        except Exception as e:
+            return (False, str(e))
+
+    def next_item(self):
+        return self.db.backfill_next("trakt")
+
+    def fetch(self, item):
+        # Trakt accepts an IMDb id directly as the {id} slug; ?extended=full carries
+        # the community rating + vote count on the summary.
+        if not self._key():
+            return None
+        imdb = str(item.get("imdb_id") or "").strip()
+        if not imdb.lower().startswith("tt"):
+            return None
+        typ = "movies" if item["kind"] == "movie" else "shows"
+        j = _http_get_json(self.BASE + "/" + typ + "/" + imdb, {"extended": "full"},
+                           headers=self._headers())
+        if not isinstance(j, dict):
+            return None
+        out = {}
+        rating = j.get("rating")
+        if isinstance(rating, (int, float)) and rating > 0:
+            out["trakt_rating"] = round(float(rating), 1)
+        votes = j.get("votes")
+        if isinstance(votes, int) and votes > 0:
+            out["trakt_votes"] = votes
+        return out or None
+
+    def record_ok(self, item, data):
+        self.db.backfill_mark("trakt", item["kind"], item["id"], "ok", columns=data)
+
+    def record_empty(self, item):
+        self.db.backfill_mark("trakt", item["kind"], item["id"], "not_found")
+
+    def record_error(self, item):
+        self.db.backfill_mark("trakt", item["kind"], item["id"], "error")
+
+    def breakdown(self):
+        return self.db.backfill_breakdown("trakt")
+
+
 def build_backfill_workers(db) -> dict:
     """All backfill workers, keyed by service id, for the engine registry."""
     return {w.service: w for w in (
         RydWorker(db), SponsorBlockWorker(db), FanartWorker(db), OpenSubtitlesWorker(db),
+        TraktWorker(db),
     )}

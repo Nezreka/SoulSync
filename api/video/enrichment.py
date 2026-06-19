@@ -53,6 +53,7 @@ def register_routes(bp):
             # Backfill-worker keys (free, optional) + no-key toggles.
             "fanart_api_key": db.get_setting("fanart_api_key") or "",
             "opensubtitles_api_key": db.get_setting("opensubtitles_api_key") or "",
+            "trakt_api_key": db.get_setting("trakt_api_key") or "",
             "ryd_enabled": (db.get_setting("ryd_enabled") or "1") == "1",
             "sponsorblock_enabled": (db.get_setting("sponsorblock_enabled") or "1") == "1",
             "billboard_autoplay": (db.get_setting("billboard_autoplay") or "1") == "1",
@@ -88,6 +89,7 @@ def register_routes(bp):
         put_key("tvdb_api_key")
         put_key("fanart_api_key")
         put_key("opensubtitles_api_key")
+        put_key("trakt_api_key")
         # No-key worker on/off toggles (read live by the worker — no rebuild needed).
         for flag in ("ryd_enabled", "sponsorblock_enabled"):
             if flag in body:
