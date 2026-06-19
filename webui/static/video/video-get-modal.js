@@ -84,8 +84,15 @@
         var dl = ov.querySelector('[data-vgm-dl]');
         var content = ov.querySelector('[data-vgm-dl-content]');
         if (!dl || !content || !window.VideoDownload) { toast('Download module not loaded', 'error'); return; }
-        var file = (modalState && modalState.kind === 'movie' && modalState.owned) ? (modalState.file || null) : null;
-        VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file });
+        if (o.kind === 'show') {
+            // Shows get a wider modal + a season/episode picker (not the movie layout).
+            VideoDownload.render(content, { kind: 'show', id: o.id, source: o.source || 'library',
+                detail: (modalState && modalState._detail) || null, tvId: (modalState && modalState._tvId) || null });
+            ov.classList.add('vgm-mode-dl-show');
+        } else {
+            var file = (modalState && modalState.kind === 'movie' && modalState.owned) ? (modalState.file || null) : null;
+            VideoDownload.render(content, { kind: o.kind, id: o.id, source: o.source || 'library', isYt: false, file: file });
+        }
         setDownloadMode(ov, true);
         dl.hidden = false;
         var modal = ov.querySelector('.vgm-modal'); if (modal) modal.scrollTop = 0;
@@ -94,6 +101,7 @@
     function exitDownload(ov) {
         var dl = ov.querySelector('[data-vgm-dl]'); if (dl) dl.hidden = true;
         setDownloadMode(ov, false);
+        ov.classList.remove('vgm-mode-dl-show');
     }
 
     // ── wishlist / watchlist writes ───────────────────────────────────────────
@@ -513,6 +521,8 @@
             if (modalState) {   // identity for the wishlist/watchlist writes
                 modalState.tmdbId = d.tmdb_id; modalState.title = d.title;
                 modalState.poster = pUrl || null; modalState.libraryId = libId;
+                modalState._detail = d;   // feeds the show download tree (seasons/episodes)
+                modalState._tvId = (o.source === 'tmdb') ? parseInt(o.id, 10) : (d.tmdb_id || null);
             }
         } else {
             modalState = { kind: 'movie', owned: !!d.owned, tmdbId: d.tmdb_id, title: d.title,

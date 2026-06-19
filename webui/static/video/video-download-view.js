@@ -72,6 +72,7 @@
     function render(container, opts) {
         if (!container) return;
         opts = opts || {};
+        if (opts.kind === 'show') { renderShow(container, opts); return; }
         container.innerHTML = contentHTML();
         if (!container._vdlWired) { container._vdlWired = true; container.addEventListener('click', onClick); }
 
@@ -195,6 +196,260 @@
         var rows = container.querySelectorAll(sel);
         for (var i = 0; i < rows.length; i++) scanRow(rows[i], i);
         toast('Automatic search isn’t wired up yet — coming soon', 'info');
+    }
+
+    // ── TV show download view ─────────────────────────────────────────────────
+    // A season→episode picker (everything you're missing pre-ticked), each season
+    // and episode searchable inline across your sources, plus a bulk "Search N
+    // selected". Searches are stubs (faux-scan) — same motion the engine will drive.
+    function isoToday() {
+        var n = new Date();
+        return n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2) + '-' + ('0' + n.getDate()).slice(-2);
+    }
+    function epState(e, today) {
+        if (e && e.owned) return 'owned';
+        if (e && e.air_date && e.air_date > today) return 'upcoming';
+        return 'missing';
+    }
+
+    function renderShow(container, opts) {
+        var d = opts.detail || {};
+        var st = container._dl = {
+            sel: new Set(), today: isoToday(),
+            tvId: opts.tvId || d.tmdb_id || null, source: opts.source || 'library',
+            sources: ['soulseek'], epMeta: {}
+        };
+        container.innerHTML =
+            '<div class="vdl-section"><div class="vdl-sec-label">Quality target</div>' +
+                '<div class="vdl-chips" data-vdl-target><span class="vdl-chip vdl-chip--ghost">Loading…</span></div></div>' +
+            '<div class="vdl-show-bar">' +
+                '<label class="vdl-allchk"><input type="checkbox" data-vdl-all><span class="vdl-allchk-txt">All</span></label>' +
+                '<span class="vdl-show-summary" data-vdl-summary>Loading episodes…</span>' +
+                '<button class="vdl-search-all vdl-search-sel" type="button" data-vdl-search-sel disabled>' +
+                    '⌕ Search <span data-vdl-selcount>0</span> selected</button>' +
+            '</div>' +
+            '<div class="vdl-seasons" data-vdl-seasons></div>';
+
+        if (!container._dlShowWired) {
+            container._dlShowWired = true;
+            container.addEventListener('click', onShowClick);
+            container.addEventListener('change', onShowChange);
+        }
+        getJSON('/api/video/downloads/quality').then(function (p) { if (container.isConnected && p) renderTarget(container, p, false); });
+        getJSON('/api/video/downloads/config').then(function (c) { if (container.isConnected) st.sources = sourcesFromConfig(c); });
+        buildSeasons(container, d, st);
+    }
+
+    function buildSeasons(container, d, st) {
+        var host = container.querySelector('[data-vdl-seasons]'); if (!host) return;
+        var seasons = (d.seasons || []).slice();
+        if (!seasons.length) { host.innerHTML = '<div class="vdl-src-empty">No season information available.</div>'; updateShowBar(container); return; }
+        host.innerHTML = seasons.map(function (s) { return seasonShellHTML(s); }).join('');
+        seasons.forEach(function (s) {
+            var card = host.querySelector('.vdl-season[data-vdl-season="' + s.season_number + '"]');
+            var eps = s.episodes || [];
+            if (eps.length) { fillSeason(container, card, s.season_number, eps, st); }
+            else if ((s.episode_total || 0) > 0 && st.tvId) { fetchSeason(container, card, s.season_number, st); }
+            else { var b = card.querySelector('.vdl-season-eps'); if (b) b.innerHTML = '<div class="vdl-season-empty">No episodes.</div>'; }
+        });
+        updateShowBar(container);
+    }
+
+    function seasonShellHTML(s) {
+        var sn = s.season_number;
+        var total = (s.episodes && s.episodes.length) || s.episode_total || 0;
+        return '<div class="vdl-season" data-vdl-season="' + sn + '">' +
+            '<div class="vdl-season-head" data-vdl-season-toggle>' +
+                '<input type="checkbox" class="vdl-season-cb" data-vdl-season-all="' + sn + '">' +
+                '<span class="vdl-season-name">' + esc(s.title || ('Season ' + sn)) + '</span>' +
+                '<span class="vdl-season-meta" data-vdl-season-meta>' + total + ' eps</span>' +
+                '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season">⌕</button>' +
+                '<span class="vdl-season-chev" aria-hidden="true">⌄</span>' +
+            '</div>' +
+            '<div class="vdl-season-body"><div class="vdl-season-eps"><div class="vdl-season-empty">Loading…</div></div></div>' +
+        '</div>';
+    }
+
+    function fillSeason(container, card, sn, eps, st) {
+        if (!card) return;
+        var body = card.querySelector('.vdl-season-eps'); if (!body) return;
+        var missing = 0;
+        eps.forEach(function (e) {
+            var es = epState(e, st.today);
+            st.epMeta[sn + '_' + e.episode_number] = { state: es };
+            if (es === 'missing') { missing++; st.sel.add(sn + '_' + e.episode_number); }
+        });
+        body.innerHTML = eps.map(function (e) { return epRowHTML(sn, e, st); }).join('');
+        var meta = card.querySelector('[data-vdl-season-meta]');
+        if (meta) meta.textContent = eps.length + ' eps' + (missing ? ' · ' + missing + ' missing' : '');
+        card.setAttribute('data-loaded', '1');
+        syncSeason(container, sn);
+    }
+
+    function fetchSeason(container, card, sn, st) {
+        if (!card || !st.tvId) return;
+        fetch('/api/video/tmdb/show/' + st.tvId + '/season/' + sn, { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!container.isConnected) return;
+                var eps = (data && data.episodes) || [];
+                var b = card.querySelector('.vdl-season-eps');
+                if (!eps.length) { if (b) b.innerHTML = '<div class="vdl-season-empty">No episode info.</div>'; return; }
+                fillSeason(container, card, sn, eps, st);
+                updateShowBar(container);
+            })
+            .catch(function () { var b = card.querySelector('.vdl-season-eps'); if (b) b.innerHTML = '<div class="vdl-season-empty">Couldn’t load.</div>'; });
+    }
+
+    function epRowHTML(sn, e, st) {
+        var key = sn + '_' + e.episode_number;
+        var es = (st.epMeta[key] && st.epMeta[key].state) || epState(e, st.today);
+        var lock = (es === 'upcoming');
+        var ctrl = lock
+            ? '<span class="vdl-ep-lock" title="Hasn\'t aired yet">◷</span>'
+            : '<input type="checkbox" class="vdl-ep-cb" data-vdl-ep-cb="' + key + '"' + (st.sel.has(key) ? ' checked' : '') + '>';
+        var badge = es === 'owned' ? '<span class="vdl-ep-badge vdl-ep-badge--owned">In library</span>'
+            : es === 'upcoming' ? '<span class="vdl-ep-badge vdl-ep-badge--soon">Upcoming</span>'
+            : '<span class="vdl-ep-badge vdl-ep-badge--missing">Missing</span>';
+        return '<div class="vdl-ep vdl-ep--' + es + '" data-vdl-ep="' + key + '">' +
+            '<div class="vdl-ep-head"' + (lock ? '' : ' data-vdl-ep-toggle') + '>' +
+                '<span class="vdl-ep-cell">' + ctrl + '</span>' +
+                '<span class="vdl-ep-num">E' + (e.episode_number != null ? e.episode_number : '') + '</span>' +
+                '<span class="vdl-ep-title">' + esc(e.title || ('Episode ' + e.episode_number)) + '</span>' +
+                '<span class="vdl-ep-status" data-vdl-ep-status></span>' +
+                badge +
+                (lock ? '' : '<span class="vdl-ep-chev" aria-hidden="true">⌄</span>') +
+            '</div>' +
+            '<div class="vdl-ep-search" data-vdl-ep-search></div>' +
+        '</div>';
+    }
+
+    function onShowClick(e) {
+        var container = e.currentTarget; if (!container._dl) return;
+        var srch = e.target.closest('[data-vdl-search]');
+        if (srch) { var row = srch.closest('.vdl-src'); if (row) scanRow(row, 0); toast('Automatic search isn’t wired up yet — coming soon', 'info'); return; }
+        var ss = e.target.closest('[data-vdl-season-search]');
+        if (ss) {
+            var sc = container.querySelector('.vdl-season[data-vdl-season="' + ss.getAttribute('data-vdl-season-search') + '"]');
+            if (sc) sc.classList.add('vdl-season--open');   // reveal the rows being scanned
+            searchScope(container, sc); return;
+        }
+        if (e.target.closest('[data-vdl-search-sel]')) { searchScope(container, container.querySelector('[data-vdl-seasons]')); return; }
+        var sh = e.target.closest('[data-vdl-season-toggle]');
+        if (sh && !e.target.closest('.vdl-season-cb') && !e.target.closest('[data-vdl-season-search]')) {
+            sh.closest('.vdl-season').classList.toggle('vdl-season--open'); return;
+        }
+        var eh = e.target.closest('[data-vdl-ep-toggle]');
+        if (eh && !e.target.closest('.vdl-ep-cell')) { toggleEp(container, eh.closest('.vdl-ep')); }
+    }
+
+    function onShowChange(e) {
+        var container = e.currentTarget; var st = container._dl; if (!st) return;
+        var ec = e.target.closest('[data-vdl-ep-cb]');
+        if (ec) {
+            var k = ec.getAttribute('data-vdl-ep-cb');
+            if (ec.checked) st.sel.add(k); else st.sel.delete(k);
+            syncSeason(container, k.split('_')[0]); updateShowBar(container); return;
+        }
+        var sa = e.target.closest('[data-vdl-season-all]');
+        if (sa) { setSeasonSel(container, sa.getAttribute('data-vdl-season-all'), sa.checked); updateShowBar(container); return; }
+        if (e.target.closest('[data-vdl-all]')) { setAllSel(container, e.target.checked); updateShowBar(container); }
+    }
+
+    function toggleEp(container, epEl) {
+        if (!epEl) return;
+        var open = !epEl.classList.contains('vdl-ep--open');
+        epEl.classList.toggle('vdl-ep--open', open);
+        if (open && !epEl.getAttribute('data-srcbuilt')) buildEpSearch(container, epEl);
+    }
+
+    function buildEpSearch(container, epEl) {
+        epEl.setAttribute('data-srcbuilt', '1');
+        var panel = epEl.querySelector('[data-vdl-ep-search]'); if (!panel) return;
+        var srcs = (container._dl.sources || []).filter(function (s) { return SRC_META[s]; });
+        if (!srcs.length) { panel.innerHTML = '<div class="vdl-ep-srcs"><div class="vdl-src-empty">No source configured.</div></div>'; return; }
+        panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) {
+            var m = SRC_META[s];
+            return '<div class="vdl-src vdl-src--mini" data-vdl-src="' + s + '">' +
+                '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
+                '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
+                    '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
+                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
+                '</div>';
+        }).join('') + '</div>';
+    }
+
+    function setSeasonSel(container, sn, on) {
+        var st = container._dl;
+        var cbs = container.querySelectorAll('.vdl-season[data-vdl-season="' + sn + '"] .vdl-ep-cb');
+        for (var i = 0; i < cbs.length; i++) {
+            cbs[i].checked = on;
+            var k = cbs[i].getAttribute('data-vdl-ep-cb');
+            if (on) st.sel.add(k); else st.sel.delete(k);
+        }
+        syncSeason(container, sn);
+    }
+
+    function setAllSel(container, on) {
+        var cards = container.querySelectorAll('.vdl-season');
+        for (var i = 0; i < cards.length; i++) setSeasonSel(container, cards[i].getAttribute('data-vdl-season'), on);
+    }
+
+    function syncSeason(container, sn) {
+        var card = container.querySelector('.vdl-season[data-vdl-season="' + sn + '"]'); if (!card) return;
+        var all = card.querySelector('[data-vdl-season-all]'); if (!all) return;
+        var cbs = card.querySelectorAll('.vdl-ep-cb'), checked = 0;
+        for (var i = 0; i < cbs.length; i++) if (cbs[i].checked) checked++;
+        all.checked = cbs.length > 0 && checked === cbs.length;
+        all.indeterminate = checked > 0 && checked < cbs.length;
+        all.disabled = cbs.length === 0;
+    }
+
+    function updateShowBar(container) {
+        var st = container._dl; if (!st) return;
+        var n = st.sel.size;
+        var cnt = container.querySelector('[data-vdl-selcount]'); if (cnt) cnt.textContent = n;
+        var btn = container.querySelector('[data-vdl-search-sel]'); if (btn) btn.disabled = n === 0;
+        var sum = container.querySelector('[data-vdl-summary]');
+        if (sum) {
+            var seasons = container.querySelectorAll('.vdl-season').length;
+            var owned = 0, missing = 0, total = 0;
+            for (var k in st.epMeta) { total++; if (st.epMeta[k].state === 'owned') owned++; else if (st.epMeta[k].state === 'missing') missing++; }
+            sum.textContent = seasons + ' season' + (seasons === 1 ? '' : 's') + ' · ' + total + ' episodes · ' +
+                owned + ' in library · ' + missing + ' missing';
+        }
+        var master = container.querySelector('[data-vdl-all]');
+        if (master) {
+            var all = container.querySelectorAll('.vdl-ep-cb'), c = 0;
+            for (var i = 0; i < all.length; i++) if (all[i].checked) c++;
+            master.checked = all.length > 0 && c === all.length;
+            master.indeterminate = c > 0 && c < all.length;
+        }
+    }
+
+    // Scan every SELECTED episode within a scope (a season card or the whole list).
+    function searchScope(container, scopeEl) {
+        if (!scopeEl || !container._dl) return;
+        var st = container._dl, eps = scopeEl.querySelectorAll('.vdl-ep'), picked = [];
+        for (var i = 0; i < eps.length; i++) { var k = eps[i].getAttribute('data-vdl-ep'); if (k && st.sel.has(k)) picked.push(eps[i]); }
+        if (!picked.length) { toast('Select at least one episode', 'info'); return; }
+        picked.forEach(function (epEl, i) { scanEp(epEl, i); });
+        toast('Automatic search isn’t wired up yet — coming soon', 'info');
+    }
+
+    function scanEp(epEl, i) {
+        if (epEl._scanning) return;
+        epEl._scanning = true;
+        epEl.classList.add('vdl-ep--scanning');
+        var s = epEl.querySelector('[data-vdl-ep-status]');
+        if (s) { s.textContent = 'Searching'; s.className = 'vdl-ep-status vdl-ep-status--scanning'; }
+        setTimeout(function () {
+            if (!epEl.isConnected) { epEl._scanning = false; return; }
+            epEl.classList.remove('vdl-ep--scanning');
+            epEl._scanning = false;
+            var x = epEl.querySelector('[data-vdl-ep-status]');
+            if (x) { x.textContent = 'Coming soon'; x.className = 'vdl-ep-status vdl-ep-status--soon'; }
+        }, 1100 + i * 180);
     }
 
     window.VideoDownload = { render: render };
