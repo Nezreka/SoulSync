@@ -392,13 +392,16 @@ def test_quality_profile_endpoint_roundtrips(tmp_path):
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     client = app.test_client()
     try:
-        # Default profile served when unset.
+        # Default profile served when unset (rich-curated model: tier ladder + cutoff).
         d = client.get("/api/video/downloads/quality").get_json()
-        assert d["resolutions"]["1080p"]["enabled"] is True and d["codec"] == "any"
-        # POST normalizes + persists; bad codec rejected.
+        assert [t["key"] for t in d["tiers"]][0] == "remux-2160p"
+        assert d["cutoff"] == "bluray-1080p" and d["prefer_codec"] == "hevc"
+        # POST normalizes + persists; bad codec rejected, valid cutoff kept.
         out = client.post("/api/video/downloads/quality",
-                          json={"codec": "bogus", "max_size_gb": 50, "prefer_hdr": True}).get_json()
-        assert out["codec"] == "any" and out["max_size_gb"] == 50 and out["prefer_hdr"] is True
+                          json={"prefer_codec": "bogus", "max_size_gb": 50,
+                                "cutoff": "web-720p", "prefer_hdr": "require"}).get_json()
+        assert out["prefer_codec"] == "hevc" and out["max_size_gb"] == 50
+        assert out["cutoff"] == "web-720p" and out["prefer_hdr"] == "require"
         assert client.get("/api/video/downloads/quality").get_json()["max_size_gb"] == 50
     finally:
         videoapi._video_db = None
