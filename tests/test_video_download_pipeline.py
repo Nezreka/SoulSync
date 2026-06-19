@@ -22,7 +22,7 @@ def test_classify_state():
     assert classify_state("InProgress") == "active"
     assert classify_state("Queued, Remotely") == "active"
     assert classify_state("Completed, Errored") == "failed"
-    assert classify_state("Completed, Cancelled") == "failed"
+    assert classify_state("Completed, Cancelled") == "cancelled"
     assert classify_state("Completed, TimedOut") == "failed"
     assert classify_state("") == "active"
 
@@ -112,9 +112,28 @@ def test_process_download_failed():
     assert upd["status"] == "failed"
 
 
-def test_process_download_no_transfer_yet():
+def test_process_download_cancelled():
     from core.video.download_monitor import process_download
-    assert process_download(_dl(), [], "/dl", lister=lambda d: [], mover=lambda s, d: None) is None
+    upd = process_download(_dl(), [_xfer("Completed, Cancelled")], "/dl",
+                           lister=lambda d: [], mover=lambda s, d: None)
+    assert upd["status"] == "cancelled"
+
+
+def test_process_download_missing_transfer_signals_missing():
+    from core.video.download_monitor import process_download
+    # slskd forgot it AND no file on disk → _missing (caller decides when to give up)
+    upd = process_download(_dl(), [], "/dl", lister=lambda d: [], mover=lambda s, d: None)
+    assert upd == {"_missing": True}
+
+
+def test_process_download_missing_but_file_present_completes():
+    from core.video.download_monitor import process_download
+    moved = {}
+    # slskd cleared the completed transfer (the music auto-clear) but the file is there
+    upd = process_download(_dl(), [], "/dl",
+                           lister=lambda d: ["/dl/Folder/movie.mkv"],
+                           mover=lambda s, d: moved.update(ok=True))
+    assert upd["status"] == "completed" and moved.get("ok") is True
 
 
 def test_process_download_completed_moves_file():

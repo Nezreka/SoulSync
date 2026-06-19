@@ -276,6 +276,45 @@ def register_routes(bp):
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         return jsonify({"downloads": db.list_video_downloads()})
 
+    @bp.route("/downloads/cancel", methods=["POST"])
+    def video_downloads_cancel():
+        from . import get_video_db
+        from core.video.slskd_download import cancel_download
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        dl = db.get_video_download(body.get("id"))
+        if not dl:
+            return jsonify({"ok": False, "error": "Download not found."}), 404
+        if dl["status"] in ("completed", "failed", "cancelled"):
+            return jsonify({"ok": True, "already": True})
+        cancel_download(dl.get("username"), dl.get("filename"))   # best-effort; mark regardless
+        import time
+        db.update_video_download(dl["id"], status="cancelled", error="Cancelled",
+                                 completed_at=time.strftime("%Y-%m-%d %H:%M:%S"))
+        return jsonify({"ok": True})
+
+    @bp.route("/downloads/retry", methods=["POST"])
+    def video_downloads_retry():
+        """Re-grab the SAME release (basic retry). Auto-retry + alternate-query retry
+        come in a later phase."""
+        from . import get_video_db
+        from core.video.download_monitor import ensure_started
+        from core.video.slskd_download import start_download
+        body = request.get_json(silent=True) or {}
+        db = get_video_db()
+        dl = db.get_video_download(body.get("id"))
+        if not dl:
+            return jsonify({"ok": False, "error": "Download not found."}), 404
+        if not dl.get("username") or not dl.get("filename"):
+            return jsonify({"ok": False, "error": "Nothing to retry from."}), 400
+        started = start_download(dl["username"], dl["filename"], dl.get("size_bytes") or 0)
+        if not started.get("ok"):
+            return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
+        db.update_video_download(dl["id"], status="downloading", progress=0, error=None,
+                                 dest_path=None, completed_at=None)
+        ensure_started(get_video_db)
+        return jsonify({"ok": True})
+
     @bp.route("/downloads/clear", methods=["POST"])
     def video_downloads_clear():
         from . import get_video_db

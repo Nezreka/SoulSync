@@ -71,15 +71,38 @@ def flatten_downloads(data: Any) -> list:
 
 
 def classify_state(state: Any) -> str:
-    """slskd state string → 'completed' | 'failed' | 'active'. Pure."""
+    """slskd state string → 'completed' | 'cancelled' | 'failed' | 'active'. Pure."""
     s = str(state or "").lower()
     if "completed" in s and "succeed" in s:
         return "completed"
-    if any(x in s for x in ("error", "cancel", "timed", "failed", "reject")):
+    if "cancel" in s:
+        return "cancelled"
+    if any(x in s for x in ("error", "timed", "failed", "reject")):
         return "failed"
     if "completed" in s:        # completed but not succeeded → treat as failed
         return "failed"
     return "active"
+
+
+def cancel_download(username: str, filename: str) -> dict:
+    """Cancel (and remove) a slskd transfer matching username+filename. Returns
+    {ok[, gone][, error]}. 'gone' = the transfer was already absent."""
+    base, headers = _conn()
+    if not base:
+        return {"ok": False, "error": "slskd isn't configured"}
+    tid = None
+    for t in list_downloads():
+        if t.get("username") == username and t.get("filename") == filename:
+            tid = t.get("id")
+            break
+    if not tid:
+        return {"ok": True, "gone": True}
+    try:
+        requests.delete(base + "/api/v0/transfers/downloads/%s/%s" % (quote(str(username or "")), tid),
+                        headers=headers, params={"remove": "true"}, timeout=10)
+        return {"ok": True}
+    except Exception as e:   # noqa: BLE001 - surface the failure; the row is marked cancelled anyway
+        return {"ok": False, "error": str(e)}
 
 
 def progress_pct(transfer: dict) -> float:
@@ -101,4 +124,4 @@ def find_transfer(transfers: list, username: str, filename: str) -> dict:
 
 
 __all__ = ["start_download", "list_downloads", "flatten_downloads", "classify_state",
-           "progress_pct", "find_transfer"]
+           "progress_pct", "find_transfer", "cancel_download"]
