@@ -2969,29 +2969,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     color: rgba(255,255,255,0.65); margin-bottom: 9px; display: flex; align-items: center; gap: 10px; }
 .vq-hint { font-size: 11px; font-weight: 500; text-transform: none; letter-spacing: 0;
     color: rgba(255,255,255,0.4); }
-.vq-rows { display: flex; flex-direction: column; gap: 7px; }
-.vq-row { display: flex; align-items: center; gap: 12px; padding: 9px 13px; border-radius: 11px;
-    background: rgba(255,255,255,0.045); border: 1px solid rgba(255,255,255,0.07);
-    transition: background 0.15s, opacity 0.15s; }
-.vq-row--off { opacity: 0.5; }
-.vq-arrows { display: inline-flex; flex-direction: column; gap: 1px; }
-.vq-arrow { width: 22px; height: 15px; display: grid; place-items: center; cursor: pointer;
-    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px;
-    color: rgba(255,255,255,0.6); font-size: 8px; line-height: 1; padding: 0; transition: all 0.12s; }
-.vq-arrow:hover:not(:disabled) { background: rgba(var(--accent-rgb),0.25); color: #fff; }
-.vq-arrow:disabled { opacity: 0.25; cursor: default; }
-.vq-row-name { flex: 1; font-size: 14px; font-weight: 600; color: #fff; }
-.vq-row-prio { font: 700 11px/1 'JetBrains Mono', ui-monospace, monospace; color: rgba(255,255,255,0.4);
-    min-width: 18px; text-align: center; }
-/* pill toggle */
-.vq-toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex: 0 0 40px; cursor: pointer; }
-.vq-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-.vq-toggle-track { position: absolute; inset: 0; border-radius: 999px; background: rgba(255,255,255,0.13);
-    transition: background 0.18s; }
-.vq-toggle-track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
-    border-radius: 50%; background: #fff; transition: transform 0.18s; }
-.vq-toggle input:checked + .vq-toggle-track { background: rgb(var(--accent-rgb)); }
-.vq-toggle input:checked + .vq-toggle-track::after { transform: translateX(18px); }
+/* Resolution + source rows reuse music's .hybrid-source-item styling (set in the
+   shared style.css) for parity with the Download Source list — no custom row CSS. */
 /* codec + hdr row */
 .vq-grid { display: flex; align-items: flex-end; gap: 28px; flex-wrap: wrap; margin: 16px 0; }
 .vq-seg { display: inline-flex; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
