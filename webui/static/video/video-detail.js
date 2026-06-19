@@ -332,6 +332,10 @@
             items.push('<span class="vd-rt vd-rt--trakt"' + tv + '><span class="vd-rt-tag">Trakt</span>' +
                 (Math.round(d.trakt_rating * 10) / 10) + '</span>');
         }
+        if (d.tvmaze_rating) {
+            items.push('<span class="vd-rt vd-rt--tvmaze"><span class="vd-rt-tag">TVmaze</span>' +
+                (Math.round(d.tvmaze_rating * 10) / 10) + '</span>');
+        }
         host.innerHTML = items.join('');
         host.hidden = !items.length;
     }

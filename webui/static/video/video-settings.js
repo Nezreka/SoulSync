@@ -222,6 +222,8 @@
                 if (ryd && d.ryd_enabled != null) ryd.checked = !!d.ryd_enabled;
                 var sb = document.getElementById('video-sponsorblock-enabled');
                 if (sb && d.sponsorblock_enabled != null) sb.checked = !!d.sponsorblock_enabled;
+                var tvm = document.getElementById('video-tvmaze-enabled');
+                if (tvm && d.tvmaze_enabled != null) tvm.checked = !!d.tvmaze_enabled;
                 var ap = document.getElementById('video-billboard-autoplay');
                 if (ap && d.billboard_autoplay != null) ap.checked = !!d.billboard_autoplay;
                 var wr = document.getElementById('video-watch-region');
@@ -252,6 +254,7 @@
         var trakt = document.getElementById('trakt-api-key');
         var ryd = document.getElementById('video-ryd-enabled');
         var sb = document.getElementById('video-sponsorblock-enabled');
+        var tvm = document.getElementById('video-tvmaze-enabled');
         return fetch(CONFIG_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -263,6 +266,7 @@
                 trakt_api_key: trakt ? trakt.value : '',
                 ryd_enabled: ryd ? ryd.checked : true,
                 sponsorblock_enabled: sb ? sb.checked : true,
+                tvmaze_enabled: tvm ? tvm.checked : true,
             })
         }).then(function () { if (!silent) toast('API keys saved', 'success'); })
           .catch(function () { /* ignore */ });
@@ -306,7 +310,7 @@
         // Enrichment keys save on blur/change (turns the workers on).
         ['tmdb-api-key', 'tvdb-api-key', 'omdb-api-key',
             'fanart-api-key', 'opensubtitles-api-key', 'trakt-api-key',
-            'video-ryd-enabled', 'video-sponsorblock-enabled'].forEach(function (id) {
+            'video-ryd-enabled', 'video-sponsorblock-enabled', 'video-tvmaze-enabled'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.addEventListener('change', function () { saveKeys(); });
         });

@@ -12,7 +12,7 @@ import pytest
 
 from database.video_database import VideoDatabase
 from core.video.enrichment.backfill import (
-    RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker,
+    RydWorker, SponsorBlockWorker, FanartWorker, OpenSubtitlesWorker, TraktWorker, TVmazeWorker,
     VideoBackfillWorker, _RateLimited, _Unauthorized, build_backfill_workers,
 )
 
@@ -178,7 +178,8 @@ def test_get_stats_shape_matches_matcher_worker(db):
 
 
 def test_build_backfill_workers_set(db):
-    assert set(build_backfill_workers(db)) == {"ryd", "sponsorblock", "fanart", "opensubtitles", "trakt"}
+    assert set(build_backfill_workers(db)) == {
+        "ryd", "sponsorblock", "fanart", "opensubtitles", "trakt", "tvmaze"}
 
 
 # ── Trakt (community rating backfill, keyed on imdb id) ────────────────────────
@@ -223,6 +224,45 @@ def test_trakt_fetch_needs_imdb_and_key(db, monkeypatch):
     assert w.fetch({"kind": "movie", "imdb_id": "tt1"}) is None   # no key configured
     db.set_setting("trakt_api_key", "k")
     assert w.fetch({"kind": "movie", "imdb_id": "550"}) is None   # not a tt-id
+
+
+# ── TVmaze (no-key, TV-only community rating) ─────────────────────────────────
+def test_tvmaze_is_show_only_and_enabled_by_default(db):
+    w = TVmazeWorker(db)
+    assert w.enabled is True                              # keyless → on by default
+    db.set_setting("tvmaze_enabled", "0")
+    assert w.enabled is False
+    # No movie entry in the backfill map → movies are never queued for tvmaze.
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M"})
+    with db.connect() as c:
+        c.execute("UPDATE movies SET imdb_id='tt1' WHERE id=?", (mid,))
+        c.commit()
+    assert db.backfill_next("tvmaze") is None
+
+
+def test_tvmaze_worker_records_rating(db):
+    with db.connect() as c:
+        c.execute("INSERT INTO shows (title, year) VALUES ('S', 2008)")
+        sid = c.execute("SELECT id FROM shows WHERE title='S'").fetchone()["id"]
+        c.execute("UPDATE shows SET imdb_id='tt0903747' WHERE id=?", (sid,))
+        c.commit()
+    nxt = db.backfill_next("tvmaze")
+    assert nxt["kind"] == "show"
+    w = TVmazeWorker(db)
+    w.fetch = lambda item: {"tvmaze_rating": 9.3}
+    assert w.process_one() is True
+    with db.connect() as c:
+        r = c.execute("SELECT tvmaze_rating, tvmaze_status FROM shows WHERE id=?", (sid,)).fetchone()
+    assert r["tvmaze_rating"] == 9.3 and r["tvmaze_status"] == "ok"
+    assert db.backfill_breakdown("tvmaze")["show"]["matched"] == 1
+
+
+def test_tvmaze_fetch_parses_lookup(db, monkeypatch):
+    import core.video.enrichment.backfill as bf
+    monkeypatch.setattr(bf, "_http_get_json",
+                        lambda url, params=None, headers=None, timeout=12: {"rating": {"average": 9.34}})
+    out = TVmazeWorker(db).fetch({"kind": "show", "imdb_id": "tt0903747"})
+    assert out == {"tvmaze_rating": 9.3}
 
 
 def test_backfill_module_imports_nothing_from_music():
