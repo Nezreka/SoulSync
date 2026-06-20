@@ -66,15 +66,16 @@ def test_detail_watch_started_for_library_movies():
     assert 'stopMovieDownloadWatch()' in _DETAIL   # cleared on (re)load / navigate away
 
 
-# --- result cards: flat release-list redesign -----------------------------
+# --- result cards: cinematic card redesign --------------------------------
 
-def test_result_cards_are_flat_release_list():
-    # Release NAME is the hero; quality is a small left tag; verdict is a compact flag.
+def test_result_cards_are_cinematic_cards_with_meta_pills():
+    # quality badge + release-name hero + a row of meta PILLS + size/verdict/Get group.
     assert 'vdl-info-title' in _VIEW and 'vdl-q-res' in _VIEW and 'vdl-flag' in _VIEW
-    assert '.vdl-q-res' in _CSS and '.vdl-info-title' in _CSS and '.vdl-flag' in _CSS
-    # the previous card structure (big res tile + summary + verdict pill) is gone
+    assert 'vdl-info-tags' in _VIEW and 'vdl-tag' in _VIEW and 'vdl-res-right' in _VIEW
+    assert '.vdl-tag' in _CSS and '.vdl-info-tags' in _CSS and '.vdl-res-right' in _CSS
+    # the old "·"-joined sub-line is gone (meta is pills now)
+    assert 'vdl-info-sub' not in _VIEW
     assert 'vdl-res-summary' not in _VIEW
-    assert 'vdl-res-body' not in _VIEW
 
 
 # --- modal resumes an in-flight download on reopen ------------------------

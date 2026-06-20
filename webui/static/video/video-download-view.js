@@ -523,18 +523,20 @@
     // demoted to a mono one-liner; a stat strip (size / uploader / group) sits below.
     // The card is a column so a live download tracker can drop in under it on grab.
     function resultCardHTML(r, i) {
-        // Flat release-list row (Radarr/Prowlarr-style): a small quality tag leads,
-        // the RELEASE NAME is the hero, dense inline meta below, size + verdict + Get
-        // on the right. The outer .vdl-res stays a column so the live tracker docks.
-        var sub = [];
-        if (r.codec) sub.push(String(r.codec).toUpperCase());
-        if (r.audio) sub.push(String(r.audio).toUpperCase().replace('-', ' '));
-        if (r.hdr) sub.push(String(r.hdr).toUpperCase());
-        if (r.repack) sub.push('REPACK');
-        sub.push(r.username
-            ? '👤 ' + r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '')
-            : (r.seeders || 0) + ' seeders');
-        if (r.group) sub.push(r.group);
+        // Cinematic release CARD: a bold quality badge (resolution over source) anchors
+        // the left, the RELEASE NAME is the hero, the meta is a row of crisp pills, and
+        // size · verdict · Get sit on the right. The outer .vdl-res is a column so the
+        // live download tracker docks under it on grab.
+        var tag = function (t, mod) { return '<span class="vdl-tag' + (mod ? ' vdl-tag--' + mod : '') + '">' + esc(t) + '</span>'; };
+        var tags = [];
+        if (r.codec) tags.push(tag(String(r.codec).toUpperCase()));
+        if (r.audio) tags.push(tag(String(r.audio).toUpperCase().replace('-', ' ')));
+        if (r.hdr) tags.push(tag(String(r.hdr).toUpperCase(), 'hdr'));
+        if (r.repack) tags.push(tag('REPACK', 'rep'));
+        if (r.group) tags.push(tag(r.group, 'grp'));
+        var avail = r.username
+            ? '<span class="vdl-avail"><span class="vdl-avail-ic">●</span>' + esc(r.username) + (r.peers > 1 ? ' · ' + r.peers : '') + '</span>'
+            : '<span class="vdl-avail vdl-avail--seed">▲ ' + (r.seeders || 0) + '</span>';
         var flag = r.accepted
             ? '<span class="vdl-flag vdl-flag--ok" title="Meets your quality profile">✓</span>'
             : '<span class="vdl-flag vdl-flag--no" title="' + esc(r.rejected || 'Filtered out') + '">✕</span>';
@@ -551,10 +553,12 @@
                 '</div>' +
                 '<div class="vdl-info">' +
                     '<div class="vdl-info-title" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
-                    '<div class="vdl-info-sub">' + esc(sub.join('  ·  ')) + '</div>' +
+                    '<div class="vdl-info-tags">' + tags.join('') + avail + '</div>' +
                 '</div>' +
-                '<div class="vdl-size">' + esc(String(r.size_gb)) + '<span class="vdl-size-u">GB</span></div>' +
-                flag + grab +
+                '<div class="vdl-res-right">' +
+                    '<span class="vdl-size">' + esc(String(r.size_gb)) + '<span class="vdl-size-u">GB</span></span>' +
+                    flag + grab +
+                '</div>' +
             '</div>' +
         '</div>';
     }
