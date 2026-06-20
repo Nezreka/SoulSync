@@ -49,8 +49,12 @@ def register_routes(bp):
                 logger.exception("airs_time backfill queue failed")
 
             from core.video.sources import resolve_video_server
+            # scope: 'watchlist' (default — shows you follow/track) or 'all' (every
+            # airing show in the library). The toggle on the page sends ?scope=.
+            scope = (request.args.get("scope") or "watchlist").lower()
             eps = db.calendar_upcoming(start.isoformat(), end.isoformat(),
-                                       server_source=resolve_video_server())
+                                       server_source=resolve_video_server(),
+                                       watchlist_only=(scope != "all"))
 
             # Per-date counts drive the day-strip dots without a second query.
             counts: dict[str, int] = {}
@@ -64,6 +68,7 @@ def register_routes(bp):
                 "start": start.isoformat(),       # window start (may be a future week)
                 "end": end.isoformat(),
                 "days": days,
+                "scope": "all" if scope == "all" else "watchlist",
                 "counts_by_date": counts,
                 "total": len(eps),
                 "owned": owned,

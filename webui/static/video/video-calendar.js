@@ -18,7 +18,7 @@
     var MO = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     var MO_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
         'September', 'October', 'November', 'December'];
-    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all', view: 'compact' };
+    var state = { loaded: false, eps: {}, data: null, offset: 0, filter: 'all', view: 'compact', scope: 'watchlist' };
 
     function $(s) { return document.querySelector(s); }
     function esc(s) {
@@ -322,7 +322,8 @@
         var grid = $('[data-video-cal-grid]'); if (grid && state.data) grid.classList.add('vcal-fading');
         showEmpty(false); showLoading(true);
         var base = new Date(); base.setHours(0, 0, 0, 0); base.setDate(base.getDate() + state.offset * 7);
-        fetch(URL + '?days=7&start=' + isoOf(base), { headers: { 'Accept': 'application/json' } })
+        fetch(URL + '?days=7&start=' + isoOf(base) + '&scope=' + (state.scope || 'watchlist'),
+            { headers: { 'Accept': 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 showLoading(false);
@@ -452,6 +453,10 @@
         for (var k = 0; k < vbs.length; k++) (function (b) {
             b.addEventListener('click', function () { setView(b.getAttribute('data-video-cal-view')); });
         })(vbs[k]);
+        var sbs = document.querySelectorAll('[data-video-cal-scope]');
+        for (var j = 0; j < sbs.length; j++) (function (b) {
+            b.addEventListener('click', function () { setScope(b.getAttribute('data-video-cal-scope')); });
+        })(sbs[j]);
         var addBtn = $('[data-video-cal-addmissing]');
         if (addBtn) addBtn.addEventListener('click', addMissing);
 
@@ -606,6 +611,22 @@
             vbs[i].classList.toggle('vcal-view-btn--on', vbs[i].getAttribute('data-video-cal-view') === state.view);
     }
 
+    // Source switcher (watchlist ↔ all library). Unlike the filter, this changes
+    // WHICH shows the server returns, so it refetches. Remembers the choice.
+    function setScope(sc) {
+        if (sc !== 'watchlist' && sc !== 'all') return;
+        if (sc === state.scope) return;
+        state.scope = sc;
+        try { localStorage.setItem('vcalScope', sc); } catch (e) { /* private mode */ }
+        applyScope();
+        load();
+    }
+    function applyScope() {
+        var sbs = document.querySelectorAll('[data-video-cal-scope]');
+        for (var i = 0; i < sbs.length; i++)
+            sbs[i].classList.toggle('vcal-filter-btn--on', sbs[i].getAttribute('data-video-cal-scope') === state.scope);
+    }
+
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
         if (!state.loaded) { state.scrollToNow = true; load(); }
@@ -615,7 +636,9 @@
     function init() {
         wire();
         try { var sv = localStorage.getItem('vcalView'); if (sv) state.view = sv; } catch (e) { /* private mode */ }
+        try { var sc = localStorage.getItem('vcalScope'); if (sc === 'watchlist' || sc === 'all') state.scope = sc; } catch (e) { /* private mode */ }
         applyView();
+        applyScope();
         document.addEventListener('soulsync:video-page-shown', onPageShown);
     }
 
