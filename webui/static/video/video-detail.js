@@ -531,6 +531,9 @@
          '[data-vd-review-section]', '[data-vd-cast-all]'].forEach(function (s) {
             var n = q(s); if (n) n.hidden = true;
         });
+        // Clear any YouTube-channel playlists from the show DOM so they don't leak
+        // onto the next movie/show you open (the section is reused across loads).
+        ytResetPlaylists();
         galleryImages = [];
         stopBillboardTrailer();
     }
@@ -1797,7 +1800,13 @@
 
     // playlists as collapsible rows below the episodes (channel-only section)
     function ytResetPlaylists() {
-        var sec = q('[data-vd-yt-pl-section]'), host = q('[data-vd-yt-playlists]');
+        // The playlist section lives ONLY in the show-detail DOM, but a movie/show
+        // load runs with q() scoped to a DIFFERENT root — so query the show subpage
+        // directly. Otherwise a channel's playlists leak onto the next show you open.
+        var showRoot = document.querySelector('[data-video-detail="show"]');
+        if (!showRoot) return;
+        var sec = showRoot.querySelector('[data-vd-yt-pl-section]');
+        var host = showRoot.querySelector('[data-vd-yt-playlists]');
         if (host) host.innerHTML = '';
         if (sec) sec.hidden = true;
     }
