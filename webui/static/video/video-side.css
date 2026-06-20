@@ -3350,3 +3350,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-row-retry:disabled { opacity: 0.5 !important; pointer-events: none; }
 @media (hover: none) { .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: none; } }
 
+
+/* Automation Hub panes that are music-specific — emptied on the video side for now. */
+.vauto-hub-soon { padding: 36px 20px; text-align: center; font-size: 13.5px; font-weight: 600;
+    color: rgba(255, 255, 255, 0.38); }

@@ -44,10 +44,21 @@
         else host.insertBefore(section, host.firstChild);
     }
 
+    // The hub's built-in tabs are MUSIC content (playlist pipelines, music recipes,
+    // music quick-start/tips). The video side will get its own content here; for now
+    // empty those four panes (Reference stays — it's generic automation reference).
+    var _HUB_EMPTY = { pipelines: 'pipelines', recipes: 'singles', guides: 'quick-start guides', tips: 'tips' };
+
     function renderHubOnce() {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         if (host.querySelector('#auto-section-hub')) return;   // build it once; it's static
-        if (typeof window._buildAutomationHub === 'function') host.appendChild(window._buildAutomationHub());
+        if (typeof window._buildAutomationHub !== 'function') return;
+        var hub = window._buildAutomationHub();
+        Object.keys(_HUB_EMPTY).forEach(function (t) {
+            var pane = hub.querySelector('#auto-hub-pane-' + t);   // scoped to the detached hub (no id clash)
+            if (pane) pane.innerHTML = '<div class="vauto-hub-soon">Video ' + _HUB_EMPTY[t] + ' coming soon.</div>';
+        });
+        host.appendChild(hub);
     }
 
     function renderStats(sys) {
