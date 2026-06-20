@@ -403,3 +403,37 @@ def test_end_to_end_monthly_schedule_produces_valid_db_string(engine_with_db):
     assert parsed.day == 15
     assert parsed.hour == 9
     assert parsed.minute == 0
+
+
+# ---------------------------------------------------------------------------
+# System-automation seeding — owned_by / action_config (video side).
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
+    """The video twin ('Scan Video Library') must seed with owned_by='video'
+    so it stays off the music page, and carry its action_config (mode). Music
+    system automations keep owned_by=None. Regression guard for the seeding
+    seam in ensure_system_automations()."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = None  # nothing seeded yet
+    created = {}
+
+    def _create(**kw):
+        created[kw['action_type']] = kw
+        return 'id-' + kw['action_type']
+
+    db.create_automation.side_effect = _create
+
+    engine = AutomationEngine(db)
+    engine.ensure_system_automations()
+
+    # Video twin seeded, tagged for the video side, with its mode config.
+    assert 'video_scan_library' in created, 'video twin not seeded'
+    video = created['video_scan_library']
+    assert video['owned_by'] == 'video'
+    assert json.loads(video['action_config']) == {'mode': 'full'}
+
+    # Music automations stay owned_by=None (shown on the music page).
+    assert created['scan_library']['owned_by'] is None
+    assert json.loads(created['scan_library']['action_config']) == {}

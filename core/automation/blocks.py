@@ -10,30 +10,37 @@ Three top-level lists:
 - `ACTIONS` — DO blocks: process_wishlist, scan_library, etc.
 - `NOTIFICATIONS` — THEN blocks: discord/pushbullet/telegram/webhook,
   plus fire_signal and run_script then-actions.
+
+Each block carries an optional ``scope`` tag so the SAME definitions can
+feed both the music and the (isolated) video automation builders:
+  - ``"both"``  — generic; shown on both sides (schedule, notifications, …).
+  - ``"video"`` — video-only; shown only on the video builder.
+  - absent      — treated as music-only (the default); never shown on video.
+Use :func:`blocks_for_scope` to get the filtered lists for one side.
 """
 
 from __future__ import annotations
 
 TRIGGERS: list[dict] = [
-    {"type": "schedule", "label": "Schedule", "icon": "clock", "description": "Run on a timer interval", "available": True,
+    {"type": "schedule", "label": "Schedule", "icon": "clock", "scope": "both", "description": "Run on a timer interval", "available": True,
      "config_fields": [
          {"key": "interval", "type": "number", "label": "Every", "default": 6, "min": 1},
          {"key": "unit", "type": "select", "label": "Unit",
           "options": [{"value": "minutes", "label": "Minutes"}, {"value": "hours", "label": "Hours"}, {"value": "days", "label": "Days"}],
           "default": "hours"}
      ]},
-    {"type": "daily_time", "label": "Daily Time", "icon": "clock", "description": "Run every day at a specific time", "available": True,
+    {"type": "daily_time", "label": "Daily Time", "icon": "clock", "scope": "both", "description": "Run every day at a specific time", "available": True,
      "config_fields": [
          {"key": "time", "type": "time", "label": "At", "default": "03:00"}
      ]},
-    {"type": "weekly_time", "label": "Weekly Schedule", "icon": "calendar", "description": "Run on specific days of the week at a set time", "available": True,
+    {"type": "weekly_time", "label": "Weekly Schedule", "icon": "calendar", "scope": "both", "description": "Run on specific days of the week at a set time", "available": True,
      "config_fields": [
          {"key": "time", "type": "time", "label": "At", "default": "03:00"},
          {"key": "days", "type": "multi_select", "label": "Days",
           "options": [{"value": "mon", "label": "Mon"}, {"value": "tue", "label": "Tue"}, {"value": "wed", "label": "Wed"},
                       {"value": "thu", "label": "Thu"}, {"value": "fri", "label": "Fri"}, {"value": "sat", "label": "Sat"}, {"value": "sun", "label": "Sun"}]}
      ]},
-    {"type": "app_started", "label": "App Started", "icon": "power", "description": "When SoulSync starts up", "available": True},
+    {"type": "app_started", "label": "App Started", "icon": "power", "scope": "both", "description": "When SoulSync starts up", "available": True},
     {"type": "track_downloaded", "label": "Track Downloaded", "icon": "download", "description": "When a track finishes downloading", "available": True,
      "has_conditions": True,
      "condition_fields": ["artist", "title", "album", "quality"],
@@ -106,14 +113,14 @@ TRIGGERS: list[dict] = [
      "description": "When duplicate cleaner finishes", "available": True,
      "variables": ["files_scanned", "duplicates_found", "space_freed"]},
     # Signal trigger
-    {"type": "signal_received", "label": "Signal Received", "icon": "zap",
+    {"type": "signal_received", "label": "Signal Received", "icon": "zap", "scope": "both",
      "description": "When another automation fires a named signal", "available": True,
      "config_fields": [
          {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
      ],
      "variables": ["signal_name"]},
     # Webhook trigger
-    {"type": "webhook_received", "label": "Webhook Received", "icon": "globe",
+    {"type": "webhook_received", "label": "Webhook Received", "icon": "globe", "scope": "both",
      "description": "When an external API request is received (POST /api/v1/request)", "available": True,
      "variables": ["query", "request_id", "source"]},
 ]
@@ -155,7 +162,7 @@ ACTIONS: list[dict] = [
          {"key": "refresh_first", "type": "checkbox", "label": "Refresh playlists before sync (regenerate snapshots)", "default": False},
          {"key": "skip_wishlist", "type": "checkbox", "label": "Skip wishlist processing", "default": False},
      ]},
-    {"type": "notify_only", "label": "Notify Only", "icon": "bell", "description": "No action — just send notification", "available": True},
+    {"type": "notify_only", "label": "Notify Only", "icon": "bell", "scope": "both", "description": "No action — just send notification", "available": True},
     # Phase 3 actions
     {"type": "start_database_update", "label": "Update Database", "icon": "database",
      "description": "Trigger library database refresh", "available": True,
@@ -184,7 +191,7 @@ ACTIONS: list[dict] = [
      "description": "Clear quarantine, download queue, import folder, and search history in one sweep", "available": True},
     {"type": "deep_scan_library", "label": "Deep Scan Library", "icon": "search",
      "description": "Full library comparison without losing enrichment data", "available": True},
-    {"type": "run_script", "label": "Run Script", "icon": "terminal",
+    {"type": "run_script", "label": "Run Script", "icon": "terminal", "scope": "both",
      "description": "Execute a script from the scripts folder", "available": True},
     {"type": "search_and_download", "label": "Search & Download", "icon": "download",
      "description": "Search for a track and download the best match", "available": True,
@@ -192,28 +199,62 @@ ACTIONS: list[dict] = [
          {"key": "query", "type": "text", "label": "Search Query",
           "placeholder": "Artist - Track (leave empty to use trigger's query)"}
      ]},
+
+    # ── Video side (isolated app, shared engine) ──────────────────────────
+    # Tagged scope='video' so they appear ONLY on the video automation
+    # builder, never the music one. Their handlers bridge into core.video.
+    {"type": "video_scan_library", "label": "Scan Video Library", "icon": "refresh", "scope": "video",
+     "description": "Tell the media server to rescan your selected movie/TV sections, then read what it found into SoulSync", "available": True,
+     "config_fields": [
+         {"key": "mode", "type": "select", "label": "Mode",
+          "options": [{"value": "full", "label": "Full (add + refresh)"},
+                      {"value": "incremental", "label": "Incremental (recent only)"},
+                      {"value": "deep", "label": "Deep (also remove missing)"}],
+          "default": "full"}
+     ]},
 ]
 
 
 NOTIFICATIONS: list[dict] = [
-    {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "description": "Send a Discord notification", "available": True,
+    {"type": "discord_webhook", "label": "Discord Webhook", "icon": "message", "scope": "both", "description": "Send a Discord notification", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
-    {"type": "pushbullet", "label": "Pushbullet", "icon": "push", "description": "Push notification to phone/desktop", "available": True,
+    {"type": "pushbullet", "label": "Pushbullet", "icon": "push", "scope": "both", "description": "Push notification to phone/desktop", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
-    {"type": "telegram", "label": "Telegram", "icon": "message", "description": "Send a Telegram message", "available": True,
+    {"type": "telegram", "label": "Telegram", "icon": "message", "scope": "both", "description": "Send a Telegram message", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
-    {"type": "webhook", "label": "Webhook (POST)", "icon": "globe", "description": "Send a POST request to any URL", "available": True,
+    {"type": "webhook", "label": "Webhook (POST)", "icon": "globe", "scope": "both", "description": "Send a POST request to any URL", "available": True,
      "variables": ["time", "name", "run_count", "status"]},
     # Signal fire action
-    {"type": "fire_signal", "label": "Fire Signal", "icon": "zap",
+    {"type": "fire_signal", "label": "Fire Signal", "icon": "zap", "scope": "both",
      "description": "Fire a signal that other automations can listen for", "available": True,
      "config_fields": [
          {"key": "signal_name", "type": "signal_input", "label": "Signal Name"}
      ]},
     # Run script then-action
-    {"type": "run_script", "label": "Run Script", "icon": "terminal",
+    {"type": "run_script", "label": "Run Script", "icon": "terminal", "scope": "both",
      "description": "Execute a script after the action completes", "available": True,
      "config_fields": [
          {"key": "script_name", "type": "script_select", "label": "Script"}
      ]},
 ]
+
+
+def _in_scope(block: dict, scope: str) -> bool:
+    """A block belongs to ``scope`` if it's generic (``"both"``) or tagged for
+    that side. Untagged blocks default to ``"music"`` (the original behaviour),
+    so the video builder never picks up music-only blocks by accident."""
+    s = block.get("scope", "music")
+    return s == "both" or s == scope
+
+
+def blocks_for_scope(scope: str = "music") -> dict:
+    """Return the trigger/action/notification lists filtered to one side.
+
+    ``scope="music"`` reproduces the pre-scope behaviour (everything except
+    video-only blocks); ``scope="video"`` returns generic + video-only blocks.
+    """
+    return {
+        "triggers": [b for b in TRIGGERS if _in_scope(b, scope)],
+        "actions": [b for b in ACTIONS if _in_scope(b, scope)],
+        "notifications": [b for b in NOTIFICATIONS if _in_scope(b, scope)],
+    }

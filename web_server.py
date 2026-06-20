@@ -3789,13 +3789,14 @@ def list_available_scripts():
 
 @app.route('/api/automations/blocks', methods=['GET'])
 def get_automation_blocks():
-    """Return available block types for the automation builder sidebar."""
-    return jsonify({
-        'triggers': _auto_blocks.TRIGGERS,
-        'actions': _auto_blocks.ACTIONS,
-        'notifications': _auto_blocks.NOTIFICATIONS,
-        'known_signals': _collect_known_signals(),
-    })
+    """Return available block types for the automation builder sidebar.
+
+    Music builder only — video-only blocks (scope='video') are filtered out
+    so the music builder never offers a video action. The video side fetches
+    its own scope via /api/video/automations/blocks."""
+    scoped = _auto_blocks.blocks_for_scope('music')
+    scoped['known_signals'] = _collect_known_signals()
+    return jsonify(scoped)
 
 @app.route('/api/mirrored-playlists/list', methods=['GET'])
 def get_mirrored_playlists_list():

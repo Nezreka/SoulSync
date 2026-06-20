@@ -35,6 +35,7 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.video_scan_library import auto_video_scan_library
 from core.automation.handlers.progress_callbacks import (
     progress_init,
     progress_finish,
@@ -165,6 +166,14 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'search_and_download',
         lambda config: auto_search_and_download(config, deps),
+    )
+
+    # Video side (isolated app, shared engine). The video twins are tagged
+    # owned_by='video' on their automation rows so they never surface on the
+    # music automations page; the handlers bridge into core.video.
+    engine.register_action_handler(
+        'video_scan_library',
+        lambda config: auto_video_scan_library(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around
