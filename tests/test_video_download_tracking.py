@@ -66,6 +66,28 @@ def test_detail_watch_started_for_library_movies():
     assert 'stopMovieDownloadWatch()' in _DETAIL   # cleared on (re)load / navigate away
 
 
+# --- result cards: flat release-list redesign -----------------------------
+
+def test_result_cards_are_flat_release_list():
+    # Release NAME is the hero; quality is a small left tag; verdict is a compact flag.
+    assert 'vdl-info-title' in _VIEW and 'vdl-q-res' in _VIEW and 'vdl-flag' in _VIEW
+    assert '.vdl-q-res' in _CSS and '.vdl-info-title' in _CSS and '.vdl-flag' in _CSS
+    # the previous card structure (big res tile + summary + verdict pill) is gone
+    assert 'vdl-res-summary' not in _VIEW
+    assert 'vdl-res-body' not in _VIEW
+
+
+# --- modal resumes an in-flight download on reopen ------------------------
+
+def test_modal_resumes_active_download_on_reopen():
+    assert 'data-vdl-active' in _VIEW
+    assert 'function watchActiveDownload(' in _VIEW
+    assert '/api/video/downloads/status?media_id=' in _VIEW
+    # suppressed while a result card is already tracking inline (no double indicator)
+    assert "querySelector('[data-vdl-track]')" in _VIEW
+    assert '.vdl-active' in _CSS
+
+
 # --- navigation plumbing --------------------------------------------------
 
 def test_video_side_handles_navigate_event():

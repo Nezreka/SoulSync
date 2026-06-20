@@ -3192,9 +3192,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-src-auto:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; filter: none; animation: none; }
 .vdl-src-empty { font-size: 13px; color: rgba(255, 255, 255, 0.5); padding: 12px 14px; border-radius: 12px;
     background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.12); }
-/* the release card the Auto pick chose — a brand ring so the choice is obvious */
-.vdl-res--auto { border-color: rgba(var(--accent-rgb), 0.8) !important;
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 10px 26px -12px rgba(var(--accent-rgb), 0.8); }
+/* (the Auto-pick highlight now lives with the flat result list — .vdl-res--auto
+   .vdl-res-main below — so the chosen row is tinted + ringed in place.) */
 @media (max-width: 560px) {
     .vdl-src { flex-wrap: wrap; }
     .vdl-src .vdl-src-actions { width: 100%; }
@@ -3359,60 +3358,57 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-res-live { background: rgba(108, 211, 145, 0.16); color: #8fe7af; }
 .vdl-res-demo { background: rgba(245, 158, 11, 0.14); color: #fbcd7a; }
 .vdl-res-err { color: #fbcd7a; }
-/* result row: [resolution tile] [body: summary + name + meta] [grab] */
-/* ── result card: redesigned (column so a live tracker can dock under it) ──── */
-.vdl-res { position: relative; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.052), rgba(255, 255, 255, 0.022));
-    margin-bottom: 9px; animation: vdlRise 0.4s both;
-    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.2s ease; }
-.vdl-res-main { display: flex; align-items: center; gap: 13px; padding: 11px 13px; }
-.vdl-res:hover { border-color: rgba(var(--accent-rgb), 0.42); transform: translateY(-1px);
-    box-shadow: 0 14px 28px -18px rgba(0, 0, 0, 0.9); }
-.vdl-res--rejected { opacity: 0.5; }
-.vdl-res--rejected:hover { opacity: 0.85; }
-/* accepted cards carry a faint green edge so "good" reads at a glance */
-.vdl-res--ok::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(#6cd391, rgba(108, 211, 145, 0.35)); box-shadow: 0 0 14px 0 rgba(108, 211, 145, 0.45); }
-.vdl-res--grabbed { border-color: rgba(var(--accent-rgb), 0.6); }
-/* resolution badge — the quick-scan anchor */
-.vdl-res-res { flex-shrink: 0; width: 56px; height: 48px; display: grid; place-items: center; border-radius: 12px;
-    font-weight: 900; letter-spacing: -0.02em; color: #06210f;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 5px 14px -7px rgba(0, 0, 0, 0.75); }
-.vdl-res-res-txt { font-size: 14.5px; }
-.vdl-res-res--4k { background: linear-gradient(140deg, #ffd76a, #f0a830); }
-.vdl-res-res--1080 { background: linear-gradient(140deg, rgba(var(--accent-rgb), 1), rgba(var(--accent-rgb), 0.7)); }
-.vdl-res-res--720 { background: linear-gradient(140deg, #8fb3ff, #5f86d6); }
-.vdl-res-res--sd { background: linear-gradient(140deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.22)); color: #11141a; }
-.vdl-res-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
-.vdl-res-line1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.vdl-res-summary { font-size: 13.5px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
-.vdl-res-tag { font-size: 9.5px; font-weight: 800; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 5px;
-    text-transform: uppercase; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.85); }
-.vdl-res-tag--hdr { background: linear-gradient(100deg, rgba(245, 158, 11, 0.4), rgba(168, 85, 247, 0.4)); color: #fff; }
-.vdl-res-verdict { margin-left: auto; font-size: 10.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
-.vdl-res-verdict--ok { background: rgba(108, 211, 145, 0.18); color: #8fe7af; }
-.vdl-res-verdict--no { background: rgba(245, 158, 11, 0.14); color: #fbcd7a; max-width: 60%; overflow: hidden; text-overflow: ellipsis; }
-.vdl-res-name { font: 500 11px/1.3 'JetBrains Mono', ui-monospace, monospace; color: rgba(255, 255, 255, 0.42);
+
+/* ── result list: flat, release-name-first rows (Radarr/Prowlarr style) ─────
+   No per-row card chrome — hairline dividers, a small quality tag, the release
+   name as the hero, dense inline meta, then size · verdict · Get on the right.
+   .vdl-res stays a column so the live tracker can dock under the chosen row. */
+.vdl-res { position: relative; display: flex; flex-direction: column;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06); animation: vdlRise 0.3s both; }
+.vdl-res:last-child { border-bottom: none; }
+.vdl-res-main { display: flex; align-items: center; gap: 13px; padding: 9px 9px; border-radius: 9px;
+    transition: background 0.14s ease; }
+.vdl-res:hover .vdl-res-main { background: rgba(255, 255, 255, 0.04); }
+.vdl-res--rejected { opacity: 0.46; }
+.vdl-res--rejected:hover { opacity: 0.82; }
+.vdl-res--grabbed .vdl-res-main { background: rgba(var(--accent-rgb), 0.08); }
+.vdl-res--auto .vdl-res-main { background: rgba(var(--accent-rgb), 0.13); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45); }
+/* quality column: a small res tag + the source word stacked under it */
+.vdl-q { flex-shrink: 0; width: 64px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.vdl-q-res { font-size: 11px; font-weight: 900; letter-spacing: -0.01em; padding: 2px 8px; border-radius: 6px; color: #06210f;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.vdl-q-res--4k { background: linear-gradient(135deg, #ffd76a, #f0a830); }
+.vdl-q-res--1080 { background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72)); }
+.vdl-q-res--720 { background: linear-gradient(135deg, #8fb3ff, #5f86d6); color: #0a1020; }
+.vdl-q-res--sd { background: rgba(255, 255, 255, 0.32); color: #11141a; }
+.vdl-q-src { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.4); }
+.vdl-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vdl-info-title { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: -0.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdl-res-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 1px; }
-.vdl-res-stat { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; font-weight: 700;
-    color: rgba(255, 255, 255, 0.6); }
-.vdl-res-ico { font-size: 11px; opacity: 0.8; }
-.vdl-res-seed { color: #8fe7af; }
-.vdl-res-grp { font-family: 'JetBrains Mono', ui-monospace, monospace; color: rgba(255, 255, 255, 0.4); font-weight: 600; }
-/* Get = the accent hero pill (same language as the source Auto button) */
-.vdl-res-grab { flex-shrink: 0; align-self: center; display: inline-flex; align-items: center; gap: 6px;
-    padding: 9px 14px; border-radius: 11px; cursor: pointer; font-size: 12px; font-weight: 850; letter-spacing: 0.01em;
-    color: #06210f; border: none;
+.vdl-info-sub { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.45);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdl-size { flex-shrink: 0; font-size: 13px; font-weight: 800; color: rgba(255, 255, 255, 0.82);
+    font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.vdl-size-u { font-size: 10px; font-weight: 700; color: rgba(255, 255, 255, 0.45); margin-left: 2px; }
+.vdl-flag { flex-shrink: 0; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 6px;
+    font-size: 12px; font-weight: 900; }
+.vdl-flag--ok { background: rgba(108, 211, 145, 0.18); color: #6cd391; }
+.vdl-flag--no { background: rgba(245, 158, 11, 0.16); color: #fbcd7a; }
+/* Get = compact accent pill (same language as the source Auto button) */
+.vdl-res-grab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: 9px;
+    cursor: pointer; font-size: 11.5px; font-weight: 850; letter-spacing: 0.01em; color: #06210f; border: none;
     background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72));
-    box-shadow: 0 5px 16px -7px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.32);
-    transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.2s ease; }
-.vdl-res-grab:hover { transform: translateY(-1px); filter: brightness(1.06);
-    box-shadow: 0 8px 20px -7px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
-.vdl-res-grab-ic { font-size: 14px; line-height: 1; }
+    box-shadow: 0 4px 12px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transition: transform 0.14s ease, filter 0.14s ease, box-shadow 0.2s ease; }
+.vdl-res-grab:hover { transform: translateY(-1px); filter: brightness(1.07);
+    box-shadow: 0 7px 16px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.38); }
+.vdl-res-grab-ic { font-size: 13px; line-height: 1; }
 .vdl-res-grab--busy { opacity: 0.7; cursor: progress; }
 .vdl-btn--busy { opacity: 0.7; cursor: progress; }
+@media (max-width: 520px) {
+    .vdl-q { flex-direction: row; align-items: center; width: auto; gap: 7px; }
+    .vdl-info-sub { white-space: normal; }
+}
 
 /* live download tracker docked under the grabbed card */
 .vdl-res-track { padding: 10px 13px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -3434,11 +3430,39 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-res-track--fail .vdl-res-track-state { color: #fbcd7a; }
 .vdl-res-track-spin { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
     border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: vdlSpin 0.7s linear infinite; }
+
+/* persistent "this title is downloading" banner at the top of the modal — shown
+   even after closing + reopening (looks the download up by media identity). */
+.vdl-active { position: relative; overflow: hidden; border-radius: 12px; margin-bottom: 18px;
+    border: 1px solid rgba(var(--accent-rgb), 0.42); background: rgba(var(--accent-rgb), 0.1);
+    animation: vdlRise 0.4s both; }
+.vdl-active[hidden] { display: none; }
+.vdl-active--active { animation: vdlRise 0.4s both, vdlChipGlow 2.6s ease-in-out 0.5s infinite; }
+.vdl-active--done { border-color: rgba(108, 211, 145, 0.5); background: rgba(108, 211, 145, 0.12); }
+.vdl-active--fail { border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.1); }
+.vdl-active-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.34), rgba(var(--accent-rgb), 0.16));
+    transition: width 0.5s ease; z-index: 0; }
+.vdl-active--done .vdl-active-fill { background: linear-gradient(90deg, rgba(108, 211, 145, 0.34), rgba(108, 211, 145, 0.18)); }
+.vdl-active--fail .vdl-active-fill { background: linear-gradient(90deg, rgba(245, 158, 11, 0.3), rgba(245, 158, 11, 0.16)); }
+.vdl-active-row { position: relative; z-index: 1; display: flex; align-items: center; gap: 11px; padding: 11px 14px; }
+.vdl-active-ic { flex-shrink: 0; font-size: 15px; font-weight: 900; color: #fff; }
+.vdl-active-txt { flex: 1; min-width: 0; font-size: 13px; color: rgba(255, 255, 255, 0.78);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdl-active-txt strong { color: #fff; font-weight: 800; }
+.vdl-active-rel { color: rgba(255, 255, 255, 0.5); }
+.vdl-active-pct { flex-shrink: 0; font-size: 13px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+.vdl-active-go { flex-shrink: 0; display: inline-flex; align-items: center; padding: 6px 12px; border-radius: 9px;
+    cursor: pointer; font-size: 11.5px; font-weight: 800; color: #fff; background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2); transition: background 0.15s, transform 0.15s; }
+.vdl-active-go:hover { background: rgba(255, 255, 255, 0.18); transform: translateY(-1px); }
+
 /* per-source block (row + its own results) */
 .vdl-src-block { display: flex; flex-direction: column; }
 .vdl-src-block .vdl-results { margin: 8px 0 2px; }
 @media (prefers-reduced-motion: reduce) {
-    .vdl-res, .vdl-res-spin, .vdl-res-track, .vdl-res-track-spin, .vd-dlchip, .vd-dlchip.is-active { animation: none !important; }
+    .vdl-res, .vdl-res-spin, .vdl-res-track, .vdl-res-track-spin, .vd-dlchip, .vd-dlchip.is-active,
+    .vdl-active, .vdl-active--active { animation: none !important; }
 }
 
 /* ── Downloads page — reuses the music .adl-* layout; these are the video-only bits ── */
