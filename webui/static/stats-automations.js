@@ -2428,8 +2428,12 @@ async function loadAutomations() {
     if (!list || !empty) return;
     try {
         const res = await fetch('/api/automations');
-        const automations = await res.json();
-        if (automations.error) throw new Error(automations.error);
+        const raw = await res.json();
+        if (raw.error) throw new Error(raw.error);
+        // The automation engine is app-wide, so /api/automations also returns
+        // video-owned rows. Those belong only on the video Automations page —
+        // exclude them here so the music page shows music automations only.
+        const automations = Array.isArray(raw) ? raw.filter(a => a.owned_by !== 'video') : raw;
         if (!automations.length) {
             list.innerHTML = ''; empty.style.display = '';
             if (statsBar) statsBar.innerHTML = '';

@@ -53,6 +53,8 @@ EXPECTED_ACTION_NAMES = frozenset({
     'full_cleanup',
     'run_script',
     'search_and_download',
+    # Video side (isolated app, shared engine).
+    'video_scan_library',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).

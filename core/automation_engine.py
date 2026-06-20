@@ -145,6 +145,20 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'full_cleanup',
         'initial_delay': 900,  # 15 min after startup
     },
+    # ── Video side (isolated app, shared engine) ──────────────────────────
+    # owned_by='video' keeps these OFF the music automations page (it filters
+    # them out) and ON the video Automations page (it shows only these).
+    # Schedule-based for now; a video-download-complete event trigger can
+    # replace the schedule once that event is wired into the engine.
+    {
+        'name': 'Scan Video Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_scan_library',
+        'action_config': {'mode': 'full'},
+        'owned_by': 'video',
+        'initial_delay': 300,  # 5 min after startup
+    },
 ]
 
 
@@ -237,8 +251,11 @@ class AutomationEngine:
                     trigger_type=spec['trigger_type'],
                     trigger_config=json.dumps(spec['trigger_config']),
                     action_type=spec['action_type'],
-                    action_config='{}',
+                    action_config=json.dumps(spec.get('action_config', {})),
                     profile_id=1,
+                    # owned_by tags the side that owns this automation (e.g.
+                    # 'video'), so the music page can exclude another side's rows.
+                    owned_by=spec.get('owned_by'),
                 )
                 if aid:
                     self.db.update_automation(aid, is_system=1)
