@@ -1902,6 +1902,16 @@ function updateHybridSecondaryOptions() {
 // ===============================
 
 let currentQualityProfile = null;
+let qualityProfileAutoSaveTimer = null;
+
+// Save just the quality profile (not the whole settings page). Used for quality
+// target edits so reordering a target doesn't re-init every backend client.
+function debouncedSaveQualityProfile() {
+    if (window._suppressSettingsAutoSave) return;
+    if (window._settingsLoadFailed) return;
+    if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
+    qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
+}
 
 async function loadQualityProfile() {
     try {
@@ -1993,33 +2003,25 @@ function renderRankedTargets() {
     });
 }
 
-function markQualityProfileCustom() {
-    if (currentQualityProfile) currentQualityProfile.preset = 'custom';
-    document.querySelectorAll('.preset-button').forEach(btn => btn.classList.remove('active'));
-}
-
 function reorderRankedTarget(from, to) {
     const [moved] = currentRankedTargets.splice(from, 1);
     currentRankedTargets.splice(to, 0, moved);
-    markQualityProfileCustom();
     renderRankedTargets();
-    debouncedAutoSaveSettings();
+    debouncedSaveQualityProfile();
 }
 
 function moveRankedTarget(i, dir) {
     const j = i + dir;
     if (j < 0 || j >= currentRankedTargets.length) return;
     [currentRankedTargets[i], currentRankedTargets[j]] = [currentRankedTargets[j], currentRankedTargets[i]];
-    markQualityProfileCustom();
     renderRankedTargets();
-    debouncedAutoSaveSettings();
+    debouncedSaveQualityProfile();
 }
 
 function deleteRankedTarget(i) {
     currentRankedTargets.splice(i, 1);
-    markQualityProfileCustom();
     renderRankedTargets();
-    debouncedAutoSaveSettings();
+    debouncedSaveQualityProfile();
 }
 
 function onRtAddFormatChange() {
@@ -2044,33 +2046,72 @@ function addRankedTarget() {
     }
     t.label = rtLabel(t);
     currentRankedTargets.push(t);
-    markQualityProfileCustom();
     renderRankedTargets();
-    debouncedAutoSaveSettings();
+    debouncedSaveQualityProfile();
 }
 
+const PRESET_LABELS = { audiophile: 'Audiophile', balanced: 'Balanced', space_saver: 'Space Saver' };
+
+// Switch to a preset. The backend restores the preset's saved edits (or factory
+// defaults if untouched) and persists it as the active profile, so there is no
+// follow-up save here and no full-page loading overlay (which caused the flicker).
 async function applyQualityPreset(presetName) {
+    // Drop any queued auto-save so a stale-target write can't land after the switch.
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
     try {
-        showLoadingOverlay(`Applying ${presetName} preset...`);
-
-        const response = await fetch(`/api/quality-profile/preset/${presetName}`, {
-            method: 'POST'
-        });
-
+        const response = await fetch(`/api/quality-profile/preset/${presetName}`, { method: 'POST' });
         const data = await response.json();
 
         if (data.success) {
             currentQualityProfile = data.profile;
-            populateQualityProfileUI(currentQualityProfile);
-            showToast(`Applied '${presetName}' preset`, 'success');
+            // Suppress the global change→auto-save listener while we programmatically
+            // set checkbox + select values — these aren't user edits.
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
         }
     } catch (error) {
         console.error('Error applying quality preset:', error);
         showToast('Failed to apply preset', 'error');
-    } finally {
-        hideLoadingOverlay();
+    }
+}
+
+// Discard the active preset's saved edits and restore its factory defaults.
+async function resetActiveQualityPreset() {
+    const presetName = currentQualityProfile?.preset;
+    if (!presetName || !(presetName in PRESET_LABELS)) {
+        showToast('No preset selected to reset', 'info');
+        return;
+    }
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
+    try {
+        const response = await fetch(`/api/quality-profile/preset/${presetName}/reset`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Reset '${PRESET_LABELS[presetName] || presetName}' to defaults`, 'success');
+        } else {
+            showToast(`Failed to reset preset: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error resetting quality preset:', error);
+        showToast('Failed to reset preset', 'error');
     }
 }
 

@@ -8,8 +8,8 @@ from database.music_database import MusicDatabase
 
 
 def _preset(name):
-    # get_quality_preset doesn't touch self/DB — call unbound to avoid setup.
-    return MusicDatabase.get_quality_preset(None, name)
+    # _factory_quality_preset is pure (no self/DB) — call unbound to avoid setup.
+    return MusicDatabase._factory_quality_preset(None, name)
 
 
 def _labels(profile):
