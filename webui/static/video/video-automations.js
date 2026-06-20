@@ -18,12 +18,11 @@
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
     }
 
-    // The system automations the video view shows (drop Beatport + user/playlist ones).
-    function isVideoSystem(a) {
-        return a && a.is_system &&
-            a.action_type !== 'refresh_beatport_cache' &&
-            a.action_type !== 'playlist_pipeline' &&
-            a.owned_by !== 'playlist_pipeline';
+    // ONLY video-owned automations belong here — the music system automations target
+    // music resources and are hidden. Video automations (tagged owned_by='video') are a
+    // separate set, built next; for now none exist so the list is empty by design.
+    function isVideoAutomation(a) {
+        return a && a.owned_by === 'video';
     }
 
     function renderSystem(sys) {
@@ -32,7 +31,7 @@
         var existing = host.querySelector('#vauto-section-system');
         if (!sys.length) {
             if (existing) existing.remove();
-            if (emptyEl && !host.querySelector('#auto-section-hub')) emptyEl.style.display = '';
+            if (emptyEl) emptyEl.style.display = '';
             return;
         }
         if (emptyEl) emptyEl.style.display = 'none';
@@ -72,7 +71,7 @@
     function load() {
         getJSON('/api/automations').then(function (d) {
             var all = Array.isArray(d) ? d : (d && d.automations) || [];
-            var sys = all.filter(isVideoSystem);
+            var sys = all.filter(isVideoAutomation);
             renderStats(sys);
             renderSystem(sys);
             renderHubOnce();
