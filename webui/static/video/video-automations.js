@@ -83,7 +83,7 @@
         if (a.next_run && a.enabled && timers.indexOf(a.trigger_type) > -1) meta.push('Next: ' + esc(timeUntil(a.next_run)));
         else if (a.enabled && timers.indexOf(a.trigger_type) === -1) meta.push('Listening');
         if (a.run_count) meta.push('Runs: ' + a.run_count);
-        if (a.last_error) meta.push('<span class="vauto-err">Error: ' + esc(a.last_error) + '</span>');
+        if (a.last_error) meta.push('Error: ' + esc(a.last_error));
         return '<div class="automation-card system' + (a.enabled ? '' : ' disabled') + '" data-auto-id="' + a.id + '">' +
             '<div class="automation-status ' + (a.enabled ? 'enabled' : 'disabled') + '"></div>' +
             '<div class="automation-info">' +
@@ -105,18 +105,30 @@
 
     function render(list) {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
+        var statsEl = document.querySelector('[data-vauto-stats]');
+        var emptyEl = document.querySelector('[data-vauto-empty]');
         var sys = (list || []).filter(isVideoSystem);
-        var sub = document.querySelector('[data-vauto-sub]');
-        if (sub) {
-            var on = sys.filter(function (a) { return a.enabled; }).length;
-            sub.textContent = sys.length ? (on + ' of ' + sys.length + ' enabled · shared with the music side')
-                : 'System tasks that keep your library fresh — shared with the music side.';
-        }
-        if (!sys.length) {
-            host.innerHTML = '<div class="vauto-empty">No system automations yet.</div>';
-            return;
-        }
-        host.innerHTML = sys.map(cardHTML).join('');
+        var active = sys.filter(function (a) { return a.enabled; }).length;
+        if (statsEl) statsEl.innerHTML = sys.length
+            ? '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
+              '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>'
+            : '';
+        if (!sys.length) { host.innerHTML = ''; if (emptyEl) emptyEl.style.display = ''; return; }
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        var collapsed = false;
+        try { collapsed = localStorage.getItem('vauto_section_system') === '1'; } catch (e) { /* ignore */ }
+        // same protected-section structure the music page builds for its System group
+        host.innerHTML =
+            '<div class="automations-section section-protected' + (collapsed ? ' collapsed' : '') + '" id="vauto-section-system">' +
+                '<div class="automations-section-header" data-vauto-toggle>' +
+                    '<span class="section-chevron">&#9660;</span>' +
+                    '<span class="section-label">System</span>' +
+                    '<span class="section-count">' + sys.length + '</span>' +
+                    '<span class="section-line"></span>' +
+                '</div>' +
+                '<div class="automations-section-body">' + sys.map(cardHTML).join('') + '</div>' +
+            '</div>';
     }
 
     function load() { getJSON(URL_LIST).then(function (d) { render(Array.isArray(d) ? d : (d && d.automations) || []); }); }
@@ -136,6 +148,13 @@
         if (_wired) return; _wired = true;
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         host.addEventListener('click', function (e) {
+            var sect = e.target.closest('[data-vauto-toggle]');
+            if (sect) {
+                var s = sect.closest('.automations-section');
+                s.classList.toggle('collapsed');
+                try { localStorage.setItem('vauto_section_system', s.classList.contains('collapsed') ? '1' : '0'); } catch (x) { /* ignore */ }
+                return;
+            }
             var run = e.target.closest('[data-auto-run]');
             if (run) {
                 run.disabled = true;
