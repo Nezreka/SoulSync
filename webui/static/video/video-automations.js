@@ -1,74 +1,24 @@
 /*
  * SoulSync — Video Automations page.
  *
- * The automation engine is app-wide, so these are the SAME system automations the
- * music side runs — surfaced on the video side too (minus Refresh Beatport Cache and
- * any user/playlist-pipeline automations). Read + toggle + run only; reuses the music
- * .automation-* card look. Calls the shared /api/automations endpoint (no music imports).
+ * The automation engine is app-wide, so this shows the SAME system automations the
+ * music side runs (minus Refresh Beatport Cache + user/playlist ones). To match the
+ * music page EXACTLY it reuses the music page's own builders — _buildAutomationSection,
+ * renderAutomationCard, _buildAutomationHub (all global in stats-automations.js) — so
+ * the System section, cards, and Automation Hub are byte-for-byte identical.
+ * Read + run + toggle (handled by the reused music card handlers). No music imports.
  */
 (function () {
     'use strict';
 
-    var URL_LIST = '/api/automations';
-    var _timer = null, _wired = false;
+    var _timer = null;
 
-    function esc(s) {
-        return String(s == null ? '' : s)
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-    function toast(m, t) { if (typeof showToast === 'function') showToast(m, t); }
     function getJSON(u) {
         return fetch(u, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
     }
-    function post(u) {
-        return fetch(u, { method: 'POST', headers: { Accept: 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
-    }
 
-    // Friendly labels (system action_types only; Beatport/playlist excluded from display).
-    var ACTIONS = {
-        process_wishlist: 'Process wishlist', scan_watchlist: 'Scan watchlist',
-        scan_library: 'Scan library', start_database_update: 'Update database',
-        deep_scan_library: 'Deep-scan library', clean_search_history: 'Clean search history',
-        clean_completed_downloads: 'Clean completed downloads', backup_database: 'Back up database',
-        full_cleanup: 'Full cleanup', clear_quarantine: 'Clear quarantine',
-        cleanup_wishlist: 'Clean up wishlist', update_discovery_pool: 'Update discovery pool'
-    };
-    var TICONS = { schedule: '⏱️', daily_time: '🕓', weekly_time: '📅', batch_complete: '⬇️', library_scan_completed: '🔄' };
-
-    function fmtTrigger(type, cfg) {
-        cfg = cfg || {};
-        if (type === 'schedule') return 'Every ' + (cfg.interval || 1) + ' ' + (cfg.unit || 'hours');
-        if (type === 'daily_time') return 'Daily at ' + (cfg.time || '00:00');
-        if (type === 'weekly_time') return 'Weekly at ' + (cfg.time || '00:00');
-        if (type === 'batch_complete') return 'When downloads finish';
-        if (type === 'library_scan_completed') return 'After a library scan';
-        return String(type || '').replace(/_/g, ' ');
-    }
-    function fmtAction(type) { return ACTIONS[type] || String(type || '').replace(/_/g, ' '); }
-
-    function timeAgo(ts) {
-        var t = Date.parse(String(ts || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts || '') ? '' : 'Z'));
-        if (isNaN(t)) return '';
-        var s = Math.round((Date.now() - t) / 1000);
-        if (s < 60) return s + 's ago';
-        if (s < 3600) return Math.round(s / 60) + 'm ago';
-        if (s < 86400) return Math.round(s / 3600) + 'h ago';
-        return Math.round(s / 86400) + 'd ago';
-    }
-    function timeUntil(ts) {
-        var t = Date.parse(String(ts || '').replace(' ', 'T') + (/[zZ]|[+-]\d\d:?\d\d$/.test(ts || '') ? '' : 'Z'));
-        if (isNaN(t)) return '';
-        var s = Math.round((t - Date.now()) / 1000);
-        if (s <= 0) return 'due';
-        if (s < 60) return 'in ' + s + 's';
-        if (s < 3600) return 'in ' + Math.round(s / 60) + 'm';
-        if (s < 86400) return 'in ' + Math.round(s / 3600) + 'h';
-        return 'in ' + Math.round(s / 86400) + 'd';
-    }
-
-    // System automations the video side shows (drop Beatport + user/playlist ones).
+    // The system automations the video view shows (drop Beatport + user/playlist ones).
     function isVideoSystem(a) {
         return a && a.is_system &&
             a.action_type !== 'refresh_beatport_cache' &&
@@ -76,100 +26,68 @@
             a.owned_by !== 'playlist_pipeline';
     }
 
-    function cardHTML(a) {
-        var timers = ['schedule', 'daily_time', 'weekly_time'];
-        var meta = [];
-        if (a.last_run) meta.push('Last: ' + esc(timeAgo(a.last_run)));
-        if (a.next_run && a.enabled && timers.indexOf(a.trigger_type) > -1) meta.push('Next: ' + esc(timeUntil(a.next_run)));
-        else if (a.enabled && timers.indexOf(a.trigger_type) === -1) meta.push('Listening');
-        if (a.run_count) meta.push('Runs: ' + a.run_count);
-        if (a.last_error) meta.push('Error: ' + esc(a.last_error));
-        return '<div class="automation-card system' + (a.enabled ? '' : ' disabled') + '" data-auto-id="' + a.id + '">' +
-            '<div class="automation-status ' + (a.enabled ? 'enabled' : 'disabled') + '"></div>' +
-            '<div class="automation-info">' +
-                '<div class="automation-name">' + esc(a.name) + '</div>' +
-                '<div class="automation-flow">' +
-                    '<span class="flow-trigger">' + (TICONS[a.trigger_type] || '⚙️') + ' ' + esc(fmtTrigger(a.trigger_type, a.trigger_config)) + '</span>' +
-                    '<span class="flow-arrow">&rarr;</span>' +
-                    '<span class="flow-action">' + esc(fmtAction(a.action_type)) + '</span>' +
-                '</div>' +
-                '<div class="automation-meta">' + meta.join(' &middot; ') + '</div>' +
-            '</div>' +
-            '<div class="automation-actions">' +
-                '<button class="automation-run-btn" type="button" data-auto-run="' + a.id + '" title="Run now">&#9654;</button>' +
-                '<label class="automation-toggle"><input type="checkbox" data-auto-toggle="' + a.id + '"' + (a.enabled ? ' checked' : '') + '>' +
-                    '<span class="toggle-slider"></span></label>' +
-            '</div>' +
-        '</div>';
-    }
-
-    function render(list) {
+    function renderSystem(sys) {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
-        var statsEl = document.querySelector('[data-vauto-stats]');
         var emptyEl = document.querySelector('[data-vauto-empty]');
-        var sys = (list || []).filter(isVideoSystem);
-        var active = sys.filter(function (a) { return a.enabled; }).length;
-        if (statsEl) statsEl.innerHTML = sys.length
-            ? '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
-              '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>'
-            : '';
-        if (!sys.length) { host.innerHTML = ''; if (emptyEl) emptyEl.style.display = ''; return; }
+        var existing = host.querySelector('#vauto-section-system');
+        if (!sys.length) {
+            if (existing) existing.remove();
+            if (emptyEl && !host.querySelector('#auto-section-hub')) emptyEl.style.display = '';
+            return;
+        }
         if (emptyEl) emptyEl.style.display = 'none';
-
-        var collapsed = false;
-        try { collapsed = localStorage.getItem('vauto_section_system') === '1'; } catch (e) { /* ignore */ }
-        // same protected-section structure the music page builds for its System group
-        host.innerHTML =
-            '<div class="automations-section section-protected' + (collapsed ? ' collapsed' : '') + '" id="vauto-section-system">' +
-                '<div class="automations-section-header" data-vauto-toggle>' +
-                    '<span class="section-chevron">&#9660;</span>' +
-                    '<span class="section-label">System</span>' +
-                    '<span class="section-count">' + sys.length + '</span>' +
-                    '<span class="section-line"></span>' +
-                '</div>' +
-                '<div class="automations-section-body">' + sys.map(cardHTML).join('') + '</div>' +
-            '</div>';
+        if (typeof window._buildAutomationSection !== 'function') return;
+        // exact same section the music page builds for its System group (unique id so
+        // it never clashes with the real music page's #auto-section-system).
+        var section = window._buildAutomationSection('vauto-section-system', 'System', sys, true, { isProtected: true });
+        if (existing) host.replaceChild(section, existing);
+        else host.insertBefore(section, host.firstChild);
     }
 
-    function load() { getJSON(URL_LIST).then(function (d) { render(Array.isArray(d) ? d : (d && d.automations) || []); }); }
+    function renderHubOnce() {
+        var host = document.querySelector('[data-vauto-list]'); if (!host) return;
+        if (host.querySelector('#auto-section-hub')) return;   // build it once; it's static
+        if (typeof window._buildAutomationHub === 'function') host.appendChild(window._buildAutomationHub());
+    }
+
+    function renderStats(sys) {
+        var el = document.querySelector('[data-vauto-stats]'); if (!el) return;
+        if (!sys.length) { el.innerHTML = ''; return; }
+        var active = sys.filter(function (a) { return a.enabled; }).length;
+        el.innerHTML = '<span class="auto-stat"><strong>' + active + '</strong> Active</span>' +
+            '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>';
+    }
+
+    function load() {
+        getJSON('/api/automations').then(function (d) {
+            var all = Array.isArray(d) ? d : (d && d.automations) || [];
+            var sys = all.filter(isVideoSystem);
+            renderStats(sys);
+            renderSystem(sys);
+            renderHubOnce();
+        });
+    }
+
+    function onPage() {
+        return document.body.getAttribute('data-side') === 'video' &&
+            !!document.querySelector('[data-video-subpage="video-automations"]:not([hidden])');
+    }
 
     function start() {
-        wire(); load();
+        load();
+        // Refresh the System section shortly after a run/toggle (the reused music card
+        // handlers fire on the music list, not ours) — keeps our cards in sync.
+        var host = document.querySelector('[data-vauto-list]');
+        if (host && !host._vautoSync) {
+            host._vautoSync = true;
+            var soon = function () { setTimeout(load, 700); };
+            host.addEventListener('click', function (e) { if (e.target.closest('.automation-run-btn')) soon(); });
+            host.addEventListener('change', function (e) { if (e.target.closest('.automation-toggle')) soon(); });
+        }
         if (_timer) clearInterval(_timer);
-        _timer = setInterval(function () {
-            if (document.body.getAttribute('data-side') === 'video' &&
-                document.querySelector('[data-video-subpage="video-automations"]:not([hidden])')) load();
-            else stop();
-        }, 5000);
+        _timer = setInterval(function () { if (onPage()) load(); else stop(); }, 8000);
     }
     function stop() { if (_timer) { clearInterval(_timer); _timer = null; } }
-
-    function wire() {
-        if (_wired) return; _wired = true;
-        var host = document.querySelector('[data-vauto-list]'); if (!host) return;
-        host.addEventListener('click', function (e) {
-            var sect = e.target.closest('[data-vauto-toggle]');
-            if (sect) {
-                var s = sect.closest('.automations-section');
-                s.classList.toggle('collapsed');
-                try { localStorage.setItem('vauto_section_system', s.classList.contains('collapsed') ? '1' : '0'); } catch (x) { /* ignore */ }
-                return;
-            }
-            var run = e.target.closest('[data-auto-run]');
-            if (run) {
-                run.disabled = true;
-                post('/api/automations/' + run.getAttribute('data-auto-run') + '/run').then(function (r) {
-                    run.disabled = false;
-                    toast(r && r.success ? 'Automation started' : 'Could not run it', r && r.success ? 'success' : 'error');
-                    setTimeout(load, 800);
-                });
-            }
-        });
-        host.addEventListener('change', function (e) {
-            var tg = e.target.closest('[data-auto-toggle]');
-            if (tg) post('/api/automations/' + tg.getAttribute('data-auto-toggle') + '/toggle').then(function () { setTimeout(load, 300); });
-        });
-    }
 
     document.addEventListener('soulsync:video-page-shown', function (e) {
         if (e.detail === 'video-automations') start(); else stop();
