@@ -196,6 +196,19 @@ def test_worker_detail_backfill_fills_status(db):
     assert db.detail_backfill_pending_count() == 0     # done → not re-picked
 
 
+def test_detail_backfill_is_tmdb_only(db):
+    # The queue is keyed on tmdb_id, so only the TMDB worker may run it — the TVDB
+    # worker would feed a TMDB id to TVDB (404s) and double-process. It must no-op.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 7, "seasons": []})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=7)
+    db.mark_episodes_synced(sid)
+    client = FakeClient({"id": 7, "metadata": {"status": "Returning Series"}})
+    tvdb = VideoEnrichmentWorker(db, "tvdb", client)
+    assert tvdb._detail_backfill_one() is False
+    assert client.calls == []                          # never called the client
+    assert db.detail_backfill_pending_count() == 1     # still pending (untouched)
+
+
 def test_detail_backfill_marks_done_even_when_status_absent(db):
     # If TMDB returns no status, we still mark it attempted so it isn't re-fetched
     # forever (bounded: one attempt per item).

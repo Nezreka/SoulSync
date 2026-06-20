@@ -248,8 +248,12 @@ class VideoEnrichmentWorker:
         that's missing details-only fields (status, network, tagline, rating…) and
         gap-fill them. The matcher skips server-pre-matched items, so without this
         their `status` stays blank — and the watchlist's airing-default can't see
-        them. TMDB-only. Returns True if it did work (so the loop rate-limits)."""
-        if not hasattr(self.client, "match"):
+        them. Returns True if it did work (so the loop rate-limits).
+
+        TMDB-ONLY: `status` (+ network/tagline/…) come from TMDB and the queue is
+        keyed on tmdb_id. Running it on the TVDB worker would feed a TMDB id to
+        TVDB (→ 404 on every show) and double-process the queue."""
+        if self.service != "tmdb" or not hasattr(self.client, "match"):
             return False
         item = self.db.detail_backfill_next("show") or self.db.detail_backfill_next("movie")
         if not item:
