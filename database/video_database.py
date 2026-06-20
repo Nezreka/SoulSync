@@ -1631,16 +1631,28 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def calendar_upcoming(self, start_date: str, end_date: str, server_source=None) -> list[dict]:
+    def calendar_upcoming(self, start_date: str, end_date: str, server_source=None,
+                          watchlist_only: bool = False) -> list[dict]:
         """Episodes airing in [start_date, end_date] (ISO) for shows on the active
         video server (``server_source``) — the Calendar feed. Scoped to one server
         so Plex and Jellyfin never commingle. Each row carries owned/missing
-        (has_file), a still flag, and show network/airs_time/year for the card."""
+        (has_file), a still flag, and show network/airs_time/year for the card.
+
+        ``watchlist_only`` restricts to the EFFECTIVE watchlist — explicit show
+        follows ∪ airing library shows (not muted), mirroring _effective_shows /
+        the Shows watchlist tab — so the calendar tracks what you follow."""
         # server_source given → that server only; None → all owned shows.
         if server_source:
             srv_where, pre = "s.server_source = ?", [server_source]
         else:
             srv_where, pre = "s.server_source IS NOT NULL", []
+        wl_where = ""
+        if watchlist_only:
+            active = self._ACTIVE_SHOW_SQL.replace("status", "s.status")
+            wl_where = (
+                " AND (s.tmdb_id IN (SELECT tmdb_id FROM video_watchlist WHERE kind='show' AND state='follow')"
+                " OR (" + active + " AND s.tmdb_id NOT IN "
+                "(SELECT tmdb_id FROM video_watchlist WHERE kind='show' AND state='mute')))")
         conn = self._get_connection()
         try:
             rows = conn.execute(
@@ -1653,7 +1665,7 @@ class VideoDatabase:
                 "(s.backdrop_url IS NOT NULL AND s.backdrop_url<>'') AS show_has_backdrop "
                 "FROM episodes e JOIN shows s ON s.id = e.show_id "
                 "WHERE " + srv_where + " "
-                "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ? "
+                "AND e.air_date IS NOT NULL AND e.air_date >= ? AND e.air_date <= ?" + wl_where + " "
                 "ORDER BY e.air_date, COALESCE(s.sort_title, s.title) COLLATE NOCASE, "
                 "e.season_number, e.episode_number",
                 pre + [start_date, end_date]).fetchall()
