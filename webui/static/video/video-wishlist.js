@@ -306,12 +306,22 @@
         var cs = $('[data-vwsh-count-show]'); if (cs) cs.textContent = state.counts.show;
         updateBadges(counts && counts.total != null ? counts.total : (state.counts.movie + state.counts.episode));
         updateSub();
+        updateClearBtn();
     }
     function setYtCounts(counts) {
         state.ytChannel = (counts && counts.channel) || 0;
         state.ytVideo = (counts && counts.video) || 0;
         var cy = $('[data-vwsh-count-youtube]'); if (cy) cy.textContent = state.ytVideo;
         updateSub();
+        updateClearBtn();
+    }
+    // Show "Clear all" only when the active tab actually has items.
+    function updateClearBtn() {
+        var btn = $('[data-vwsh-clear]'); if (!btn) return;
+        var has = state.tab === 'movie' ? state.counts.movie > 0
+            : state.tab === 'show' ? state.counts.show > 0
+            : (state.ytVideo > 0 || state.ytChannel > 0);
+        btn.hidden = !has;
     }
     // Keep the YouTube tab badge fresh without switching to the tab.
     function refreshYtCount() {
@@ -431,7 +441,36 @@
         var tabs = document.querySelectorAll('[data-vwsh-tab]');
         for (var i = 0; i < tabs.length; i++)
             tabs[i].classList.toggle('vwsh-tab--on', tabs[i].getAttribute('data-vwsh-tab') === tab);
+        updateClearBtn();
         load();
+    }
+
+    // Empty the whole current tab (movies / TV / YouTube), after a confirm.
+    function clearAll() {
+        var kind = state.tab;
+        var label = kind === 'movie' ? 'movies' : kind === 'show' ? 'TV episodes' : 'YouTube videos';
+        var go = function () {
+            fetch('/api/video/wishlist/clear', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: kind }),
+            }).then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.success) {
+                        if (typeof showToast === 'function')
+                            showToast('Cleared ' + (res.removed || 0) + ' ' + label + ' from your wishlist', 'success');
+                        load();
+                    } else if (typeof showToast === 'function') {
+                        showToast('Could not clear wishlist', 'error');
+                    }
+                }).catch(function () { if (typeof showToast === 'function') showToast('Could not clear wishlist', 'error'); });
+        };
+        if (typeof showConfirmDialog === 'function') {
+            showConfirmDialog({
+                title: 'Clear wishlist',
+                message: 'Remove ALL ' + label + ' from your wishlist? This can’t be undone.',
+                confirmText: 'Clear all', cancelText: 'Cancel', destructive: true,
+            }).then(function (ok) { if (ok) go(); });
+        } else { go(); }
     }
 
     // ── remove (TMDB scopes via /wishlist/remove; YouTube scopes via youtube) ──
@@ -539,6 +578,8 @@
         });
         var sortSel = $('[data-vwsh-sort]');
         if (sortSel) sortSel.addEventListener('change', function () { state.sort = sortSel.value; state.page = 1; load(); });
+        var clearBtn = $('[data-vwsh-clear]');
+        if (clearBtn) clearBtn.addEventListener('click', clearAll);
         var prev = $('[data-vwsh-prev]');
         if (prev) prev.addEventListener('click', function () { if (state.page > 1) { state.page--; load(); } });
         var next = $('[data-vwsh-next]');

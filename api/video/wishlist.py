@@ -108,6 +108,23 @@ def register_routes(bp):
             logger.exception("Failed to remove from video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/wishlist/clear", methods=["POST"])
+    def video_wishlist_clear():
+        """Empty an entire wishlist tab. Body: {kind} where kind ∈ movie|show|youtube."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        kind = body.get("kind")
+        if kind not in ("movie", "show", "youtube"):
+            return jsonify({"success": False, "error": "kind must be movie|show|youtube"}), 400
+        try:
+            db = get_video_db()
+            removed = db.clear_wishlist(kind)
+            return jsonify({"success": True, "removed": removed,
+                            "counts": db.wishlist_counts(), "youtube_counts": db.youtube_wishlist_counts()})
+        except Exception:
+            logger.exception("Failed to clear video wishlist")
+            return jsonify({"success": False, "error": "Failed"}), 500
+
     @bp.route("/wishlist/backfill-art", methods=["POST"])
     def video_wishlist_backfill_art():
         """Fill episode stills + season posters for rows that predate art-capture.
