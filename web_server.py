@@ -4526,19 +4526,23 @@ def get_quality_presets():
 
 @app.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
 def apply_quality_preset(preset_name):
-    """Apply a predefined quality preset"""
+    """Switch to a quality preset, restoring its saved edits if it has any."""
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
 
-        preset = db.get_quality_preset(preset_name)
+        current = db.get_quality_profile()
+        preset = dict(db.get_quality_preset(preset_name))
+        # search_mode is a global search strategy, not a per-preset audio setting —
+        # carry the user's current choice across preset switches.
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         success = db.set_quality_profile(preset)
 
         if success:
-            add_activity_item("", "Quality Preset Applied", f"Applied '{preset_name}' preset", "Now")
+            add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
             return jsonify({
                 "success": True,
-                "message": f"Applied '{preset_name}' preset",
+                "message": f"Switched to '{preset_name}' preset",
                 "profile": preset
             })
         else:
@@ -4546,6 +4550,33 @@ def apply_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error applying quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/preset/<preset_name>/reset', methods=['POST'])
+def reset_quality_preset(preset_name):
+    """Discard a preset's saved edits and restore its factory defaults."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        current = db.get_quality_profile()
+        preset = dict(db.reset_quality_preset(preset_name))
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        success = db.set_quality_profile(preset)
+
+        if success:
+            add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
+            return jsonify({
+                "success": True,
+                "message": f"Reset '{preset_name}' to defaults",
+                "profile": preset
+            })
+        else:
+            return jsonify({"success": False, "error": "Failed to reset preset"}), 500
+
+    except Exception as e:
+        logger.error(f"Error resetting quality preset: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================

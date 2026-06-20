@@ -8752,21 +8752,69 @@ class MusicDatabase:
             },
         }
 
+    # Presets whose per-preset customizations we remember across switches.
+    _KNOWN_PRESETS = ('audiophile', 'balanced', 'space_saver')
+
     def set_quality_profile(self, profile: dict) -> bool:
-        """Save quality profile configuration"""
+        """Save quality profile configuration.
+
+        Besides the single active profile (read by the download pipeline), we also
+        stash the profile under its preset name so switching presets and coming
+        back restores the user's edits instead of the factory defaults. 'custom'
+        and unknown preset names are not stashed."""
         import json
 
         try:
             profile_json = json.dumps(profile)
             self.set_preference('quality_profile', profile_json)
+
+            preset_name = profile.get('preset')
+            if preset_name in self._KNOWN_PRESETS:
+                store = self._load_preset_store()
+                store[preset_name] = profile
+                self.set_preference('quality_profile_presets', json.dumps(store))
+
             logger.info(f"Quality profile saved: preset={profile.get('preset', 'custom')}")
             return True
         except Exception as e:
             logger.error(f"Failed to save quality profile: {e}")
             return False
 
-    def get_quality_preset(self, preset_name: str) -> dict:
-        """Get a predefined quality preset (v3 format with ranked_targets)."""
+    def _load_preset_store(self) -> dict:
+        """Per-preset customizations, keyed by preset name. {} if none saved."""
+        import json
+        raw = self.get_preference('quality_profile_presets')
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                logger.error("Failed to parse quality_profile_presets, ignoring")
+        return {}
+
+    def reset_quality_preset(self, preset_name: str) -> dict:
+        """Forget a preset's saved customizations and return its factory defaults."""
+        import json
+        store = self._load_preset_store()
+        if preset_name in store:
+            del store[preset_name]
+            self.set_preference('quality_profile_presets', json.dumps(store))
+        return self.get_quality_preset(preset_name, customized=False)
+
+    def get_quality_preset(self, preset_name: str, *, customized: bool = True) -> dict:
+        """Get a quality preset (v3 format with ranked_targets).
+
+        With ``customized`` (default), a preset the user has edited is returned in
+        its saved form; otherwise the hard-coded factory defaults are returned."""
+        if customized:
+            saved = self._load_preset_store().get(preset_name)
+            if saved:
+                return saved
+        return self._factory_quality_preset(preset_name)
+
+    def _factory_quality_preset(self, preset_name: str) -> dict:
+        """The hard-coded factory defaults for a preset (ignores customizations)."""
         # Strict 24-bit FLAC ladder — no 16-bit, no lossy. This is what
         # "audiophile" means: only true hi-res passes.
         _FLAC_24BIT_TARGETS = [
