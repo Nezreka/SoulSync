@@ -55,7 +55,10 @@
             '<div class="vdl-section">' +
                 '<div class="vdl-sec-head">' +
                     '<div class="vdl-sec-label">Sources</div>' +
-                    '<button class="vdl-search-all" type="button" data-vdl-search-all>⌕ Search all</button>' +
+                    '<span class="vdl-src-actions">' +
+                        '<button class="vdl-search-all" type="button" data-vdl-search-all title="Search every source — pick releases yourself">⌕ Manual all</button>' +
+                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-all title="Search every source and auto-grab the best release on each">⚡ Auto all</button>' +
+                    '</span>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
             '</div>';
@@ -68,7 +71,10 @@
             '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
             '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
                 '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
-            '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '">⌕ Search</button>' +
+            '<span class="vdl-src-actions">' +
+                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '" title="Search and pick a release yourself">⌕ Manual</button>' +
+                '<button class="vdl-src-auto" type="button" data-vdl-auto="' + s + '" title="Search and auto-grab the best release for your quality profile">⚡ Auto</button>' +
+            '</span>' +
             '</div>';
     }
     function srcBlockHTML(s, mini) {
@@ -78,20 +84,31 @@
         '</div>';
     }
 
-    function _movieSearch(container, block) {
+    function _movieSearch(container, block, auto) {
         var o = container._opts || {};
         var s = block.getAttribute('data-vdl-src-block');
-        searchInto(container, block.querySelector('[data-vdl-results-for="' + s + '"]'),
+        var resultsEl = block.querySelector('[data-vdl-results-for="' + s + '"]');
+        var statusRow = block.querySelector('.vdl-src');
+        // In auto mode, when the search settles we grab the best accepted release.
+        var onDone = auto ? function () { _autoPick(resultsEl, statusRow); } : null;
+        searchInto(container, resultsEl,
             { scope: 'movie', title: o.title || '', year: o.year || null, source: s },
-            [block.querySelector('.vdl-src')]);
+            [statusRow], onDone);
     }
 
     function onClick(e) {
         var container = e.currentTarget;
         var grab = e.target.closest('[data-vdl-grab]');
         if (grab) { doGrab(grab); return; }
+        var ab = e.target.closest('[data-vdl-auto]');
+        if (ab) { _movieSearch(container, ab.closest('[data-vdl-src-block]'), true); return; }
         var sb = e.target.closest('[data-vdl-search]');
         if (sb) { _movieSearch(container, sb.closest('[data-vdl-src-block]')); return; }
+        if (e.target.closest('[data-vdl-auto-all]')) {
+            Array.prototype.forEach.call(container.querySelectorAll('[data-vdl-src-block]'),
+                function (block) { _movieSearch(container, block, true); });
+            return;
+        }
         if (e.target.closest('[data-vdl-search-all]')) {
             Array.prototype.forEach.call(container.querySelectorAll('[data-vdl-src-block]'),
                 function (block) { _movieSearch(container, block); });
@@ -202,6 +219,7 @@
             if (row.matches && row.matches('button')) { row.disabled = on; row.classList.toggle('vdl-btn--busy', on); return; }
             row.classList.toggle('vdl-src--scanning', on);
             var b = row.querySelector('[data-vdl-search]'); if (b) b.disabled = on;
+            var a = row.querySelector('[data-vdl-auto]'); if (a) a.disabled = on;
             var s = row.querySelector('[data-vdl-status]');
             if (s) { s.textContent = on ? 'Searching' : 'Ready'; s.className = 'vdl-src-status' + (on ? ' vdl-src-status--scanning' : ''); }
         });
@@ -235,10 +253,11 @@
 
     // Start a search; for Soulseek, stream results in (poll like the music side —
     // results trickle in over ~30s, so a single short wait misses them).
-    function searchInto(container, resultsEl, params, triggerRows) {
+    function searchInto(container, resultsEl, params, triggerRows, onDone) {
         if (!resultsEl) return;
         triggerRows = (triggerRows || []).filter(Boolean);
         if (resultsEl._poll) { clearTimeout(resultsEl._poll); resultsEl._poll = null; }
+        resultsEl._rows = null;   // drop any prior search's rows so Auto can't grab a stale hit
         _setScanning(triggerRows, true);
         resultsEl.hidden = false;
         resultsEl.classList.remove('vdl-res-noanim');
@@ -249,13 +268,14 @@
             if (!d || !d.id) {   // mock / immediate
                 _setScanning(triggerRows, false);
                 renderResults(resultsEl, params, d ? d.results : [], !!(d && d.live), true);
+                if (onDone) onDone();
                 return;
             }
-            _pollSearch(resultsEl, params, d.id, triggerRows, d.poll_ms);
+            _pollSearch(resultsEl, params, d.id, triggerRows, d.poll_ms, onDone);
         });
     }
 
-    function _pollSearch(resultsEl, params, id, triggerRows, pollMs) {
+    function _pollSearch(resultsEl, params, id, triggerRows, pollMs, onDone) {
         // slskd keeps searching for the whole search_timeout (~60s) and results
         // trickle in over ~50s — poll that long (the music side does), streaming
         // results as they arrive. Stop early only once results clearly plateau.
@@ -276,27 +296,25 @@
                 // done = full timeout, OR plenty of results, OR results plateaued after ≥20s.
                 var done = elapsed >= MAX_MS || rows.length >= 25 || (rows.length > 0 && elapsed > 20000 && stable >= 6);
                 renderResults(resultsEl, params, rows, true, done, total);
-                if (done) { _setScanning(triggerRows, false); resultsEl._poll = null; }
+                if (done) { _setScanning(triggerRows, false); resultsEl._poll = null; if (onDone) onDone(); }
                 else { resultsEl._poll = setTimeout(tick, 1500); }
             });
         }
         tick();
     }
 
-    // Grab → start a real download (Soulseek only for now), then it lives on the
-    // Downloads page. Reads the card's row + the panel's search context.
-    function doGrab(btn) {
-        var panel = btn.closest('.vdl-results'); if (!panel || !panel._rows) return;
-        var r = panel._rows[parseInt(btn.getAttribute('data-vdl-grab'), 10)]; if (!r) return;
+    // Build the /grab payload for a chosen release row `r` in `panel` (the results
+    // element). Shared by the manual grab button and the auto-pick path so both
+    // send an identical request (incl. the auto-retry candidate pool).
+    function buildGrabPayload(panel, r) {
         var p = panel._search || {};
-        btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
         var container = panel.closest('[data-vgm-dl-content]');
         var o = (container && (container._opts || container._dl)) || {};
         // the other accepted (live slskd) hits become the auto-retry pool
         var pool = (panel._rows || []).filter(function (x) { return x.accepted && x.username && x.filename !== r.filename; })
             .map(function (x) { return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
                 quality_label: x.quality_label, title: x.title }; });
-        postJSON('/api/video/downloads/grab', {
+        return {
             kind: p.scope || 'movie', title: p.title || '', release_title: r.title,
             source: 'soulseek', username: r.username, filename: r.filename,
             size_bytes: r.size_bytes, quality_label: r.quality_label,
@@ -305,7 +323,18 @@
             candidates: pool,
             search_ctx: { scope: p.scope || 'movie', title: p.title || '', year: o.year,
                 season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null }
-        }).then(function (res) {
+        };
+    }
+
+    function sendGrab(payload) { return postJSON('/api/video/downloads/grab', payload); }
+
+    // Grab → start a real download (Soulseek only for now), then it lives on the
+    // Downloads page. Reads the card's row + the panel's search context.
+    function doGrab(btn) {
+        var panel = btn.closest('.vdl-results'); if (!panel || !panel._rows) return;
+        var r = panel._rows[parseInt(btn.getAttribute('data-vdl-grab'), 10)]; if (!r) return;
+        btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
+        sendGrab(buildGrabPayload(panel, r)).then(function (res) {
             btn.classList.remove('vdl-res-grab--busy');
             if (res && res.ok) {
                 btn.textContent = '✓'; btn.classList.add('vdl-res-grab--done');
@@ -314,6 +343,45 @@
             } else {
                 btn.disabled = false; btn.textContent = '⤓';
                 toast((res && res.error) || 'Couldn’t start the download', 'error');
+            }
+        });
+    }
+
+    // Auto-pick: after an auto-search settles, grab the BEST grabbable release.
+    // Results arrive already ranked best-first (server sorts by accepted → score →
+    // availability), so the first accepted hit with an uploader is the best pick.
+    function _autoPick(panel, statusRow) {
+        if (!panel || !panel.isConnected) return;
+        var rows = panel._rows || [];
+        var best = null, bestIdx = -1;
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].accepted && rows[i].username) { best = rows[i]; bestIdx = i; break; }
+        }
+        var statusEl = statusRow && statusRow.querySelector('[data-vdl-status]');
+        if (!best) {
+            if (statusEl) { statusEl.textContent = 'No match'; statusEl.className = 'vdl-src-status vdl-src-status--none'; }
+            toast('Auto: no release met your quality profile', 'error');
+            return;
+        }
+        // Highlight the card we're auto-grabbing so the choice is transparent.
+        var cards = panel.querySelectorAll('.vdl-res');
+        var card = cards[bestIdx];
+        if (card) card.classList.add('vdl-res--auto');
+        var gbtn = card && card.querySelector('[data-vdl-grab]');
+        if (gbtn) { gbtn.disabled = true; gbtn.classList.add('vdl-res-grab--busy'); gbtn.textContent = '…'; }
+        if (statusEl) { statusEl.textContent = 'Auto-grabbing'; statusEl.className = 'vdl-src-status vdl-src-status--scanning'; }
+        toast('Auto-grabbing best: ' + (best.quality_label || best.title || 'release'), 'info');
+        sendGrab(buildGrabPayload(panel, best)).then(function (res) {
+            if (gbtn) gbtn.classList.remove('vdl-res-grab--busy');
+            if (res && res.ok) {
+                if (gbtn) { gbtn.textContent = '✓'; gbtn.classList.add('vdl-res-grab--done'); }
+                if (statusEl) { statusEl.textContent = 'Sent'; statusEl.className = 'vdl-src-status vdl-src-status--done'; }
+                toast('Sent to Downloads', 'success');
+                document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+            } else {
+                if (gbtn) { gbtn.disabled = false; gbtn.textContent = '⤓'; }
+                if (statusEl) { statusEl.textContent = 'Ready'; statusEl.className = 'vdl-src-status'; }
+                toast((res && res.error) || 'Auto: couldn’t start the download', 'error');
             }
         });
     }

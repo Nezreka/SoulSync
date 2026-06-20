@@ -3109,6 +3109,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-src-status--soon { color: #fbcd7a; }
 .vdl-src-status--scanning { color: rgb(var(--src)); }
 .vdl-src-status--scanning::after { content: ''; animation: vdlDots 1.1s steps(1) infinite; }
+.vdl-src-status--done { color: #58d39a; }
+.vdl-src-status--none { color: #fbcd7a; }
 /* moving scan bar along the bottom of a row while "searching" — in the source brand */
 .vdl-src--scanning::before { content: ''; position: absolute; left: 0; bottom: 0; height: 2px; width: 38%;
     border-radius: 2px; background: linear-gradient(90deg, transparent, rgb(var(--src)), transparent);
@@ -3119,8 +3121,20 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-src-search:hover { background: rgba(var(--src), 0.32); border-color: rgba(var(--src), 0.65);
     box-shadow: 0 5px 14px -5px rgb(var(--src)); transform: translateY(-1px); }
 .vdl-src-search:disabled { opacity: 0.55; cursor: default; transform: none; box-shadow: none; }
+/* the two per-source actions sit together; Manual = outline, Auto = brand-filled */
+.vdl-src-actions { flex-shrink: 0; display: inline-flex; align-items: center; gap: 7px; }
+.vdl-src-auto { flex-shrink: 0; padding: 7px 13px; border-radius: 9px; cursor: pointer; font-size: 12px; font-weight: 800;
+    color: #0a0f14; border: 1px solid transparent; transition: all 0.15s;
+    background: linear-gradient(135deg, rgb(var(--src)), rgba(var(--src), 0.74)); box-shadow: 0 4px 14px -6px rgb(var(--src)); }
+.vdl-src-auto:hover { filter: brightness(1.08); transform: translateY(-1px); box-shadow: 0 7px 18px -6px rgb(var(--src)); }
+.vdl-src-auto:disabled { opacity: 0.55; cursor: default; transform: none; box-shadow: none; filter: none; }
+/* Auto-all mirrors the source-brand fill idea on the accent header button */
+.vdl-auto-all { animation: none; }
 .vdl-src-empty { font-size: 13px; color: rgba(255, 255, 255, 0.5); padding: 12px 14px; border-radius: 12px;
     background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.12); }
+/* the release card the Auto pick chose — a brand ring so the choice is obvious */
+.vdl-res--auto { border-color: rgba(var(--accent-rgb), 0.8) !important;
+    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 10px 26px -12px rgba(var(--accent-rgb), 0.8); }
 @media (max-width: 560px) {
     .vdl-src { flex-wrap: wrap; }
 }
