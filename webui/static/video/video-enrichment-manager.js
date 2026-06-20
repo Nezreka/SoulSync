@@ -400,6 +400,24 @@
         renderCards();
         loadUnmatched().then(function () { renderControls(); renderList(); });
     }
+    // GLOBAL "Retry all failed": re-queue every failed/not_found item across ALL
+    // workers + kinds in one call (one-click recovery after an outage).
+    function retryAllFailedGlobal() {
+        var btn = document.querySelector('[data-em-retry-all-global]');
+        if (btn) btn.disabled = true;
+        fetch('/api/video/enrichment/retry-all-failed', { method: 'POST', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var n = (d && d.reset) || 0;
+                if (typeof showToast === 'function') {
+                    showToast(n ? 'Re-queued ' + n + ' failed item' + (n === 1 ? '' : 's') + ' across all workers'
+                        : 'Nothing failed to retry', n ? 'success' : 'info');
+                }
+                return refreshAll();
+            })
+            .then(function () { renderRail(); selectWorker(state.selected); if (btn) btn.disabled = false; })
+            .catch(function () { if (btn) btn.disabled = false; });
+    }
     function togglePause() {
         var s = state.statuses[state.selected] || {};
         if (!s.enabled) return;
@@ -478,7 +496,9 @@
             '<button data-em-priority="movie">Movies</button>' +
             '<button data-em-priority="show">Shows</button>' +
             '<button data-em-priority="" class="em-global-auto">Auto</button></div></div>' +
-            '<div class="em-topbar-actions"><button class="em-icon-btn" data-em-refresh title="Refresh">⟳</button>' +
+            '<div class="em-topbar-actions">' +
+            '<button class="em-icon-btn em-retry-global" data-em-retry-all-global title="Re-queue every failed item across ALL workers">↻ Retry all failed</button>' +
+            '<button class="em-icon-btn" data-em-refresh title="Refresh">⟳</button>' +
             '<button class="em-icon-btn em-icon-btn--close" data-em-close title="Close">&times;</button></div></div>' +
             '<div class="em-body"><div class="em-rail" id="vem-rail"></div><div class="em-panel" id="vem-panel"></div></div></div>';
         overlay.addEventListener('click', onOverlayClick);
@@ -496,9 +516,11 @@
         var overlay = byId('vem-overlay');
         if (e.target === overlay) { close(); return; }
         var t = e.target.closest('[data-em-select],[data-em-pause],[data-em-kind],[data-em-retry-all],' +
-            '[data-em-retry-item],[data-em-page],[data-em-refresh],[data-em-close],[data-em-priority]');
+            '[data-em-retry-item],[data-em-page],[data-em-refresh],[data-em-close],[data-em-priority],' +
+            '[data-em-retry-all-global]');
         if (!t) return;
         if (t.hasAttribute('data-em-close')) close();
+        else if (t.hasAttribute('data-em-retry-all-global')) retryAllFailedGlobal();
         else if (t.hasAttribute('data-em-priority')) setPriority(t.getAttribute('data-em-priority'));
         else if (t.hasAttribute('data-em-refresh')) { refreshAll().then(renderRail); selectWorker(state.selected); }
         else if (t.hasAttribute('data-em-select')) selectWorker(t.getAttribute('data-em-select'));

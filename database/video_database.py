@@ -1145,6 +1145,23 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def retry_all_failed(self) -> int:
+        """Re-queue every failed/not_found item across ALL enrichment services and
+        their kinds (the modal's GLOBAL 'Retry all failed'). Derives the service+kind
+        set from the same maps the workers use, so it stays in sync. Returns the
+        total number of items re-queued."""
+        pairs = [(svc, k) for svc, kinds in _ENRICH.items() for k in kinds]   # tmdb, tvdb
+        pairs += [("omdb", "movie"), ("omdb", "show")]                        # ratings (special-cased)
+        pairs += [(svc, k) for svc, kinds in _BACKFILL.items() for k in kinds]  # fanart/trakt/…
+        pairs += [("ryd", "video"), ("sponsorblock", "video"), ("dearrow", "video")]  # YouTube video stats
+        total = 0
+        for svc, kind in pairs:
+            try:
+                total += self.enrichment_retry(svc, kind, scope="failed")
+            except Exception:
+                logger.exception("retry_all_failed: %s/%s failed", svc, kind)
+        return total
+
     def requeue_shows_for_airtime(self) -> int:
         """One-time backfill: re-queue TVDB enrichment for shows that have a
         tvdb_id but no air time yet, so the worker re-fetches `airsTime`. Only

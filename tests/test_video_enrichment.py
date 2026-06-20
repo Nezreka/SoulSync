@@ -1311,3 +1311,23 @@ def test_top_owned_genres_orders_by_count(db):
     g = db.top_owned_genres("movie", server_source="plex", limit=5)
     assert g[0] == "Action"                                  # owned twice → first
     assert "Drama" in g and "Comedy" not in g                # Comedy movie isn't owned
+
+
+def test_retry_all_failed_requeues_across_all_services(db):
+    # Global retry: one failed item in a matcher (tmdb), a backfill (trakt) and a
+    # YouTube video service (dearrow) — all re-queued in one call. imdb_rating is set
+    # so OMDb's "unrated" re-queue doesn't add to the count (keeps it deterministic).
+    conn = db._get_connection()
+    conn.execute("INSERT INTO movies (server_source, server_id, title, tmdb_match_status, imdb_rating) "
+                 "VALUES ('plex','m1','M','not_found', 7.0)")
+    conn.execute("INSERT INTO shows (server_source, server_id, title, imdb_id, trakt_status, imdb_rating) "
+                 "VALUES ('plex','s1','S','tt1','error', 8.0)")
+    conn.execute("INSERT INTO youtube_video_stats (youtube_id, dearrow_status) VALUES ('v1','not_found')")
+    conn.commit(); conn.close()
+
+    assert db.retry_all_failed() == 3
+    conn = db._get_connection()
+    assert conn.execute("SELECT tmdb_match_status FROM movies WHERE server_id='m1'").fetchone()[0] is None
+    assert conn.execute("SELECT trakt_status FROM shows WHERE server_id='s1'").fetchone()[0] is None
+    assert conn.execute("SELECT dearrow_status FROM youtube_video_stats WHERE youtube_id='v1'").fetchone()[0] is None
+    conn.close()

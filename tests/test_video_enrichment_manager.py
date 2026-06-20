@@ -40,6 +40,15 @@ def test_priority_changes_only_from_top_tabs():
     assert "function requeueFailed(" not in _JS
 
 
+def test_global_retry_all_failed_button_wired():
+    # a topbar button that re-queues failed items across ALL workers in one call
+    assert "data-em-retry-all-global" in _JS
+    assert "function retryAllFailedGlobal(" in _JS
+    assert "/api/video/enrichment/retry-all-failed" in _JS
+    # it's distinct from the per-worker retry (which targets one worker)
+    assert "retryAllFailedGlobal()" in _JS
+
+
 def test_retry_all_failed_covers_every_kind_of_the_worker():
     body = _func("retryAllFailed")
     # iterate the worker's kinds (movie+show / show / video …), retry each
