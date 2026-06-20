@@ -57,10 +57,8 @@
                 '<div class="vdl-sec-head">' +
                     '<div class="vdl-sec-label">Sources</div>' +
                     '<span class="vdl-src-actions vdl-src-actions--head">' +
-                        '<button class="vdl-search-all" type="button" data-vdl-search-all title="Search every source — pick releases yourself">' +
-                            '<span class="vdl-btn-ic" aria-hidden="true">⌕</span><span>Manual all</span></button>' +
-                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-all title="Search every source and auto-grab the best release on each">' +
-                            '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto all</span></button>' +
+                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-best title="Search every source, then download the single best release for your quality profile">' +
+                            '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto</span></button>' +
                     '</span>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
@@ -89,35 +87,89 @@
         '</div>';
     }
 
-    function _movieSearch(container, block, auto) {
+    function _movieSearch(container, block, auto, onSettled) {
         var o = container._opts || {};
         var s = block.getAttribute('data-vdl-src-block');
         var resultsEl = block.querySelector('[data-vdl-results-for="' + s + '"]');
         var statusRow = block.querySelector('.vdl-src');
-        // In auto mode, when the search settles we grab the best accepted release.
-        var onDone = auto ? function () { _autoPick(resultsEl, statusRow); } : null;
+        // In per-source auto mode, grab this source's best when it settles; an
+        // optional onSettled lets a coordinator (header Auto) wait for every source.
+        var onDone = (auto || onSettled) ? function () {
+            if (auto) _autoPick(resultsEl, statusRow);
+            if (onSettled) onSettled(resultsEl);
+        } : null;
         searchInto(container, resultsEl,
             { scope: 'movie', title: o.title || '', year: o.year || null, source: s },
             [statusRow], onDone);
+    }
+
+    // Header "Auto": search EVERY source, then download the single best release
+    // across all of them (NOT one per source). Each source's results still show so
+    // the pick is transparent; the winner gets the auto ring + live tracker.
+    function _autoBest(container) {
+        var blocks = Array.prototype.slice.call(container.querySelectorAll('[data-vdl-src-block]'));
+        if (!blocks.length) return;
+        var hb = container.querySelector('[data-vdl-auto-best]');
+        if (hb) hb.disabled = true;
+        var pending = blocks.length, done = false;
+        blocks.forEach(function (block) {
+            _movieSearch(container, block, false, function () {
+                if (done) return;
+                if (--pending > 0) return;
+                done = true;
+                _grabBestAcross(container, blocks, hb);
+            });
+        });
+    }
+
+    function _grabBestAcross(container, blocks, hb) {
+        var best = null, bestPanel = null, bestIdx = -1;
+        blocks.forEach(function (block) {
+            var s = block.getAttribute('data-vdl-src-block');
+            var panel = block.querySelector('[data-vdl-results-for="' + s + '"]');
+            var rows = (panel && panel._rows) || [];
+            for (var i = 0; i < rows.length; i++) {
+                var r = rows[i];
+                if (!(r.accepted && r.username)) continue;   // grabbable (Soulseek) + meets profile
+                var avail = r.peers || r.seeders || 0;
+                var bAvail = best ? (best.peers || best.seeders || 0) : -1;
+                if (!best || (r.score || 0) > (best.score || 0) ||
+                    ((r.score || 0) === (best.score || 0) && avail > bAvail)) {
+                    best = r; bestPanel = panel; bestIdx = i;
+                }
+            }
+        });
+        if (hb) hb.disabled = false;
+        if (!best) { toast('Auto: no release met your quality profile on any source', 'error'); return; }
+        var card = bestPanel.querySelector('[data-vdl-card="' + bestIdx + '"]');
+        if (card) {
+            card.classList.add('vdl-res--auto');
+            if (card.scrollIntoView) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+        var gbtn = card && card.querySelector('[data-vdl-grab]');
+        if (gbtn) { gbtn.disabled = true; gbtn.classList.add('vdl-res-grab--busy'); }
+        toast('Auto-picked best across sources: ' + (best.quality_label || best.title || 'release'), 'info');
+        sendGrab(buildGrabPayload(bestPanel, best)).then(function (res) {
+            if (res && res.ok) {
+                toast('Sent to Downloads', 'success');
+                beginTracking(card, res.id);
+                document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+            } else {
+                if (gbtn) { gbtn.disabled = false; gbtn.classList.remove('vdl-res-grab--busy'); }
+                toast((res && res.error) || 'Auto: couldn’t start the download', 'error');
+            }
+        });
     }
 
     function onClick(e) {
         var container = e.currentTarget;
         var grab = e.target.closest('[data-vdl-grab]');
         if (grab) { doGrab(grab); return; }
+        if (e.target.closest('[data-vdl-auto-best]')) { _autoBest(container); return; }
         var ab = e.target.closest('[data-vdl-auto]');
         if (ab) { _movieSearch(container, ab.closest('[data-vdl-src-block]'), true); return; }
         var sb = e.target.closest('[data-vdl-search]');
         if (sb) { _movieSearch(container, sb.closest('[data-vdl-src-block]')); return; }
-        if (e.target.closest('[data-vdl-auto-all]')) {
-            Array.prototype.forEach.call(container.querySelectorAll('[data-vdl-src-block]'),
-                function (block) { _movieSearch(container, block, true); });
-            return;
-        }
-        if (e.target.closest('[data-vdl-search-all]')) {
-            Array.prototype.forEach.call(container.querySelectorAll('[data-vdl-src-block]'),
-                function (block) { _movieSearch(container, block); });
-        }
     }
 
     // Render the download view into `container`. Re-callable (resets each time).

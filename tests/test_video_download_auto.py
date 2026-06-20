@@ -30,16 +30,28 @@ def test_each_source_has_manual_and_auto_buttons():
     assert 'vdl-btn-ic--auto' in _VIEW
 
 
-def test_search_all_gains_an_auto_all():
-    assert 'data-vdl-auto-all' in _VIEW
-    assert 'Auto all' in _VIEW
+def test_header_has_single_auto_best_button():
+    # The old "Manual all" + "Auto all" pair is replaced by ONE header "Auto" that
+    # searches every source and grabs the single best release across all of them.
+    assert 'data-vdl-auto-best' in _VIEW
+    assert 'data-vdl-auto-all' not in _VIEW      # the per-source-grab-all footgun is gone
+    assert 'data-vdl-search-all' not in _VIEW
+    assert 'Manual all' not in _VIEW and 'Auto all' not in _VIEW
 
 
-def test_click_handler_routes_auto_before_manual():
-    # Auto + auto-all must be handled (and auto checked before the plain search
-    # selector, since the markup nests differently).
-    assert "closest('[data-vdl-auto]')" in _VIEW
-    assert "closest('[data-vdl-auto-all]')" in _VIEW
+def test_auto_best_picks_one_winner_across_all_sources():
+    assert 'function _autoBest(' in _VIEW
+    assert 'function _grabBestAcross(' in _VIEW
+    # it compares accepted+grabbable hits across every source by profile score…
+    assert "r.accepted && r.username" in _VIEW
+    assert '(r.score || 0) > (best.score || 0)' in _VIEW
+    # …and grabs exactly ONE (no per-source loop of grabs)
+    assert _VIEW.count('beginTracking(') >= 3   # def + doGrab + _autoPick (+ _grabBestAcross)
+
+
+def test_click_handler_routes_auto_best_and_per_source():
+    assert "closest('[data-vdl-auto-best]')" in _VIEW
+    assert "closest('[data-vdl-auto]')" in _VIEW     # per-source auto still works
 
 
 def test_search_threads_a_done_callback():
