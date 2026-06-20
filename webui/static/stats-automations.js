@@ -1703,6 +1703,48 @@ async function retryFailedMirroredDiscovery(urlHash) {
 let _autoBlocks = null; // cached block definitions from /api/automations/blocks
 let _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
 
+// Builder context — lets the SAME builder functions drive either the music
+// automation page or the (isolated) video automation page. Default = music, so
+// existing music behaviour is byte-identical. The video page swaps in its own
+// element ids + the video-scoped blocks endpoint + owned_by tagging before
+// opening, so a video automation is built with video triggers/actions and never
+// leaks onto the music page. Only one builder is open at a time, so a single
+// shared context is safe.
+const _AUTO_CTX_MUSIC = {
+    ids: {
+        listView: 'automations-list-view', builderView: 'automations-builder-view',
+        name: 'builder-name', group: 'builder-group-name', groupList: 'builder-group-list',
+        sidebar: 'builder-sidebar', canvas: 'builder-canvas',
+    },
+    blocksUrl: '/api/automations/blocks',
+    ownedBy: null,
+    onSaved: function () { return loadAutomations(); },
+};
+const _AUTO_CTX_VIDEO = {
+    ids: {
+        listView: 'vauto-list-view', builderView: 'vauto-builder-view',
+        name: 'vauto-builder-name', group: 'vauto-builder-group-name', groupList: 'vauto-builder-group-list',
+        sidebar: 'vauto-builder-sidebar', canvas: 'vauto-builder-canvas',
+    },
+    blocksUrl: '/api/video/automations/blocks',
+    ownedBy: 'video',
+    // Reloads the video automations list after a save (video-automations.js
+    // exposes this; falls back to a no-op if the video page isn't loaded).
+    onSaved: function () { return window._reloadVideoAutomations ? window._reloadVideoAutomations() : null; },
+};
+let _autoBuilderCtx = _AUTO_CTX_MUSIC;
+
+// Resolve a builder element through the active context (music vs video ids).
+function _bEl(key) { return document.getElementById(_autoBuilderCtx.ids[key]); }
+
+// Route a card's edit/cog to the right builder based on the active side, so a
+// video card opens the VIDEO builder (on the video page) instead of hijacking
+// the hidden music page's builder.
+function editAutomation(id) {
+    if (document.body.getAttribute('data-side') === 'video') return showVideoAutomationBuilder(id);
+    return showAutomationBuilder(id);
+}
+
 let _autoMirroredPlaylists = null; // cached mirrored playlist list
 let _autoSpotifyAuthenticated = false; // whether Spotify is authed (for refresh filtering)
 
@@ -2911,7 +2953,7 @@ async function useHubRecipe(recipeId) {
     const t = AUTO_HUB_RECIPES.find(r => r.id === recipeId);
     if (!t) return;
     await showAutomationBuilder();
-    document.getElementById('builder-name').value = t.name;
+    _bEl('name').value = t.name;
     _autoBuilder.when = { type: t.when.type, config: JSON.parse(JSON.stringify(t.when.config)) };
     _autoBuilder.do = { type: t.do.type, config: JSON.parse(JSON.stringify(t.do.config)) };
     _autoBuilder.then = t.then.map(th => ({ type: th.type, config: JSON.parse(JSON.stringify(th.config)) }));
@@ -3267,7 +3309,7 @@ function renderAutomationCard(a) {
                 <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAutomation(${a.id})">
                 <span class="toggle-slider"></span>
             </label>
-            <button class="automation-edit-btn" title="Edit" onclick="event.stopPropagation(); showAutomationBuilder(${a.id})">&#9881;</button>
+            <button class="automation-edit-btn" title="Edit" onclick="event.stopPropagation(); editAutomation(${a.id})">&#9881;</button>
             ${dupeBtn}
             ${groupBtn}
             ${deleteBtn}
@@ -3677,7 +3719,7 @@ function _formatDuration(seconds) {
 }
 
 async function saveAutomation() {
-    const name = document.getElementById('builder-name').value.trim();
+    const name = _bEl('name').value.trim();
     if (!name) { showToast('Name is required', 'error'); return; }
     if (!_autoBuilder.when) { showToast('Add a trigger (WHEN)', 'error'); return; }
     if (!_autoBuilder.do) { showToast('Add an action (DO)', 'error'); return; }
@@ -3697,7 +3739,7 @@ async function saveAutomation() {
     const delayVal = delayEl ? parseInt(delayEl.value) : 0;
     if (delayVal > 0) actionConfig.delay = delayVal;
 
-    const groupInput = document.getElementById('builder-group-name');
+    const groupInput = _bEl('group');
     const groupName = groupInput ? groupInput.value.trim() : '';
 
     const body = {
@@ -3707,6 +3749,9 @@ async function saveAutomation() {
         then_actions: thenActions,
         group_name: groupName || null,
     };
+    // Tag the side that owns this automation (video) so it stays on the video
+    // page and off the music one. Music context leaves this null (unchanged).
+    if (_autoBuilderCtx.ownedBy) body.owned_by = _autoBuilderCtx.ownedBy;
 
     try {
         let res;
@@ -3719,16 +3764,36 @@ async function saveAutomation() {
         if (data.error) throw new Error(data.error);
         showToast(_autoBuilder.editId ? 'Automation updated' : 'Automation created', 'success');
         hideAutomationBuilder();
-        await loadAutomations();
+        if (_autoBuilderCtx.onSaved) await _autoBuilderCtx.onSaved();
     } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 // --- Builder View ---
 
-async function showAutomationBuilder(editId) {
-    // Load block definitions (always refresh)
+// Music entry point — sets the music context, then opens the shared builder.
+function showAutomationBuilder(editId) {
+    _autoBuilderCtx = _AUTO_CTX_MUSIC;
+    return _openAutomationBuilder(editId);
+}
+
+// Video entry point — sets the video context (video ids + video-scoped blocks +
+// owned_by='video'), then opens the SAME shared builder on the video page.
+function showVideoAutomationBuilder(editId) {
+    _autoBuilderCtx = _AUTO_CTX_VIDEO;
+    return _openAutomationBuilder(editId);
+}
+
+async function _openAutomationBuilder(editId) {
+    // Clear BOTH builders' sidebar/canvas first so stale cfg-* ids from a
+    // previously-open builder (music or video) can never be matched by
+    // getElementById while this one is open. Cheap and bulletproof.
+    ['builder-sidebar', 'builder-canvas', 'vauto-builder-sidebar', 'vauto-builder-canvas'].forEach(function (id) {
+        const el = document.getElementById(id); if (el) el.innerHTML = '';
+    });
+
+    // Load block definitions for the active scope (always refresh).
     try {
-        const res = await fetch('/api/automations/blocks');
+        const res = await fetch(_autoBuilderCtx.blocksUrl);
         _autoBlocks = await res.json();
     } catch (e) {
         if (!_autoBlocks) { showToast('Failed to load blocks', 'error'); return; }
@@ -3744,7 +3809,7 @@ async function showAutomationBuilder(editId) {
         const allAutos = await allRes.json();
         const groupSet = new Set();
         if (Array.isArray(allAutos)) allAutos.forEach(a => { if (a.group_name) groupSet.add(a.group_name); });
-        const datalist = document.getElementById('builder-group-list');
+        const datalist = _bEl('groupList');
         if (datalist) datalist.innerHTML = [...groupSet].sort().map(g => `<option value="${_escAttr(g)}">`).join('');
     } catch (e) { }
 
@@ -3754,8 +3819,8 @@ async function showAutomationBuilder(editId) {
             const res = await fetch('/api/automations/' + editId);
             const a = await res.json();
             if (a.error) throw new Error(a.error);
-            document.getElementById('builder-name').value = a.name || '';
-            const groupInput = document.getElementById('builder-group-name');
+            _bEl('name').value = a.name || '';
+            const groupInput = _bEl('group');
             if (groupInput) groupInput.value = a.group_name || '';
             _autoBuilder.when = { type: a.trigger_type, config: a.trigger_config || {} };
             _autoBuilder.do = { type: a.action_type, config: a.action_config || {} };
@@ -3770,34 +3835,34 @@ async function showAutomationBuilder(editId) {
             _autoBuilder.isSystem = !!a.is_system;
         } catch (err) { showToast('Failed to load automation', 'error'); return; }
     } else {
-        document.getElementById('builder-name').value = '';
-        const groupInput = document.getElementById('builder-group-name');
+        _bEl('name').value = '';
+        const groupInput = _bEl('group');
         if (groupInput) groupInput.value = '';
     }
 
     // System automations: lock the name field and hide group
-    document.getElementById('builder-name').readOnly = _autoBuilder.isSystem;
-    const groupEl = document.getElementById('builder-group-name');
+    _bEl('name').readOnly = _autoBuilder.isSystem;
+    const groupEl = _bEl('group');
     if (groupEl) groupEl.style.display = _autoBuilder.isSystem ? 'none' : '';
 
     _renderBuilderSidebar();
     _renderBuilderCanvas();
 
-    document.getElementById('automations-list-view').style.display = 'none';
-    document.getElementById('automations-builder-view').style.display = '';
+    _bEl('listView').style.display = 'none';
+    _bEl('builderView').style.display = '';
 }
 
 function hideAutomationBuilder() {
-    document.getElementById('automations-builder-view').style.display = 'none';
-    document.getElementById('automations-list-view').style.display = '';
-    document.getElementById('builder-name').readOnly = false;
+    _bEl('builderView').style.display = 'none';
+    _bEl('listView').style.display = '';
+    const nameEl = _bEl('name'); if (nameEl) nameEl.readOnly = false;
     _autoBuilder = { editId: null, when: null, do: null, then: [], isSystem: false };
 }
 
 // --- Sidebar ---
 
 function _renderBuilderSidebar() {
-    const sidebar = document.getElementById('builder-sidebar');
+    const sidebar = _bEl('sidebar');
     if (!sidebar || !_autoBlocks) return;
 
     let html = '';
@@ -3832,7 +3897,7 @@ function _renderBuilderSidebar() {
 // --- Canvas ---
 
 function _renderBuilderCanvas() {
-    const canvas = document.getElementById('builder-canvas');
+    const canvas = _bEl('canvas');
     if (!canvas) return;
 
     let html = '';
@@ -4218,7 +4283,46 @@ function _renderBlockConfigFields(slotKey, blockType, config) {
         </div>
         ${_notifyVarHtml(slotKey)}`;
     }
+    // Generic config_fields renderer — drives the VIDEO builder only (gated on
+    // the video context) so the music side keeps its bespoke renderers above and
+    // is byte-identical. Any video block that declares config_fields in
+    // core/automation/blocks.py (select / text / number / checkbox) renders here.
+    if (_autoBuilderCtx.ownedBy) {
+        const def = _findBlockDef(blockType);
+        if (def && Array.isArray(def.config_fields) && def.config_fields.length) {
+            return def.config_fields.map(f => _renderGenericConfigField(slotKey, f, config)).join('');
+        }
+    }
     return '';
+}
+
+// One generic config row from a block's config_fields definition.
+function _renderGenericConfigField(slotKey, f, config) {
+    const id = 'cfg-' + slotKey + '-' + f.key;
+    const cur = (config && config[f.key] !== undefined && config[f.key] !== null) ? config[f.key] : f.default;
+    const label = _esc(f.label || f.key);
+    if (f.type === 'select') {
+        const opts = (f.options || []).map(o =>
+            `<option value="${_escAttr(o.value)}"${String(cur) === String(o.value) ? ' selected' : ''}>${_esc(o.label)}</option>`).join('');
+        return `<div class="config-row"><label>${label}</label><select id="${id}">${opts}</select></div>`;
+    }
+    if (f.type === 'checkbox') {
+        return `<div class="config-row"><label><input type="checkbox" id="${id}"${cur ? ' checked' : ''}> ${label}</label></div>`;
+    }
+    if (f.type === 'number') {
+        const min = (f.min !== undefined) ? ` min="${f.min}"` : '';
+        return `<div class="config-row"><label>${label}</label><input type="number" id="${id}" value="${_escAttr(cur != null ? cur : '')}"${min} style="width:90px;"></div>`;
+    }
+    return `<div class="config-row"><label>${label}</label><input type="text" id="${id}" value="${_escAttr(cur != null ? cur : '')}" placeholder="${_escAttr(f.placeholder || '')}"></div>`;
+}
+
+// Read one generic config field back from the DOM (mirror of the renderer).
+function _readGenericConfigField(slotKey, f) {
+    const el = document.getElementById('cfg-' + slotKey + '-' + f.key);
+    if (!el) return (f.default !== undefined) ? f.default : '';
+    if (f.type === 'checkbox') return el.checked;
+    if (f.type === 'number') { const n = parseFloat(el.value); return isNaN(n) ? (f.default != null ? f.default : 0) : n; }
+    return el.value;
 }
 
 // --- Condition Builder ---
@@ -4581,6 +4685,16 @@ function _readPlacedConfig(slotKey) {
             headers: document.getElementById('cfg-' + slotKey + '-headers')?.value || '',
             message: document.getElementById('cfg-' + slotKey + '-message')?.value || '',
         };
+    }
+    // Generic config_fields read — video builder only (mirror of the generic
+    // renderer above); music keeps its bespoke readers, untouched.
+    if (_autoBuilderCtx.ownedBy) {
+        const def = _findBlockDef(type);
+        if (def && Array.isArray(def.config_fields) && def.config_fields.length) {
+            const out = {};
+            def.config_fields.forEach(f => { out[f.key] = _readGenericConfigField(slotKey, f); });
+            return out;
+        }
     }
     return {};
 }

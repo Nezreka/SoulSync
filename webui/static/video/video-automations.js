@@ -69,7 +69,7 @@
     }
 
     function load() {
-        getJSON('/api/automations').then(function (d) {
+        return getJSON('/api/automations').then(function (d) {
             var all = Array.isArray(d) ? d : (d && d.automations) || [];
             var sys = all.filter(isVideoAutomation);
             renderStats(sys);
@@ -78,12 +78,22 @@
         });
     }
 
+    // Exposed so the shared automation builder (stats-automations.js) can refresh
+    // THIS list after a video automation is created/edited/saved. Lives on window
+    // because the builder is global and this module is an IIFE.
+    window._reloadVideoAutomations = load;
+
     function onPage() {
         return document.body.getAttribute('data-side') === 'video' &&
             !!document.querySelector('[data-video-subpage="video-automations"]:not([hidden])');
     }
 
     function start() {
+        // Always enter on the list view — if the builder was left open from a
+        // previous visit, swap back so the page doesn't greet you mid-build.
+        var bv = document.getElementById('vauto-builder-view');
+        var lv = document.getElementById('vauto-list-view');
+        if (bv && lv && bv.style.display !== 'none') { bv.style.display = 'none'; lv.style.display = ''; }
         load();
         // Refresh the System section shortly after a run/toggle (the reused music card
         // handlers fire on the music list, not ours) — keeps our cards in sync.
