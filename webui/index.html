@@ -359,6 +359,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></span>
                     <span class="nav-text">Calendar</span>
                 </a>
+                <a class="nav-button" data-video-page="video-automations" href="/video-automations">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
+                    <span class="nav-text">Automations</span>
+                </a>
                 <a class="nav-button" data-video-page="video-tools" href="/video-tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.1-.5-.5-2.1 2.7-2.4z"/></svg></span>
                     <span class="nav-text">Tools</span>
@@ -1303,6 +1307,18 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </section>
+                <!-- Automations page — the SAME app-wide system automations as music
+                     (minus Refresh Beatport Cache + user/playlist ones). Reuses the
+                     music .automation-* card look; built by video/video-automations.js. -->
+                <section class="video-subpage" data-video-subpage="video-automations" hidden>
+                    <div class="vauto-wrap">
+                        <div class="vauto-head">
+                            <h1 class="vauto-title">Automations</h1>
+                            <p class="vauto-sub" data-vauto-sub>System tasks that keep your library fresh — shared with the music side.</p>
+                        </div>
+                        <div class="vauto-list" data-vauto-list></div>
                     </div>
                 </section>
                 <!-- TV-show detail (drill-in from a show card; not a nav page).
@@ -10256,6 +10272,8 @@
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
     <!-- Downloads page (isolated): live status of every grab from the video side -->
     <script src="{{ url_for('static', filename='video/video-downloads-page.js', v=static_v) }}"></script>
+    <!-- Automations page (shared system automations, video view) -->
+    <script src="{{ url_for('static', filename='video/video-automations.js', v=static_v) }}"></script>
     <!-- Video library page (isolated; lists movies/shows + scan trigger) -->
     <script src="{{ url_for('static', filename='video/video-library.js', v=static_v) }}"></script>
     <!-- Video detail page (isolated; show drill-in: hero + season/episode tree) -->
