@@ -539,6 +539,11 @@ CREATE TABLE IF NOT EXISTS video_downloads (
     status        TEXT NOT NULL DEFAULT 'downloading',
     progress      REAL DEFAULT 0,
     error         TEXT,
+    candidates    TEXT,                          -- JSON: remaining best-first hits to retry
+    search_ctx    TEXT,                          -- JSON: {scope,title,year,season,episode}
+    tried_queries TEXT,                          -- JSON: slskd queries already searched
+    tried_files   TEXT,                          -- JSON: release filenames already attempted
+    attempts      INTEGER DEFAULT 0,
     created_at    TEXT DEFAULT (datetime('now')),
     updated_at    TEXT DEFAULT (datetime('now')),
     completed_at  TEXT

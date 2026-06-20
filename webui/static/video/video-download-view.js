@@ -292,12 +292,19 @@
         btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
         var container = panel.closest('[data-vgm-dl-content]');
         var o = (container && (container._opts || container._dl)) || {};
+        // the other accepted (live slskd) hits become the auto-retry pool
+        var pool = (panel._rows || []).filter(function (x) { return x.accepted && x.username && x.filename !== r.filename; })
+            .map(function (x) { return { username: x.username, filename: x.filename, size_bytes: x.size_bytes,
+                quality_label: x.quality_label, title: x.title }; });
         postJSON('/api/video/downloads/grab', {
             kind: p.scope || 'movie', title: p.title || '', release_title: r.title,
             source: 'soulseek', username: r.username, filename: r.filename,
             size_bytes: r.size_bytes, quality_label: r.quality_label,
             media_id: o.id || o.mediaId, media_source: o.source || o.mediaSource,
-            year: o.year, poster_url: o.poster
+            year: o.year, poster_url: o.poster,
+            candidates: pool,
+            search_ctx: { scope: p.scope || 'movie', title: p.title || '', year: o.year,
+                season: p.season != null ? p.season : null, episode: p.episode != null ? p.episode : null }
         }).then(function (res) {
             btn.classList.remove('vdl-res-grab--busy');
             if (res && res.ok) {

@@ -35,11 +35,12 @@
     var STATUS = {
         downloading: { label: 'Downloading', cls: 'active' },
         queued: { label: 'Queued', cls: 'queued' },
+        searching: { label: 'Searching', cls: 'active' },     // retrying — finding another release
         completed: { label: 'Completed', cls: 'completed' },
         failed: { label: 'Failed', cls: 'failed' },
         cancelled: { label: 'Cancelled', cls: 'cancelled' }
     };
-    function isActive(s) { return s === 'downloading' || s === 'queued'; }
+    function isActive(s) { return s === 'downloading' || s === 'queued' || s === 'searching'; }
     function isFail(s) { return s === 'failed' || s === 'cancelled'; }
     function matches(s) {
         return _filter === 'all' || (_filter === 'active' && isActive(s)) ||
@@ -74,6 +75,7 @@
     function patchCard(el, d) {
         var info = STATUS[d.status] || STATUS.downloading;
         var cls = info.cls, active = isActive(d.status);
+        var showBar = d.status === 'downloading' || d.status === 'queued';
         var pct = Math.max(0, Math.min(100, d.progress || 0));
         var q = function (f) { return el.querySelector('[data-f="' + f + '"]'); };
 
@@ -97,7 +99,8 @@
         // meta: quality chip + a context line (release / size·user·pct / dest)
         var ctx;
         if (d.status === 'completed' && d.dest_path) ctx = '→ ' + d.dest_path;
-        else if (active) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
+        else if (d.status === 'searching') ctx = 'Trying another release…';
+        else if (showBar) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
         else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
         var chip = d.quality_label ? '<span class="vdpg-qchip">' + esc(d.quality_label) + '</span>' : '';
         var metaHTML = chip + '<span class="vdpg-mctx' + (d.status === 'completed' && d.dest_path ? ' vdpg-dest' : '') + '">' + esc(ctx) + '</span>';
@@ -109,14 +112,15 @@
         err.style.display = errTxt ? '' : 'none';
 
         var bar = q('bar');
-        bar.style.display = active ? '' : 'none';
-        if (active) q('fill').style.width = pct + '%';
+        bar.style.display = showBar ? '' : 'none';
+        if (showBar) q('fill').style.width = pct + '%';
 
         var st = q('status'); var stWant = 'adl-row-status ' + cls;
         if (st.className !== stWant) st.className = stWant;
         var dot = q('dot'); var dotWant = 'adl-status-dot ' + cls;
         if (dot.className !== dotWant) dot.className = dotWant;
-        var lab = q('label'); if (lab.textContent !== info.label) lab.textContent = info.label;
+        var labelTxt = info.label + (d.attempts > 1 ? ' · ' + d.attempts + 'x' : '');
+        var lab = q('label'); if (lab.textContent !== labelTxt) lab.textContent = labelTxt;
 
         var act = q('actions');
         var openBtn = d.media_id ? '<button class="vdpg-open" type="button" data-vdpg-open="' + esc(d.media_id) +

@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -123,6 +123,12 @@ _COLUMN_MIGRATIONS = [
     ("video_downloads", "media_source", "TEXT"),
     ("video_downloads", "year", "INTEGER"),
     ("video_downloads", "poster_url", "TEXT"),
+    # video_downloads — auto-retry state (remaining candidates + requery context).
+    ("video_downloads", "candidates", "TEXT"),
+    ("video_downloads", "search_ctx", "TEXT"),
+    ("video_downloads", "tried_queries", "TEXT"),
+    ("video_downloads", "tried_files", "TEXT"),
+    ("video_downloads", "attempts", "INTEGER"),
     ("movies", "tmdb_match_status", "TEXT"),
     ("movies", "tmdb_last_attempted", "TEXT"),
     ("shows", "tmdb_match_status", "TEXT"),
@@ -1134,7 +1140,8 @@ class VideoDatabase:
     # ── video downloads (the grab → transfer pipeline) ────────────────────────
     _DL_FIELDS = ("kind", "title", "release_title", "source", "username", "filename",
                   "size_bytes", "quality_label", "target_dir", "status",
-                  "media_id", "media_source", "year", "poster_url")
+                  "media_id", "media_source", "year", "poster_url",
+                  "candidates", "search_ctx", "tried_queries", "tried_files", "attempts")
 
     def add_video_download(self, rec: dict) -> int:
         """Insert a download row (status defaults to 'downloading'); returns its id."""
@@ -1176,7 +1183,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT * FROM video_downloads WHERE status IN ('queued', 'downloading') ORDER BY id"
+                "SELECT * FROM video_downloads WHERE status IN ('queued', 'downloading', 'searching') ORDER BY id"
             ).fetchall()
             return [dict(r) for r in rows]
         finally:

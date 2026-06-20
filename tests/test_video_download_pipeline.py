@@ -154,6 +154,51 @@ def test_process_download_completed_but_file_not_settled():
     assert upd == {"progress": 100.0}   # no status change — retries next tick
 
 
+def test_fail_or_retry_starts_next_candidate(tmp_path, monkeypatch):
+    import json
+    import core.video.download_monitor as mon
+    import core.video.slskd_download as slskd
+    from database.video_database import VideoDatabase
+
+    monkeypatch.setattr(slskd, "start_download", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(mon, "start_download", lambda *a, **k: {"ok": True})
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    dl_id = db.add_video_download({
+        "kind": "movie", "title": "Dune", "release_title": "Dune.2021.1080p.x265-A",
+        "source": "soulseek", "username": "alice", "filename": r"@@a\A\dune.mkv",
+        "target_dir": "/m", "status": "downloading", "attempts": 0,
+        "tried_files": json.dumps([r"@@a\A\dune.mkv"]),
+        "candidates": json.dumps([{"username": "bob", "filename": r"@@b\B\dune.mkv",
+                                   "size_bytes": 9, "quality_label": "1080p", "release_title": "Dune.2021.1080p.x265-B"}]),
+        "search_ctx": json.dumps({"scope": "movie", "title": "Dune", "year": 2021}),
+        "tried_queries": json.dumps(["Dune 2021"]),
+    })
+    row = db.get_video_download(dl_id)
+    mon._fail_or_retry(db, row, "Soulseek transfer Errored")
+    after = db.get_video_download(dl_id)
+    # rolled onto the next candidate (bob's release), back to downloading, attempt counted
+    assert after["status"] == "downloading" and after["username"] == "bob"
+    assert after["release_title"] == "Dune.2021.1080p.x265-B" and after["attempts"] == 1
+    assert json.loads(after["candidates"]) == []   # pool consumed
+
+
+def test_fail_or_retry_marks_failed_when_exhausted(tmp_path, monkeypatch):
+    import json
+    import core.video.download_monitor as mon
+    from database.video_database import VideoDatabase
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    dl_id = db.add_video_download({
+        "kind": "movie", "title": "Dune", "source": "soulseek", "username": "a",
+        "filename": "x.mkv", "target_dir": "/m", "status": "downloading", "attempts": 0,
+        "candidates": "[]", "tried_files": json.dumps(["x.mkv"]),
+        "search_ctx": json.dumps({"scope": "movie", "title": "Dune"}),   # no year → only one query
+        "tried_queries": json.dumps(["Dune"]),
+    })
+    mon._fail_or_retry(db, db.get_video_download(dl_id), "boom")
+    assert db.get_video_download(dl_id)["status"] == "failed"
+
+
 def test_process_download_move_failure_marks_failed():
     from core.video.download_monitor import process_download
 
