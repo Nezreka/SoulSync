@@ -3350,11 +3350,3 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-row-retry:disabled { opacity: 0.5 !important; pointer-events: none; }
 @media (hover: none) { .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: none; } }
 
-/* ── Automations page (.vauto-*; reuses the music .automation-* card look) ──── */
-.vauto-wrap { max-width: 1100px; padding: 8px 4px 40px; }
-.vauto-head { margin-bottom: 22px; }
-.vauto-title { font-size: 34px; font-weight: 900; letter-spacing: -0.03em; margin: 0; color: #fff; }
-.vauto-sub { margin: 6px 0 0; font-size: 13.5px; font-weight: 600; color: rgba(255, 255, 255, 0.5); }
-.vauto-list { display: flex; flex-direction: column; gap: 9px; }
-.vauto-empty { text-align: center; padding: 60px 20px; font-size: 14px; color: rgba(255, 255, 255, 0.4); }
-.vauto-err { color: #fca5a5; }
