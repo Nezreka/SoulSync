@@ -1078,6 +1078,10 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     padding: 5px 12px; border-radius: 999px;
     background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14); backdrop-filter: blur(6px);
 }
+/* watchlist (follow person) button row — reuses the shared .library-artist-watchlist-btn */
+.vp-actions { margin-top: 14px; }
+.vp-actions:empty { display: none; }
+@media (max-width: 720px) { .vp-actions { display: flex; justify-content: center; } }
 @media (prefers-reduced-motion: reduce) {
     .vp-photo-wrap { animation: none; }
     .vp-photo-ring { animation: none; }
