@@ -81,3 +81,21 @@ def test_proxy_instances_setting_parsing(db):
     assert ("invidious", "https://invidious.b.test") in got   # kind inferred + trailing / stripped
     assert ("piped", "https://c.test") in got
     assert all(u.startswith("http") for _, u in got)          # 'junk' dropped
+
+
+def test_dearrow_retry_requeues_failed_youtube_videos(db):
+    # Regression: enrichment_retry only handled ryd/sponsorblock, so DeArrow's
+    # Retry button was a silent no-op. It must re-queue failed dearrow rows.
+    conn = db._get_connection()
+    conn.execute("INSERT INTO youtube_video_stats (youtube_id, dearrow_status) VALUES ('a', 'not_found')")
+    conn.execute("INSERT INTO youtube_video_stats (youtube_id, dearrow_status) VALUES ('b', 'error')")
+    conn.execute("INSERT INTO youtube_video_stats (youtube_id, dearrow_status) VALUES ('c', 'ok')")
+    conn.commit(); conn.close()
+
+    n = db.enrichment_retry("dearrow", "video", scope="failed")
+    assert n == 2                                      # the not_found + error rows
+    conn = db._get_connection()
+    rows = dict(conn.execute("SELECT youtube_id, dearrow_status FROM youtube_video_stats").fetchall())
+    conn.close()
+    assert rows["a"] is None and rows["b"] is None     # re-queued
+    assert rows["c"] == "ok"                           # matched left untouched

@@ -1096,9 +1096,9 @@ class VideoDatabase:
                 return cur.rowcount
             finally:
                 conn.close()
-        if service in ("ryd", "sponsorblock"):
-            col = "ryd_status" if service == "ryd" else "sb_status"
-            att = "ryd_attempted" if service == "ryd" else "sb_attempted"
+        if service in ("ryd", "sponsorblock", "dearrow"):
+            col = {"ryd": "ryd_status", "sponsorblock": "sb_status", "dearrow": "dearrow_status"}[service]
+            att = {"ryd": "ryd_attempted", "sponsorblock": "sb_attempted", "dearrow": "dearrow_attempted"}[service]
             conn = self._get_connection()
             try:
                 if scope == "item" and item_id is not None:
