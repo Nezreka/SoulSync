@@ -155,9 +155,11 @@ SYSTEM_AUTOMATIONS = [
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},
         'action_type': 'video_scan_library',
-        'action_config': {'mode': 'full'},
+        'action_config': {'mode': 'incremental'},   # recurring = light (newest-only, no prune)
         'owned_by': 'video',
-        'initial_delay': 300,  # 5 min after startup
+        # First run a full interval out — a scheduled scan should NOT fire right after
+        # app startup; post-download freshness is handled by the event chain instead.
+        'initial_delay': 6 * 60 * 60,
     },
 ]
 
@@ -302,6 +304,32 @@ class AutomationEngine:
                     logger.info(f"System automation '{spec['name']}' next_run set to {initial_delay}s from now")
                 else:
                     logger.info(f"System automation '{spec['name']}' ready (event-based)")
+        self._fix_video_scan_default()
+
+    def _fix_video_scan_default(self):
+        """One-time correction: the first 'Scan Video Library' seed defaulted to a
+        FULL scan that fired ~5 min after startup. Switch existing rows that still
+        carry that old default to an INCREMENTAL scan and push the next run a full
+        interval out (no startup-proximate scan). Guarded by a flag + only touches
+        the unchanged default, so a user's deliberate choice is never overridden."""
+        try:
+            from config.settings import config_manager
+            if config_manager.get('video_scan_default_v2', False):
+                return
+            auto = self.db.get_system_automation_by_action('video_scan_library')
+            if auto:
+                try:
+                    cfg = json.loads(auto.get('action_config') or '{}')
+                except (ValueError, TypeError):
+                    cfg = {}
+                if cfg.get('mode', 'full') == 'full':   # still the old default → correct it
+                    self.db.update_automation(
+                        auto['id'], action_config=json.dumps({'mode': 'incremental'}),
+                        next_run=_utc_after(6 * 60 * 60))
+                    logger.info("Migrated 'Scan Video Library' to incremental + schedule-only")
+            config_manager.set('video_scan_default_v2', True)
+        except Exception:
+            logger.exception("video scan default migration failed")
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""

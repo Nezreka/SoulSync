@@ -432,7 +432,7 @@ def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
     assert 'video_scan_library' in created, 'video twin not seeded'
     video = created['video_scan_library']
     assert video['owned_by'] == 'video'
-    assert json.loads(video['action_config']) == {'mode': 'full'}
+    assert json.loads(video['action_config']) == {'mode': 'incremental'}
 
     # Music automations stay owned_by=None (shown on the music page).
     assert created['scan_library']['owned_by'] is None
