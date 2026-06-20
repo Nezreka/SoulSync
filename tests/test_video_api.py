@@ -541,6 +541,45 @@ def test_downloads_grab_and_active(tmp_path, monkeypatch):
         videoapi._video_db = None
 
 
+def test_downloads_status_lookup_by_id_and_media(tmp_path, monkeypatch):
+    """The live-tracking endpoint: the modal result card looks up by download id,
+    a movie detail page looks up by media_id+media_source. Powers both progress UIs."""
+    import api.video as videoapi
+    import core.video.download_monitor as mon
+    import core.video.slskd_download as slskd
+    from database.video_database import VideoDatabase
+
+    monkeypatch.setattr(slskd, "start_download", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(mon, "ensure_started", lambda *a, **k: None)
+
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.set_setting("movies_path", "/media/movies")
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        gid = client.post("/api/video/downloads/grab", json={
+            "kind": "movie", "title": "The Matrix", "source": "soulseek",
+            "username": "neo", "filename": "m.mkv", "size_bytes": 8, "quality_label": "1080p",
+            "media_id": 42, "media_source": "library"}).get_json()["id"]
+
+        # by id
+        byid = client.get("/api/video/downloads/status?id=" + str(gid)).get_json()["download"]
+        assert byid and byid["id"] == gid and byid["status"] == "downloading"
+
+        # by media identity (what the movie detail page uses)
+        bym = client.get("/api/video/downloads/status?media_id=42&media_source=library").get_json()["download"]
+        assert bym and bym["id"] == gid
+
+        # a different movie / unknown id → null, never an error
+        assert client.get("/api/video/downloads/status?media_id=999&media_source=library").get_json()["download"] is None
+        assert client.get("/api/video/downloads/status?id=123456").get_json()["download"] is None
+        assert client.get("/api/video/downloads/status").get_json()["download"] is None
+    finally:
+        videoapi._video_db = None
+
+
 def test_slskd_config_shared_via_config_manager(tmp_path, monkeypatch):
     import api.video as videoapi
     import config.settings as cfg

@@ -1246,11 +1246,65 @@
     }
 
     // ── movie detail (flat) ───────────────────────────────────────────────────
+    // ── live download status (a movie being grabbed shows progress here, and the
+    //    chip jumps to the Downloads page) ─────────────────────────────────────
+    var _dlWatch = { id: null, t: null };
+    function stopMovieDownloadWatch() {
+        if (_dlWatch.t) { clearTimeout(_dlWatch.t); _dlWatch.t = null; }
+        _dlWatch.id = null;
+        var c = q('[data-vd-dlchip]'); if (c) c.remove();
+    }
+    function renderMovieDownloadChip(dl) {
+        var a = q('[data-vd-actions]'); if (!a) return;
+        var chip = q('[data-vd-dlchip]');
+        var show = dl && ['downloading', 'queued', 'searching', 'completed', 'failed'].indexOf(dl.status) > -1;
+        if (!show) { if (chip) chip.remove(); return; }
+        if (!chip) {
+            chip = document.createElement('button');
+            chip.type = 'button';
+            chip.setAttribute('data-vd-dlchip', '');
+            chip.title = 'Open the Downloads page';
+            chip.addEventListener('click', function () {
+                document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-downloads' }));
+            });
+            a.parentNode.insertBefore(chip, a);   // sits above the action buttons (renderActions won't wipe it)
+        }
+        var st = dl.status, pct = Math.max(0, Math.min(100, dl.progress || 0));
+        if (st === 'completed') pct = 100;
+        chip.className = 'vd-dlchip ' + (st === 'completed' ? 'is-done' : (st === 'failed' ? 'is-fail' : 'is-active'));
+        var label = st === 'completed' ? 'Downloaded' : st === 'failed' ? 'Download failed'
+            : st === 'searching' ? 'Finding a release…' : st === 'queued' ? 'Queued' : 'Downloading';
+        var pctTxt = (st === 'downloading' || st === 'queued') ? ' · ' + pct + '%' : '';
+        var ic = st === 'completed' ? '✓ ' : st === 'failed' ? '✕ ' : '⤓ ';
+        chip.innerHTML =
+            '<span class="vd-dlchip-bar" style="width:' + pct + '%"></span>' +
+            '<span class="vd-dlchip-txt">' + ic + esc(label) + pctTxt + '<span class="vd-dlchip-go"> · Track ↗</span></span>';
+    }
+    function watchMovieDownload(id) {
+        stopMovieDownloadWatch();
+        _dlWatch.id = id;
+        (function tick() {
+            if (currentId !== id || currentKind !== 'movie') return;   // navigated away → stop
+            fetch('/api/video/downloads/status?media_id=' + encodeURIComponent(id) +
+                  '&media_source=' + encodeURIComponent(currentSource || 'library'),
+                  { headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (currentId !== id || currentKind !== 'movie') return;
+                    var dl = res && res.download;
+                    renderMovieDownloadChip(dl);
+                    var active = dl && ['downloading', 'queued', 'searching'].indexOf(dl.status) > -1;
+                    if (active) _dlWatch.t = setTimeout(tick, 1800);
+                }).catch(function () { /* keep last state */ });
+        })();
+    }
+
     function loadMovie(id, source) {
         currentKind = 'movie'; currentSource = source || 'library';
         if (!root()) return;
         if (currentId !== id) artAttemptedFor = null;
         currentId = id;
+        stopMovieDownloadWatch();   // clear any prior movie's chip
         showLoading(true);
         resetExtras();
         var dh = q('[data-vd-details]'); if (dh) dh.innerHTML = '';
@@ -1272,6 +1326,7 @@
                 } else {
                     maybeRefreshMovie(id);
                     loadExtras('movie', id);
+                    watchMovieDownload(id);           // live download progress chip (if any)
                 }
             })
             .catch(function () { showLoading(false); setText('[data-vd-title]', 'Could not load movie'); });
