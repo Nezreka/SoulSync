@@ -201,6 +201,12 @@ _COLUMN_MIGRATIONS = [
     ("youtube_video_stats", "dearrow_title", "TEXT"),
     ("youtube_video_stats", "dearrow_status", "TEXT"),
     ("youtube_video_stats", "dearrow_attempted", "TEXT"),
+    # TMDB details backfill: the server pre-matches shows/movies (so the matcher
+    # skips them) but never supplies details-only fields like `status` (airing vs
+    # ended) — which the watchlist's airing-default depends on. This marker drives a
+    # one-time per-item detail re-fetch that fills those gaps. Starts 0 = needs it.
+    ("shows", "details_synced", "INTEGER NOT NULL DEFAULT 0"),
+    ("movies", "details_synced", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 
@@ -862,6 +868,55 @@ class VideoDatabase:
         try:
             return conn.execute(
                 "SELECT COUNT(*) FROM shows WHERE tmdb_id IS NOT NULL AND episodes_synced=0").fetchone()[0]
+        finally:
+            conn.close()
+
+    # ── TMDB details backfill (status / network / tagline / rating …) ──────────
+    # The media server pre-matches items (tmdb_id set), so the matcher skips them and
+    # never fetches details-only fields. This one-time pass re-fetches details for a
+    # matched item and gap-fills, then marks it done so it isn't re-picked.
+    _DETAIL_TBL = {"show": "shows", "movie": "movies"}
+
+    def detail_backfill_next(self, kind: str) -> dict | None:
+        """Next matched show/movie (has tmdb_id) whose details haven't been
+        backfilled yet. Returns {kind, id, title, year, tmdb_id} or None."""
+        tbl = self._DETAIL_TBL.get(kind)
+        if not tbl:
+            return None
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                f"SELECT id, title, year, tmdb_id FROM {tbl} "
+                f"WHERE tmdb_id IS NOT NULL AND details_synced=0 ORDER BY id LIMIT 1").fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["kind"] = kind
+            return d
+        finally:
+            conn.close()
+
+    def mark_details_synced(self, kind: str, item_id: int) -> None:
+        """Flag that an item's TMDB details were backfilled (attempted once), so the
+        background pass doesn't re-pick it even if a field stayed empty."""
+        tbl = self._DETAIL_TBL.get(kind)
+        if not tbl:
+            return
+        conn = self._get_connection()
+        try:
+            conn.execute(f"UPDATE {tbl} SET details_synced=1 WHERE id=?", (item_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def detail_backfill_pending_count(self) -> int:
+        conn = self._get_connection()
+        try:
+            n = 0
+            for tbl in ("shows", "movies"):
+                n += conn.execute(
+                    f"SELECT COUNT(*) FROM {tbl} WHERE tmdb_id IS NOT NULL AND details_synced=0").fetchone()[0]
+            return n
         finally:
             conn.close()
 
