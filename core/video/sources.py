@@ -308,6 +308,12 @@ class PlexVideoSource:
             secs = [s for s in secs if s.title == name]
         return secs
 
+    def _scan_sections(self, kind: str, name):
+        """Sections to SCAN for a kind. UNLIKE _sections, an empty name means
+        'this kind isn't mapped' → scan NOTHING (never fall back to all sections).
+        Prevents a missing selection from silently pulling every library."""
+        return self._sections(kind, name) if name else []
+
     def available_libraries(self) -> dict:
         return {
             "movies": [{"title": s.title} for s in self._sections("movie")],
@@ -316,14 +322,14 @@ class PlexVideoSource:
 
     def counts(self, incremental=False) -> dict:
         """Cheap item totals (no full fetch) for the progress bar."""
-        m = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._sections("movie", self._movies_lib))
-        sh = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._sections("show", self._tv_lib))
+        m = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._scan_sections("movie", self._movies_lib))
+        sh = sum(int(getattr(s, "totalSize", 0) or 0) for s in self._scan_sections("show", self._tv_lib))
         if incremental:
             m, sh = min(m, 100), min(sh, 50)
         return {"movies": m, "shows": sh}
 
     def iter_movies(self, incremental=False):
-        for section in self._sections("movie", self._movies_lib):
+        for section in self._scan_sections("movie", self._movies_lib):
             items = section.search(sort="addedAt:desc", maxresults=100) if incremental else section.all()
             for m in items:
                 try:
@@ -332,7 +338,7 @@ class PlexVideoSource:
                     logger.exception("Plex: skipping movie %s", getattr(m, "title", "?"))
 
     def iter_shows(self, incremental=False):
-        for section in self._sections("show", self._tv_lib):
+        for section in self._scan_sections("show", self._tv_lib):
             items = section.search(sort="addedAt:desc", maxresults=50) if incremental else section.all()
             for sh in items:
                 try:
@@ -345,7 +351,7 @@ class PlexVideoSource:
         get indexed. (plexapi ``section.update()`` triggers the library scan.)"""
         n = 0
         for kind, name in (("movie", self._movies_lib), ("show", self._tv_lib)):
-            for s in self._sections(kind, name):
+            for s in self._scan_sections(kind, name):
                 try:
                     s.update()
                     n += 1
@@ -508,6 +514,12 @@ class JellyfinVideoSource:
             views = [v for v in views if v.get("Name") == name]
         return views
 
+    def _scan_views(self, collection_type: str, name):
+        """Views to SCAN. An empty name means this kind isn't mapped → scan NOTHING
+        (never fall back to all views), so a missing selection can't pull every
+        library. (available_libraries still lists all via _views.)"""
+        return self._views(collection_type, name) if name else []
+
     def available_libraries(self) -> dict:
         return {
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
@@ -522,7 +534,7 @@ class JellyfinVideoSource:
         if not base:
             return {"ok": False, "sections": 0}
         headers = {"X-Emby-Token": self._c.api_key or ""}
-        views = list(self._views("movies", self._movies_lib)) + list(self._views("tvshows", self._tv_lib))
+        views = list(self._scan_views("movies", self._movies_lib)) + list(self._scan_views("tvshows", self._tv_lib))
         n = 0
         for v in views:
             vid = v.get("Id")
@@ -543,8 +555,8 @@ class JellyfinVideoSource:
                 "ParentId": view["Id"], "IncludeItemTypes": itype,
                 "Recursive": "true", "Limit": "0"}) or {}
             return int(resp.get("TotalRecordCount", 0) or 0)
-        m = sum(total(v, "Movie") for v in self._views("movies", self._movies_lib))
-        sh = sum(total(v, "Series") for v in self._views("tvshows", self._tv_lib))
+        m = sum(total(v, "Movie") for v in self._scan_views("movies", self._movies_lib))
+        sh = sum(total(v, "Series") for v in self._scan_views("tvshows", self._tv_lib))
         if incremental:
             m, sh = min(m, 100), min(sh, 50)
         return {"movies": m, "shows": sh}
@@ -589,7 +601,7 @@ class JellyfinVideoSource:
 
     def iter_movies(self, incremental=False):
         path = f"/Users/{self.uid}/Items"
-        for view in self._views("movies", self._movies_lib):
+        for view in self._scan_views("movies", self._movies_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Movie",
                       "Recursive": "true", "Fields": _JF_MOVIE_FIELDS}
             if incremental:
@@ -631,7 +643,7 @@ class JellyfinVideoSource:
 
     def iter_shows(self, incremental=False):
         path = f"/Users/{self.uid}/Items"
-        for view in self._views("tvshows", self._tv_lib):
+        for view in self._scan_views("tvshows", self._tv_lib):
             params = {"ParentId": view["Id"], "IncludeItemTypes": "Series",
                       "Recursive": "true", "Fields": _JF_SHOW_FIELDS}
             if incremental:

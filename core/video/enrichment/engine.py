@@ -105,6 +105,19 @@ class VideoEnrichmentEngine:
             if not w.paused:
                 w.pause(persist=False)
                 self._scan_paused.add(service)
+        # The YouTube date enricher is a separate singleton (not in self.workers) —
+        # pause it too so a scan stops EVERY enricher, not just the matcher/backfill
+        # workers. Only if it wasn't already paused (never override a manual pause).
+        self._scan_paused_yt = False
+        try:
+            from core.video.youtube_enrichment import get_youtube_date_enricher
+            yt = get_youtube_date_enricher()
+            if yt and not getattr(yt, "_paused", False):
+                yt.pause()
+                self._scan_paused_yt = True
+                self._scan_paused.add("youtube")
+        except Exception:
+            logger.debug("video enrichment: could not pause YouTube date enricher for scan", exc_info=True)
         if self._scan_paused:
             logger.info("video enrichment: paused %s for library scan",
                         ", ".join(sorted(self._scan_paused)))
@@ -115,6 +128,15 @@ class VideoEnrichmentEngine:
             w = self.workers.get(service)
             if w:
                 w.resume(persist=False)
+        if getattr(self, "_scan_paused_yt", False):
+            try:
+                from core.video.youtube_enrichment import get_youtube_date_enricher
+                yt = get_youtube_date_enricher()
+                if yt:
+                    yt.resume()
+            except Exception:
+                logger.debug("video enrichment: could not resume YouTube date enricher", exc_info=True)
+            self._scan_paused_yt = False
         if getattr(self, "_scan_paused", None):
             logger.info("video enrichment: resumed %s after library scan",
                         ", ".join(sorted(self._scan_paused)))
