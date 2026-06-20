@@ -160,6 +160,53 @@ def test_worker_background_episode_sync_pulls_full_list(db):
     assert db.episode_sync_pending_count() == 0
 
 
+def test_detail_backfill_next_only_matched_unsynced(db):
+    # Matched items (have tmdb_id) that haven't had details backfilled are queued;
+    # un-matched ones are skipped. Shows + movies are independent queues.
+    a = db.upsert_show_tree("plex", {"server_id": "s1", "title": "A", "tmdb_id": 1, "seasons": []})
+    db.upsert_show_tree("plex", {"server_id": "s2", "title": "B", "seasons": []})   # no tmdb_id → skip
+    nx = db.detail_backfill_next("show")
+    assert nx and nx["id"] == a and nx["kind"] == "show" and nx["tmdb_id"] == 1
+    db.mark_details_synced("show", a)
+    assert db.detail_backfill_next("show") is None
+    mid = db.upsert_movie("plex", {"server_id": "m1", "title": "M", "tmdb_id": 9})
+    assert db.detail_backfill_next("movie")["id"] == mid
+    db.mark_details_synced("movie", mid)
+    assert db.detail_backfill_next("movie") is None
+    assert db.detail_backfill_pending_count() == 0
+
+
+def test_worker_detail_backfill_fills_status(db):
+    # The real bug: a show pre-matched by the server (tmdb_id set) + already
+    # episode-synced, but `status` never captured (server doesn't supply it, the
+    # matcher skips matched rows). With the match + episode queues clear, the worker
+    # re-fetches details and gap-fills `status` — what the airing-watchlist needs.
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 1396, "seasons": []})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=1396)
+    db.mark_episodes_synced(sid)                       # episode queue clear → detail backfill runs
+    assert db.detail_backfill_pending_count() == 1
+    client = FakeClient({"id": 1396, "metadata": {"status": "Returning Series", "network": "HBO"}})
+    w = VideoEnrichmentWorker(db, "tmdb", client)
+    assert w.process_one() is True                     # no match/episode work → detail backfill
+    assert client.calls == [("show", "S", None, 1396)]  # enrich BY id, no re-search
+    with db.connect() as c:
+        row = c.execute("SELECT status, details_synced FROM shows WHERE id=?", (sid,)).fetchone()
+    assert row["status"] == "Returning Series"
+    assert row["details_synced"] == 1
+    assert db.detail_backfill_pending_count() == 0     # done → not re-picked
+
+
+def test_detail_backfill_marks_done_even_when_status_absent(db):
+    # If TMDB returns no status, we still mark it attempted so it isn't re-fetched
+    # forever (bounded: one attempt per item).
+    sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "tmdb_id": 5, "seasons": []})
+    db.enrichment_apply("tmdb", "show", sid, matched=True, external_id=5)
+    db.mark_episodes_synced(sid)
+    w = VideoEnrichmentWorker(db, "tmdb", FakeClient({"id": 5, "metadata": {}}))
+    assert w.process_one() is True
+    assert db.detail_backfill_pending_count() == 0
+
+
 def test_show_match_info(db):
     sid = db.upsert_show_tree("plex", {"server_id": "s1", "title": "S", "year": 2019,
                                        "tmdb_id": 1396, "seasons": []})

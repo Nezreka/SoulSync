@@ -118,10 +118,13 @@ class VideoEnrichmentWorker:
         try:
             priority = self.db.get_setting("enrichment_priority") or None
         except Exception:
-            pass
+            logger.debug("enrichment priority lookup failed", exc_info=True)
         item = self.db.enrichment_next(self.service, self.retry_days, priority=priority)
         if not item:
-            return self._sync_episodes_once()
+            # No pending matches → use idle time for the full episode-list sync
+            # (which also fills details for shows it touches), then the details
+            # backfill for everything already episode-synced but missing `status`.
+            return self._sync_episodes_once() or self._detail_backfill_one()
         self.current_item = {"type": item["kind"], "name": item["title"]}
         try:
             # Prefer the provider id the server already gave us (enrich BY ID, no
@@ -240,6 +243,33 @@ class VideoEnrichmentWorker:
             self.db.mark_episodes_synced(show["id"])         # move on (never loop on one show)
         return True
 
+    def _detail_backfill_one(self) -> bool:
+        """Background TMDB details backfill: re-fetch ONE already-matched show/movie
+        that's missing details-only fields (status, network, tagline, rating…) and
+        gap-fill them. The matcher skips server-pre-matched items, so without this
+        their `status` stays blank — and the watchlist's airing-default can't see
+        them. TMDB-only. Returns True if it did work (so the loop rate-limits)."""
+        if not hasattr(self.client, "match"):
+            return False
+        item = self.db.detail_backfill_next("show") or self.db.detail_backfill_next("movie")
+        if not item:
+            return False
+        self.current_item = {"type": item["kind"], "name": item["title"]}
+        try:
+            result = self.client.match(item["kind"], item["title"], item.get("year"),
+                                       known_id=item.get("tmdb_id"))
+            if result and result.get("id"):
+                # Gap-fill only (never clobbers server data); fills status et al.
+                self.db.enrichment_apply("tmdb", item["kind"], item["id"], matched=True,
+                                         external_id=result["id"], metadata=result.get("metadata"))
+                logger.info("Backfilled details for %s '%s'", item["kind"], item["title"])
+            self.db.mark_details_synced(item["kind"], item["id"])   # attempted once → don't re-pick
+        except Exception:
+            # Transient call failure — leave details_synced=0 so it retries later.
+            logger.exception("detail backfill failed for %s '%s'", item["kind"], item["title"])
+            self.stats["errors"] += 1
+        return True
+
     def _cascade_episodes(self, show_id, tv_id, season_numbers=None) -> None:
         """Backfill a show's FULL episode list from the provider (one call per
         season) — owned + missing. Best-effort: a season failure never aborts the
@@ -278,7 +308,10 @@ class VideoEnrichmentWorker:
             try:
                 pending += self.db.episode_sync_pending_count()
             except Exception:
-                pass
+                logger.debug("episode_sync_pending_count failed", exc_info=True)
+        # NB: the TMDB details backfill (status/network/…) is a background gap-fill on
+        # ALREADY-matched items — like episode coverage, it doesn't block "Complete".
+        # It still runs in the idle loop; it's just not counted as blocking pending.
         cooling = self._cooldown_until > time.monotonic()
         running = self.running and not self.paused and self.enabled and not cooling
         idle = running and pending == 0 and self.current_item is None
