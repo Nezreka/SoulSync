@@ -2570,6 +2570,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     cursor: pointer; outline: none; transition: border-color 0.15s ease; }
 .vwsh-sort:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
 .vwsh-sort option { background: #16161d; color: #fff; }
+/* Clear-all (empties the current tab) — red-tinted, sits at the end of the toolbar */
+.vwsh-clear { margin-left: auto; padding: 11px 16px; border-radius: 12px; cursor: pointer;
+    font-size: 13px; font-weight: 700; color: #fca5a5;
+    background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.32);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+.vwsh-clear:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); color: #fecaca; }
+.vwsh-clear[hidden] { display: none; }
 
 /* video-only: square-ish bubbles (the music orbs are circles) */
 .vwsh-nebula .wl-orb, .vwsh-nebula .wl-orb-glow, .vwsh-nebula .wl-orb-img,

@@ -2127,6 +2127,20 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def clear_wishlist(self, kind: str) -> int:
+        """Empty an entire wishlist tab in one go. ``kind`` is the user-facing tab:
+        'movie' | 'show' (TV) | 'youtube'. Returns the number of rows removed."""
+        dbkind = {"movie": "movie", "show": "episode", "youtube": "video"}.get(kind)
+        if not dbkind:
+            return 0
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_wishlist WHERE kind=?", (dbkind,))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def wishlist_counts(self) -> dict:
         """{'movie': n, 'show': n, 'episode': n, 'total': movies+episodes}."""
         conn = self._get_connection()
