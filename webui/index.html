@@ -1313,20 +1313,49 @@
                      (minus Refresh Beatport Cache + user/playlist ones). Reuses the
                      music .automation-* card look; built by video/video-automations.js. -->
                 <section class="video-subpage" data-video-subpage="video-automations" hidden>
-                    <div class="page-shell automations-container">
-                        <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
-                            <div class="header-text">
-                                <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
-                                <p class="header-subtitle">System tasks that keep your library fresh — shared with the music side</p>
+                    <!-- List view (swaps with the builder view below, exactly like the
+                         music page does inside #automations-page). -->
+                    <div class="automations-list-view" id="vauto-list-view">
+                        <div class="page-shell automations-container">
+                            <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
+                                <div class="header-text">
+                                    <h2 class="header-title"><img src="/static/automation.png" class="page-header-icon" alt=""><span>Automations</span></h2>
+                                    <p class="header-subtitle">Video tasks that keep your movie &amp; TV library fresh — separate from the music side</p>
+                                </div>
+                                <div class="header-spacer"></div>
+                                <div class="header-actions">
+                                    <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New Automation</button>
+                                </div>
                             </div>
-                            <div class="header-spacer"></div>
+                            <div class="automations-stats" data-vauto-stats></div>
+                            <div class="automations-list" data-vauto-list></div>
+                            <div class="automations-empty" data-vauto-empty style="display:none;">
+                                <div class="automations-empty-icon">&#9889;</div>
+                                <div class="automations-empty-title">No video automations yet</div>
+                                <div class="automations-empty-text">The video side has its own automations (library scan, cleanup, wishlist…) — separate from the music ones. Create your first one.</div>
+                                <button class="auto-new-btn" onclick="showVideoAutomationBuilder()">+ New Automation</button>
+                            </div>
                         </div>
-                        <div class="automations-stats" data-vauto-stats></div>
-                        <div class="automations-list" data-vauto-list></div>
-                        <div class="automations-empty" data-vauto-empty style="display:none;">
-                            <div class="automations-empty-icon">&#9889;</div>
-                            <div class="automations-empty-title">Video automations coming soon</div>
-                            <div class="automations-empty-text">The video side gets its own automations (library scan, cleanup, wishlist…) — separate from the music ones.</div>
+                    </div>
+
+                    <!-- Builder view — mirrors the music builder markup with vauto- prefixed
+                         ids so the SAME shared builder functions (showAutomationBuilder core,
+                         saveAutomation, hideAutomationBuilder) drive it via a video context.
+                         Its sidebar is fed by /api/video/automations/blocks (video scope). -->
+                    <div class="automations-builder-view" id="vauto-builder-view" style="display:none;">
+                        <div class="builder-header">
+                            <button class="builder-back-btn" onclick="hideAutomationBuilder()" title="Back to list">&#8592;</button>
+                            <input type="text" id="vauto-builder-name" class="builder-name-input" placeholder="Automation Name">
+                            <input type="text" id="vauto-builder-group-name" class="builder-group-input" placeholder="Group (optional)" list="vauto-builder-group-list">
+                            <datalist id="vauto-builder-group-list"></datalist>
+                            <div class="builder-header-actions">
+                                <button class="btn-cancel" onclick="hideAutomationBuilder()">Cancel</button>
+                                <button class="btn-save" onclick="saveAutomation()">Save</button>
+                            </div>
+                        </div>
+                        <div class="builder-content">
+                            <div class="builder-sidebar" id="vauto-builder-sidebar"></div>
+                            <div class="builder-canvas" id="vauto-builder-canvas"></div>
                         </div>
                     </div>
                 </section>
