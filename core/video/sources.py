@@ -266,6 +266,22 @@ def get_active_video_source():
     return _build_source(sel.get("movies") or None, sel.get("tv") or None)
 
 
+def refresh_video_server_sections():
+    """Tell the active media server to rescan its selected VIDEO sections (so newly
+    downloaded files get indexed) — the video twin of music's 'Scan Library'. Returns
+    {ok, sections} or {ok: False, error}."""
+    src = get_active_video_source()
+    if src is None:
+        return {"ok": False, "error": "No video server configured"}
+    if not hasattr(src, "refresh_sections"):
+        return {"ok": False, "error": "This server doesn't support a scan trigger"}
+    try:
+        return src.refresh_sections()
+    except Exception as e:   # noqa: BLE001 - surface any server error to the automation
+        logger.exception("video sources: refresh failed")
+        return {"ok": False, "error": str(e)}
+
+
 def list_video_libraries():
     """Discover the active server's video libraries for the mapping UI:
     {'server', 'movies': [{'title'}], 'tv': [{'title'}]} or None."""
@@ -323,6 +339,19 @@ class PlexVideoSource:
                     yield self._show(sh)
                 except Exception:
                     logger.exception("Plex: skipping show %s", getattr(sh, "title", "?"))
+
+    def refresh_sections(self) -> dict:
+        """Tell Plex to rescan the selected video sections so freshly-downloaded files
+        get indexed. (plexapi ``section.update()`` triggers the library scan.)"""
+        n = 0
+        for kind, name in (("movie", self._movies_lib), ("show", self._tv_lib)):
+            for s in self._sections(kind, name):
+                try:
+                    s.update()
+                    n += 1
+                except Exception:
+                    logger.exception("Plex: refresh failed for section %s", getattr(s, "title", "?"))
+        return {"ok": n > 0, "sections": n}
 
     @staticmethod
     def _part_file(obj):
@@ -484,6 +513,29 @@ class JellyfinVideoSource:
             "movies": [{"title": v.get("Name")} for v in self._views("movies")],
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
         }
+
+    def refresh_sections(self) -> dict:
+        """Ask Jellyfin to rescan the selected video libraries (POST /Items/{id}/Refresh)
+        so freshly-downloaded files get indexed. _make_request is GET-only, so POST direct."""
+        import requests
+        base = (self._c.base_url or "").rstrip("/")
+        if not base:
+            return {"ok": False, "sections": 0}
+        headers = {"X-Emby-Token": self._c.api_key or ""}
+        views = list(self._views("movies", self._movies_lib)) + list(self._views("tvshows", self._tv_lib))
+        n = 0
+        for v in views:
+            vid = v.get("Id")
+            if not vid:
+                continue
+            try:
+                requests.post(base + "/Items/" + str(vid) + "/Refresh", headers=headers,
+                              params={"Recursive": "true", "MetadataRefreshMode": "Default",
+                                      "ImageRefreshMode": "Default"}, timeout=15)
+                n += 1
+            except Exception:
+                logger.exception("Jellyfin: refresh failed for view %s", vid)
+        return {"ok": n > 0, "sections": n}
 
     def counts(self, incremental=False) -> dict:
         def total(view, itype):
