@@ -161,6 +161,24 @@ SYSTEM_AUTOMATIONS = [
         # app startup; post-download freshness is handled by the event chain instead.
         'initial_delay': 6 * 60 * 60,
     },
+    # Post-download chain (video twin of music's batch_complete → scan_library →
+    # library_scan_completed → start_database_update). Event-based, so a finished
+    # video download refreshes the server then pulls the new media into video.db.
+    {
+        'name': 'Auto-Scan Video After Downloads',
+        'trigger_type': 'video_batch_complete',
+        'trigger_config': {},
+        'action_type': 'video_scan_server',
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Update Video Database After Scan',
+        'trigger_type': 'video_library_scan_completed',
+        'trigger_config': {},
+        'action_type': 'video_update_database',
+        'action_config': {'mode': 'incremental'},
+        'owned_by': 'video',
+    },
 ]
 
 

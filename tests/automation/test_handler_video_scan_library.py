@@ -173,3 +173,65 @@ class TestHandlerNeverRaises:
             {}, deps, server_refresh=_refresh_ok(), run_video_scan=_scan_done(),
         )
         assert result['status'] == 'completed'
+
+
+# ── post-download chain: video_scan_server (stage 1) ───────────────────────
+from core.automation.handlers.video_scan_library import (  # noqa: E402
+    auto_video_scan_server, auto_video_update_database)
+
+
+class TestScanServerStage:
+    def test_refreshes_waits_then_emits_scan_done(self):
+        deps = _RecordingDeps()
+        events = []
+        slept = []
+        r = auto_video_scan_server(
+            {'_automation_id': 'a', 'debounce_seconds': 90}, deps,
+            server_refresh=_refresh_ok(), sleep=lambda s: slept.append(s),
+            emit=lambda ev, data: events.append((ev, data)))
+        assert r['status'] == 'completed'
+        assert slept == [90]                                  # waited the debounce
+        assert events == [('video_library_scan_completed', {'server': ''})]
+
+    def test_default_debounce_and_server_unavailable_still_emits(self):
+        deps = _RecordingDeps()
+        events = []
+        auto_video_scan_server(
+            {'_automation_id': 'a'}, deps,
+            server_refresh=lambda: {'ok': False, 'error': 'no server'},
+            sleep=lambda s: None, emit=lambda ev, data: events.append(ev))
+        assert events == ['video_library_scan_completed']     # fires even if refresh failed
+        assert 'warning' in deps.log_types()
+
+    def test_never_raises(self):
+        deps = _RecordingDeps()
+        r = auto_video_scan_server(
+            {'_automation_id': 'a'}, deps,
+            server_refresh=lambda: (_ for _ in ()).throw(RuntimeError('boom')),
+            sleep=lambda s: None, emit=lambda *a: None)
+        assert r['status'] == 'error' and r['error'] == 'boom'
+
+
+# ── post-download chain: video_update_database (stage 2) ───────────────────
+class TestUpdateDatabaseStage:
+    def test_incremental_read_returns_counts(self):
+        deps = _RecordingDeps()
+        r = auto_video_update_database({'_automation_id': 'a'}, deps, run_video_scan=_scan_done(2, 1, 5))
+        assert r == {'status': 'completed', '_manages_own_progress': True,
+                     'movies': 2, 'shows': 1, 'episodes': 5}
+
+    def test_defaults_to_incremental_mode(self):
+        seen = {}
+
+        def _scan(mode):
+            seen['mode'] = mode
+            return {'state': 'done'}
+
+        auto_video_update_database({'_automation_id': 'a'}, _RecordingDeps(), run_video_scan=_scan)
+        assert seen['mode'] == 'incremental'
+
+    def test_scan_error_propagates(self):
+        deps = _RecordingDeps()
+        r = auto_video_update_database({'_automation_id': 'a'}, deps,
+                                       run_video_scan=lambda m: {'state': 'error', 'error': 'no server'})
+        assert r['status'] == 'error' and r['error'] == 'no server'

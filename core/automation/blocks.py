@@ -123,6 +123,14 @@ TRIGGERS: list[dict] = [
     {"type": "webhook_received", "label": "Webhook Received", "icon": "globe", "scope": "both",
      "description": "When an external API request is received (POST /api/v1/request)", "available": True,
      "variables": ["query", "request_id", "source"]},
+
+    # ── Video side (scope='video') — the post-download scan chain triggers ──
+    {"type": "video_batch_complete", "label": "Video Download Batch Done", "icon": "check-circle", "scope": "video",
+     "description": "When a batch of video downloads finishes", "available": True,
+     "variables": ["completed"]},
+    {"type": "video_library_scan_completed", "label": "Video Library Scan Done", "icon": "hard-drive", "scope": "video",
+     "description": "When the media server finishes rescanning your video sections", "available": True,
+     "variables": ["server"]},
 ]
 
 
@@ -211,6 +219,21 @@ ACTIONS: list[dict] = [
                       {"value": "incremental", "label": "Incremental (recent only)"},
                       {"value": "deep", "label": "Deep (also remove missing)"}],
           "default": "full"}
+     ]},
+    # Post-download chain actions (two stages, like music's scan_library +
+    # start_database_update). Stage 1 nudges the server; stage 2 reads it in.
+    {"type": "video_scan_server", "label": "Scan Video Server", "icon": "refresh", "scope": "video",
+     "description": "Tell the media server to rescan your video sections, then fire 'Video Library Scan Done'", "available": True,
+     "config_fields": [
+         {"key": "debounce_seconds", "type": "number", "label": "Wait for indexing (sec)", "default": 120, "min": 10}
+     ]},
+    {"type": "video_update_database", "label": "Update Video Database", "icon": "database", "scope": "video",
+     "description": "Read newly-indexed media from the server into SoulSync (incremental)", "available": True,
+     "config_fields": [
+         {"key": "mode", "type": "select", "label": "Mode",
+          "options": [{"value": "incremental", "label": "Incremental (recent only)"},
+                      {"value": "full", "label": "Full (add + refresh)"}],
+          "default": "incremental"}
      ]},
 ]
 

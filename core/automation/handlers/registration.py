@@ -35,7 +35,9 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
-from core.automation.handlers.video_scan_library import auto_video_scan_library
+from core.automation.handlers.video_scan_library import (
+    auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
+)
 from core.automation.handlers.progress_callbacks import (
     progress_init,
     progress_finish,
@@ -174,6 +176,15 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_scan_library',
         lambda config: auto_video_scan_library(config, deps),
+    )
+    # Post-download chain: scan the server, then (on the scan-done event) update the DB.
+    engine.register_action_handler(
+        'video_scan_server',
+        lambda config: auto_video_scan_server(config, deps),
+    )
+    engine.register_action_handler(
+        'video_update_database',
+        lambda config: auto_video_update_database(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around
