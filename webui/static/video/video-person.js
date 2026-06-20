@@ -301,11 +301,60 @@
         var bio = q('[data-vp-bio]'), more = q('[data-vp-bio-more]');
         if (bio) { bio.textContent = d.biography || ''; bio.hidden = !d.biography; bio.classList.remove('vp-bio--open'); }
         if (more) { more.hidden = !((d.biography || '').length > 320); more.textContent = 'Read more'; }
+        renderWatchlist(d);
         renderPhotos(d.photos);
 
         applyFilters();
         var sub = document.querySelector('.video-subpage[data-video-subpage="video-person-detail"]');
         if (sub) sub.scrollTop = 0;
+    }
+
+    // ── watchlist (follow a person — same button as the movie/show pages) ──────
+    // persons are tmdb-only, so currentId (the navigation id) IS the tmdb person id.
+    function pid() { return currentId || (data && data.id); }
+    function renderWatchlist(d) {
+        var host = q('[data-vp-actions]'); if (!host) return;
+        var on = !!d._vw_watched;
+        host.innerHTML =
+            '<button class="library-artist-watchlist-btn' + (on ? ' watching' : '') + '" type="button" data-vp-watch>' +
+            '<span class="watchlist-icon">' + (on ? '✓' : '＋') + '</span>' +
+            '<span class="watchlist-text">' + (on ? 'In Watchlist' : 'Watchlist') + '</span></button>';
+        // Resolve the real watched state once (lazy), then re-render the button.
+        var id = pid();
+        if (!d._vw_checked && id) {
+            d._vw_checked = true;
+            fetch('/api/video/watchlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ kind: 'person', tmdb_ids: [id] }) })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (res) {
+                    if (res && res.results && data === d) {
+                        d._vw_watched = !!res.results[String(id)];
+                        renderWatchlist(d);
+                    }
+                }).catch(function () { /* keep default (off) */ });
+        }
+    }
+    function toggleWatch() {
+        var d = data; if (!d) return;
+        var id = pid(); if (!id) return;
+        var on = !!d._vw_watched;
+        var url = on ? '/api/video/watchlist/remove' : '/api/video/watchlist/add';
+        var body = on ? { kind: 'person', tmdb_id: id }
+            : { kind: 'person', tmdb_id: id, title: d.name, poster_url: d.photo || null };
+        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (res) {
+                if (!res || res.success === false) {
+                    if (typeof showToast === 'function') showToast('Watchlist update failed', 'error');
+                    return;
+                }
+                d._vw_watched = !on;
+                renderWatchlist(d);
+                if (typeof showToast === 'function')
+                    showToast(!on ? 'Added to watchlist' : 'Removed from watchlist', !on ? 'success' : 'info');
+                document.dispatchEvent(new CustomEvent('soulsync:video-watchlist-changed',
+                    { detail: { kind: 'person', id: String(id), watched: !on } }));
+            }).catch(function () { if (typeof showToast === 'function') showToast('Watchlist update failed', 'error'); });
     }
 
     function load(id) {
@@ -344,6 +393,8 @@
 
     function onClick(e) {
         var r = root(); if (!r) return;
+        var watchBtn = e.target.closest('[data-vp-watch]');
+        if (watchBtn && r.contains(watchBtn)) { toggleWatch(); return; }
         var kindBtn = e.target.closest('[data-vp-tab]');
         if (kindBtn && r.contains(kindBtn)) {
             tab = kindBtn.getAttribute('data-vp-tab'); applyFilters(); return;
