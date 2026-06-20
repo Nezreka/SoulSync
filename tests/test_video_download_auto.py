@@ -23,8 +23,11 @@ _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encod
 def test_each_source_has_manual_and_auto_buttons():
     assert 'data-vdl-search="' in _VIEW          # Manual (pick yourself)
     assert 'data-vdl-auto="' in _VIEW            # Auto (best pick)
-    # Renamed for clarity: Manual vs Auto.
-    assert '⌕ Manual' in _VIEW and '⚡ Auto' in _VIEW
+    # Renamed for clarity: Manual vs Auto (icon + label now split into spans).
+    assert '>Manual<' in _VIEW and '>Auto<' in _VIEW
+    # The harsh lightning was redesigned out in favour of a monochrome sparkle.
+    assert '⚡' not in _VIEW
+    assert 'vdl-btn-ic--auto' in _VIEW
 
 
 def test_search_all_gains_an_auto_all():

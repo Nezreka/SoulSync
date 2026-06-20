@@ -55,9 +55,11 @@
             '<div class="vdl-section">' +
                 '<div class="vdl-sec-head">' +
                     '<div class="vdl-sec-label">Sources</div>' +
-                    '<span class="vdl-src-actions">' +
-                        '<button class="vdl-search-all" type="button" data-vdl-search-all title="Search every source — pick releases yourself">⌕ Manual all</button>' +
-                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-all title="Search every source and auto-grab the best release on each">⚡ Auto all</button>' +
+                    '<span class="vdl-src-actions vdl-src-actions--head">' +
+                        '<button class="vdl-search-all" type="button" data-vdl-search-all title="Search every source — pick releases yourself">' +
+                            '<span class="vdl-btn-ic" aria-hidden="true">⌕</span><span>Manual all</span></button>' +
+                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-all title="Search every source and auto-grab the best release on each">' +
+                            '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto all</span></button>' +
                     '</span>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
@@ -70,10 +72,12 @@
         return '<div class="vdl-src' + (mini ? ' vdl-src--mini' : '') + '" data-vdl-src="' + s + '">' +
             '<span class="vdl-src-icon"><span class="vdl-src-emoji">' + m.emoji + '</span></span>' +
             '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
-                '<span class="vdl-src-meta"><span class="vdl-src-dot"></span><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
+                '<span class="vdl-src-meta"><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
             '<span class="vdl-src-actions">' +
-                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '" title="Search and pick a release yourself">⌕ Manual</button>' +
-                '<button class="vdl-src-auto" type="button" data-vdl-auto="' + s + '" title="Search and auto-grab the best release for your quality profile">⚡ Auto</button>' +
+                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '" title="Search and pick a release yourself">' +
+                    '<span class="vdl-btn-ic" aria-hidden="true">⌕</span><span>Manual</span></button>' +
+                '<button class="vdl-src-auto" type="button" data-vdl-auto="' + s + '" title="Search and auto-grab the best release for your quality profile">' +
+                    '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto</span></button>' +
             '</span>' +
             '</div>';
     }
