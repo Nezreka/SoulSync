@@ -189,8 +189,17 @@
 
     function anyActive() { return !!document.querySelector('.adl-row.adl-row-active, .adl-row.adl-row-queued'); }
 
-    function poll() { getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); schedule(); }); }
-    function schedule() { if (_timer) clearTimeout(_timer); _timer = setTimeout(poll, anyActive() ? 1500 : 6000); }
+    // Only poll while the Downloads page is actually on screen — not in the background
+    // and not after switching to the music side (where the page-change event never fires).
+    function _onPage() {
+        return document.body.getAttribute('data-side') === 'video' &&
+            !!document.querySelector('[data-video-subpage="video-downloads"]:not([hidden])');
+    }
+    function poll() {
+        if (!_onPage()) { stop(); return; }
+        getJSON(URL_ACTIVE).then(function (d) { if (d) render(d.downloads || []); schedule(); });
+    }
+    function schedule() { if (_timer) clearTimeout(_timer); _timer = setTimeout(poll, anyActive() ? 2000 : 6000); }
     function start() { wire(); if (_timer) clearTimeout(_timer); poll(); }
     function stop() { if (_timer) { clearTimeout(_timer); _timer = null; } }
 
