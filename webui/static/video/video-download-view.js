@@ -47,7 +47,8 @@
     }
 
     function contentHTML() {
-        return '<div class="vdl-section">' +
+        return '<div class="vdl-active" data-vdl-active hidden></div>' +
+            '<div class="vdl-section">' +
                 '<div class="vdl-sec-label">Quality target</div>' +
                 '<div class="vdl-chips" data-vdl-target><span class="vdl-chip vdl-chip--ghost">Loading…</span></div>' +
             '</div>' +
@@ -138,6 +139,61 @@
                 if (container.isConnected) renderSources(container, sourcesFromConfig(c));
             });
             if (opts.file) renderOwned(container, opts.file);
+        }
+        // Resume tracking: if this title already has a download in flight (e.g. the
+        // user grabbed it, closed the modal, and re-opened), show a live banner.
+        watchActiveDownload(container, opts);
+    }
+
+    // Poll for an active/just-finished download of THIS title (by media identity) and
+    // surface a live banner at the top of the view — so re-opening the modal knows a
+    // download is already running. Suppressed while a result card is already tracking
+    // it inline (fresh-grab case), to avoid a duplicate indicator.
+    function watchActiveDownload(container, opts) {
+        var box = container.querySelector('[data-vdl-active]'); if (!box) return;
+        var mediaId = (opts.id != null ? opts.id : opts.mediaId);
+        if (mediaId == null) { box.hidden = true; return; }
+        var mediaSource = opts.source || opts.mediaSource || 'library';
+        if (container._activeT) { clearTimeout(container._activeT); container._activeT = null; }
+        (function tick() {
+            if (!container.isConnected) return;   // modal closed → stop
+            getJSON('/api/video/downloads/status?media_id=' + encodeURIComponent(mediaId) +
+                    '&media_source=' + encodeURIComponent(mediaSource)).then(function (d) {
+                if (!container.isConnected) return;
+                var dl = d && d.download;
+                var inlineTracker = !!container.querySelector('[data-vdl-track]');   // a card is already tracking
+                renderActiveBanner(box, (dl && !inlineTracker) ? dl : null);
+                var active = dl && ['downloading', 'queued', 'searching'].indexOf(dl.status) > -1;
+                if (active) container._activeT = setTimeout(tick, 1800);
+            });
+        })();
+    }
+
+    function renderActiveBanner(box, dl) {
+        var show = dl && ['downloading', 'queued', 'searching', 'completed', 'failed'].indexOf(dl.status) > -1;
+        if (!show) { box.hidden = true; box.innerHTML = ''; box._wired = false; return; }
+        box.hidden = false;
+        var st = dl.status, pct = Math.max(0, Math.min(100, dl.progress || 0));
+        if (st === 'completed') pct = 100;
+        box.className = 'vdl-active vdl-active--' + (st === 'completed' ? 'done' : (st === 'failed' ? 'fail' : 'active'));
+        var label = st === 'completed' ? 'Downloaded' : st === 'failed' ? 'Download failed'
+            : st === 'searching' ? 'Finding a release…' : st === 'queued' ? 'Queued' : 'Downloading';
+        var ic = st === 'completed' ? '✓' : st === 'failed' ? '✕' : '⤓';
+        var pctTxt = (st === 'downloading' || st === 'queued') ? pct + '%' : '';
+        box.innerHTML =
+            '<div class="vdl-active-fill" style="width:' + pct + '%"></div>' +
+            '<div class="vdl-active-row">' +
+                '<span class="vdl-active-ic">' + ic + '</span>' +
+                '<span class="vdl-active-txt"><strong>' + esc(label) + '</strong>' +
+                    (dl.release_title ? '<span class="vdl-active-rel"> · ' + esc(dl.release_title) + '</span>' : '') + '</span>' +
+                '<span class="vdl-active-pct">' + pctTxt + '</span>' +
+                '<button class="vdl-active-go" type="button" data-vdl-active-go>Track on Downloads ↗</button>' +
+            '</div>';
+        if (!box._wired) {
+            box._wired = true;
+            box.addEventListener('click', function (e) {
+                if (e.target.closest('[data-vdl-active-go]')) gotoDownloads();
+            });
         }
     }
 
@@ -415,36 +471,38 @@
     // demoted to a mono one-liner; a stat strip (size / uploader / group) sits below.
     // The card is a column so a live download tracker can drop in under it on grab.
     function resultCardHTML(r, i) {
-        var summary = [SRC_LABEL[r.source] || r.source,
-            r.codec ? String(r.codec).toUpperCase() : '',
-            r.audio ? String(r.audio).toUpperCase().replace('-', ' ') : ''].filter(Boolean).join('  ·  ');
-        var tags = '';
-        if (r.hdr) tags += '<span class="vdl-res-tag vdl-res-tag--hdr">' + esc(String(r.hdr).toUpperCase()) + '</span>';
-        if (r.repack) tags += '<span class="vdl-res-tag">REPACK</span>';
-        var verdict = r.accepted
-            ? '<span class="vdl-res-verdict vdl-res-verdict--ok">✓ Meets profile</span>'
-            : '<span class="vdl-res-verdict vdl-res-verdict--no" title="' + esc(r.rejected || '') + '">✕ ' + esc(r.rejected || 'Filtered') + '</span>';
+        // Flat release-list row (Radarr/Prowlarr-style): a small quality tag leads,
+        // the RELEASE NAME is the hero, dense inline meta below, size + verdict + Get
+        // on the right. The outer .vdl-res stays a column so the live tracker docks.
+        var sub = [];
+        if (r.codec) sub.push(String(r.codec).toUpperCase());
+        if (r.audio) sub.push(String(r.audio).toUpperCase().replace('-', ' '));
+        if (r.hdr) sub.push(String(r.hdr).toUpperCase());
+        if (r.repack) sub.push('REPACK');
+        sub.push(r.username
+            ? '👤 ' + r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '')
+            : (r.seeders || 0) + ' seeders');
+        if (r.group) sub.push(r.group);
+        var flag = r.accepted
+            ? '<span class="vdl-flag vdl-flag--ok" title="Meets your quality profile">✓</span>'
+            : '<span class="vdl-flag vdl-flag--no" title="' + esc(r.rejected || 'Filtered out') + '">✕</span>';
         var grab = (r.accepted && r.username)
             ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Download this release">' +
-                '<span class="vdl-res-grab-ic" aria-hidden="true">⤓</span><span class="vdl-res-grab-tx">Get</span></button>'
+                '<span class="vdl-res-grab-ic" aria-hidden="true">⤓</span><span>Get</span></button>'
             : '';
+        var srcWord = SRC_LABEL[r.source] || r.source || '';
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
-                '<div class="vdl-res-res vdl-res-res--' + resKind(r.resolution) + '">' +
-                    '<span class="vdl-res-res-txt">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span></div>' +
-                '<div class="vdl-res-body">' +
-                    '<div class="vdl-res-line1">' +
-                        '<span class="vdl-res-summary">' + esc(summary) + '</span>' + tags +
-                        verdict +
-                    '</div>' +
-                    '<div class="vdl-res-name" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
-                    '<div class="vdl-res-meta">' +
-                        '<span class="vdl-res-stat"><span class="vdl-res-ico">💾</span>' + r.size_gb + ' GB</span>' +
-                        resAvailHTML(r) +
-                        (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
-                    '</div>' +
+                '<div class="vdl-q">' +
+                    '<span class="vdl-q-res vdl-q-res--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
+                    (srcWord ? '<span class="vdl-q-src">' + esc(srcWord) + '</span>' : '') +
                 '</div>' +
-                grab +
+                '<div class="vdl-info">' +
+                    '<div class="vdl-info-title" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
+                    '<div class="vdl-info-sub">' + esc(sub.join('  ·  ')) + '</div>' +
+                '</div>' +
+                '<div class="vdl-size">' + esc(String(r.size_gb)) + '<span class="vdl-size-u">GB</span></div>' +
+                flag + grab +
             '</div>' +
         '</div>';
     }
