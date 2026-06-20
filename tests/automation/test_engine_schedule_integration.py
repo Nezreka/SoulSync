@@ -411,10 +411,9 @@ def test_end_to_end_monthly_schedule_produces_valid_db_string(engine_with_db):
 
 
 def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
-    """The video twin ('Scan Video Library') must seed with owned_by='video'
-    so it stays off the music page, and carry its action_config (mode). Music
-    system automations keep owned_by=None. Regression guard for the seeding
-    seam in ensure_system_automations()."""
+    """The video post-download chain twins must seed with owned_by='video' so they
+    stay off the music page; the standalone 'Scan Video Library' is NO LONGER seeded
+    (superseded by the chain). Music system automations keep owned_by=None."""
     db = MagicMock()
     db.get_system_automation_by_action.return_value = None  # nothing seeded yet
     created = {}
@@ -428,12 +427,32 @@ def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
     engine = AutomationEngine(db)
     engine.ensure_system_automations()
 
-    # Video twin seeded, tagged for the video side, with its mode config.
-    assert 'video_scan_library' in created, 'video twin not seeded'
-    video = created['video_scan_library']
-    assert video['owned_by'] == 'video'
-    assert json.loads(video['action_config']) == {'mode': 'incremental'}
+    # The standalone scheduled scan is gone; the chain twins are seeded, video-tagged.
+    assert 'video_scan_library' not in created
+    assert created['video_scan_server']['owned_by'] == 'video'
+    assert created['video_update_database']['owned_by'] == 'video'
+    assert json.loads(created['video_update_database']['action_config']) == {'mode': 'incremental'}
 
     # Music automations stay owned_by=None (shown on the music page).
     assert created['scan_library']['owned_by'] is None
     assert json.loads(created['scan_library']['action_config']) == {}
+
+
+def test_video_scan_library_system_automation_is_cleaned_up(monkeypatch):
+    """The old standalone 'Scan Video Library' system automation is deleted once
+    (superseded by the post-download chain). Guard flag stops it re-running."""
+    class _FakeCfg:
+        def __init__(self): self._d = {}
+        def get(self, k, default=None): return self._d.get(k, default)
+        def set(self, k, v): self._d[k] = v
+    monkeypatch.setattr('config.settings.config_manager', _FakeCfg())
+
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {'id': 99, 'is_system': 1}
+    engine = AutomationEngine(db)
+
+    engine._fix_video_scan_default()
+    db.delete_automation.assert_called_once_with(99)
+
+    engine._fix_video_scan_default()                 # flag set → no second delete
+    db.delete_automation.assert_called_once()

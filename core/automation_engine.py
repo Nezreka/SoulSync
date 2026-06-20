@@ -150,17 +150,8 @@ SYSTEM_AUTOMATIONS = [
     # them out) and ON the video Automations page (it shows only these).
     # Schedule-based for now; a video-download-complete event trigger can
     # replace the schedule once that event is wired into the engine.
-    {
-        'name': 'Scan Video Library',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 6, 'unit': 'hours'},
-        'action_type': 'video_scan_library',
-        'action_config': {'mode': 'incremental'},   # recurring = light (newest-only, no prune)
-        'owned_by': 'video',
-        # First run a full interval out — a scheduled scan should NOT fire right after
-        # app startup; post-download freshness is handled by the event chain instead.
-        'initial_delay': 6 * 60 * 60,
-    },
+    # (No standalone scheduled scan — the post-download chain below keeps the library
+    # fresh. The 'video_scan_library' action/block still exist for a custom automation.)
     # Post-download chain (video twin of music's batch_complete → scan_library →
     # library_scan_completed → start_database_update). Event-based, so a finished
     # video download refreshes the server then pulls the new media into video.db.
@@ -325,29 +316,22 @@ class AutomationEngine:
         self._fix_video_scan_default()
 
     def _fix_video_scan_default(self):
-        """One-time correction: the first 'Scan Video Library' seed defaulted to a
-        FULL scan that fired ~5 min after startup. Switch existing rows that still
-        carry that old default to an INCREMENTAL scan and push the next run a full
-        interval out (no startup-proximate scan). Guarded by a flag + only touches
-        the unchanged default, so a user's deliberate choice is never overridden."""
+        """One-time cleanup: remove the standalone 'Scan Video Library' system
+        automation — it's superseded by the post-download chain (Auto-Scan Video
+        After Downloads → Auto-Update Video Database After Scan). Only deletes the
+        SYSTEM row; a user can still build their own scan automation from the action.
+        Flag-guarded so it runs once."""
         try:
             from config.settings import config_manager
-            if config_manager.get('video_scan_default_v2', False):
+            if config_manager.get('video_scan_cleanup_v3', False):
                 return
             auto = self.db.get_system_automation_by_action('video_scan_library')
-            if auto:
-                try:
-                    cfg = json.loads(auto.get('action_config') or '{}')
-                except (ValueError, TypeError):
-                    cfg = {}
-                if cfg.get('mode', 'full') == 'full':   # still the old default → correct it
-                    self.db.update_automation(
-                        auto['id'], action_config=json.dumps({'mode': 'incremental'}),
-                        next_run=_utc_after(6 * 60 * 60))
-                    logger.info("Migrated 'Scan Video Library' to incremental + schedule-only")
-            config_manager.set('video_scan_default_v2', True)
+            if auto and auto.get('is_system'):
+                self.db.delete_automation(auto['id'])
+                logger.info("Removed superseded 'Scan Video Library' system automation")
+            config_manager.set('video_scan_cleanup_v3', True)
         except Exception:
-            logger.exception("video scan default migration failed")
+            logger.exception("video scan cleanup failed")
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
