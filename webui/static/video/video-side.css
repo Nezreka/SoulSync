@@ -3128,29 +3128,32 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%); }
 .vdl-auto-all:hover::after { animation: vdlSheen 0.7s ease 1; }
 
-.vdl-sources { display: flex; flex-direction: column; gap: 11px; }
-/* each source carries its own brand colour (--src) so the row glows in-brand */
+.vdl-sources { display: flex; flex-direction: column; gap: 10px; }
+/* a source = a sleek dark-glass row; the brand colour is an ACCENT (icon + edge
+   light + hover wash), not a full colour wash — calmer + more premium. */
 .vdl-src { --src: 130 130 150; position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px;
-    padding: 13px 14px; border-radius: 16px; border: 1px solid rgba(var(--src), 0.26);
-    background: linear-gradient(100deg, rgba(var(--src), 0.17), rgba(var(--src), 0.05) 52%, rgba(255, 255, 255, 0.018));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
-    animation: vdlSlide 0.46s both; transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.25s ease; }
-/* a soft brand glow bleeding from the left edge gives the row depth */
-.vdl-src::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(rgb(var(--src)), rgba(var(--src), 0.4));
-    box-shadow: 0 0 16px 1px rgba(var(--src), 0.7); }
+    padding: 12px 13px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); animation: vdlSlide 0.46s both;
+    transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.2s, box-shadow 0.25s, background 0.2s; }
+/* a thin brand light on the left edge — extends + brightens on hover */
+.vdl-src::before { content: ''; position: absolute; left: 0; top: 16%; bottom: 16%; width: 3px; border-radius: 3px;
+    background: rgb(var(--src)); opacity: 0.5; box-shadow: 0 0 12px 1px rgba(var(--src), 0.55);
+    transition: opacity 0.2s, top 0.2s, bottom 0.2s; }
 .vdl-src[data-vdl-src="soulseek"] { --src: 74 163 255; }
 .vdl-src[data-vdl-src="torrent"] { --src: 245 158 11; }
 .vdl-src[data-vdl-src="usenet"] { --src: 168 85 247; }
 .vdl-src[data-vdl-src="youtube"] { --src: 255 64 64; }
-.vdl-src:hover { transform: translateY(-2px); border-color: rgba(var(--src), 0.6);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 14px 30px -14px rgba(var(--src), 0.85); }
-/* brand icon tile — glassier, with an inner highlight + brand halo */
-.vdl-src-icon { position: relative; flex-shrink: 0; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
-    background: linear-gradient(145deg, rgba(var(--src), 0.5), rgba(var(--src), 0.14));
-    border: 1px solid rgba(var(--src), 0.5);
-    box-shadow: 0 6px 18px -7px rgb(var(--src)), inset 0 1px 0 rgba(255, 255, 255, 0.28); transition: transform 0.2s ease; }
-.vdl-src:hover .vdl-src-icon { transform: scale(1.07) rotate(-4deg); }
+.vdl-src:hover { transform: translateY(-2px); border-color: rgba(var(--src), 0.42);
+    background: linear-gradient(180deg, rgba(var(--src), 0.07), rgba(255, 255, 255, 0.015));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 34px -18px rgba(var(--src), 0.85); }
+.vdl-src:hover::before { top: 0; bottom: 0; opacity: 1; }
+/* brand icon tile — glassy, with an inner highlight + brand halo */
+.vdl-src-icon { position: relative; flex-shrink: 0; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+    background: linear-gradient(150deg, rgba(var(--src), 0.42), rgba(var(--src), 0.1));
+    border: 1px solid rgba(var(--src), 0.42);
+    box-shadow: 0 7px 20px -9px rgb(var(--src)), inset 0 1px 0 rgba(255, 255, 255, 0.25); transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.vdl-src:hover .vdl-src-icon { transform: translateY(-1px) scale(1.05); }
 .vdl-src-emoji { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
 .vdl-src-main { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
 .vdl-src-name { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
@@ -3370,55 +3373,69 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-res-demo { background: rgba(245, 158, 11, 0.14); color: #fbcd7a; }
 .vdl-res-err { color: #fbcd7a; }
 
-/* ── result list: flat, release-name-first rows (Radarr/Prowlarr style) ─────
-   No per-row card chrome — hairline dividers, a small quality tag, the release
-   name as the hero, dense inline meta, then size · verdict · Get on the right.
-   .vdl-res stays a column so the live tracker can dock under the chosen row. */
-.vdl-res { position: relative; display: flex; flex-direction: column;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06); animation: vdlRise 0.3s both; }
-.vdl-res:last-child { border-bottom: none; }
-.vdl-res-main { display: flex; align-items: center; gap: 13px; padding: 9px 9px; border-radius: 9px;
-    transition: background 0.14s ease; }
-.vdl-res:hover .vdl-res-main { background: rgba(255, 255, 255, 0.04); }
-.vdl-res--rejected { opacity: 0.46; }
-.vdl-res--rejected:hover { opacity: 0.82; }
-.vdl-res--grabbed .vdl-res-main { background: rgba(var(--accent-rgb), 0.08); }
-.vdl-res--auto .vdl-res-main { background: rgba(var(--accent-rgb), 0.13); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.45); }
-/* quality column: a small res tag + the source word stacked under it */
-.vdl-q { flex-shrink: 0; width: 64px; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
-.vdl-q-res { font-size: 11px; font-weight: 900; letter-spacing: -0.01em; padding: 2px 8px; border-radius: 6px; color: #06210f;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
-.vdl-q-res--4k { background: linear-gradient(135deg, #ffd76a, #f0a830); }
-.vdl-q-res--1080 { background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72)); }
-.vdl-q-res--720 { background: linear-gradient(135deg, #8fb3ff, #5f86d6); color: #0a1020; }
-.vdl-q-res--sd { background: rgba(255, 255, 255, 0.32); color: #11141a; }
-.vdl-q-src { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.4); }
-.vdl-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.vdl-info-title { font-size: 13px; font-weight: 700; color: #fff; letter-spacing: -0.01em;
+/* ── result cards: cinematic, card-based ────────────────────────────────────
+   A bold quality badge (resolution over source) anchors the left, the release
+   NAME is the hero, the meta is a row of crisp pills, then size · verdict · Get.
+   .vdl-res is a column so the live tracker docks under the chosen card on grab. */
+.vdl-res { position: relative; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
+    margin-bottom: 9px; animation: vdlRise 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
+    border: 1px solid rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.18s, box-shadow 0.22s; }
+.vdl-res-main { display: flex; align-items: center; gap: 14px; padding: 12px 14px; }
+.vdl-res:hover { transform: translateY(-2px); border-color: rgba(var(--accent-rgb), 0.4);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 18px 34px -20px rgba(0, 0, 0, 0.95); }
+.vdl-res--rejected { opacity: 0.48; }
+.vdl-res--rejected:hover { opacity: 0.85; }
+/* accepted releases get a faint accent edge; the grabbed/auto pick lights up fully */
+.vdl-res--ok::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: linear-gradient(rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.4)); box-shadow: 0 0 14px 0 rgba(var(--accent-rgb), 0.4); }
+.vdl-res--grabbed { border-color: rgba(var(--accent-rgb), 0.55); }
+.vdl-res--auto { border-color: rgba(var(--accent-rgb), 0.85) !important;
+    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 18px 36px -16px rgba(var(--accent-rgb), 0.85); }
+/* quality badge — bold + cinematic, resolution over the source word */
+.vdl-q { flex-shrink: 0; width: 58px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.vdl-q-res { width: 100%; text-align: center; font-size: 15px; font-weight: 900; letter-spacing: -0.02em; color: #06210f;
+    padding: 7px 0; border-radius: 11px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 5px 14px -7px rgba(0, 0, 0, 0.7); }
+.vdl-q-res--4k { background: linear-gradient(140deg, #ffd76a, #f0a830); }
+.vdl-q-res--1080 { background: linear-gradient(140deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.7)); }
+.vdl-q-res--720 { background: linear-gradient(140deg, #8fb3ff, #5f86d6); color: #0a1020; }
+.vdl-q-res--sd { background: linear-gradient(140deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.22)); color: #11141a; }
+.vdl-q-src { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.42); }
+.vdl-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.vdl-info-title { font-size: 13.5px; font-weight: 700; color: #fff; letter-spacing: -0.01em;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdl-info-sub { font-size: 11px; font-weight: 600; color: rgba(255, 255, 255, 0.45);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdl-size { flex-shrink: 0; font-size: 13px; font-weight: 800; color: rgba(255, 255, 255, 0.82);
-    font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
-.vdl-size-u { font-size: 10px; font-weight: 700; color: rgba(255, 255, 255, 0.45); margin-left: 2px; }
-.vdl-flag { flex-shrink: 0; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 6px;
+.vdl-info-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vdl-tag { font-size: 10px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; padding: 3px 7px; border-radius: 6px;
+    background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); }
+.vdl-tag--hdr { background: linear-gradient(100deg, rgba(245, 158, 11, 0.38), rgba(168, 85, 247, 0.38)); color: #fff; border-color: transparent; }
+.vdl-tag--rep { background: rgba(108, 211, 145, 0.16); color: #8fe7af; border-color: transparent; }
+.vdl-tag--grp { background: transparent; color: rgba(255, 255, 255, 0.42); border-color: rgba(255, 255, 255, 0.12);
+    font-family: 'JetBrains Mono', ui-monospace, monospace; text-transform: none; letter-spacing: 0; }
+.vdl-avail { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #8fe7af; }
+.vdl-avail-ic { font-size: 8px; color: #6cd391; }
+.vdl-avail--seed { color: rgba(255, 255, 255, 0.55); }
+.vdl-res-right { flex-shrink: 0; display: flex; align-items: center; gap: 11px; }
+.vdl-size { font-size: 14px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vdl-size-u { font-size: 9.5px; font-weight: 700; color: rgba(255, 255, 255, 0.4); margin-left: 1px; }
+.vdl-flag { flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px;
     font-size: 12px; font-weight: 900; }
 .vdl-flag--ok { background: rgba(108, 211, 145, 0.18); color: #6cd391; }
 .vdl-flag--no { background: rgba(245, 158, 11, 0.16); color: #fbcd7a; }
-/* Get = compact accent pill (same language as the source Auto button) */
-.vdl-res-grab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 7px 13px; border-radius: 9px;
-    cursor: pointer; font-size: 11.5px; font-weight: 850; letter-spacing: 0.01em; color: #06210f; border: none;
+/* Get — the accent hero pill */
+.vdl-res-grab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 8px 15px; border-radius: 10px;
+    cursor: pointer; font-size: 12px; font-weight: 850; letter-spacing: 0.01em; color: #06210f; border: none;
     background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72));
-    box-shadow: 0 4px 12px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    transition: transform 0.14s ease, filter 0.14s ease, box-shadow 0.2s ease; }
+    box-shadow: 0 5px 14px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.32);
+    transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.2s ease; }
 .vdl-res-grab:hover { transform: translateY(-1px); filter: brightness(1.07);
-    box-shadow: 0 7px 16px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.38); }
-.vdl-res-grab-ic { font-size: 13px; line-height: 1; }
+    box-shadow: 0 8px 18px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.vdl-res-grab-ic { font-size: 14px; line-height: 1; }
 .vdl-res-grab--busy { opacity: 0.7; cursor: progress; }
 .vdl-btn--busy { opacity: 0.7; cursor: progress; }
 @media (max-width: 520px) {
-    .vdl-q { flex-direction: row; align-items: center; width: auto; gap: 7px; }
-    .vdl-info-sub { white-space: normal; }
+    .vdl-res-main { flex-wrap: wrap; }
+    .vdl-info { flex-basis: 100%; order: 3; }
 }
 
 /* live download tracker docked under the grabbed card */
