@@ -234,11 +234,14 @@ def _tick(db) -> None:
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads()
     live_ids = set()
+    completed_now = 0
     for dl in active:
         live_ids.add(dl["id"])
         upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move)
         if not upd:
             continue
+        if upd.get("status") == "completed":
+            completed_now += 1
         if upd.get("_missing"):
             n = _misses.get(dl["id"], 0) + 1
             _misses[dl["id"]] = n
@@ -258,6 +261,16 @@ def _tick(db) -> None:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
         _misses.pop(k, None)
+    # Batch complete: we finished ≥1 download this tick AND nothing is left in
+    # flight (queued/downloading/searching). Fires once, on the transition to
+    # empty — the next tick early-returns. Publishes to the event bridge so the
+    # 'Auto-Scan Video After Downloads' automation can refresh the server.
+    if completed_now and not db.get_active_video_downloads():
+        try:
+            from core.video.download_events import notify_batch_complete
+            notify_batch_complete({"completed": completed_now})
+        except Exception:
+            logger.exception("video monitor: batch-complete notify failed")
 
 
 def _run(db_provider) -> None:

@@ -125,6 +125,19 @@ def test_music_scope_matches_legacy_full_lists_minus_video():
         assert {b['type'] for b in music[key]} == expected
 
 
+def test_post_download_chain_blocks_are_video_scoped():
+    music = blocks.blocks_for_scope('music')
+    video = blocks.blocks_for_scope('video')
+    trig = {t['type'] for t in video['triggers']}
+    act = {a['type'] for a in video['actions']}
+    assert {'video_batch_complete', 'video_library_scan_completed'} <= trig
+    assert {'video_scan_server', 'video_update_database'} <= act
+    mtrig = {t['type'] for t in music['triggers']}
+    mact = {a['type'] for a in music['actions']}
+    assert not ({'video_batch_complete', 'video_library_scan_completed'} & mtrig)
+    assert not ({'video_scan_server', 'video_update_database'} & mact)
+
+
 def test_video_scan_library_block_shape():
     action = next(a for a in blocks.ACTIONS if a['type'] == 'video_scan_library')
     assert action['scope'] == 'video'
