@@ -1381,19 +1381,34 @@ class VideoDatabase:
                          (owner_id, gid))
 
     @staticmethod
-    def _resilient_upsert(conn, table: str, base: dict, id_cols: dict) -> None:
+    def _resilient_upsert(conn, table: str, base: dict, id_cols: dict,
+                          preserve_enrichment: bool = True) -> None:
         """INSERT…ON CONFLICT(server_source, server_id) for a movie/show row.
 
         Resilient to a LEGACY UNIQUE on tmdb_id/tvdb_id/imdb_id (old DBs created
         before those were made non-unique — SQLite can't drop an inline UNIQUE):
         on IntegrityError we retry WITHOUT the id columns, so the row is still
         stored (same film in >1 library) instead of being dropped by the scan.
-        ``base`` holds the always-written cols; ``id_cols`` the droppable ids."""
+        ``base`` holds the always-written cols; ``id_cols`` the droppable ids.
+
+        ``preserve_enrichment`` (default) keeps enrichment-owned fields (``status``,
+        network, ratings, air dates…) that the SERVER left blank — so an incremental
+        or deep re-scan never wipes the TMDB-backfilled ``status`` (which the airing
+        watchlist depends on). A FULL scan passes False = a clean overwrite / reset."""
+        protect = (_ENRICH_META_COLS.get(table, set()) if preserve_enrichment else set())
+
+        def _set(c):
+            # On a conflict UPDATE, an enrichment-owned column only takes the server
+            # value when it's non-blank; otherwise it keeps what's already stored.
+            if c in protect:
+                return f"{c}=COALESCE(NULLIF(excluded.{c}, ''), {table}.{c})"
+            return f"{c}=excluded.{c}"
+
         def run(include_ids):
             cols = list(base.keys()) + (list(id_cols.keys()) if include_ids else [])
             vals = list(base.values()) + (list(id_cols.values()) if include_ids else [])
             updates = [c for c in cols if c not in ("server_source", "server_id")]
-            set_clause = ", ".join(f"{c}=excluded.{c}" for c in updates) + ", updated_at=CURRENT_TIMESTAMP"
+            set_clause = ", ".join(_set(c) for c in updates) + ", updated_at=CURRENT_TIMESTAMP"
             sql = (f"INSERT INTO {table} ({', '.join(cols)}, updated_at) "
                    f"VALUES ({', '.join(['?'] * len(cols))}, CURRENT_TIMESTAMP) "
                    f"ON CONFLICT(server_source, server_id) DO UPDATE SET {set_clause}")
@@ -1453,8 +1468,10 @@ class VideoDatabase:
                 for r in rows if r["department"] == "crew"]
         return {"cast": cast, "crew": crew}
 
-    def upsert_movie(self, server_source: str, item: dict) -> int:
-        """Insert/update one movie (keyed on server id) and its file. Returns row id."""
+    def upsert_movie(self, server_source: str, item: dict, preserve_enrichment: bool = True) -> int:
+        """Insert/update one movie (keyed on server id) and its file. Returns row id.
+        ``preserve_enrichment`` keeps enrichment-owned fields the server left blank
+        (default); a FULL scan passes False for a clean reset."""
         conn = self._get_connection()
         try:
             self._resilient_upsert(conn, "movies", {
@@ -1465,7 +1482,8 @@ class VideoDatabase:
                 "studio": item.get("studio"), "tagline": item.get("tagline"),
                 "rating": item.get("rating"), "rating_critic": item.get("rating_critic"),
                 "poster_url": item.get("poster_url"), "has_file": 1 if item.get("file") else 0,
-            }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")})
+            }, {"tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
+                preserve_enrichment=preserve_enrichment)
             movie_id = conn.execute(
                 "SELECT id FROM movies WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),
@@ -1477,10 +1495,12 @@ class VideoDatabase:
         finally:
             conn.close()
 
-    def upsert_show_tree(self, server_source: str, item: dict) -> int:
+    def upsert_show_tree(self, server_source: str, item: dict, preserve_enrichment: bool = True) -> int:
         """Insert/update a show with its seasons + episodes (and files) in one
         transaction. Episodes/seasons no longer present on the server for this
-        show are pruned. Returns the show row id."""
+        show are pruned. Returns the show row id. ``preserve_enrichment`` keeps
+        enrichment-owned fields (status etc.) the server left blank (default); a FULL
+        scan passes False for a clean reset."""
         conn = self._get_connection()
         try:
             self._resilient_upsert(conn, "shows", {
@@ -1492,7 +1512,8 @@ class VideoDatabase:
                 "tagline": item.get("tagline"), "rating": item.get("rating"),
                 "first_air_date": item.get("first_air_date"), "last_air_date": item.get("last_air_date"),
                 "poster_url": item.get("poster_url"),
-            }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")})
+            }, {"tvdb_id": item.get("tvdb_id"), "tmdb_id": item.get("tmdb_id"), "imdb_id": item.get("imdb_id")},
+                preserve_enrichment=preserve_enrichment)
             show_id = conn.execute(
                 "SELECT id FROM shows WHERE server_source=? AND server_id=?",
                 (server_source, item["server_id"]),

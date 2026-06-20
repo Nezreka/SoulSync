@@ -138,6 +138,10 @@ class VideoLibraryScanner:
             server = source.server_name
             incremental = mode == "incremental"
             do_prune = mode == "deep"
+            # FULL = a clean reset (clobber enrichment-owned fields). Incremental/deep
+            # PRESERVE them, so a routine re-scan never wipes the TMDB-backfilled
+            # `status` the airing watchlist relies on. (Only an explicit full resets.)
+            preserve = mode != "full"
 
             # Incremental on a near-empty library is pointless — fall back to a
             # full pass so the first scan actually populates (music does this).
@@ -178,7 +182,7 @@ class VideoLibraryScanner:
                     continue
                 consec = 0
                 try:
-                    self.db.upsert_movie(server, item)
+                    self.db.upsert_movie(server, item, preserve_enrichment=preserve)
                 except Exception:
                     logger.exception("video scan: skipping movie %s", sid)
                     continue
@@ -215,7 +219,7 @@ class VideoLibraryScanner:
                     continue
                 consec = 0
                 try:
-                    self.db.upsert_show_tree(server, show)
+                    self.db.upsert_show_tree(server, show, preserve_enrichment=preserve)
                 except Exception:
                     logger.exception("video scan: skipping show %s", sid)
                     continue
