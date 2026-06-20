@@ -189,7 +189,12 @@ class VideoLibraryScanner:
                     self._set(movies=movies, percent=pct())
             self._set(movies=movies, percent=pct())
             # Prune ONLY on a deep scan, and only when we actually saw items —
-            # so a transient empty response can never wipe the library.
+            # so a transient empty response can never wipe the library. The prune
+            # runs AFTER the bar fills, and a big cleanup (many orphaned rows +
+            # cascades) takes a few seconds — surface a phase so the UI shows
+            # "cleaning up", not a stuck 100%.
+            if do_prune and seen_movies:
+                self._set(phase="cleaning up removed movies", percent=pct())
             removed_m = (self.db.prune_missing("movies", server, seen_movies)
                          if do_prune and seen_movies else 0)
 
@@ -219,6 +224,9 @@ class VideoLibraryScanner:
                 episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
                 processed += 1
                 self._set(shows=shows, episodes=episodes, percent=pct())
+            # Final prune (the one that delays "done" on a deep scan) — show it.
+            if do_prune and seen_shows:
+                self._set(phase="cleaning up removed shows", percent=100)
             removed_s = (self.db.prune_missing("shows", server, seen_shows)
                          if do_prune and seen_shows else 0)
 

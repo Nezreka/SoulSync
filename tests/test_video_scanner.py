@@ -110,6 +110,25 @@ def test_deep_scan_prunes_removed_items(db):
     assert db.dashboard_stats()["library"]["movies"] == 1
 
 
+def test_deep_scan_shows_cleanup_phase_during_prune(db):
+    # On a deep scan the bar hits 100% before the (slow) prune runs — the scanner
+    # must surface a "cleaning up" phase so the UI doesn't look stuck at 100%.
+    scanner = VideoLibraryScanner(db)
+    scanner.scan_sync(lambda: FakeSource(
+        [{"server_id": "m1", "title": "A"}, {"server_id": "m2", "title": "B"}], []), mode="deep")
+    # Spy the phase at the exact moment prune is called on the next deep scan.
+    seen = {}
+    real_prune = db.prune_missing
+
+    def spy(table, server, ids):
+        seen[table] = scanner.get_status().get("phase")
+        return real_prune(table, server, ids)
+
+    db.prune_missing = spy
+    scanner.scan_sync(lambda: FakeSource([{"server_id": "m1", "title": "A"}], []), mode="deep")
+    assert seen.get("movies") == "cleaning up removed movies"
+
+
 def test_full_refresh_does_not_prune(db):
     # 'full' refreshes/adds but never removes — only 'deep' prunes.
     scanner = VideoLibraryScanner(db)
