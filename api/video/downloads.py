@@ -292,6 +292,33 @@ def register_routes(bp):
         ensure_started(get_video_db)   # also (re)start the monitor when the page is open
         return jsonify({"downloads": db.list_video_downloads()})
 
+    @bp.route("/downloads/status", methods=["GET"])
+    def video_downloads_status():
+        """Lightweight live-tracking lookup — used by the Download modal's result
+        card (by ``id``) and a movie/show detail page (by ``media_id`` +
+        ``media_source``, returning that title's most relevant download so the page
+        can show live progress). Returns ``{"download": {...}|null}``."""
+        from . import get_video_db
+        from core.video.download_monitor import ensure_started
+        db = get_video_db()
+        ensure_started(get_video_db)
+        dl_id = request.args.get("id")
+        if dl_id:
+            try:
+                return jsonify({"download": db.get_video_download(int(dl_id))})
+            except (TypeError, ValueError):
+                return jsonify({"download": None})
+        media_id = request.args.get("media_id")
+        if media_id:
+            media_source = request.args.get("media_source")
+            match = [r for r in db.list_video_downloads()
+                     if str(r.get("media_id")) == str(media_id)
+                     and (not media_source or r.get("media_source") == media_source)]
+            # list_video_downloads orders active-first then newest — so an active
+            # download (or else the most recent) for this title is simply match[0].
+            return jsonify({"download": match[0] if match else None})
+        return jsonify({"download": None})
+
     @bp.route("/downloads/cancel", methods=["POST"])
     def video_downloads_cancel():
         from . import get_video_db

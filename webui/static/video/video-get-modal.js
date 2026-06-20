@@ -650,5 +650,5 @@
         return parts.length ? '<span class="vcard-ctrls">' + parts.join('') + '</span>' : '';
     }
 
-    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, cardButton: cardButton };
+    window.VideoGet = { btn: btn, isAiring: isAiring, open: openModal, close: closeModal, cardButton: cardButton };
 })();

@@ -344,6 +344,13 @@
             })(gotos[k]);
         }
 
+        // Jump to a top-level video page from anywhere (e.g. a "Track on Downloads"
+        // button in the download modal / a detail page's live-progress chip).
+        document.addEventListener('soulsync:video-navigate', function (e) {
+            var pageId = e && e.detail && (e.detail.page || e.detail);
+            if (typeof pageId === 'string') navigate(pageId);
+        });
+
         // Drill-in: a card fires soulsync:video-open-detail {kind, id, source}. We
         // navigate to the matching detail subpage (video-detail.js loads the data)
         // and push a real URL — unless we're restoring from the URL (_restore).

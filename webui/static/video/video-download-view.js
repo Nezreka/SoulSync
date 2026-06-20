@@ -336,16 +336,16 @@
     // Downloads page. Reads the card's row + the panel's search context.
     function doGrab(btn) {
         var panel = btn.closest('.vdl-results'); if (!panel || !panel._rows) return;
+        var card = btn.closest('.vdl-res');
         var r = panel._rows[parseInt(btn.getAttribute('data-vdl-grab'), 10)]; if (!r) return;
-        btn.disabled = true; btn.classList.add('vdl-res-grab--busy'); btn.textContent = '…';
+        btn.disabled = true; btn.classList.add('vdl-res-grab--busy');
         sendGrab(buildGrabPayload(panel, r)).then(function (res) {
-            btn.classList.remove('vdl-res-grab--busy');
             if (res && res.ok) {
-                btn.textContent = '✓'; btn.classList.add('vdl-res-grab--done');
                 toast('Sent to Downloads', 'success');
+                beginTracking(card, res.id);   // selected card → live tracker + Track button
                 document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
             } else {
-                btn.disabled = false; btn.textContent = '⤓';
+                btn.disabled = false; btn.classList.remove('vdl-res-grab--busy');
                 toast((res && res.error) || 'Couldn’t start the download', 'error');
             }
         });
@@ -367,23 +367,25 @@
             toast('Auto: no release met your quality profile', 'error');
             return;
         }
-        // Highlight the card we're auto-grabbing so the choice is transparent.
-        var cards = panel.querySelectorAll('.vdl-res');
-        var card = cards[bestIdx];
-        if (card) card.classList.add('vdl-res--auto');
+        // Spotlight the card we're auto-grabbing so the choice is obvious, and
+        // scroll it into view (it may be below the fold among many results).
+        var card = panel.querySelector('[data-vdl-card="' + bestIdx + '"]');
+        if (card) {
+            card.classList.add('vdl-res--auto');
+            if (card.scrollIntoView) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
         var gbtn = card && card.querySelector('[data-vdl-grab]');
-        if (gbtn) { gbtn.disabled = true; gbtn.classList.add('vdl-res-grab--busy'); gbtn.textContent = '…'; }
+        if (gbtn) { gbtn.disabled = true; gbtn.classList.add('vdl-res-grab--busy'); }
         if (statusEl) { statusEl.textContent = 'Auto-grabbing'; statusEl.className = 'vdl-src-status vdl-src-status--scanning'; }
-        toast('Auto-grabbing best: ' + (best.quality_label || best.title || 'release'), 'info');
+        toast('Auto-picked best: ' + (best.quality_label || best.title || 'release'), 'info');
         sendGrab(buildGrabPayload(panel, best)).then(function (res) {
-            if (gbtn) gbtn.classList.remove('vdl-res-grab--busy');
             if (res && res.ok) {
-                if (gbtn) { gbtn.textContent = '✓'; gbtn.classList.add('vdl-res-grab--done'); }
                 if (statusEl) { statusEl.textContent = 'Sent'; statusEl.className = 'vdl-src-status vdl-src-status--done'; }
                 toast('Sent to Downloads', 'success');
+                beginTracking(card, res.id);   // chosen card → live tracker + Track button
                 document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
             } else {
-                if (gbtn) { gbtn.disabled = false; gbtn.textContent = '⤓'; }
+                if (gbtn) { gbtn.disabled = false; gbtn.classList.remove('vdl-res-grab--busy'); }
                 if (statusEl) { statusEl.textContent = 'Ready'; statusEl.className = 'vdl-src-status'; }
                 toast((res && res.error) || 'Auto: couldn’t start the download', 'error');
             }
@@ -408,8 +410,10 @@
         return '<span class="vdl-res-stat vdl-res-seed">▲ ' + (r.seeders || 0) + ' seeders</span>';
     }
 
-    // Readable card: a big resolution tile anchors it, a plain-English quality summary
-    // leads, the raw release name is demoted to a muted one-liner, then size/seeders.
+    // Result card: a colour-coded resolution badge anchors the left; the headline is
+    // a plain-English quality summary with the verdict pill; the raw release name is
+    // demoted to a mono one-liner; a stat strip (size / uploader / group) sits below.
+    // The card is a column so a live download tracker can drop in under it on grab.
     function resultCardHTML(r, i) {
         var summary = [SRC_LABEL[r.source] || r.source,
             r.codec ? String(r.codec).toUpperCase() : '',
@@ -420,22 +424,97 @@
         var verdict = r.accepted
             ? '<span class="vdl-res-verdict vdl-res-verdict--ok">✓ Meets profile</span>'
             : '<span class="vdl-res-verdict vdl-res-verdict--no" title="' + esc(r.rejected || '') + '">✕ ' + esc(r.rejected || 'Filtered') + '</span>';
-        return '<div class="vdl-res' + (r.accepted ? '' : ' vdl-res--rejected') + '">' +
-            '<div class="vdl-res-res vdl-res-res--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</div>' +
-            '<div class="vdl-res-body">' +
-                '<div class="vdl-res-line1">' +
-                    '<span class="vdl-res-summary">' + esc(summary) + '</span>' + tags +
-                    verdict +
+        var grab = (r.accepted && r.username)
+            ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Download this release">' +
+                '<span class="vdl-res-grab-ic" aria-hidden="true">⤓</span><span class="vdl-res-grab-tx">Get</span></button>'
+            : '';
+        return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
+            '<div class="vdl-res-main">' +
+                '<div class="vdl-res-res vdl-res-res--' + resKind(r.resolution) + '">' +
+                    '<span class="vdl-res-res-txt">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span></div>' +
+                '<div class="vdl-res-body">' +
+                    '<div class="vdl-res-line1">' +
+                        '<span class="vdl-res-summary">' + esc(summary) + '</span>' + tags +
+                        verdict +
+                    '</div>' +
+                    '<div class="vdl-res-name" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
+                    '<div class="vdl-res-meta">' +
+                        '<span class="vdl-res-stat"><span class="vdl-res-ico">💾</span>' + r.size_gb + ' GB</span>' +
+                        resAvailHTML(r) +
+                        (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
+                    '</div>' +
                 '</div>' +
-                '<div class="vdl-res-name" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
-                '<div class="vdl-res-meta">' +
-                    '<span class="vdl-res-stat"><span class="vdl-res-ico">💾</span>' + r.size_gb + ' GB</span>' +
-                    resAvailHTML(r) +
-                    (r.group ? '<span class="vdl-res-stat vdl-res-grp">' + esc(r.group) + '</span>' : '') +
-                '</div>' +
+                grab +
             '</div>' +
-            (r.accepted && r.username ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Grab this release">⤓</button>' : '') +
         '</div>';
+    }
+
+    // States the result-card tracker shows while a grabbed release downloads.
+    var TRACK_LABEL = { downloading: 'Downloading', queued: 'Queued',
+        searching: 'Finding another release…', completed: 'Downloaded', failed: 'Failed', cancelled: 'Cancelled' };
+    var TRACK_DONE = { completed: 1, failed: 1, cancelled: 1 };
+
+    // Close the modal (if any) and jump to the Downloads page.
+    function gotoDownloads() {
+        if (window.VideoGet && VideoGet.close) VideoGet.close();
+        document.dispatchEvent(new CustomEvent('soulsync:video-navigate', { detail: 'video-downloads' }));
+    }
+
+    // After a grab, turn the chosen card into a live tracker: a progress bar that
+    // follows the real download + a button that jumps to the Downloads page. Polls
+    // /downloads/status?id= until the download reaches a terminal state.
+    function beginTracking(card, dlId) {
+        if (!card) return;
+        card.classList.add('vdl-res--grabbed');
+        var gb = card.querySelector('[data-vdl-grab]'); if (gb) gb.remove();
+        var main = card.querySelector('.vdl-res-main') || card;
+        var foot = card.querySelector('[data-vdl-track]');
+        if (!foot) {
+            foot = document.createElement('div');
+            foot.className = 'vdl-res-track vdl-res-track--active';
+            foot.setAttribute('data-vdl-track', '');
+            foot.innerHTML =
+                '<div class="vdl-res-track-head">' +
+                    '<span class="vdl-res-track-state" data-vdl-track-state><span class="vdl-res-track-spin"></span>Starting…</span>' +
+                    '<span class="vdl-res-track-pct" data-vdl-track-pct></span>' +
+                    '<button class="vdl-res-track-go" type="button" data-vdl-track-go>Track on Downloads ↗</button>' +
+                '</div>' +
+                '<div class="vdl-res-track-bar"><span class="vdl-res-track-fill" data-vdl-track-fill></span></div>';
+            if (main.nextSibling) card.insertBefore(foot, main.nextSibling); else card.appendChild(foot);
+            var go = foot.querySelector('[data-vdl-track-go]');
+            if (go) go.addEventListener('click', gotoDownloads);
+        }
+        _trackPoll(card, foot, dlId);
+    }
+
+    function _trackPoll(card, foot, dlId) {
+        if (foot._t) { clearTimeout(foot._t); foot._t = null; }
+        function tick() {
+            if (!card.isConnected) return;   // modal closed → stop
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+                if (!card.isConnected) return;
+                var dl = d && d.download;
+                if (!dl) { foot._t = setTimeout(tick, 2000); return; }
+                var st = dl.status;
+                var pct = Math.max(0, Math.min(100, dl.progress || 0));
+                if (st === 'completed') pct = 100;
+                var active = !(st in TRACK_DONE);
+                foot.className = 'vdl-res-track vdl-res-track--' +
+                    (st === 'completed' ? 'done' : (st === 'failed' || st === 'cancelled' ? 'fail' : 'active'));
+                var fill = foot.querySelector('[data-vdl-track-fill]'); if (fill) fill.style.width = pct + '%';
+                var pctEl = foot.querySelector('[data-vdl-track-pct]');
+                if (pctEl) pctEl.textContent = (st === 'downloading' || st === 'queued') ? pct + '%' : '';
+                var stEl = foot.querySelector('[data-vdl-track-state]');
+                if (stEl) {
+                    var spin = (st === 'downloading' || st === 'queued' || st === 'searching')
+                        ? '<span class="vdl-res-track-spin"></span>' : '';
+                    var ic = st === 'completed' ? '✓ ' : (st === 'failed' || st === 'cancelled' ? '✕ ' : '');
+                    stEl.innerHTML = spin + ic + esc(TRACK_LABEL[st] || 'Downloading');
+                }
+                if (active) foot._t = setTimeout(tick, 1700);
+            });
+        }
+        tick();
     }
 
     // ── TV show download view ─────────────────────────────────────────────────
