@@ -260,6 +260,14 @@ def register_routes(bp):
         if not started.get("ok"):
             return jsonify({"ok": False, "error": started.get("error") or "slskd refused the download."}), 502
 
+        import json as _json
+        from core.video.slskd_search import build_query
+        # The OTHER accepted results become the retry pool; the search context drives
+        # the alternate-query requery when the pool runs dry.
+        ctx = body.get("search_ctx") if isinstance(body.get("search_ctx"), dict) else {}
+        candidates = [c for c in (body.get("candidates") or []) if isinstance(c, dict) and c.get("filename") != filename]
+        first_query = build_query(ctx.get("scope") or body.get("kind") or "movie", ctx.get("title") or body.get("title"),
+                                  year=ctx.get("year"), season=ctx.get("season"), episode=ctx.get("episode"))
         dl_id = db.add_video_download({
             "kind": str(body.get("kind") or "movie"), "title": body.get("title"),
             "release_title": body.get("release_title") or body.get("filename"),
@@ -269,6 +277,9 @@ def register_routes(bp):
             "media_id": (str(body.get("media_id")) if body.get("media_id") is not None else None),
             "media_source": body.get("media_source"), "year": body.get("year"),
             "poster_url": body.get("poster_url"),
+            "candidates": _json.dumps(candidates), "search_ctx": _json.dumps(ctx),
+            "tried_queries": _json.dumps([first_query] if first_query else []),
+            "tried_files": _json.dumps([filename]), "attempts": 0,
         })
         ensure_started(get_video_db)
         return jsonify({"ok": True, "id": dl_id})
