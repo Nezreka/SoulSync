@@ -1,8 +1,9 @@
-"""Guard: the test suite must NEVER resolve the real database/music_library.db.
+"""Guard: the test suite must NEVER resolve the real music OR video library DB.
 
-Tests exercise modules that call get_database() with no path. If that resolves
-to the live DB, test writes can corrupt a real library (this happened, over a
-WSL-mounted Windows drive). conftest.py sets DATABASE_PATH to a temp file before
+Tests exercise modules that call get_database()/get_video_db() with no path. If
+that resolves to a live DB, test writes can corrupt a real library (this
+happened to BOTH the music and the video library, over a WSL-mounted Windows
+drive). conftest.py sets DATABASE_PATH + VIDEO_DATABASE_PATH to temp files before
 anything imports; these tests prove it sticks for every default-path access.
 """
 
@@ -29,4 +30,24 @@ def test_musicdatabase_default_path_never_real():
 def test_get_database_path_never_real():
     from database.music_database import get_database
     resolved = str(Path(get_database().database_path).resolve())
+    assert 'soulsync-testdb-' in resolved, resolved
+
+
+# ── Video side — same hazard, same guarantee ──────────────────────────────
+
+def test_video_database_path_env_is_isolated():
+    p = os.environ.get('VIDEO_DATABASE_PATH', '')
+    assert 'soulsync-testdb-' in p, f"VIDEO_DATABASE_PATH not isolated: {p!r}"
+
+
+def test_videodatabase_default_path_never_real():
+    from database.video_database import VideoDatabase
+    resolved = str(Path(VideoDatabase().database_path).resolve())
+    assert 'soulsync-testdb-' in resolved, resolved
+    assert not resolved.replace('\\', '/').endswith('database/video_library.db'), resolved
+
+
+def test_get_video_db_path_never_real():
+    from api.video import get_video_db
+    resolved = str(Path(get_video_db().database_path).resolve())
     assert 'soulsync-testdb-' in resolved, resolved
