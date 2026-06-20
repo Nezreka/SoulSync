@@ -391,35 +391,14 @@
         Promise.all([loadBreakdown(id), loadUnmatched()]).then(function () { renderPanel(); });
     }
     function switchKind(kind) {
+        // A coverage card just SWITCHES THE VIEW to that kind — it must NOT change
+        // the global "process first" priority (that's the top Movies/Shows/Auto
+        // tabs only) or silently re-queue failed items (the explicit "Retry all
+        // failed" button does that on demand). Keeping them separate so clicking a
+        // worker's coverage doesn't reach across and re-prioritise every worker.
         state.kind = kind; state.page = 0;
         renderCards();
-        // Like the music worker manager: clicking a coverage group also "pins" it
-        // and RE-QUEUES its previously-failed items (not_found/error -> pending) so
-        // the worker sweeps ALL unmatched, not just never-tried ones — otherwise
-        // failed items sit forever (in the retry cooldown) and the worker reports
-        // "all matched". (Episodes are a sync cascade, not a match queue.)
-        if (kind === 'movie' || kind === 'show') {
-            setPriority(kind);
-            requeueFailed(kind);
-        } else {
-            loadUnmatched().then(function () { renderControls(); renderList(); });
-        }
-    }
-    function requeueFailed(kind) {
-        fetch('/api/video/enrichment/' + state.selected + '/retry', {
-            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ kind: kind, scope: 'failed' }),
-        }).then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (d) {
-                var n = (d && d.reset) || 0;
-                if (n && typeof showToast === 'function') {
-                    showToast('Re-queued ' + n + ' previously-failed ' +
-                        (KIND_LABEL[kind] || kind).toLowerCase(), 'success');
-                }
-                return Promise.all([loadBreakdown(state.selected), loadUnmatched()]);
-            })
-            .then(function () { renderCards(); renderControls(); renderList(); })
-            .catch(function () { loadUnmatched().then(function () { renderControls(); renderList(); }); });
+        loadUnmatched().then(function () { renderControls(); renderList(); });
     }
     function togglePause() {
         var s = state.statuses[state.selected] || {};
@@ -437,6 +416,26 @@
         }).then(function () {
             return Promise.all([loadBreakdown(state.selected), loadUnmatched()]);
         }).then(function () { renderCards(); renderList(); });
+    }
+    // "Retry all failed" applies to EVERY coverage kind this worker handles (not
+    // just the tab you're viewing) — the label says "all", so re-queue movie + show
+    // (or whatever kinds the worker covers) in one click.
+    function retryAllFailed() {
+        var w = workerDef(state.selected);
+        var kinds = (w && w.kinds && w.kinds.length) ? w.kinds : [state.kind];
+        Promise.all(kinds.map(function (k) {
+            return fetch('/api/video/enrichment/' + state.selected + '/retry', {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ kind: k, scope: 'failed' }),
+            }).then(function (r) { return r.ok ? r.json() : null; });
+        })).then(function (results) {
+            var total = results.reduce(function (a, r) { return a + ((r && r.reset) || 0); }, 0);
+            if (total && typeof showToast === 'function') {
+                showToast('Re-queued ' + total + ' failed item' + (total === 1 ? '' : 's') +
+                    ' across ' + kinds.length + ' categor' + (kinds.length === 1 ? 'y' : 'ies'), 'success');
+            }
+            return Promise.all([loadBreakdown(state.selected), loadUnmatched()]);
+        }).then(function () { renderCards(); renderControls(); renderList(); });
     }
     function setPriority(kind) {
         state.priority = kind;
@@ -505,7 +504,7 @@
         else if (t.hasAttribute('data-em-select')) selectWorker(t.getAttribute('data-em-select'));
         else if (t.hasAttribute('data-em-pause')) togglePause();
         else if (t.hasAttribute('data-em-kind')) switchKind(t.getAttribute('data-em-kind'));
-        else if (t.hasAttribute('data-em-retry-all')) retry('failed', null);
+        else if (t.hasAttribute('data-em-retry-all')) retryAllFailed();
         else if (t.hasAttribute('data-em-retry-item')) retry('item', Number(t.getAttribute('data-em-retry-item')));
         else if (t.hasAttribute('data-em-page')) {
             state.page += (t.getAttribute('data-em-page') === 'next') ? 1 : -1;
