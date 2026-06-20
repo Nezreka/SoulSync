@@ -3507,3 +3507,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* Automation Hub panes that are music-specific — emptied on the video side for now. */
 .vauto-hub-soon { padding: 36px 20px; text-align: center; font-size: 13.5px; font-weight: 600;
     color: rgba(255, 255, 255, 0.38); }
+
+/* Global "Retry all failed" — a text button in the worker modal topbar (overrides
+   the round .em-icon-btn sizing + its rotate-on-hover; amber = retry/failed). */
+.em-retry-global {
+    width: auto; height: 32px; padding: 0 13px; border-radius: 999px;
+    gap: 6px; font-size: 12px; font-weight: 800; white-space: nowrap;
+    color: #fbcd7a; background: rgba(245, 158, 11, 0.14);
+}
+.em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
+.em-retry-global:disabled { opacity: 0.55; cursor: default; }

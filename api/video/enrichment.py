@@ -202,6 +202,13 @@ def register_routes(bp):
         res.update({"service": service, "kind": kind})
         return jsonify(res)
 
+    @bp.route("/enrichment/retry-all-failed", methods=["POST"])
+    def video_enrichment_retry_all_failed():
+        """Global re-queue: reset every failed/not_found item across ALL workers and
+        kinds (one-click recovery after an outage). Returns the total re-queued."""
+        from . import get_video_db
+        return jsonify({"success": True, "reset": get_video_db().retry_all_failed()})
+
     @bp.route("/enrichment/<service>/retry", methods=["POST"])
     def video_enrichment_retry(service):
         from . import get_video_db
