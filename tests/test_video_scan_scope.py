@@ -165,3 +165,47 @@ def test_scan_status_helper_is_none_when_no_server(monkeypatch):
     import core.video.sources as srcmod
     monkeypatch.setattr(srcmod, "get_active_video_source", lambda: None)
     assert srcmod.video_server_scan_in_progress("all") is None   # caller falls back to fixed wait
+
+
+# ── has_item probe (smart post-download scan) ───────────────────────────────
+
+def test_plex_has_item_matches_movie_by_title_and_year():
+    class Movie:
+        def __init__(self, title, year): self.title, self.year = title, year
+    class Sec:
+        type = "movie"
+        def __init__(self, title, results): self.title, self._r = title, results
+        def search(self, title=None, maxresults=5): return self._r
+    class Srv:
+        def __init__(self, secs): self.library = _Lib(secs)
+    secs = [Sec("Movies", [Movie("Dune", 2024)])]
+    # _scan_sections filters by title==movies_lib; give the section that title
+    secs[0].title = "Movies"
+    src = PlexVideoSource(Srv(secs), movies_lib="Movies", tv_lib="TV Shows")
+    assert src.has_item("movie", {"title": "Dune", "year": 2024}) is True
+    assert src.has_item("movie", {"title": "Dune", "year": 1990}) is False   # year mismatch
+    assert src.has_item("movie", {"title": "Nope", "year": 2024}) is True    # search returns the same stub; title checked server-side in real plex
+
+
+def test_plex_has_item_checks_specific_episode():
+    class Show:
+        def __init__(self, has): self._has = has
+        def episode(self, season=None, episode=None):
+            if self._has == (season, episode): return object()
+            raise Exception("no such episode")
+    class Sec:
+        type = "show"
+        def __init__(self, title, results): self.title, self._r = title, results
+        def search(self, title=None, maxresults=5): return self._r
+    class Srv:
+        def __init__(self, secs): self.library = _Lib(secs)
+    secs = [Sec("TV Shows", [Show((2, 5))])]
+    src = PlexVideoSource(Srv(secs), movies_lib="Movies", tv_lib="TV Shows")
+    assert src.has_item("show", {"title": "Severance", "season_number": 2, "episode_number": 5}) is True
+    assert src.has_item("show", {"title": "Severance", "season_number": 2, "episode_number": 9}) is False
+
+
+def test_has_item_helper_false_when_no_server(monkeypatch):
+    import core.video.sources as srcmod
+    monkeypatch.setattr(srcmod, "get_active_video_source", lambda: None)
+    assert srcmod.video_server_has_item("movie", {"title": "X"}) is False
