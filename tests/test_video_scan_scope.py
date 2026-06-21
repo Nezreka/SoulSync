@@ -101,3 +101,28 @@ def test_scan_never_resumes_a_manually_paused_youtube_enricher(engine, monkeypat
     assert "youtube" not in engine._scan_paused   # we didn't touch it
     engine.resume_after_scan()
     assert fake._paused is True                    # still paused after the scan
+
+
+# ── refresh_sections is scoped by media_type too (server nudge) ─────────────
+
+def test_refresh_sections_scopes_by_media_type():
+    class SecU:
+        def __init__(self, type_, title):
+            self.type, self.title, self.updated = type_, title, False
+
+        def update(self):
+            self.updated = True
+
+    secs = [SecU("movie", "Movies"), SecU("show", "TV Shows")]
+    src = PlexVideoSource(_Server(secs), movies_lib="Movies", tv_lib="TV Shows")
+
+    src.refresh_sections("movie")
+    assert secs[0].updated and not secs[1].updated       # only the Movie section nudged
+    secs[0].updated = False
+
+    src.refresh_sections("show")
+    assert secs[1].updated and not secs[0].updated       # only the TV section nudged
+    secs[1].updated = False
+
+    res = src.refresh_sections("all")
+    assert secs[0].updated and secs[1].updated and res["sections"] == 2   # both

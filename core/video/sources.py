@@ -266,17 +266,31 @@ def get_active_video_source():
     return _build_source(sel.get("movies") or None, sel.get("tv") or None)
 
 
-def refresh_video_server_sections():
+def normalize_media_type(media_type) -> str:
+    """'movie'|'show'|'all' — accepts the friendly aliases (movies/tv/series/…) the
+    UI and automation configs use. Movies and TV are independent libraries, so the
+    scan family is scoped by this everywhere."""
+    m = str(media_type or "all").lower()
+    if m in ("movie", "movies", "film", "films"):
+        return "movie"
+    if m in ("show", "shows", "tv", "series", "episode", "episodes"):
+        return "show"
+    return "all"
+
+
+def refresh_video_server_sections(media_type="all"):
     """Tell the active media server to rescan its selected VIDEO sections (so newly
-    downloaded files get indexed) — the video twin of music's 'Scan Library'. Returns
-    {ok, sections} or {ok: False, error}."""
+    downloaded files get indexed) — the video twin of music's 'Scan Library'.
+    ``media_type`` scopes it to one library ('movie' / 'show'); 'all' (default) nudges
+    both. Returns {ok, sections} or {ok: False, error}."""
+    media_type = normalize_media_type(media_type)
     src = get_active_video_source()
     if src is None:
         return {"ok": False, "error": "No video server configured"}
     if not hasattr(src, "refresh_sections"):
         return {"ok": False, "error": "This server doesn't support a scan trigger"}
     try:
-        return src.refresh_sections()
+        return src.refresh_sections(media_type)
     except Exception as e:   # noqa: BLE001 - surface any server error to the automation
         logger.exception("video sources: refresh failed")
         return {"ok": False, "error": str(e)}
@@ -346,11 +360,14 @@ class PlexVideoSource:
                 except Exception:
                     logger.exception("Plex: skipping show %s", getattr(sh, "title", "?"))
 
-    def refresh_sections(self) -> dict:
+    def refresh_sections(self, media_type="all") -> dict:
         """Tell Plex to rescan the selected video sections so freshly-downloaded files
-        get indexed. (plexapi ``section.update()`` triggers the library scan.)"""
+        get indexed. (plexapi ``section.update()`` triggers the library scan.)
+        ``media_type`` scopes it to the Movie or TV section; 'all' does both."""
         n = 0
         for kind, name in (("movie", self._movies_lib), ("show", self._tv_lib)):
+            if media_type != "all" and media_type != kind:
+                continue
             for s in self._scan_sections(kind, name):
                 try:
                     s.update()
@@ -526,15 +543,20 @@ class JellyfinVideoSource:
             "tv": [{"title": v.get("Name")} for v in self._views("tvshows")],
         }
 
-    def refresh_sections(self) -> dict:
+    def refresh_sections(self, media_type="all") -> dict:
         """Ask Jellyfin to rescan the selected video libraries (POST /Items/{id}/Refresh)
-        so freshly-downloaded files get indexed. _make_request is GET-only, so POST direct."""
+        so freshly-downloaded files get indexed. _make_request is GET-only, so POST direct.
+        ``media_type`` scopes it to the Movie or TV view; 'all' does both."""
         import requests
         base = (self._c.base_url or "").rstrip("/")
         if not base:
             return {"ok": False, "sections": 0}
         headers = {"X-Emby-Token": self._c.api_key or ""}
-        views = list(self._scan_views("movies", self._movies_lib)) + list(self._scan_views("tvshows", self._tv_lib))
+        views = []
+        if media_type in ("all", "movie"):
+            views += list(self._scan_views("movies", self._movies_lib))
+        if media_type in ("all", "show"):
+            views += list(self._scan_views("tvshows", self._tv_lib))
         n = 0
         for v in views:
             vid = v.get("Id")

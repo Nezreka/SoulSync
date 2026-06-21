@@ -34,7 +34,7 @@ class _RecordingDeps:
 
 
 def _refresh_ok(sections: int = 2):
-    return lambda: {'ok': True, 'sections': sections}
+    return lambda media_type=None: {'ok': True, 'sections': sections}
 
 
 def _scan_done(movies: int = 3, shows: int = 1, episodes: int = 9):
@@ -158,7 +158,7 @@ class TestServerUnavailable:
         deps = _RecordingDeps()
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
-            server_refresh=lambda: {'ok': False, 'error': 'No video server configured'},
+            server_refresh=lambda media_type=None: {'ok': False, 'error': 'No video server configured'},
             run_video_scan=_scan,
         )
         assert scanned.get('ran') is True
@@ -169,7 +169,7 @@ class TestServerUnavailable:
         deps = _RecordingDeps()
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
-            server_refresh=lambda: None, run_video_scan=_scan_done(),
+            server_refresh=lambda media_type=None: None, run_video_scan=_scan_done(),
         )
         assert result['status'] == 'completed'
 
@@ -203,7 +203,7 @@ class TestHandlerNeverRaises:
         deps = _RecordingDeps()
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
-            server_refresh=lambda: (_ for _ in ()).throw(RuntimeError('boom')),
+            server_refresh=lambda media_type=None: (_ for _ in ()).throw(RuntimeError('boom')),
         )
         assert result['status'] == 'error'
         assert result['error'] == 'boom'
@@ -243,14 +243,14 @@ class TestScanServerStage:
             emit=lambda ev, data: events.append((ev, data)))
         assert r['status'] == 'completed'
         assert slept == [90]                                  # waited the debounce
-        assert events == [('video_library_scan_completed', {'server': ''})]
+        assert events == [('video_library_scan_completed', {'server': '', 'media_type': 'all'})]
 
     def test_default_debounce_and_server_unavailable_still_emits(self):
         deps = _RecordingDeps()
         events = []
         auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
-            server_refresh=lambda: {'ok': False, 'error': 'no server'},
+            server_refresh=lambda media_type=None: {'ok': False, 'error': 'no server'},
             sleep=lambda s: None, emit=lambda ev, data: events.append(ev))
         assert events == ['video_library_scan_completed']     # fires even if refresh failed
         assert 'warning' in deps.log_types()
@@ -259,9 +259,24 @@ class TestScanServerStage:
         deps = _RecordingDeps()
         r = auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
-            server_refresh=lambda: (_ for _ in ()).throw(RuntimeError('boom')),
+            server_refresh=lambda media_type=None: (_ for _ in ()).throw(RuntimeError('boom')),
             sleep=lambda s: None, emit=lambda *a: None)
         assert r['status'] == 'error' and r['error'] == 'boom'
+
+    def test_scopes_refresh_and_carries_media_type_on_the_event(self):
+        seen = {}
+        events = []
+
+        def _refresh(media_type=None):
+            seen['mt'] = media_type
+            return {'ok': True}
+
+        auto_video_scan_server(
+            {'_automation_id': 'a', 'media_type': 'show'}, _RecordingDeps(),
+            server_refresh=_refresh, sleep=lambda s: None,
+            emit=lambda ev, data: events.append((ev, data)))
+        assert seen['mt'] == 'show'                                   # only TV sections nudged
+        assert events[0][1]['media_type'] == 'show'                   # stage 2 inherits the scope
 
 
 # ── post-download chain: video_update_database (stage 2) ───────────────────
@@ -285,5 +300,33 @@ class TestUpdateDatabaseStage:
     def test_scan_error_propagates(self):
         deps = _RecordingDeps()
         r = auto_video_update_database({'_automation_id': 'a'}, deps,
-                                       run_video_scan=lambda m: {'state': 'error', 'error': 'no server'})
+                                       run_video_scan=lambda m, media_type=None: {'state': 'error', 'error': 'no server'})
         assert r['status'] == 'error' and r['error'] == 'no server'
+
+    def test_inherits_media_type_from_the_scan_event(self):
+        # The post-download chain carries the scope: a TV-only rescan updates only TV.
+        seen = {}
+
+        def _scan(mode, media_type=None):
+            seen['media_type'] = media_type
+            return {'state': 'done', 'shows': 3, 'episodes': 12}
+
+        deps = _RecordingDeps()
+        auto_video_update_database(
+            {'_automation_id': 'a', '_event_data': {'media_type': 'show'}}, deps, run_video_scan=_scan)
+        assert seen['media_type'] == 'show'
+        assert deps.calls[-1]['log_line'] == 'Video database updated: 3 shows, 12 episodes'
+
+    def test_explicit_media_type_beats_event(self):
+        seen = {}
+        auto_video_update_database(
+            {'_automation_id': 'a', 'media_type': 'movie', '_event_data': {'media_type': 'show'}},
+            _RecordingDeps(),
+            run_video_scan=lambda mode, media_type=None: seen.setdefault('mt', media_type) or {'state': 'done'})
+        assert seen['mt'] == 'movie'
+
+    def test_busy_scanner_skips_cleanly(self):
+        r = auto_video_update_database(
+            {'_automation_id': 'a'}, _RecordingDeps(),
+            run_video_scan=lambda mode, media_type=None: {'state': 'in_progress'})
+        assert r['status'] == 'skipped'
