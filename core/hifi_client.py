@@ -140,6 +140,39 @@ def compute_new_default_pushes(all_defaults, offered, legacy_baseline, existing)
     return to_add, new_offered
 
 
+_EXTINF_RE = re.compile(r'#EXTINF:\s*([0-9]+(?:\.[0-9]+)?)')
+
+
+def sum_hls_segment_seconds(playlist_text: str) -> float:
+    """Total audio seconds an HLS media playlist actually provides — the sum of its
+    ``#EXTINF`` segment durations. This is the authoritative "how much audio is really
+    here" signal: a PREVIEW manifest serves only ~30s of segments even though the track
+    is full-length, so summing EXTINF catches it before we waste the download. Returns
+    0.0 when the playlist has no EXTINF lines (master playlists, legacy manifests) — the
+    caller treats 0 as 'unknown', never as 'preview'."""
+    total = 0.0
+    for m in _EXTINF_RE.finditer(playlist_text or ''):
+        try:
+            total += float(m.group(1))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def is_short_audio(actual_seconds: float, expected_seconds: float, threshold: float = 0.8) -> bool:
+    """True when ``actual`` is meaningfully shorter than ``expected`` — i.e. a preview
+    clip or a truncated/corrupt download. Conservative: returns False whenever either
+    value is missing/zero (unknown ⇒ never reject), and only trips below ``threshold``
+    of the expected length (previews are ~15% of full, so the margin is huge)."""
+    try:
+        a, e = float(actual_seconds or 0), float(expected_seconds or 0)
+    except (TypeError, ValueError):
+        return False
+    if a <= 0 or e <= 0:
+        return False
+    return a < e * threshold
+
+
 # Run the new-default push at most once per process.
 _pushed_new_defaults = False
 
@@ -662,6 +695,7 @@ class HiFiClient(DownloadSourcePlugin):
             logger.warning(f"Failed to parse HLS playlist for track {track_id}: {e}")
             return None
 
+        media_text = playlist_text   # the playlist that actually carries the EXTINF segments
         if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
             playlist_uri = segment_uris[0]
             try:
@@ -669,6 +703,7 @@ class HiFiClient(DownloadSourcePlugin):
                 variant_resp = self.session.get(playlist_uri, allow_redirects=True, timeout=30)
                 variant_resp.raise_for_status()
                 variant_text = variant_resp.text
+                media_text = variant_text
                 init_uri, segment_uris = self._parse_hls_playlist(variant_text, playlist_uri)
             except Exception as e:
                 logger.warning(f"Failed to fetch variant playlist for track {track_id}: {e}")
@@ -687,6 +722,9 @@ class HiFiClient(DownloadSourcePlugin):
             'extension': q_info['extension'],
             'codec': q_info['codec'],
             'quality': quality,
+            # Real audio length the manifest provides (sum of EXTINF) — used to reject
+            # preview manifests before downloading. 0.0 = unknown (don't reject).
+            'manifest_duration': sum_hls_segment_seconds(media_text),
         }
 
     def _get_legacy_track_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
@@ -710,6 +748,20 @@ class HiFiClient(DownloadSourcePlugin):
             'codec': q_info['codec'],
             'quality': quality,
         }
+
+    @staticmethod
+    def _probe_audio_seconds(path) -> float:
+        """Real decoded audio length of a finished file, via mutagen (already a dep).
+        0.0 on any failure — the caller treats 0 as 'unknown' and never rejects on it."""
+        try:
+            from mutagen import File as _MutagenFile
+            mf = _MutagenFile(str(path))
+            info = getattr(mf, 'info', None) if mf is not None else None
+            if info is not None:
+                return float(getattr(info, 'length', 0) or 0)
+        except Exception:
+            pass
+        return 0.0
 
     def _demux_flac(self, input_path: Path, output_path: Path) -> None:
         ffmpeg = shutil.which('ffmpeg')
@@ -836,6 +888,15 @@ class HiFiClient(DownloadSourcePlugin):
 
         MIN_AUDIO_SIZE = 100 * 1024
 
+        # Expected track length (for the preview/truncation guards). Best-effort: a 0
+        # here just disables the duration checks for this track, never rejects.
+        expected_s = 0.0
+        try:
+            info = self.get_track_info(track_id) or {}
+            expected_s = float(info.get('duration_s') or 0)
+        except Exception:
+            expected_s = 0.0
+
         for q_key in chain:
             if self.shutdown_check and self.shutdown_check():
                 logger.info("Shutdown detected, aborting HiFi download")
@@ -850,6 +911,16 @@ class HiFiClient(DownloadSourcePlugin):
                 )
             ):
                 logger.warning(f"No HLS manifest at quality {q_key}, trying next")
+                continue
+
+            # Preview guard #1 (pre-download): a preview manifest serves only ~30s of
+            # segments for a full-length track. Catch it from the EXTINF sum before
+            # wasting the download, so the orchestrator falls through to the next source.
+            manifest_s = float(manifest_info.get('manifest_duration') or 0)
+            if is_short_audio(manifest_s, expected_s):
+                logger.warning(
+                    "HiFi served a PREVIEW manifest at %s for '%s' (%.0fs of %.0fs) — skipping",
+                    q_key, display_name, manifest_s, expected_s)
                 continue
 
             extension = manifest_info['extension']
@@ -928,6 +999,17 @@ class HiFiClient(DownloadSourcePlugin):
                 if final_size < MIN_AUDIO_SIZE:
                     logger.warning(f"Final file too small after processing at {q_key} "
                                    f"({final_size} bytes), trying next")
+                    out_path.unlink(missing_ok=True)
+                    continue
+
+                # Preview guard #2 (post-download): verify the finished file's REAL audio
+                # length. Backs up the manifest check for legacy/direct (no-EXTINF)
+                # downloads and catches any truncated/corrupt result.
+                actual_s = self._probe_audio_seconds(out_path)
+                if is_short_audio(actual_s, expected_s):
+                    logger.warning(
+                        "HiFi file too short at %s for '%s' (%.0fs of %.0fs) — likely a "
+                        "preview, rejecting", q_key, display_name, actual_s, expected_s)
                     out_path.unlink(missing_ok=True)
                     continue
 
