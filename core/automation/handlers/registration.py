@@ -35,6 +35,7 @@ from core.automation.handlers.download_cleanup import (
 )
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
+from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -185,6 +186,11 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_update_database',
         lambda config: auto_video_update_database(config, deps),
+    )
+    # Sonarr-style: wishlist every episode airing today (for followed shows).
+    engine.register_action_handler(
+        'video_add_airing_episodes',
+        lambda config: auto_video_add_airing_episodes(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around

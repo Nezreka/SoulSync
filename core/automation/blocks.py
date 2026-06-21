@@ -235,6 +235,8 @@ ACTIONS: list[dict] = [
                       {"value": "full", "label": "Full (add + refresh)"}],
           "default": "incremental"}
      ]},
+    {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
+     "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own", "available": True},
 ]
 
 

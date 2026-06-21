@@ -170,6 +170,15 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'incremental'},
         'owned_by': 'video',
     },
+    # Sonarr-style: each day, wishlist every episode airing today for the shows you
+    # follow (skipping ones already owned) so they queue up to be grabbed.
+    {
+        'name': 'Auto-Wishlist Episodes Airing Today',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '01:00'},
+        'action_type': 'video_add_airing_episodes',
+        'owned_by': 'video',
+    },
 ]
 
 

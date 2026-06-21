@@ -91,6 +91,33 @@ def test_modal_resumes_active_download_on_reopen():
     assert '.vdl-active' in _CSS
 
 
+# --- per-episode live tracking (TV parity with the movie inline tracker) ---
+
+def test_episode_rows_get_live_download_status():
+    # each episode ROW shows its own Searching → Downloading % → Downloaded status
+    assert 'function epTrack(' in _VIEW and 'function epStatusRender(' in _VIEW
+    assert "/api/video/downloads/status?id=" in _VIEW
+    assert 'data-vdl-ep-status' in _VIEW
+    assert 'vdl-ep--dl-active' in _VIEW and 'vdl-ep--dl-done' in _VIEW and 'vdl-ep--dl-fail' in _VIEW
+    assert '.vdl-ep-dl' in _CSS and '.vdl-ep-dl-bar' in _CSS
+
+
+def test_season_grab_lights_rows_and_resumes_on_reopen():
+    # season grab gives immediate per-row feedback (not headless), and reopening the
+    # modal resumes tracking in-flight episodes
+    assert 'function epSearching(' in _VIEW
+    assert 'eps.forEach(function (en) { epSearching(' in _VIEW       # rows light up at once
+    assert 'function resumeEpisodeTracking(' in _VIEW
+    assert "/api/video/downloads/active" in _VIEW
+    assert 'resumeEpisodeTracking(container, st)' in _VIEW           # called when rows build
+
+
+def test_episode_grab_uses_the_shared_single_grab_path():
+    # the season batch grabs via the same payload as a manual grab (can't diverge)
+    assert 'function _pickAndGrab(' in _VIEW
+    assert 'sendGrab(buildGrabPayload(panel, best))' in _VIEW
+
+
 # --- navigation plumbing --------------------------------------------------
 
 def test_video_side_handles_navigate_event():
