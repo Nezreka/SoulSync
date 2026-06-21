@@ -38,7 +38,7 @@ def _refresh_ok(sections: int = 2):
 
 
 def _scan_done(movies: int = 3, shows: int = 1, episodes: int = 9):
-    return lambda mode: {'state': 'done', 'movies': movies, 'shows': shows, 'episodes': episodes}
+    return lambda mode, media_type=None: {'state': 'done', 'movies': movies, 'shows': shows, 'episodes': episodes}
 
 
 class TestHappyPath:
@@ -67,7 +67,7 @@ class TestHappyPath:
     def test_passes_configured_mode_through_to_scan(self):
         seen = {}
 
-        def _scan(mode):
+        def _scan(mode, media_type=None):
             seen['mode'] = mode
             return {'state': 'done'}
 
@@ -81,7 +81,7 @@ class TestHappyPath:
     def test_defaults_mode_to_full(self):
         seen = {}
 
-        def _scan(mode):
+        def _scan(mode, media_type=None):
             seen['mode'] = mode
             return {'state': 'done'}
 
@@ -93,13 +93,65 @@ class TestHappyPath:
         assert seen['mode'] == 'full'
 
 
+class TestMediaTypeScope:
+    """The Movie and TV deep scans run the same handler scoped via media_type."""
+
+    def test_passes_media_type_through_to_scan(self):
+        seen = {}
+
+        def _scan(mode, media_type=None):
+            seen['media_type'] = media_type
+            return {'state': 'done'}
+
+        auto_video_scan_library(
+            {'_automation_id': 'a', 'mode': 'deep', 'media_type': 'show'}, _RecordingDeps(),
+            server_refresh=_refresh_ok(), run_video_scan=_scan)
+        assert seen['media_type'] == 'show'
+
+    def test_defaults_media_type_to_all(self):
+        seen = {}
+
+        def _scan(mode, media_type=None):
+            seen['media_type'] = media_type
+            return {'state': 'done'}
+
+        auto_video_scan_library(
+            {'_automation_id': 'a'}, _RecordingDeps(),
+            server_refresh=_refresh_ok(), run_video_scan=_scan)
+        assert seen['media_type'] == 'all'
+
+    def test_movie_scan_summary_names_only_movies(self):
+        deps = _RecordingDeps()
+        auto_video_scan_library(
+            {'_automation_id': 'a', 'media_type': 'movie'}, deps,
+            server_refresh=_refresh_ok(), run_video_scan=_scan_done(7, 0, 0))
+        summary = deps.calls[-1].get('log_line', '')
+        assert 'Movie library scanned: 7 movies' == summary  # no "0 shows"
+
+    def test_tv_scan_summary_names_only_tv(self):
+        deps = _RecordingDeps()
+        auto_video_scan_library(
+            {'_automation_id': 'a', 'media_type': 'show'}, deps,
+            server_refresh=_refresh_ok(), run_video_scan=_scan_done(0, 4, 22))
+        summary = deps.calls[-1].get('log_line', '')
+        assert summary == 'TV library scanned: 4 shows, 22 episodes'
+
+    def test_busy_scanner_skips_cleanly(self):
+        # The singleton scanner reports another run in progress → skip, don't error.
+        res = auto_video_scan_library(
+            {'_automation_id': 'a', 'media_type': 'movie'}, _RecordingDeps(),
+            server_refresh=_refresh_ok(),
+            run_video_scan=lambda mode, media_type=None: {'state': 'in_progress'})
+        assert res['status'] == 'skipped'
+
+
 class TestServerUnavailable:
     def test_warns_but_still_reads_library(self):
         """A server that can't be triggered is a warning, not a failure —
         the read still mirrors whatever the server currently reports."""
         scanned = {}
 
-        def _scan(mode):
+        def _scan(mode, media_type=None):
             scanned['ran'] = True
             return {'state': 'done', 'movies': 5}
 
@@ -128,7 +180,7 @@ class TestScanFailure:
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
             server_refresh=_refresh_ok(),
-            run_video_scan=lambda mode: {'state': 'error', 'error': 'no connected server'},
+            run_video_scan=lambda mode, media_type=None: {'state': 'error', 'error': 'no connected server'},
         )
         assert result['status'] == 'error'
         assert result['error'] == 'no connected server'
@@ -139,7 +191,7 @@ class TestScanFailure:
         deps = _RecordingDeps()
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
-            server_refresh=_refresh_ok(), run_video_scan=lambda mode: None,
+            server_refresh=_refresh_ok(), run_video_scan=lambda mode, media_type=None: None,
         )
         # No state -> treated as a (zero-count) completion, never raises.
         assert result['status'] == 'completed'
@@ -162,7 +214,7 @@ class TestHandlerNeverRaises:
         result = auto_video_scan_library(
             {'_automation_id': 'a'}, deps,
             server_refresh=_refresh_ok(),
-            run_video_scan=lambda mode: (_ for _ in ()).throw(ValueError('kaboom')),
+            run_video_scan=lambda mode, media_type=None: (_ for _ in ()).throw(ValueError('kaboom')),
         )
         assert result['status'] == 'error'
         assert result['error'] == 'kaboom'
@@ -223,7 +275,7 @@ class TestUpdateDatabaseStage:
     def test_defaults_to_incremental_mode(self):
         seen = {}
 
-        def _scan(mode):
+        def _scan(mode, media_type=None):
             seen['mode'] = mode
             return {'state': 'done'}
 

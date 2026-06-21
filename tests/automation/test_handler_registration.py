@@ -55,6 +55,8 @@ EXPECTED_ACTION_NAMES = frozenset({
     'search_and_download',
     # Video side (isolated app, shared engine).
     'video_scan_library',
+    'video_deep_scan_movies',
+    'video_deep_scan_tv',
     'video_scan_server',
     'video_update_database',
     'video_add_airing_episodes',

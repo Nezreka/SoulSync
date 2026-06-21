@@ -178,6 +178,18 @@ def register_all(deps: AutomationDeps) -> None:
         'video_scan_library',
         lambda config: auto_video_scan_library(config, deps),
     )
+    # Per-library deep scans (the video twin of music's 'Auto-Deep Scan Library',
+    # split because Movies and TV are independent libraries). Distinct action types
+    # so the system seeder — which keys on action_type — treats them as two separate
+    # automations; both reuse the one handler, scoped via media_type in action_config.
+    engine.register_action_handler(
+        'video_deep_scan_movies',
+        lambda config: auto_video_scan_library({**config, 'media_type': 'movie', 'mode': config.get('mode') or 'deep'}, deps),
+    )
+    engine.register_action_handler(
+        'video_deep_scan_tv',
+        lambda config: auto_video_scan_library({**config, 'media_type': 'show', 'mode': config.get('mode') or 'deep'}, deps),
+    )
     # Post-download chain: scan the server, then (on the scan-done event) update the DB.
     engine.register_action_handler(
         'video_scan_server',

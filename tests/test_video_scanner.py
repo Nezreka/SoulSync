@@ -266,3 +266,47 @@ def test_core_video_imports_nothing_from_music():
             s = line.strip()
             if s.startswith("import ") or s.startswith("from "):
                 assert "music" not in s.lower(), f"{py.name}: music import leaked: {s!r}"
+
+
+# ── media_type scope: Movies and TV are independent libraries ───────────────
+
+_MOVIES = [{"server_id": "m1", "title": "A", "file": {"relative_path": "a.mkv", "size_bytes": 5}}]
+_SHOWS = [{"server_id": "s1", "title": "Show", "seasons": [
+    {"season_number": 1, "episodes": [
+        {"episode_number": 1, "title": "E1", "file": {"relative_path": "e1.mkv"}}]}]}]
+
+
+def test_movie_media_type_scans_only_movies(db):
+    src = FakeSource(_MOVIES, _SHOWS)
+    st = VideoLibraryScanner(db).scan_sync(lambda: src, "full", "movie")
+    assert st["state"] == "done"
+    assert (st["movies"], st["shows"], st["episodes"]) == (1, 0, 0)
+    assert [k for k, _ in src.incremental_calls] == ["movies"]   # shows iterator never touched
+    lib = db.dashboard_stats()["library"]
+    assert (lib["movies"], lib["shows"]) == (1, 0)
+
+
+def test_tv_media_type_scans_only_shows(db):
+    # 'tv' is a friendly alias normalised to 'show'
+    src = FakeSource(_MOVIES, _SHOWS)
+    st = VideoLibraryScanner(db).scan_sync(lambda: src, "full", "tv")
+    assert (st["movies"], st["shows"], st["episodes"]) == (0, 1, 1)
+    assert [k for k, _ in src.incremental_calls] == ["shows"]    # movies iterator never touched
+    lib = db.dashboard_stats()["library"]
+    assert (lib["movies"], lib["shows"]) == (0, 1)
+
+
+def test_all_media_type_scans_both(db):
+    src = FakeSource(_MOVIES, _SHOWS)
+    st = VideoLibraryScanner(db).scan_sync(lambda: src, "full", "all")
+    assert (st["movies"], st["shows"], st["episodes"]) == (1, 1, 1)
+    assert {k for k, _ in src.incremental_calls} == {"movies", "shows"}
+
+
+def test_concurrent_scan_reports_in_progress_without_running(db):
+    scanner = VideoLibraryScanner(db)
+    scanner._status = {"state": "scanning"}        # a scan is already running
+    src = FakeSource(_MOVIES, _SHOWS)
+    st = scanner.scan_sync(lambda: src, "full", "movie")
+    assert st["state"] == "in_progress"
+    assert src.incremental_calls == []             # nothing scanned — didn't stomp the live run

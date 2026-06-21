@@ -29,6 +29,9 @@ from utils.logging_config import get_logger
 logger = get_logger("video_scanner")
 
 VALID_MODES = ("incremental", "full", "deep")
+# Which library to scan. Movies and TV are independent libraries, so a TV scan
+# must never touch movies and vice-versa. 'all' (default) does both.
+VALID_MEDIA_TYPES = ("all", "movie", "show")
 
 # Incremental stops after this many consecutive already-known items (recent
 # first), mirroring music's "25 consecutive complete albums" early-stop.
@@ -73,31 +76,51 @@ class VideoLibraryScanner:
     def _norm_mode(mode) -> str:
         return mode if mode in VALID_MODES else "full"
 
-    def request_scan(self, source_factory, mode: str = "full") -> dict:
+    @staticmethod
+    def _norm_media_type(media_type) -> str:
+        """'movie'|'show'|'all', accepting the friendly aliases the UI/config use."""
+        m = str(media_type or "all").lower()
+        if m in ("movie", "movies", "film", "films"):
+            return "movie"
+        if m in ("show", "shows", "tv", "series", "episode", "episodes"):
+            return "show"
+        return "all"
+
+    def request_scan(self, source_factory, mode: str = "full", media_type: str = "all") -> dict:
         """Kick off a background scan. ``source_factory()`` returns a media
-        source (or None if no video-capable server is connected)."""
+        source (or None if no video-capable server is connected). ``media_type``
+        limits it to one library ('movie' / 'show'); 'all' does both."""
         mode = self._norm_mode(mode)
+        media_type = self._norm_media_type(media_type)
         with self._lock:
             if self._status.get("state") == "scanning":
                 return {"status": "in_progress"}
             self._cancel = False
             self._status = {"state": "scanning", "phase": "starting", "mode": mode,
-                            "started_at": time.time(), "percent": None,
-                            "movies": 0, "shows": 0, "episodes": 0}
+                            "media_type": media_type, "started_at": time.time(),
+                            "percent": None, "movies": 0, "shows": 0, "episodes": 0}
         self._thread = threading.Thread(
-            target=self._run, args=(source_factory, mode), daemon=True)
+            target=self._run, args=(source_factory, mode, media_type), daemon=True)
         self._thread.start()
-        return {"status": "started", "mode": mode}
+        return {"status": "started", "mode": mode, "media_type": media_type}
 
-    def scan_sync(self, source_factory, mode: str = "full") -> dict:
-        """Run a scan inline (used by tests / callers that want to block)."""
+    def scan_sync(self, source_factory, mode: str = "full", media_type: str = "all") -> dict:
+        """Run a scan inline (used by tests / callers that want to block).
+
+        ``media_type`` limits the scan to one library: 'movie' or 'show' (TV);
+        'all' (default) does both. Because the scanner is a process singleton, a
+        scan that starts while another is running returns ``state='in_progress'``
+        without stomping the live one — the caller should skip."""
         mode = self._norm_mode(mode)
+        media_type = self._norm_media_type(media_type)
         with self._lock:
+            if self._status.get("state") == "scanning":
+                return {"state": "in_progress", "phase": "a video scan is already running"}
             self._cancel = False
             self._status = {"state": "scanning", "phase": "starting", "mode": mode,
-                            "started_at": time.time(), "percent": None,
-                            "movies": 0, "shows": 0, "episodes": 0}
-        self._run(source_factory, mode)
+                            "media_type": media_type, "started_at": time.time(),
+                            "percent": None, "movies": 0, "shows": 0, "episodes": 0}
+        self._run(source_factory, mode, media_type)
         return self.get_status()
 
     def _finish_cancelled(self, movies, shows, episodes) -> None:
@@ -125,7 +148,7 @@ class VideoLibraryScanner:
         except Exception:
             logger.debug("video scan: resuming enrichment workers failed", exc_info=True)
 
-    def _run(self, source_factory, mode: str = "full") -> None:
+    def _run(self, source_factory, mode: str = "full", media_type: str = "all") -> None:
         # Enrichment steps aside for the scan (all modes, both entry points), and
         # the finally guarantees it resumes on success, cancel, or error.
         paused = self._pause_for_scan()
@@ -138,6 +161,10 @@ class VideoLibraryScanner:
             server = source.server_name
             incremental = mode == "incremental"
             do_prune = mode == "deep"
+            # Movies and TV are independent libraries — scan only the requested
+            # kind(s) so a TV scan never pulls in (or prunes) movies, and vice-versa.
+            do_movies = media_type in ("all", "movie")
+            do_shows = media_type in ("all", "show")
             # FULL = a clean reset (clobber enrichment-owned fields). Incremental/deep
             # PRESERVE them, so a routine re-scan never wipes the TMDB-backfilled
             # `status` the airing watchlist relies on. (Only an explicit full resets.)
@@ -153,7 +180,8 @@ class VideoLibraryScanner:
             total = 0
             try:
                 c = source.counts(incremental=incremental) or {}
-                total = int(c.get("movies", 0) or 0) + int(c.get("shows", 0) or 0)
+                total = (int(c.get("movies", 0) or 0) if do_movies else 0) + \
+                        (int(c.get("shows", 0) or 0) if do_shows else 0)
             except Exception:
                 logger.debug("video scan: counts() unavailable; progress will be indeterminate")
             processed = 0
@@ -161,78 +189,82 @@ class VideoLibraryScanner:
             def pct():
                 return round(processed / total * 100) if total else None
 
-            known_movies = self.db.server_ids("movies", server) if incremental else set()
-            known_shows = self.db.server_ids("shows", server) if incremental else set()
+            known_movies = self.db.server_ids("movies", server) if (incremental and do_movies) else set()
+            known_shows = self.db.server_ids("shows", server) if (incremental and do_shows) else set()
 
-            # ── Movies ──
-            self._set(phase="scanning movies", total=total, percent=pct())
+            # ── Movies ── (skipped entirely on a TV-only scan)
             seen_movies: set[str] = set()
             movies = 0
-            consec = 0
-            for item in source.iter_movies(incremental=incremental):
-                if self._cancel:
-                    return self._finish_cancelled(movies, 0, 0)
-                sid = str(item["server_id"])
-                # Incremental early-stop: skip already-known items and bail after
-                # a run of consecutive known ones (server lists recent first).
-                if incremental and sid in known_movies:
-                    consec += 1
-                    if consec >= INCREMENTAL_STOP_AFTER:
-                        break
-                    continue
+            removed_m = 0
+            if do_movies:
+                self._set(phase="scanning movies", total=total, percent=pct())
                 consec = 0
-                try:
-                    self.db.upsert_movie(server, item, preserve_enrichment=preserve)
-                except Exception:
-                    logger.exception("video scan: skipping movie %s", sid)
-                    continue
-                seen_movies.add(sid)
-                movies += 1
-                processed += 1
-                if movies % 10 == 0:
-                    self._set(movies=movies, percent=pct())
-            self._set(movies=movies, percent=pct())
-            # Prune ONLY on a deep scan, and only when we actually saw items —
-            # so a transient empty response can never wipe the library. The prune
-            # runs AFTER the bar fills, and a big cleanup (many orphaned rows +
-            # cascades) takes a few seconds — surface a phase so the UI shows
-            # "cleaning up", not a stuck 100%.
-            if do_prune and seen_movies:
-                self._set(phase="cleaning up removed movies", percent=pct())
-            removed_m = (self.db.prune_missing("movies", server, seen_movies)
-                         if do_prune and seen_movies else 0)
+                for item in source.iter_movies(incremental=incremental):
+                    if self._cancel:
+                        return self._finish_cancelled(movies, 0, 0)
+                    sid = str(item["server_id"])
+                    # Incremental early-stop: skip already-known items and bail after
+                    # a run of consecutive known ones (server lists recent first).
+                    if incremental and sid in known_movies:
+                        consec += 1
+                        if consec >= INCREMENTAL_STOP_AFTER:
+                            break
+                        continue
+                    consec = 0
+                    try:
+                        self.db.upsert_movie(server, item, preserve_enrichment=preserve)
+                    except Exception:
+                        logger.exception("video scan: skipping movie %s", sid)
+                        continue
+                    seen_movies.add(sid)
+                    movies += 1
+                    processed += 1
+                    if movies % 10 == 0:
+                        self._set(movies=movies, percent=pct())
+                self._set(movies=movies, percent=pct())
+                # Prune ONLY on a deep scan, and only when we actually saw items —
+                # so a transient empty response can never wipe the library. The prune
+                # runs AFTER the bar fills, and a big cleanup (many orphaned rows +
+                # cascades) takes a few seconds — surface a phase so the UI shows
+                # "cleaning up", not a stuck 100%.
+                if do_prune and seen_movies:
+                    self._set(phase="cleaning up removed movies", percent=pct())
+                removed_m = (self.db.prune_missing("movies", server, seen_movies)
+                             if do_prune and seen_movies else 0)
 
-            # ── Shows ──
-            self._set(phase="scanning shows")
+            # ── Shows ── (skipped entirely on a movie-only scan)
             seen_shows: set[str] = set()
             shows = 0
             episodes = 0
-            consec = 0
-            for show in source.iter_shows(incremental=incremental):
-                if self._cancel:
-                    return self._finish_cancelled(movies, shows, episodes)
-                sid = str(show["server_id"])
-                if incremental and sid in known_shows:
-                    consec += 1
-                    if consec >= INCREMENTAL_STOP_AFTER:
-                        break
-                    continue
+            removed_s = 0
+            if do_shows:
+                self._set(phase="scanning shows")
                 consec = 0
-                try:
-                    self.db.upsert_show_tree(server, show, preserve_enrichment=preserve)
-                except Exception:
-                    logger.exception("video scan: skipping show %s", sid)
-                    continue
-                seen_shows.add(sid)
-                shows += 1
-                episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
-                processed += 1
-                self._set(shows=shows, episodes=episodes, percent=pct())
-            # Final prune (the one that delays "done" on a deep scan) — show it.
-            if do_prune and seen_shows:
-                self._set(phase="cleaning up removed shows", percent=100)
-            removed_s = (self.db.prune_missing("shows", server, seen_shows)
-                         if do_prune and seen_shows else 0)
+                for show in source.iter_shows(incremental=incremental):
+                    if self._cancel:
+                        return self._finish_cancelled(movies, shows, episodes)
+                    sid = str(show["server_id"])
+                    if incremental and sid in known_shows:
+                        consec += 1
+                        if consec >= INCREMENTAL_STOP_AFTER:
+                            break
+                        continue
+                    consec = 0
+                    try:
+                        self.db.upsert_show_tree(server, show, preserve_enrichment=preserve)
+                    except Exception:
+                        logger.exception("video scan: skipping show %s", sid)
+                        continue
+                    seen_shows.add(sid)
+                    shows += 1
+                    episodes += sum(len(s.get("episodes", [])) for s in show.get("seasons", []))
+                    processed += 1
+                    self._set(shows=shows, episodes=episodes, percent=pct())
+                # Final prune (the one that delays "done" on a deep scan) — show it.
+                if do_prune and seen_shows:
+                    self._set(phase="cleaning up removed shows", percent=100)
+                removed_s = (self.db.prune_missing("shows", server, seen_shows)
+                             if do_prune and seen_shows else 0)
 
             self._set(state="done", phase="complete", finished_at=time.time(),
                       movies=movies, shows=shows, episodes=episodes, percent=100,

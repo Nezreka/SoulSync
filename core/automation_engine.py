@@ -182,6 +182,29 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_add_airing_episodes',
         'owned_by': 'video',
     },
+    # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
+    # and TV are independent libraries — a TV scan never pulls in new movies and
+    # vice-versa. Weekly deep scan (re-read + prune removed). Initial delays are
+    # staggered so they don't collide on startup; the singleton scanner also skips a
+    # run that overlaps the other (handler returns 'skipped').
+    {
+        'name': 'Auto-Deep Scan Movie Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'video_deep_scan_movies',
+        'action_config': {'mode': 'deep', 'media_type': 'movie'},
+        'initial_delay': 1500,  # 25 min after startup
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Deep Scan TV Library',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 7, 'unit': 'days'},
+        'action_type': 'video_deep_scan_tv',
+        'action_config': {'mode': 'deep', 'media_type': 'show'},
+        'initial_delay': 2400,  # 40 min after startup (staggered past the movie scan)
+        'owned_by': 'video',
+    },
 ]
 
 

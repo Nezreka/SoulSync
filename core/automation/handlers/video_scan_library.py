@@ -37,12 +37,13 @@ def _default_server_refresh() -> Dict[str, Any]:
     return refresh_video_server_sections()
 
 
-def _default_run_video_scan(mode: str) -> Dict[str, Any]:
-    """Production wiring: read the server into video.db (blocking)."""
+def _default_run_video_scan(mode: str, media_type: str = "all") -> Dict[str, Any]:
+    """Production wiring: read the server into video.db (blocking). ``media_type``
+    scopes it to one library ('movie' / 'show'); 'all' does both."""
     from api.video import get_video_db
     from core.video.scanner import get_video_scanner
     from core.video.sources import get_active_video_source
-    return get_video_scanner(get_video_db()).scan_sync(get_active_video_source, mode)
+    return get_video_scanner(get_video_db()).scan_sync(get_active_video_source, mode, media_type)
 
 
 def auto_video_scan_library(
@@ -50,12 +51,17 @@ def auto_video_scan_library(
     deps: AutomationDeps,
     *,
     server_refresh: Optional[Callable[[], Dict[str, Any]]] = None,
-    run_video_scan: Optional[Callable[[str], Dict[str, Any]]] = None,
+    run_video_scan: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Trigger a server-side video rescan, then mirror the result into video.db.
 
+    ``config['media_type']`` scopes the scan to one library — 'movie' or 'show'
+    (TV); 'all' (default) does both. Movies and TV are independent libraries, so
+    the Movie scan never touches TV and vice-versa.
+
     Returns one of:
       - ``{'status': 'completed', '_manages_own_progress': True, 'movies': .., 'shows': .., 'episodes': ..}``
+      - ``{'status': 'skipped', 'reason': '...'}`` (another scan was already running)
       - ``{'status': 'error', 'error': '...', '_manages_own_progress': True}``
     """
     server_refresh = server_refresh or _default_server_refresh
@@ -65,13 +71,15 @@ def auto_video_scan_library(
     # 'full' is the safe default — upsert everything, never prune. 'deep' prunes
     # what the server no longer has; only use it when the config asks explicitly.
     mode = config.get('mode') or 'full'
+    media_type = config.get('media_type') or 'all'
+    lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
 
     try:
         deps.update_progress(
             automation_id,
-            phase='Asking media server to rescan video sections...',
+            phase=f'Asking media server to rescan {lib_label} sections...',
             progress=10,
-            log_line='Triggering server-side video scan',
+            log_line=f'Triggering server-side {lib_label} scan',
             log_type='info',
         )
 
@@ -100,11 +108,21 @@ def auto_video_scan_library(
         # scan handler blocking until the scan resolves).
         deps.update_progress(
             automation_id,
-            phase='Reading library into SoulSync...',
+            phase=f'Reading {lib_label} library into SoulSync...',
             progress=45,
         )
-        result = run_video_scan(mode) or {}
+        result = run_video_scan(mode, media_type) or {}
         state = result.get('state')
+        # Singleton scanner already busy with another scan (e.g. the Movie + TV
+        # deep scans firing close together) — skip cleanly, don't error.
+        if state == 'in_progress':
+            deps.update_progress(
+                automation_id, status='finished', phase='Skipped',
+                log_line='Another video scan is already running — skipping this run',
+                log_type='info',
+            )
+            return {'status': 'skipped', 'reason': 'a video scan is already running',
+                    '_manages_own_progress': True}
         if state == 'error':
             err = result.get('error') or 'Video library scan failed'
             deps.update_progress(
@@ -119,12 +137,19 @@ def auto_video_scan_library(
         movies = int(result.get('movies', 0) or 0)
         shows = int(result.get('shows', 0) or 0)
         episodes = int(result.get('episodes', 0) or 0)
+        # Summary names only the scanned library so a TV scan doesn't read "0 movies".
+        if media_type == 'movie':
+            summary = f'Movie library scanned: {movies} movies'
+        elif media_type == 'show':
+            summary = f'TV library scanned: {shows} shows, {episodes} episodes'
+        else:
+            summary = f'Video library scanned: {movies} movies, {shows} shows, {episodes} episodes'
         deps.update_progress(
             automation_id,
             status='finished',
             progress=100,
             phase='Complete',
-            log_line=f'Video library scanned: {movies} movies, {shows} shows, {episodes} episodes',
+            log_line=summary,
             log_type='success',
         )
         return {
