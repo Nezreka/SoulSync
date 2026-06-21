@@ -233,6 +233,36 @@ def wait_for_server_scan(scan_status, sleep, *, grace_seconds: int = 15,
     return waited
 
 
+def probe_present_libraries(candidates, has_item, sleep, *, grace_seconds: int = 120,
+                            interval_seconds: int = 15):
+    """Which libraries does the server ALREADY have the newest grab for?
+
+    ``candidates`` = [(scope, item), …]. A freshly-dropped file takes ~1-2 min to show
+    up even with the server's auto-scan ON, so we POLL: check each candidate, and give
+    the server up to ``grace_seconds`` (re-checking every ``interval_seconds``) to
+    ingest before giving up on it. Returns the set of scopes confirmed present (→ skip
+    their crawl); anything still missing when grace expires stays out (→ gets crawled).
+    A probe that errors is treated as 'not present' (conservative). ``sleep`` injected."""
+    pending = list(candidates or [])
+    present = set()
+    waited = 0
+    while True:
+        still = []
+        for scope, item in pending:
+            try:
+                if has_item(scope, item):
+                    present.add(scope)
+                    continue
+            except Exception:   # noqa: BLE001 - uncertainty → keep probing, then scan
+                pass
+            still.append((scope, item))
+        pending = still
+        if not pending or waited >= grace_seconds:
+            return present
+        sleep(interval_seconds)
+        waited += interval_seconds
+
+
 _LIB = {'movie': 'Movie', 'show': 'TV'}
 
 
@@ -274,29 +304,39 @@ def auto_video_scan_server(
     except (TypeError, ValueError):
         cap = 3600
     try:
-        # Which libraries actually need the expensive crawl? Skip any the server
-        # already has the newest download for (it auto-ingested → nothing to find).
+        _pg = config.get('probe_grace_minutes')   # 0 is valid (probe once, no wait)
+        grace = max(0, int(float(_pg if _pg is not None else 2) * 60))
+    except (TypeError, ValueError):
+        grace = 120
+    try:
+        # Which libraries actually need the expensive crawl? Skip any the server already
+        # has the newest grab for (it auto-ingested → nothing to find). Fresh drops take
+        # ~1-2 min to appear even with auto-scan ON, so POLL the probe over a grace
+        # window instead of checking once immediately (which would always miss).
         scopes = ['movie', 'show'] if media_type == 'all' else \
             ([media_type] if media_type in ('movie', 'show') else ['movie', 'show'])
-        to_scan = []
-        for sc in scopes:
-            if skip_if_present:
-                latest = None
+        present = set()
+        if skip_if_present:
+            candidates = []
+            for sc in scopes:
                 try:
                     latest = latest_completed(sc)
                 except Exception:   # noqa: BLE001
                     latest = None
                 if latest:
-                    try:
-                        present = bool(server_has_item(sc, latest))
-                    except Exception:   # noqa: BLE001
-                        present = False
-                    if present:
-                        deps.update_progress(
-                            automation_id, log_line=f'{_LIB[sc]} library: server already has the newest grab — skipping its scan',
-                            log_type='info')
-                        continue
-            to_scan.append(sc)
+                    candidates.append((sc, latest))
+            if candidates:
+                deps.update_progress(automation_id, progress=15,
+                                     phase='Checking whether the server already has the new downloads…',
+                                     log_line='Probing the server (giving its auto-scan time to ingest)…',
+                                     log_type='info')
+                present = probe_present_libraries(candidates, server_has_item, sleep,
+                                                  grace_seconds=grace)
+                for sc in present:
+                    deps.update_progress(
+                        automation_id, log_line=f'{_LIB[sc]} library: server already has the newest grab — skipping its scan',
+                        log_type='info')
+        to_scan = [sc for sc in scopes if sc not in present]
 
         waited, server_name = 0, ''
         if to_scan:

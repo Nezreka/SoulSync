@@ -236,6 +236,7 @@ ACTIONS: list[dict] = [
                       {"value": "show", "label": "TV only"}],
           "default": "all"},
          {"key": "skip_if_present", "type": "checkbox", "label": "Skip the scan if the server already has the download", "default": True},
+         {"key": "probe_grace_minutes", "type": "number", "label": "Give the server's auto-scan this long to ingest first (min)", "default": 2, "min": 0},
          {"key": "max_wait_minutes", "type": "number", "label": "Max wait for scan (min)", "default": 60, "min": 1},
          {"key": "debounce_seconds", "type": "number", "label": "Fallback wait if status unknown (sec)", "default": 120, "min": 10}
      ]},
