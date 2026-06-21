@@ -174,31 +174,81 @@ def auto_video_scan_library(
 
 # ── post-download chain (video twin of music's scan_library → start_database_update) ──
 # Split into two stages so the calendar/library reflect a download promptly, mirroring
-# the music side: tell the server to rescan, then (after it has had time to index) read
-# the new state into video.db. Stage 1 emits 'video_library_scan_completed' on a debounce
-# (like music's web_scan_manager time-based completion); stage 2 listens for that.
+# the music side: tell the server to rescan, WAIT until its scan queue is actually idle
+# (a big library can take 10-20 min — a fixed wait would read too early), then fire
+# 'video_library_scan_completed'; stage 2 listens for that and reads the fresh state.
+
+def _default_scan_status(media_type: str = "all"):
+    """Production wiring: True/False if the active server is/ isn't scanning, or None
+    when it can't report (so the caller falls back to a fixed wait)."""
+    from core.video.sources import video_server_scan_in_progress
+    return video_server_scan_in_progress(media_type)
+
+
+def wait_for_server_scan(scan_status, sleep, *, grace_seconds: int = 15,
+                         interval_seconds: int = 10, cap_seconds: int = 3600,
+                         fallback_seconds: int = 120) -> int:
+    """Block until the media server's scan queue goes idle, then return ~seconds waited.
+
+    ``scan_status()`` returns True (scanning), False (idle) or None (can't tell). After
+    a short grace — so the just-triggered scan has time to register as running — poll
+    every ``interval_seconds`` until idle or ``cap_seconds`` (a generous backstop for a
+    huge library). If the server can't report its state, fall back to a fixed
+    ``fallback_seconds`` wait — exactly the old behaviour. ``sleep`` is injected and
+    elapsed is counted from the sleeps, so tests never actually block."""
+    grace = max(0, grace_seconds)
+    if grace:
+        sleep(grace)
+    waited = grace
+    try:
+        status = scan_status()
+    except Exception:   # noqa: BLE001 - status is best-effort
+        status = None
+    if status is None:
+        extra = max(0, fallback_seconds - waited)
+        if extra:
+            sleep(extra)
+        return waited + extra
+    while status is True and waited < cap_seconds:
+        sleep(interval_seconds)
+        waited += interval_seconds
+        try:
+            status = scan_status()
+        except Exception:   # noqa: BLE001
+            status = None
+        if status is None:   # lost the ability to tell — stop waiting, don't hang
+            break
+    return waited
+
 
 def auto_video_scan_server(
     config: Dict[str, Any],
     deps: AutomationDeps,
     *,
-    server_refresh: Optional[Callable[[], Dict[str, Any]]] = None,
+    server_refresh: Optional[Callable[..., Dict[str, Any]]] = None,
     sleep: Optional[Callable[[float], None]] = None,
     emit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    scan_status: Optional[Callable[..., Any]] = None,
 ) -> Dict[str, Any]:
-    """Stage 1: tell the media server to rescan the video sections, wait a debounce
-    for it to index, then fire 'video_library_scan_completed' so the DB-update twin
-    reads the fresh state. (Video twin of music's scan_library.)"""
+    """Stage 1: tell the media server to rescan the video sections, WAIT until its scan
+    queue is idle (polling the server; falls back to a fixed wait if it can't report),
+    then fire 'video_library_scan_completed' so the DB-update twin reads the fresh state.
+    (Video twin of music's scan_library.)"""
     server_refresh = server_refresh or _default_server_refresh
     sleep = sleep or time.sleep
     emit = emit or deps.engine.emit
+    scan_status = scan_status or _default_scan_status
     automation_id = config.get('_automation_id')
     media_type = config.get('media_type') or 'all'
     lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
     try:
-        debounce = int(config.get('debounce_seconds') or 120)
+        fallback = int(config.get('debounce_seconds') or 120)
     except (TypeError, ValueError):
-        debounce = 120
+        fallback = 120
+    try:
+        cap = int(config.get('max_wait_minutes') or 60) * 60
+    except (TypeError, ValueError):
+        cap = 3600
     try:
         deps.update_progress(automation_id, phase=f'Asking media server to rescan {lib_label}…', progress=20,
                              log_line=f'Triggering server-side {lib_label} scan', log_type='info')
@@ -207,13 +257,15 @@ def auto_video_scan_server(
             deps.update_progress(automation_id,
                                  log_line='Server scan trigger unavailable: ' + str(refresh.get('error') or 'unknown'),
                                  log_type='warning')
-        deps.update_progress(automation_id, phase=f'Waiting for the server to index ({debounce}s)…', progress=55)
-        sleep(debounce)
+        deps.update_progress(automation_id, phase='Waiting for the server to finish indexing…', progress=55)
+        waited = wait_for_server_scan(lambda: scan_status(media_type), sleep,
+                                      fallback_seconds=fallback, cap_seconds=cap)
         # Carry the scope so stage 2 (Update DB) reads only the library we rescanned.
         emit('video_library_scan_completed',
              {'server': refresh.get('server') or '', 'media_type': media_type})
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                             log_line='Server scan done — updating the database', log_type='success')
+                             log_line=f'Server scan finished (~{waited}s) — updating the database',
+                             log_type='success')
         return {'status': 'completed', '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')

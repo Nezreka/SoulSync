@@ -229,29 +229,74 @@ class TestHandlerNeverRaises:
 
 # ── post-download chain: video_scan_server (stage 1) ───────────────────────
 from core.automation.handlers.video_scan_library import (  # noqa: E402
-    auto_video_scan_server, auto_video_update_database)
+    auto_video_scan_server, auto_video_update_database, wait_for_server_scan)
+
+
+class TestWaitForServerScan:
+    """Poll the server until its scan queue is idle; fixed wait only as a fallback."""
+
+    def test_returns_quickly_when_already_idle(self):
+        slept = []
+        waited = wait_for_server_scan(lambda: False, slept.append, grace_seconds=15)
+        assert waited == 15 and slept == [15]                 # just the grace, then idle
+
+    def test_polls_until_the_scan_finishes(self):
+        # scanning for three polls, then idle — handles a 10-20 min big-library scan
+        seq = iter([True, True, True, False])
+        slept = []
+        waited = wait_for_server_scan(lambda: next(seq), slept.append,
+                                      grace_seconds=15, interval_seconds=10)
+        assert waited == 15 + 30                               # grace + 3 polls
+        assert slept == [15, 10, 10, 10]
+
+    def test_falls_back_to_fixed_wait_when_status_unknown(self):
+        slept = []
+        waited = wait_for_server_scan(lambda: None, slept.append,
+                                      grace_seconds=15, fallback_seconds=120)
+        assert waited == 120 and slept == [15, 105]           # grace + (fallback - grace)
+
+    def test_stops_at_the_cap_on_a_runaway_scan(self):
+        slept = []
+        waited = wait_for_server_scan(lambda: True, slept.append,
+                                      grace_seconds=0, interval_seconds=10, cap_seconds=50)
+        assert waited == 50                                   # never hangs forever
+
+    def test_stops_if_status_becomes_unknown_mid_poll(self):
+        seq = iter([True, None])
+        slept = []
+        wait_for_server_scan(lambda: next(seq), slept.append, grace_seconds=0, interval_seconds=10)
+        assert slept == [10]                                  # one poll, then bail — no hang
 
 
 class TestScanServerStage:
-    def test_refreshes_waits_then_emits_scan_done(self):
+    def test_waits_for_idle_then_emits_scan_done(self):
         deps = _RecordingDeps()
         events = []
-        slept = []
+        # scanning once, then idle
+        seq = iter([True, False])
         r = auto_video_scan_server(
-            {'_automation_id': 'a', 'debounce_seconds': 90}, deps,
-            server_refresh=_refresh_ok(), sleep=lambda s: slept.append(s),
+            {'_automation_id': 'a'}, deps,
+            server_refresh=_refresh_ok(), sleep=lambda s: None,
+            scan_status=lambda mt: next(seq),
             emit=lambda ev, data: events.append((ev, data)))
         assert r['status'] == 'completed'
-        assert slept == [90]                                  # waited the debounce
         assert events == [('video_library_scan_completed', {'server': '', 'media_type': 'all'})]
 
-    def test_default_debounce_and_server_unavailable_still_emits(self):
+    def test_falls_back_to_fixed_wait_when_server_cant_report(self):
+        slept = []
+        auto_video_scan_server(
+            {'_automation_id': 'a', 'debounce_seconds': 90}, _RecordingDeps(),
+            server_refresh=_refresh_ok(), sleep=slept.append,
+            scan_status=lambda mt: None, emit=lambda ev, data: None)
+        assert sum(slept) == 90                               # honoured the fallback wait
+
+    def test_server_unavailable_still_emits(self):
         deps = _RecordingDeps()
         events = []
         auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
             server_refresh=lambda media_type=None: {'ok': False, 'error': 'no server'},
-            sleep=lambda s: None, emit=lambda ev, data: events.append(ev))
+            sleep=lambda s: None, scan_status=lambda mt: False, emit=lambda ev, data: events.append(ev))
         assert events == ['video_library_scan_completed']     # fires even if refresh failed
         assert 'warning' in deps.log_types()
 
@@ -260,22 +305,24 @@ class TestScanServerStage:
         r = auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
             server_refresh=lambda media_type=None: (_ for _ in ()).throw(RuntimeError('boom')),
-            sleep=lambda s: None, emit=lambda *a: None)
+            sleep=lambda s: None, scan_status=lambda mt: False, emit=lambda *a: None)
         assert r['status'] == 'error' and r['error'] == 'boom'
 
-    def test_scopes_refresh_and_carries_media_type_on_the_event(self):
+    def test_scopes_refresh_and_status_and_carries_media_type_on_the_event(self):
         seen = {}
         events = []
 
         def _refresh(media_type=None):
-            seen['mt'] = media_type
+            seen['refresh_mt'] = media_type
             return {'ok': True}
 
         auto_video_scan_server(
             {'_automation_id': 'a', 'media_type': 'show'}, _RecordingDeps(),
             server_refresh=_refresh, sleep=lambda s: None,
+            scan_status=lambda mt: seen.setdefault('status_mt', mt) and False,
             emit=lambda ev, data: events.append((ev, data)))
-        assert seen['mt'] == 'show'                                   # only TV sections nudged
+        assert seen['refresh_mt'] == 'show'                           # only TV sections nudged
+        assert seen['status_mt'] == 'show'                            # polled TV scan status
         assert events[0][1]['media_type'] == 'show'                   # stage 2 inherits the scope
 
 
