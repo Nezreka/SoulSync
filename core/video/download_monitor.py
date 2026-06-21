@@ -37,12 +37,17 @@ _started = False
 _lock = threading.Lock()
 
 
-def _complete_via_file(dl, download_dir, lister, mover):
-    """Locate the finished file in the download dir and move it to the library. Returns
-    a completed/failed patch, or {'progress':100} if the file isn't there yet."""
+def _complete_via_file(dl, download_dir, lister, mover, organizer):
+    """Locate the finished file in the download dir and post-process it into the
+    library. Returns a completed/import_failed patch, or {'progress':100} if the file
+    isn't on disk yet. ``organizer(dl, src)`` (when supplied) runs the full Radarr-style
+    import (parse → templated rename → copy/replace → carry subs); otherwise we fall
+    back to the legacy flat move by basename."""
     src = find_completed_file(download_dir, dl.get("filename"), lister)
     if not src:
         return {"progress": 100.0}
+    if organizer is not None:
+        return organizer(dl, src)
     dest = dest_path_for(dl.get("target_dir"), src)
     try:
         mover(src, dest)
@@ -51,7 +56,7 @@ def _complete_via_file(dl, download_dir, lister, mover):
     return {"status": "completed", "progress": 100.0, "dest_path": dest}
 
 
-def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mover) -> dict | None:
+def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mover, organizer=None) -> dict | None:
     """Decide the next state for one active download given the current slskd transfers.
     Returns a patch dict for the DB row, or {'_missing': True} when slskd no longer
     knows the transfer (the caller decides when to give up). Robust to slskd clearing
@@ -60,7 +65,7 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
     t = find_transfer(transfers, dl.get("username"), dl.get("filename"))
     if not t:
         # slskd forgot it — could be done+cleared. If the file's there, finish it.
-        done = _complete_via_file(dl, download_dir, lister, mover)
+        done = _complete_via_file(dl, download_dir, lister, mover, organizer)
         if done.get("status"):
             return done
         return {"_missing": True}
@@ -71,12 +76,123 @@ def process_download(dl: dict, transfers: list, download_dir: str, *, lister, mo
         return {"status": "cancelled", "error": "Cancelled on Soulseek"}
     if state == "failed":
         return {"status": "failed", "error": "Soulseek transfer " + str(t.get("state") or "failed")}
-    return _complete_via_file(dl, download_dir, lister, mover)   # completed
+    return _complete_via_file(dl, download_dir, lister, mover, organizer)   # completed
 
 
 def _move(src: str, dest: str) -> None:
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     shutil.move(src, dest)
+
+
+def _make_organizer(db):
+    """A per-tick organizer closure: post-process a finished download into the library
+    via the importer (Radarr-style parse → ffprobe-verify → templated rename →
+    copy/replace → carry subs) against the real filesystem. The upgrade decision reads
+    the destination folder (filesystem-as-truth), so no DB/profile lookup is needed.
+    ffprobe is best-effort — when it isn't installed, ``probe`` returns None and the
+    importer falls back to scene-name parsing."""
+    from core.video import organization
+    from core.video.importer import real_fs, run_import
+    from core.video.mediainfo import probe
+    fs = real_fs()
+    try:
+        settings = organization.load(db)
+    except Exception:   # noqa: BLE001 - a settings-load hiccup must never wedge the monitor
+        settings = organization.default_settings()
+    prober = probe if settings.get("verify_with_ffprobe", True) else None
+
+    def organize(dl, src):
+        patch = run_import(dl, src, fs=fs, prober=prober, settings=settings)
+        if patch.get("status") == "completed" and patch.get("dest_path"):
+            if settings.get("save_artwork") or settings.get("write_nfo"):
+                write_sidecars(db, dl, patch["dest_path"], settings, fs)
+            if settings.get("download_subtitles"):
+                write_subtitles_for(db, dl, patch["dest_path"], settings, fs)
+        return patch
+
+    return organize
+
+
+def _media_ids(db, dl):
+    """(tmdb_id, imdb_id) for a download's title — taken directly when it was grabbed
+    from TMDB, or looked up from the LIBRARY row for an owned re-grab (whose ``media_id``
+    is the library id, not a TMDB id). (None, None) when it can't be resolved."""
+    dl = dl or {}
+    mid = dl.get("media_id")
+    if not mid:
+        return (None, None)
+    src = str(dl.get("media_source") or "").lower()
+    if src == "tmdb":
+        try:
+            return (int(mid), None)
+        except (TypeError, ValueError):
+            return (None, None)
+    if src == "library" and db is not None:
+        try:
+            kind = "movie" if str(dl.get("kind") or "").lower() == "movie" else "show"
+            return db.media_tmdb_id(kind, mid)
+        except Exception:   # noqa: BLE001
+            return (None, None)
+    return (None, None)
+
+
+def write_sidecars(db, dl, dest_path, settings, fs):
+    """Best-effort: fetch full TMDB metadata for the imported title (resolving a library
+    re-grab's id when needed) and write NFO + the artwork set next to it — movie folder,
+    or the show root for an episode. Uses the detail's ABSOLUTE image URLs (the download
+    row's poster is an internal/relative path, not fetchable). Never raises. Shared by
+    the monitor and the manual-import endpoint."""
+    try:
+        from core.video import sidecars
+        scope = "movie" if str(dl.get("kind") or "").lower() == "movie" else "episode"
+        tmdb_id, _imdb = _media_ids(db, dl)
+        detail = None
+        if tmdb_id is not None:
+            try:
+                from core.video.enrichment.engine import get_video_enrichment_engine
+                # full_detail (not tmdb_detail) so OWNED titles don't redirect — sidecars
+                # need the raw metadata + absolute image URLs regardless of ownership.
+                d = get_video_enrichment_engine().tmdb_full_detail(
+                    "movie" if scope == "movie" else "show", tmdb_id)
+                if isinstance(d, dict):
+                    detail = d
+            except Exception:   # noqa: BLE001 - a metadata fetch hiccup → skip, don't fail
+                detail = None
+        sidecars.write_for(dest_path, scope, (detail or {}).get("poster_url"), detail, settings, fs)
+    except Exception:   # noqa: BLE001 - sidecars are a nice-to-have, never fatal
+        logger.exception("sidecar write failed for download %s", (dl or {}).get("id"))
+
+
+def write_subtitles_for(db, dl, dest_path, settings, fs):
+    """Best-effort: download external .srt files (OpenSubtitles) next to the imported
+    video for the user's preferred languages. The .srt sits NEXT TO the file (so an
+    episode's subs land in its Season folder, not the show root). Never raises."""
+    try:
+        import json as _json
+        from core.video import subtitles
+        api_key = db.get_setting("opensubtitles_api_key") if db else None
+        fetch = subtitles.opensubtitles_fetcher(api_key)
+        if not fetch:
+            return
+        tmdb_id, imdb_id = _media_ids(db, dl)
+        identity = {}
+        if tmdb_id is not None:
+            identity["tmdb_id"] = tmdb_id
+        if imdb_id:
+            identity["imdb_id"] = imdb_id
+        try:
+            ctx = _json.loads(dl.get("search_ctx") or "{}")
+        except (ValueError, TypeError):
+            ctx = {}
+        if isinstance(ctx, dict) and ctx.get("season") is not None:
+            identity["season"] = ctx.get("season")
+            identity["episode"] = ctx.get("episode")
+        if not (identity.get("tmdb_id") or identity.get("imdb_id")):
+            return
+        langs = subtitles.parse_langs(settings.get("subtitle_langs"))
+        subtitles.write_subtitles(dest_path, langs, identity, fetch, fs)
+    except Exception:   # noqa: BLE001 - subtitle fetch is best-effort, never fatal
+        logger.exception("subtitle fetch failed for download %s", (dl or {}).get("id"))
 
 
 def _walk(root: str):
@@ -233,11 +349,13 @@ def _tick(db) -> None:
     from config.settings import config_manager
     download_dir = str(config_manager.get("soulseek.download_path", "") or "")
     transfers = list_downloads()
+    organizer = _make_organizer(db)
     live_ids = set()
     completed_now = 0
     for dl in active:
         live_ids.add(dl["id"])
-        upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move)
+        upd = process_download(dl, transfers, download_dir, lister=_walk, mover=_move,
+                               organizer=organizer)
         if not upd:
             continue
         if upd.get("status") == "completed":
@@ -253,7 +371,10 @@ def _tick(db) -> None:
         if upd.get("status") == "failed":
             _fail_or_retry(db, dl, upd.get("error"))      # auto-retry before truly failing
             continue
-        if upd.get("status") in ("completed", "cancelled"):
+        # import_failed = the file downloaded fine but couldn't be placed (sample, wrong
+        # episode, not an upgrade, …). Terminal + needs manual import — NOT a download
+        # failure, so don't burn the retry budget re-downloading the same good file.
+        if upd.get("status") in ("completed", "cancelled", "import_failed"):
             upd.setdefault("completed_at", _now())
         try:
             db.update_video_download(dl["id"], **upd)

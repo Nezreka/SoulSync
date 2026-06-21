@@ -25,7 +25,7 @@ _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encod
 def test_result_card_redesigned_as_column_with_get_button():
     assert 'vdl-res-main' in _VIEW          # row wrapper so a tracker can dock below
     assert 'data-vdl-card="' in _VIEW       # addressable card (auto-pick targets it)
-    assert 'vdl-res-grab-ic' in _VIEW       # the grab button is now a labelled "Get" pill
+    assert '[ GET ]' in _VIEW               # brutalist grab button is a bracketed label
     assert '.vdl-res-main' in _CSS
 
 
@@ -66,16 +66,18 @@ def test_detail_watch_started_for_library_movies():
     assert 'stopMovieDownloadWatch()' in _DETAIL   # cleared on (re)load / navigate away
 
 
-# --- result cards: cinematic card redesign --------------------------------
+# --- result cards: flat / brutalist redesign ------------------------------
 
-def test_result_cards_are_cinematic_cards_with_meta_pills():
-    # quality badge + release-name hero + a row of meta PILLS + size/verdict/Get group.
-    assert 'vdl-info-title' in _VIEW and 'vdl-q-res' in _VIEW and 'vdl-flag' in _VIEW
-    assert 'vdl-info-tags' in _VIEW and 'vdl-tag' in _VIEW and 'vdl-res-right' in _VIEW
-    assert '.vdl-tag' in _CSS and '.vdl-info-tags' in _CSS and '.vdl-res-right' in _CSS
-    # the old "·"-joined sub-line is gone (meta is pills now)
-    assert 'vdl-info-sub' not in _VIEW
-    assert 'vdl-res-summary' not in _VIEW
+def test_result_cards_are_flat_brutalist_three_line():
+    # 3 hard lines: [QUALITY] + title, an UPPERCASE spec line, then verdict + GET.
+    assert 'vdl-r-l1' in _VIEW and 'vdl-r-q' in _VIEW and 'vdl-r-title' in _VIEW
+    assert 'vdl-r-l2' in _VIEW and 'vdl-r-l3' in _VIEW and 'vdl-r-verdict' in _VIEW
+    assert '.vdl-r-q' in _CSS and '.vdl-r-l2' in _CSS and '.vdl-r-verdict' in _CSS
+    # the cinematic pill/badge language was redesigned out
+    assert 'vdl-info-tags' not in _VIEW and 'vdl-tag' not in _VIEW
+    assert 'vdl-q-res' not in _VIEW and 'vdl-flag' not in _VIEW
+    # sharp corners + monospace are the brutalist signature
+    assert 'border-radius: 0' in _CSS and 'monospace' in _CSS
 
 
 # --- modal resumes an in-flight download on reopen ------------------------

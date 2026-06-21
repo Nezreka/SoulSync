@@ -685,6 +685,117 @@
         }).catch(function () { toast('Failed to test ' + name + ' connection', 'error'); });
     }
 
+    // ── Library Organization (naming templates + post-process toggles) ───────
+    var ORG_URL = '/api/video/organization';
+    var _videoOrg = null;
+    // Sample values for the live preview (mirrors what the importer feeds the engine).
+    var _ORG_MOVIE_EG = { title: 'The Matrix', titlefirst: 'T', year: '1999', quality: 'Bluray-1080p',
+        resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
+    var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
+        year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189' };
+
+    function _orgSanitize(v) {
+        return String(v == null ? '' : v).replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
+            .replace(/\s+/g, ' ').trim().replace(/[ .]+$/, '');
+    }
+    // Client-side mirror of core/video/organization.render_template + _tidy_component
+    // (kept in lockstep) so the preview matches what actually lands on disk.
+    function _orgRender(tmpl, vals) {
+        var keys = Object.keys(vals).sort(function (a, b) { return b.length - a.length; });
+        var out = String(tmpl || '');
+        keys.forEach(function (k) { out = out.split('${' + k + '}').join(_orgSanitize(vals[k])); });
+        keys.forEach(function (k) { out = out.split('$' + k).join(_orgSanitize(vals[k])); });
+        return out.split('/').map(function (p) {
+            p = p.replace(/\s+-\s+(?=(\s|$))/g, ' ').replace(/\(\s*\)/g, '').replace(/\[\s*\]/g, '');
+            p = p.replace(/\s+/g, ' ').trim().replace(/^-+|-+$/g, '').trim().replace(/[ .]+$/, '');
+            return p;
+        }).filter(function (p) { return p !== ''; }).join('/');
+    }
+    function renderOrgPreview() {
+        var mt = document.getElementById('vo-movie-template');
+        var et = document.getElementById('vo-episode-template');
+        var mp = document.getElementById('vo-movie-preview');
+        var ep = document.getElementById('vo-episode-preview');
+        if (mp && mt) mp.textContent = _orgRender(mt.value || mt.placeholder, _ORG_MOVIE_EG) + '.mkv';
+        if (ep && et) ep.textContent = _orgRender(et.value || et.placeholder, _ORG_EP_EG) + '.mkv';
+    }
+    function fillOrg() {
+        if (!_videoOrg) return;
+        var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+        var chk = function (id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; };
+        set('vo-movie-template', _videoOrg.movie_template || '');
+        set('vo-episode-template', _videoOrg.episode_template || '');
+        set('vo-transfer-mode', _videoOrg.transfer_mode || 'copy');
+        chk('vo-verify', _videoOrg.verify_with_ffprobe);
+        chk('vo-replace', _videoOrg.replace_existing);
+        chk('vo-subs', _videoOrg.carry_subtitles);
+        chk('vo-artwork', _videoOrg.save_artwork);
+        chk('vo-nfo', _videoOrg.write_nfo);
+        chk('vo-subs-dl', _videoOrg.download_subtitles);
+        set('vo-sub-langs', _videoOrg.subtitle_langs || 'en');
+        renderOrgPreview();
+    }
+    function loadOrganization() {
+        fetch(ORG_URL, { headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) { if (d) { _videoOrg = d; fillOrg(); } })
+            .catch(function () { /* ignore */ });
+    }
+    function collectOrg() {
+        var val = function (id) { var el = document.getElementById(id); return el ? el.value : ''; };
+        var on = function (id) { var el = document.getElementById(id); return !!(el && el.checked); };
+        return {
+            movie_template: val('vo-movie-template'),
+            episode_template: val('vo-episode-template'),
+            transfer_mode: val('vo-transfer-mode'),
+            verify_with_ffprobe: on('vo-verify'),
+            replace_existing: on('vo-replace'),
+            carry_subtitles: on('vo-subs'),
+            save_artwork: on('vo-artwork'),
+            write_nfo: on('vo-nfo'),
+            download_subtitles: on('vo-subs-dl'),
+            subtitle_langs: val('vo-sub-langs')
+        };
+    }
+    function saveOrganization(silent) {
+        return fetch(ORG_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify(collectOrg())
+        }).then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) { if (d) { _videoOrg = d; } if (!silent) toast('Library organization saved', 'success'); })
+          .catch(function () { /* ignore */ });
+    }
+    function wireOrganization() {
+        var anchor = document.getElementById('vo-movie-template');
+        if (!anchor) return;
+        var card = anchor.closest('.settings-group');
+        if (!card || card._voWired) return;
+        card._voWired = true;
+        ['vo-movie-template', 'vo-episode-template'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            el.addEventListener('input', renderOrgPreview);          // live preview while typing
+            el.addEventListener('change', function () { saveOrganization(false); });
+        });
+        ['vo-transfer-mode', 'vo-verify', 'vo-replace', 'vo-subs', 'vo-artwork', 'vo-nfo',
+            'vo-subs-dl', 'vo-sub-langs'].forEach(function (id) {
+            var el = document.getElementById(id);
+            if (el) el.addEventListener('change', function () { saveOrganization(false); });
+        });
+        var reset = document.getElementById('vo-reset');
+        if (reset) reset.addEventListener('click', function () {
+            // POST blank templates + standard toggles; the backend normalises to the
+            // Radarr/Sonarr defaults and echoes them back.
+            fetch(ORG_URL, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                body: JSON.stringify({ movie_template: '', episode_template: '', transfer_mode: 'copy',
+                    verify_with_ffprobe: true, replace_existing: true, carry_subtitles: true,
+                    save_artwork: false, write_nfo: false, download_subtitles: false, subtitle_langs: 'en' })
+            }).then(function (r) { return r.ok ? r.json() : null; })
+              .then(function (d) { if (d) { _videoOrg = d; fillOrg(); toast('Reset to the standard layout', 'success'); } });
+        });
+    }
+
     function onPageShown(e) {
         if (e && e.detail !== PAGE_ID) return;
         loadServer();
@@ -699,6 +810,8 @@
         wireYtQuality();
         loadSlskd();
         wireSlskd();
+        loadOrganization();
+        wireOrganization();
     }
 
     function init() {
