@@ -29,6 +29,7 @@ _SOURCE = [
     (re.compile(r"\b(blu-?ray|bdrip|brrip|bd25|bd50)\b", re.I), "bluray"),
     (re.compile(r"\b(web-?dl|web\.?dl|amzn|nf|dsnp|hmax|atvp)\b", re.I), "web-dl"),
     (re.compile(r"\bweb-?rip\b", re.I), "webrip"),
+    (re.compile(r"\bweb\b", re.I), "web-dl"),   # plain "WEB" (very common) — treat as WEB-DL
     (re.compile(r"\bhdtv\b", re.I), "hdtv"),
     (re.compile(r"\b(dvdrip|dvd)\b", re.I), "dvd"),
     (re.compile(r"\b(cam|hdcam|ts|telesync|hdts)\b", re.I), "cam"),

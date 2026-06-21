@@ -6,10 +6,14 @@ from __future__ import annotations
 
 from core.video.quality_eval import (
     evaluate_owned,
+    evaluate_release,
     meets_cutoff,
     resolution_label,
     resolution_rank,
+    tier_key,
 )
+from core.video.quality_profile import default_profile
+from core.video.release_parse import parse_release
 
 
 def test_resolution_rank_agrees_across_formats():
@@ -64,3 +68,14 @@ def test_evaluate_owned_always_upgrade_when_cutoff_empty():
 def test_evaluate_owned_handles_garbage_inputs():
     assert evaluate_owned(None, None)["meets"] in (True, False)   # never raises
     assert evaluate_owned("nope", 42)["resolution_label"] == ""
+
+
+def test_resolution_only_release_still_grabbable():
+    # a known resolution with NO recognised source assumes web → lands on a tier
+    # (instead of being rejected as 'unknown quality'); ffprobe verifies after.
+    assert tier_key(None, "1080p") == "web-1080p"
+    assert tier_key("web-dl", "720p") == "web-720p"          # plain WEB now resolves here
+    assert tier_key(None, None) == ""                        # no res + no source → still unknown
+    v = evaluate_release(parse_release("Show S01E01 720p"), default_profile(),
+                         scope="episode", want_season=1, want_episode=1)
+    assert v["accepted"] is True
