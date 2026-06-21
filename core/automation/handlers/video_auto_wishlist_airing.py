@@ -34,6 +34,28 @@ def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dic
         show_tmdb_id, show_title, episodes, server_source=resolve_video_server())
 
 
+def _default_season_meta(tmdb_id: Any, season_number: Any):
+    """The SAME TMDB season fetch the show modal uses for a manual add — so auto-added
+    episodes carry identical stills / overviews / season posters, not the patchy values
+    the local DB happens to hold."""
+    from core.video.enrichment.engine import get_video_enrichment_engine
+    return get_video_enrichment_engine().tmdb_season(tmdb_id, season_number)
+
+
+def _season_lookup(season_meta, tmdb_id, season_number, cache):
+    """(season_poster_url, {episode_number: tmdb_episode}) for a show+season, fetched
+    once and cached. A TMDB hiccup degrades to empty (DB values fill in)."""
+    key = (tmdb_id, season_number)
+    if key not in cache:
+        try:
+            sm = season_meta(tmdb_id, season_number) or {}
+        except Exception:   # noqa: BLE001 - never let a metadata fetch break the run
+            sm = {}
+        emap = {e.get('episode_number'): e for e in (sm.get('episodes') or []) if isinstance(e, dict)}
+        cache[key] = (sm.get('poster_url'), emap)
+    return cache[key]
+
+
 def auto_video_add_airing_episodes(
     config: Dict[str, Any],
     deps: AutomationDeps,
@@ -41,12 +63,14 @@ def auto_video_add_airing_episodes(
     fetch_airing: Optional[Callable[[str], List[Dict[str, Any]]]] = None,
     add_episodes: Optional[Callable[[Any, Any, List[Dict[str, Any]]], int]] = None,
     today_fn: Optional[Callable[[], str]] = None,
+    season_meta: Optional[Callable[[Any, Any], Any]] = None,
 ) -> Dict[str, Any]:
     """Add today's airing (unowned, followed-show) episodes to the video wishlist.
 
     Returns ``{'status': 'completed', 'episodes_added': int, 'shows': int, ...}``."""
     fetch_airing = fetch_airing or _default_fetch_airing
     add_episodes = add_episodes or _default_add_episodes
+    season_meta = season_meta or _default_season_meta
     today_fn = today_fn or (lambda: date.today().isoformat())
     automation_id = config.get('_automation_id')
     try:
@@ -59,21 +83,26 @@ def auto_video_add_airing_episodes(
         # real season/episode. add_episodes_to_wishlist is idempotent, so re-runs
         # never duplicate.
         by_show: Dict[tuple, List[Dict[str, Any]]] = {}
+        season_cache: Dict[tuple, tuple] = {}
         for r in rows:
             if r.get('has_file'):
                 continue
             tid = r.get('show_tmdb_id')
-            if not tid or r.get('season_number') is None or r.get('episode_number') is None:
+            sn, en = r.get('season_number'), r.get('episode_number')
+            if not tid or sn is None or en is None:
                 continue
+            # Pull the SAME TMDB metadata a manual add gets (still + overview + season
+            # poster); fall back to the calendar/DB values if TMDB is unavailable.
+            poster, emap = _season_lookup(season_meta, tid, sn, season_cache)
+            tm = emap.get(en) or {}
             by_show.setdefault((tid, r.get('show_title')), []).append({
-                'season_number': r.get('season_number'),
-                'episode_number': r.get('episode_number'),
-                'title': r.get('title'),
-                'air_date': r.get('air_date'),
-                # carry the rich metadata so auto-added episodes look like manual ones
-                # (synopsis + still thumbnail), not blank rows
-                'overview': r.get('overview'),
-                'still_url': r.get('still_url'),
+                'season_number': sn,
+                'episode_number': en,
+                'title': r.get('title') or tm.get('title'),
+                'air_date': r.get('air_date') or tm.get('air_date'),
+                'overview': tm.get('overview') or r.get('overview'),
+                'still_url': tm.get('still_url') or r.get('still_url'),
+                'season_poster_url': poster,
             })
 
         added = 0
