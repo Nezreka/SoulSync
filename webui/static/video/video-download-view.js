@@ -448,6 +448,8 @@
             if (res && res.ok) {
                 toast('Sent to Downloads', 'success');
                 beginTracking(card, res.id);   // selected card → live tracker + Track button
+                var _ep = panel.closest && panel.closest('.vdl-ep');
+                if (_ep) epTrack(_ep, res.id);   // also light the collapsed episode row
                 document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
             } else {
                 btn.disabled = false; btn.classList.remove('vdl-res-grab--busy');
@@ -488,6 +490,8 @@
                 if (statusEl) { statusEl.textContent = 'Sent'; statusEl.className = 'vdl-src-status vdl-src-status--done'; }
                 toast('Sent to Downloads', 'success');
                 beginTracking(card, res.id);   // chosen card → live tracker + Track button
+                var _ep = panel.closest && panel.closest('.vdl-ep');
+                if (_ep) epTrack(_ep, res.id);   // also light the collapsed episode row
                 document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
             } else {
                 if (gbtn) { gbtn.disabled = false; gbtn.classList.remove('vdl-res-grab--busy'); }
@@ -712,6 +716,7 @@
         if (meta) meta.textContent = eps.length + ' eps' + (missing ? ' · ' + missing + ' missing' : '');
         card.setAttribute('data-loaded', '1');
         syncSeason(container, sn);
+        resumeEpisodeTracking(container, st);   // light up any in-flight episode rows
     }
 
     function fetchSeason(container, card, sn, st) {
@@ -838,12 +843,83 @@
         panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) { return srcBlockHTML(s, true); }).join('') + '</div>';
     }
 
+    // ── per-episode live tracking ──────────────────────────────────────────────
+    // Every episode ROW carries its own live download status (Searching → Downloading
+    // % → Downloaded / Failed), so season grabs aren't headless and the modal shows
+    // exactly what each episode is doing — matching the inline movie tracker.
+    function _epEl(container, sn, en) {
+        return container.querySelector('.vdl-ep[data-vdl-ep="' + sn + '_' + en + '"]');
+    }
+
+    function epStatusRender(epEl, dl) {
+        var stEl = epEl.querySelector('[data-vdl-ep-status]'); if (!stEl) return;
+        var st = dl.status, pct = Math.max(0, Math.min(100, dl.progress || 0));
+        if (st === 'completed') pct = 100;
+        epEl.classList.remove('vdl-ep--dl-active', 'vdl-ep--dl-done', 'vdl-ep--dl-fail');
+        if (st === 'completed') {
+            epEl.classList.add('vdl-ep--dl-done');
+            stEl.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--done">&#10003; Downloaded</span>';
+        } else if (st === 'failed' || st === 'cancelled') {
+            epEl.classList.add('vdl-ep--dl-fail');
+            stEl.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--fail">&#10007; ' + esc(TRACK_LABEL[st] || 'Failed') + '</span>';
+        } else {
+            epEl.classList.add('vdl-ep--dl-active');
+            var label = st === 'downloading' ? ('Downloading ' + pct + '%')
+                : (st === 'searching' ? 'Searching…' : (TRACK_LABEL[st] || 'Queued'));
+            stEl.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--active">' +
+                '<span class="vdl-ep-dl-bar"><span style="width:' + pct + '%"></span></span>' + esc(label) + '</span>';
+        }
+    }
+
+    function epSearching(epEl) {
+        if (!epEl) return;
+        epEl.classList.remove('vdl-ep--dl-done', 'vdl-ep--dl-fail');
+        epEl.classList.add('vdl-ep--dl-active');
+        var s = epEl.querySelector('[data-vdl-ep-status]');
+        if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--active"><span class="vdl-ep-dl-spin"></span>Searching…</span>';
+    }
+    function epNoRelease(epEl) {
+        if (!epEl) return;
+        epEl.classList.remove('vdl-ep--dl-active');
+        var s = epEl.querySelector('[data-vdl-ep-status]');
+        if (s) s.innerHTML = '<span class="vdl-ep-dl vdl-ep-dl--none">No release found</span>';
+    }
+
+    // Poll one episode's download by id and paint its row until it finishes. Robust to
+    // the modal closing (stops) and to a newer grab on the same row (id guard).
+    function epTrack(epEl, dlId) {
+        if (!epEl || dlId == null) return;
+        if (epEl._eptimer) { clearTimeout(epEl._eptimer); epEl._eptimer = null; }
+        epEl._epdl = dlId;
+        (function tick() {
+            if (!epEl.isConnected || epEl._epdl !== dlId) return;
+            getJSON('/api/video/downloads/status?id=' + encodeURIComponent(dlId)).then(function (d) {
+                if (!epEl.isConnected || epEl._epdl !== dlId) return;
+                var dl = d && d.download;
+                if (!dl) { epEl._eptimer = setTimeout(tick, 2200); return; }
+                epStatusRender(epEl, dl);
+                if (!(dl.status in TRACK_DONE)) epEl._eptimer = setTimeout(tick, 2000);
+            });
+        })();
+    }
+
+    // Pick the best accepted+grabbable hit in a results panel and grab it. Returns
+    // {ok, id} — the id is what the episode row tracks. (Same payload as a manual grab.)
+    function _pickAndGrab(panel) {
+        var rows = (panel && panel._rows) || [];
+        var best = null;
+        for (var i = 0; i < rows.length; i++) {
+            if (rows[i].accepted && rows[i].username) { best = rows[i]; break; }
+        }
+        if (!best) return Promise.resolve({ ok: false });
+        return sendGrab(buildGrabPayload(panel, best)).then(function (res) {
+            return (res && res.ok) ? { ok: true, id: res.id } : { ok: false };
+        });
+    }
+
     // ── Grab whole season (episode level) ──────────────────────────────────────
-    // We DON'T grab a multi-file pack; we run the per-episode auto-grab for every
-    // MISSING episode, throttled, reusing searchInto + _autoPick — so each episode
-    // takes the exact same path a manual per-episode Auto would. A hidden scratch
-    // holds the headless result panels; the grabs surface on the Downloads page.
-    // (Pack-folder grabbing can come later; this covers the common case.)
+    // Run the per-episode auto-grab for every MISSING episode, throttled — each takes
+    // the same path a manual per-episode Auto would, and each ROW shows live status.
     function ensureScratch(container) {
         var s = container.querySelector('[data-vdl-grab-scratch]');
         if (!s) {
@@ -856,15 +932,27 @@
     }
 
     function autoGrabEpisode(container, st, sn, en, src) {
-        // Resolves once the SEARCH settles (the grab POST fires inside _autoPick);
-        // throttling the searches is what protects slskd from a burst.
+        // Resolves once the search SETTLES (throttle the searches, not the grabs); the
+        // row then tracks the live download itself.
         return new Promise(function (resolve) {
+            var epEl = _epEl(container, sn, en);
+            epSearching(epEl);
             var panel = document.createElement('div');
             panel.className = 'vdl-results vdl-res-noanim';
             ensureScratch(container).appendChild(panel);
             searchInto(container, panel,
                 { scope: 'episode', title: st.title, season: sn, episode: en, source: src },
-                [], function () { _autoPick(panel, null); resolve(); });
+                [], function () {
+                    _pickAndGrab(panel).then(function (r) {
+                        if (r.ok) {
+                            epTrack(epEl, r.id);
+                            document.dispatchEvent(new CustomEvent('soulsync:video-download-started'));
+                        } else {
+                            epNoRelease(epEl);
+                        }
+                        resolve(r);
+                    });
+                });
         });
     }
 
@@ -877,22 +965,41 @@
         }
         eps.sort(function (a, b) { return a - b; });
         if (!eps.length) { toast('No missing episodes in this season', 'info'); return; }
+        // make sure the season is open so the user sees the rows light up
+        var card = container.querySelector('.vdl-season[data-vdl-season="' + sn + '"]');
+        if (card) card.classList.add('vdl-season--open');
+        eps.forEach(function (en) { epSearching(_epEl(container, sn, en)); });   // immediate feedback
         var btn = container.querySelector('[data-vdl-season-grab="' + sn + '"]');
-        if (btn) { btn.disabled = true; btn.textContent = 'Grabbing 0/' + eps.length; }
-        toast('Auto-grabbing ' + eps.length + ' missing episode' + (eps.length > 1 ? 's' : '') + ' — watch Downloads', 'info');
+        if (btn) { btn.disabled = true; btn.textContent = 'Grabbing…'; }
+        toast('Grabbing ' + eps.length + ' episode' + (eps.length > 1 ? 's' : '') + ' — each row shows live status', 'info');
         var idx = 0, active = 0, done = 0, MAX = 3;
         function pump() {
             while (active < MAX && idx < eps.length) {
                 active++;
                 autoGrabEpisode(container, st, sn, eps[idx++], src).then(function () {
                     active--; done++;
-                    if (btn) btn.textContent = done < eps.length ? 'Grabbing ' + done + '/' + eps.length : 'Season queued';
-                    if (done >= eps.length) { if (btn) btn.disabled = false; }
+                    if (done >= eps.length) { if (btn) { btn.disabled = false; btn.textContent = 'Grab season'; } }
                     else pump();
                 });
             }
         }
         pump();
+    }
+
+    // On (re)open, resume live tracking for any episodes of THIS show already in flight,
+    // so closing/reopening the modal never loses the per-episode progress.
+    function resumeEpisodeTracking(container, st) {
+        getJSON('/api/video/downloads/active').then(function (d) {
+            ((d && d.downloads) || []).forEach(function (dl) {
+                var ctx = dl.search_ctx;
+                if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch (e) { ctx = null; } }
+                ctx = ctx || {};
+                if (String(ctx.title || dl.title) !== String(st.title)) return;
+                if (ctx.season == null || ctx.episode == null) return;
+                var epEl = _epEl(container, ctx.season, ctx.episode);
+                if (epEl && epEl._epdl == null) { epStatusRender(epEl, dl); epTrack(epEl, dl.id); }
+            });
+        });
     }
 
     function setSeasonSel(container, sn, on) {
