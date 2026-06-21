@@ -490,3 +490,41 @@ def test_airing_automation_migration_is_idempotent():
     db2.get_system_automation_by_action.return_value = None
     AutomationEngine(db2)._fix_airing_automation_schedule()
     db2.update_automation.assert_not_called()
+
+
+def test_deep_scans_migrate_to_fixed_weekly_times():
+    """The two video deep scans move from a rolling 7-day interval to fixed weekly
+    times — TV Mondays 02:00, Movies Tuesdays 02:00."""
+    rows = {
+        'video_deep_scan_tv': {'id': 7, 'is_system': 1, 'trigger_type': 'schedule',
+                               'trigger_config': json.dumps({'interval': 7, 'unit': 'days'})},
+        'video_deep_scan_movies': {'id': 8, 'is_system': 1, 'trigger_type': 'schedule',
+                                   'trigger_config': json.dumps({'interval': 7, 'unit': 'days'})},
+    }
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    eng = AutomationEngine(db)
+    eng._default_tz = 'UTC'
+    eng._fix_deep_scan_schedules()
+
+    by_id = {c.args[0]: c.kwargs for c in db.update_automation.call_args_list}
+    assert json.loads(by_id[7]['trigger_config']) == {'time': '02:00', 'days': ['mon']}   # TV → Mon
+    assert json.loads(by_id[8]['trigger_config']) == {'time': '02:00', 'days': ['tue']}   # Movies → Tue
+    assert by_id[7]['trigger_type'] == 'weekly_time' and by_id[8]['trigger_type'] == 'weekly_time'
+    assert by_id[7]['next_run'].endswith(' 02:00:00') and by_id[8]['next_run'].endswith(' 02:00:00')
+
+
+def test_deep_scan_migration_is_idempotent_and_safe_when_absent():
+    # already weekly_time → no-op (a hand-tuned day/time isn't reverted)
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: {
+        'id': 7, 'is_system': 1, 'trigger_type': 'weekly_time',
+        'trigger_config': json.dumps({'time': '05:00', 'days': ['sat']})}
+    AutomationEngine(db)._fix_deep_scan_schedules()
+    db.update_automation.assert_not_called()
+
+    # absent (not seeded yet) → no-op, never errors
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_deep_scan_schedules()
+    db2.update_automation.assert_not_called()

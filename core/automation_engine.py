@@ -184,25 +184,24 @@ SYSTEM_AUTOMATIONS = [
     },
     # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
     # and TV are independent libraries — a TV scan never pulls in new movies and
-    # vice-versa. Weekly deep scan (re-read + prune removed). Initial delays are
-    # staggered so they don't collide on startup; the singleton scanner also skips a
-    # run that overlaps the other (handler returns 'skipped').
+    # vice-versa. Fixed weekly deep scan (re-read + prune removed) at 02:00 server-
+    # local: TV Mondays, Movies Tuesdays — different days so they never overlap. The
+    # seeder arms timed system triggers; _fix_deep_scan_schedules migrates the
+    # original rolling-7-day rows. (Busy guard in the scanner is still a safety net.)
     {
-        'name': 'Auto-Deep Scan Movie Library',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 7, 'unit': 'days'},
-        'action_type': 'video_deep_scan_movies',
-        'action_config': {'mode': 'deep', 'media_type': 'movie'},
-        'initial_delay': 1500,  # 25 min after startup
+        'name': 'Auto-Deep Scan TV Library',
+        'trigger_type': 'weekly_time',
+        'trigger_config': {'time': '02:00', 'days': ['mon']},
+        'action_type': 'video_deep_scan_tv',
+        'action_config': {'mode': 'deep', 'media_type': 'show'},
         'owned_by': 'video',
     },
     {
-        'name': 'Auto-Deep Scan TV Library',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 7, 'unit': 'days'},
-        'action_type': 'video_deep_scan_tv',
-        'action_config': {'mode': 'deep', 'media_type': 'show'},
-        'initial_delay': 2400,  # 40 min after startup (staggered past the movie scan)
+        'name': 'Auto-Deep Scan Movie Library',
+        'trigger_type': 'weekly_time',
+        'trigger_config': {'time': '02:00', 'days': ['tue']},
+        'action_type': 'video_deep_scan_movies',
+        'action_config': {'mode': 'deep', 'media_type': 'movie'},
         'owned_by': 'video',
     },
 ]
@@ -362,6 +361,7 @@ class AutomationEngine:
                         logger.info(f"System automation '{spec['name']}' ready (event-based)")
         self._fix_video_scan_default()
         self._fix_airing_automation_schedule()
+        self._fix_deep_scan_schedules()
 
     def _fix_video_scan_default(self):
         """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
@@ -406,6 +406,31 @@ class AutomationEngine:
                         auto.get('id'))
         except Exception:
             logger.exception("airing automation schedule migration failed")
+
+    def _fix_deep_scan_schedules(self):
+        """Migrate the two video deep-scan system automations from the original
+        rolling 7-day interval to fixed weekly times — TV Mondays 02:00, Movies
+        Tuesdays 02:00 (different days so they never overlap). The seeder only
+        creates rows, never updates a drifted trigger; this rewrites the live rows.
+        Only converts the original interval rows (skips once trigger_type is already
+        weekly_time, so a hand-tuned day/time sticks). Idempotent."""
+        targets = {
+            'video_deep_scan_tv': {'time': '02:00', 'days': ['mon']},
+            'video_deep_scan_movies': {'time': '02:00', 'days': ['tue']},
+        }
+        for action_type, cfg in targets.items():
+            try:
+                auto = self.db.get_system_automation_by_action(action_type)
+                if not auto or auto.get('trigger_type') == 'weekly_time':
+                    continue
+                nr_dt = next_run_at('weekly_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+                self.db.update_automation(
+                    auto['id'], trigger_type='weekly_time', trigger_config=json.dumps(cfg),
+                    next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
+                logger.info("Set '%s' to weekly %s %s (id=%s)", auto.get('name'),
+                            cfg['days'], cfg['time'], auto.get('id'))
+            except Exception:
+                logger.exception("deep-scan schedule migration failed for %s", action_type)
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
