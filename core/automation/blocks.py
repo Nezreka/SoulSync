@@ -261,7 +261,10 @@ ACTIONS: list[dict] = [
     {"type": "video_deep_scan_movies", "label": "Deep Scan Movie Library", "icon": "search", "scope": "video",
      "description": "Full reconcile of the Movie library: re-read every movie from the server and drop ones it no longer has (a read, NOT a Plex disk-scan; never touches TV)", "available": True},
     {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
-     "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own", "available": True},
+     "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own. Also tidies the watchlist by dropping shows that have ended/been canceled.", "available": True,
+     "config_fields": [
+         {"key": "prune_ended", "type": "checkbox", "label": "Also remove ended/canceled shows from the watchlist", "default": True}
+     ]},
 ]
 
 

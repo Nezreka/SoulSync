@@ -2055,6 +2055,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def followed_shows(self) -> list[dict]:
+        """Explicitly-followed shows (state='follow') with their library status when
+        owned (NULL for tmdb-only follows). Used by the watchlist-prune pass to drop
+        shows that have since ended/been canceled."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT w.tmdb_id, w.title, w.library_id, s.status "
+                "FROM video_watchlist w LEFT JOIN shows s ON s.id = w.library_id "
+                "WHERE w.kind='show' AND w.state='follow'")]
+        finally:
+            conn.close()
+
     def remove_from_watchlist(self, kind: str, tmdb_id: int) -> bool:
         """Un-follow. Stored as a 'mute' tombstone (not a delete) so an
         actively-airing library show — watched by default — is not silently

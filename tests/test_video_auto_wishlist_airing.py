@@ -34,7 +34,7 @@ def test_adds_unowned_airings_grouped_by_show():
         return len(eps)
 
     res = auto_video_add_airing_episodes(
-        {"_automation_id": "a1"}, _Deps(),
+        {"_automation_id": "a1", "prune_ended": False}, _Deps(),
         fetch_airing=lambda today: rows, add_episodes=add, today_fn=lambda: "2026-06-21",
         season_meta=lambda *a: None)
 
@@ -66,7 +66,7 @@ def test_uses_tmdb_season_metadata_like_a_manual_add():
         captured["eps"] = eps
         return len(eps)
 
-    auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
                                    fetch_airing=lambda t: rows, add_episodes=add,
                                    today_fn=lambda: "2026-06-21", season_meta=season_meta)
     ep = captured["eps"][0]
@@ -85,7 +85,7 @@ def test_falls_back_to_db_values_when_tmdb_unavailable():
         captured["eps"] = eps
         return len(eps)
 
-    auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
                                    fetch_airing=lambda t: rows, add_episodes=add,
                                    today_fn=lambda: "2026-06-21", season_meta=lambda *a: None)
     ep = captured["eps"][0]
@@ -100,14 +100,14 @@ def test_queries_the_calendar_for_today():
         seen["today"] = today
         return []
 
-    auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+    auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
                                    fetch_airing=fetch, add_episodes=lambda *a: 0,
                                    today_fn=lambda: "2026-06-21")
     assert seen["today"] == "2026-06-21"     # start == end == today
 
 
 def test_nothing_airing_is_a_clean_noop():
-    res = auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+    res = auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, _Deps(),
                                          fetch_airing=lambda t: [], add_episodes=lambda *a: 0,
                                          today_fn=lambda: "2026-06-21")
     assert res["status"] == "completed" and res["episodes_added"] == 0
@@ -118,7 +118,64 @@ def test_error_is_caught_and_reported():
         raise RuntimeError("calendar down")
 
     deps = _Deps()
-    res = auto_video_add_airing_episodes({"_automation_id": "a"}, deps,
+    res = auto_video_add_airing_episodes({"_automation_id": "a", "prune_ended": False}, deps,
                                          fetch_airing=boom, add_episodes=lambda *a: 0)
     assert res["status"] == "error" and "calendar down" in res["error"]
     assert any(p.get("status") == "error" for p in deps.progress)
+
+
+# ── watchlist hygiene: prune ended/canceled follows ─────────────────────────
+from core.automation.handlers.video_auto_wishlist_airing import prune_ended_show_follows  # noqa: E402
+
+
+def test_prune_removes_ended_and_canceled_follows():
+    follows = [
+        {"tmdb_id": 1, "title": "Returning Show", "status": "Returning Series"},
+        {"tmdb_id": 2, "title": "Done Show", "status": "Ended"},
+        {"tmdb_id": 3, "title": "Axed Show", "status": "Canceled"},
+        {"tmdb_id": 4, "title": "Live Show", "status": "In Production"},
+    ]
+    removed = []
+    n = prune_ended_show_follows(_Deps(), "a", fetch_follows=lambda: follows,
+                                 show_status=lambda t: None, remove_show=removed.append)
+    assert n == 2 and removed == [2, 3]            # only Ended + Canceled
+
+
+def test_prune_looks_up_status_for_tmdb_only_follows():
+    # no local status → fetch from TMDB; ended → prune
+    follows = [{"tmdb_id": 9, "title": "TMDB-only", "status": None}]
+    removed = []
+    prune_ended_show_follows(_Deps(), "a", fetch_follows=lambda: follows,
+                             show_status=lambda t: "Ended", remove_show=removed.append)
+    assert removed == [9]
+
+
+def test_prune_never_removes_on_unknown_status_or_lookup_error():
+    def _boom(t):
+        raise RuntimeError("tmdb down")
+    follows = [{"tmdb_id": 1, "title": "Unknown", "status": None},   # lookup returns None
+               {"tmdb_id": 2, "title": "Errored", "status": None}]   # lookup raises
+    removed = []
+    n = prune_ended_show_follows(
+        _Deps(), "a", fetch_follows=lambda: follows,
+        show_status=lambda t: (_boom(t) if t == 2 else None), remove_show=removed.append)
+    assert n == 0 and removed == []                # uncertainty → keep
+
+
+def test_airing_handler_runs_the_prune_pass():
+    removed = []
+    res = auto_video_add_airing_episodes(
+        {"_automation_id": "a"}, _Deps(),
+        fetch_airing=lambda t: [], add_episodes=lambda *a, **k: 0, today_fn=lambda: "2026-06-21",
+        prune_follows=lambda: [{"tmdb_id": 7, "title": "Old", "status": "Ended"}],
+        show_status=lambda t: None, remove_show=removed.append)
+    assert res["status"] == "completed" and res["shows_pruned"] == 1 and removed == [7]
+
+
+def test_airing_handler_can_disable_the_prune():
+    called = {"n": 0}
+    auto_video_add_airing_episodes(
+        {"_automation_id": "a", "prune_ended": False}, _Deps(),
+        fetch_airing=lambda t: [], add_episodes=lambda *a, **k: 0, today_fn=lambda: "2026-06-21",
+        prune_follows=lambda: called.update(n=called["n"] + 1) or [])
+    assert called["n"] == 0                          # prune skipped entirely
