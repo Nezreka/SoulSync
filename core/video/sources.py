@@ -311,6 +311,23 @@ def video_server_scan_in_progress(media_type="all"):
         return None
 
 
+def video_server_has_item(media_type, item) -> bool:
+    """True if the active server already has this specific grab indexed — the signal
+    for the post-download scan to skip a library's expensive crawl. Conservative: any
+    uncertainty (no server, unsupported, error, no match) → False, so we scan."""
+    media_type = normalize_media_type(media_type)
+    if media_type not in ("movie", "show") or not item:
+        return False
+    src = get_active_video_source()
+    if src is None or not hasattr(src, "has_item"):
+        return False
+    try:
+        return bool(src.has_item(media_type, item))
+    except Exception:
+        logger.debug("video sources: has_item probe failed", exc_info=True)
+        return False
+
+
 def list_video_libraries():
     """Discover the active server's video libraries for the mapping UI:
     {'server', 'movies': [{'title'}], 'tv': [{'title'}]} or None."""
@@ -409,6 +426,44 @@ class PlexVideoSource:
                 at = (getattr(act, "title", "") or "").lower()
                 if any(t and t in at for t in titles):
                     return True
+        return False
+
+    def has_item(self, media_type, item) -> bool:
+        """True if Plex ALREADY has this specific grab indexed (so the post-download
+        scan can skip the crawl). Conservative — only True when we can positively match
+        the exact movie (title + year) or episode (show + SxE)."""
+        title = (item or {}).get("title")
+        if not title:
+            return False
+        if media_type == "movie":
+            year = (item or {}).get("year")
+            for sec in self._scan_sections("movie", self._movies_lib):
+                try:
+                    hits = sec.search(title=title, maxresults=5)
+                except Exception:
+                    hits = []
+                for h in hits:
+                    hy = getattr(h, "year", None)
+                    if year and hy and abs(int(hy) - int(year)) > 1:
+                        continue
+                    return True
+            return False
+        if media_type == "show":
+            sn, en = (item or {}).get("season_number"), (item or {}).get("episode_number")
+            for sec in self._scan_sections("show", self._tv_lib):
+                try:
+                    hits = sec.search(title=title, maxresults=5)
+                except Exception:
+                    hits = []
+                for show in hits:
+                    if sn is None or en is None:
+                        return True            # show present, no episode to pin
+                    try:
+                        if show.episode(season=int(sn), episode=int(en)):
+                            return True
+                    except Exception:
+                        continue
+            return False
         return False
 
     @staticmethod
@@ -624,6 +679,52 @@ class JellyfinVideoSource:
             if (("scan" in name or "refresh" in name or "library" in name)
                     and task.get("State") in ("Running", "Cancelling")):
                 return True
+        return False
+
+    def has_item(self, media_type, item) -> bool:
+        """True if Jellyfin already has this grab indexed. Conservative — matches the
+        exact movie (name + year) or episode (series + SxE); any uncertainty → False."""
+        import requests
+        title = (item or {}).get("title")
+        base = (self._c.base_url or "").rstrip("/")
+        if not title or not base:
+            return False
+        headers = {"X-Emby-Token": self._c.api_key or ""}
+
+        def _find(item_type):
+            try:
+                r = requests.get(base + "/Items", headers=headers, timeout=10, params={
+                    "searchTerm": title, "IncludeItemTypes": item_type, "Recursive": "true",
+                    "Fields": "ProductionYear", "Limit": 5})
+                return (r.json() or {}).get("Items", []) if r.ok else []
+            except Exception:
+                return []
+
+        if media_type == "movie":
+            year = (item or {}).get("year")
+            for it in _find("Movie"):
+                py = it.get("ProductionYear")
+                if year and py and abs(int(py) - int(year)) > 1:
+                    continue
+                return True
+            return False
+        if media_type == "show":
+            sn, en = (item or {}).get("season_number"), (item or {}).get("episode_number")
+            for series in _find("Series"):
+                sid = series.get("Id")
+                if not sid:
+                    continue
+                if sn is None or en is None:
+                    return True
+                try:
+                    r = requests.get(base + "/Shows/" + str(sid) + "/Episodes", headers=headers,
+                                     timeout=10, params={"season": int(sn)})
+                    eps = (r.json() or {}).get("Items", []) if r.ok else []
+                    if any(int(e.get("IndexNumber") or -1) == int(en) for e in eps):
+                        return True
+                except Exception:
+                    continue
+            return False
         return False
 
     def counts(self, incremental=False) -> dict:

@@ -277,7 +277,7 @@ class TestScanServerStage:
         r = auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
             server_refresh=_refresh_ok(), sleep=lambda s: None,
-            scan_status=lambda mt: next(seq),
+            latest_completed=lambda sc: None, scan_status=lambda mt: next(seq),
             emit=lambda ev, data: events.append((ev, data)))
         assert r['status'] == 'completed'
         assert events == [('video_library_scan_completed', {'server': '', 'media_type': 'all'})]
@@ -287,7 +287,7 @@ class TestScanServerStage:
         auto_video_scan_server(
             {'_automation_id': 'a', 'debounce_seconds': 90}, _RecordingDeps(),
             server_refresh=_refresh_ok(), sleep=slept.append,
-            scan_status=lambda mt: None, emit=lambda ev, data: None)
+            latest_completed=lambda sc: None, scan_status=lambda mt: None, emit=lambda ev, data: None)
         assert sum(slept) == 90                               # honoured the fallback wait
 
     def test_server_unavailable_still_emits(self):
@@ -296,7 +296,7 @@ class TestScanServerStage:
         auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
             server_refresh=lambda media_type=None: {'ok': False, 'error': 'no server'},
-            sleep=lambda s: None, scan_status=lambda mt: False, emit=lambda ev, data: events.append(ev))
+            sleep=lambda s: None, latest_completed=lambda sc: None, scan_status=lambda mt: False, emit=lambda ev, data: events.append(ev))
         assert events == ['video_library_scan_completed']     # fires even if refresh failed
         assert 'warning' in deps.log_types()
 
@@ -305,7 +305,7 @@ class TestScanServerStage:
         r = auto_video_scan_server(
             {'_automation_id': 'a'}, deps,
             server_refresh=lambda media_type=None: (_ for _ in ()).throw(RuntimeError('boom')),
-            sleep=lambda s: None, scan_status=lambda mt: False, emit=lambda *a: None)
+            sleep=lambda s: None, latest_completed=lambda sc: None, scan_status=lambda mt: False, emit=lambda *a: None)
         assert r['status'] == 'error' and r['error'] == 'boom'
 
     def test_scopes_refresh_and_status_and_carries_media_type_on_the_event(self):
@@ -319,11 +319,69 @@ class TestScanServerStage:
         auto_video_scan_server(
             {'_automation_id': 'a', 'media_type': 'show'}, _RecordingDeps(),
             server_refresh=_refresh, sleep=lambda s: None,
-            scan_status=lambda mt: seen.setdefault('status_mt', mt) and False,
+            latest_completed=lambda sc: None, scan_status=lambda mt: seen.setdefault('status_mt', mt) and False,
             emit=lambda ev, data: events.append((ev, data)))
         assert seen['refresh_mt'] == 'show'                           # only TV sections nudged
         assert seen['status_mt'] == 'show'                            # polled TV scan status
         assert events[0][1]['media_type'] == 'show'                   # stage 2 inherits the scope
+
+
+class TestSmartScanSkip:
+    """Scanning is expensive — skip a library's crawl when the server already has the
+    newest grab (it auto-ingested). Always still emits so stage 2 reads."""
+
+    def _run(self, **kw):
+        deps = _RecordingDeps()
+        events, refreshed, polled = [], [], []
+        base = dict(
+            server_refresh=lambda mt=None: refreshed.append(mt) or {'ok': True},
+            sleep=lambda s: None, scan_status=lambda mt: polled.append(mt) or False,
+            emit=lambda ev, data: events.append((ev, data)))
+        base.update(kw)
+        res = auto_video_scan_server({'_automation_id': 'a'}, deps, **base)
+        return res, events, refreshed, polled, deps
+
+    def test_skips_entirely_when_server_has_both_newest(self):
+        res, events, refreshed, polled, deps = self._run(
+            latest_completed=lambda sc: {'title': 'X'},      # history has a newest for each
+            server_has_item=lambda sc, item: True)            # …and the server already has it
+        assert refreshed == [] and polled == []               # no crawl, no poll — the win
+        assert events[0] == ('video_library_scan_completed', {'server': '', 'media_type': 'all'})
+        assert res['scanned'] == [] and set(res['skipped']) == {'movie', 'show'}
+        assert any('no scan needed' in (c.get('log_line') or '') for c in deps.calls)
+
+    def test_scans_only_the_library_the_server_is_missing(self):
+        # server has the newest MOVIE but not the newest EPISODE → scan TV only
+        res, events, refreshed, polled, _ = self._run(
+            latest_completed=lambda sc: {'title': 'X'},
+            server_has_item=lambda sc, item: sc == 'movie')
+        assert refreshed == ['show'] and polled == ['show']   # only the TV library crawled
+        assert res['scanned'] == ['show'] and res['skipped'] == ['movie']
+
+    def test_scans_when_there_is_no_history_to_probe(self):
+        res, events, refreshed, polled, _ = self._run(
+            latest_completed=lambda sc: None,                 # nothing grabbed yet
+            server_has_item=lambda sc, item: True)            # (never consulted)
+        assert refreshed == ['all']                           # both → scan all
+        assert set(res['scanned']) == {'movie', 'show'}
+
+    def test_toggle_off_always_scans(self):
+        deps = _RecordingDeps()
+        refreshed = []
+        auto_video_scan_server(
+            {'_automation_id': 'a', 'skip_if_present': False}, deps,
+            server_refresh=lambda mt=None: refreshed.append(mt) or {'ok': True},
+            sleep=lambda s: None, scan_status=lambda mt: False,
+            latest_completed=lambda sc: {'title': 'X'}, server_has_item=lambda sc, item: True,
+            emit=lambda ev, data: None)
+        assert refreshed == ['all']                           # skip disabled → crawl anyway
+
+    def test_probe_error_is_treated_as_missing_so_we_scan(self):
+        def _boom(sc, item):
+            raise RuntimeError('plex down')
+        res, events, refreshed, polled, _ = self._run(
+            latest_completed=lambda sc: {'title': 'X'}, server_has_item=_boom)
+        assert refreshed == ['all']                           # uncertainty → scan (safe)
 
 
 # ── post-download chain: video_update_database (stage 2) ───────────────────

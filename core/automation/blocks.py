@@ -228,13 +228,14 @@ ACTIONS: list[dict] = [
     # Post-download chain actions (two stages, like music's scan_library +
     # start_database_update). Stage 1 nudges the server; stage 2 reads it in.
     {"type": "video_scan_server", "label": "Scan Video Server", "icon": "refresh", "scope": "video",
-     "description": "Tell the media server to rescan your video sections, wait until it actually finishes indexing, then fire 'Video Library Scan Done'", "available": True,
+     "description": "Get the server to index new downloads (skips the scan if it already has them), waits until it finishes, then fires 'Video Library Scan Done'", "available": True,
      "config_fields": [
          {"key": "media_type", "type": "select", "label": "Library",
           "options": [{"value": "all", "label": "Movies + TV"},
                       {"value": "movie", "label": "Movies only"},
                       {"value": "show", "label": "TV only"}],
           "default": "all"},
+         {"key": "skip_if_present", "type": "checkbox", "label": "Skip the scan if the server already has the download", "default": True},
          {"key": "max_wait_minutes", "type": "number", "label": "Max wait for scan (min)", "default": 60, "min": 1},
          {"key": "debounce_seconds", "type": "number", "label": "Fallback wait if status unknown (sec)", "default": 120, "min": 10}
      ]},

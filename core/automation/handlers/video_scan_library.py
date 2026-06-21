@@ -185,6 +185,18 @@ def _default_scan_status(media_type: str = "all"):
     return video_server_scan_in_progress(media_type)
 
 
+def _default_latest_completed(media_type: str):
+    """The newest completed grab of a type — the probe target for the smart skip."""
+    from api.video import get_video_db
+    return get_video_db().latest_completed_download(media_type)
+
+
+def _default_server_has_item(media_type: str, item) -> bool:
+    """Does the active server already have this specific grab indexed?"""
+    from core.video.sources import video_server_has_item
+    return video_server_has_item(media_type, item)
+
+
 def wait_for_server_scan(scan_status, sleep, *, grace_seconds: int = 15,
                          interval_seconds: int = 10, cap_seconds: int = 3600,
                          fallback_seconds: int = 120) -> int:
@@ -221,6 +233,9 @@ def wait_for_server_scan(scan_status, sleep, *, grace_seconds: int = 15,
     return waited
 
 
+_LIB = {'movie': 'Movie', 'show': 'TV'}
+
+
 def auto_video_scan_server(
     config: Dict[str, Any],
     deps: AutomationDeps,
@@ -229,18 +244,27 @@ def auto_video_scan_server(
     sleep: Optional[Callable[[float], None]] = None,
     emit: Optional[Callable[[str, Dict[str, Any]], None]] = None,
     scan_status: Optional[Callable[..., Any]] = None,
+    latest_completed: Optional[Callable[[str], Any]] = None,
+    server_has_item: Optional[Callable[[str, Any], bool]] = None,
 ) -> Dict[str, Any]:
-    """Stage 1: tell the media server to rescan the video sections, WAIT until its scan
-    queue is idle (polling the server; falls back to a fixed wait if it can't report),
-    then fire 'video_library_scan_completed' so the DB-update twin reads the fresh state.
-    (Video twin of music's scan_library.)"""
+    """Stage 1: get the server to index our new downloads, then fire
+    'video_library_scan_completed' so the DB-update twin reads the fresh state.
+
+    SMART SKIP (``skip_if_present``, default on): scanning is expensive, and many
+    servers auto-ingest new files. So per library, we first probe whether the server
+    already has the NEWEST grab of that type (from download history) — if it does, it
+    already picked everything up, and we skip that library's crawl. Only libraries the
+    server is missing get the (expensive) rescan + poll-until-idle. We always emit so
+    stage 2 still READS the new items into video.db. (Video twin of music's scan_library.)"""
     server_refresh = server_refresh or _default_server_refresh
     sleep = sleep or time.sleep
     emit = emit or deps.engine.emit
     scan_status = scan_status or _default_scan_status
+    latest_completed = latest_completed or _default_latest_completed
+    server_has_item = server_has_item or _default_server_has_item
     automation_id = config.get('_automation_id')
     media_type = config.get('media_type') or 'all'
-    lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
+    skip_if_present = config.get('skip_if_present', True)
     try:
         fallback = int(config.get('debounce_seconds') or 120)
     except (TypeError, ValueError):
@@ -250,23 +274,58 @@ def auto_video_scan_server(
     except (TypeError, ValueError):
         cap = 3600
     try:
-        deps.update_progress(automation_id, phase=f'Asking media server to rescan {lib_label}…', progress=20,
-                             log_line=f'Triggering server-side {lib_label} scan', log_type='info')
-        refresh = server_refresh(media_type) or {}
-        if not refresh.get('ok'):
-            deps.update_progress(automation_id,
-                                 log_line='Server scan trigger unavailable: ' + str(refresh.get('error') or 'unknown'),
-                                 log_type='warning')
-        deps.update_progress(automation_id, phase='Waiting for the server to finish indexing…', progress=55)
-        waited = wait_for_server_scan(lambda: scan_status(media_type), sleep,
-                                      fallback_seconds=fallback, cap_seconds=cap)
-        # Carry the scope so stage 2 (Update DB) reads only the library we rescanned.
-        emit('video_library_scan_completed',
-             {'server': refresh.get('server') or '', 'media_type': media_type})
+        # Which libraries actually need the expensive crawl? Skip any the server
+        # already has the newest download for (it auto-ingested → nothing to find).
+        scopes = ['movie', 'show'] if media_type == 'all' else \
+            ([media_type] if media_type in ('movie', 'show') else ['movie', 'show'])
+        to_scan = []
+        for sc in scopes:
+            if skip_if_present:
+                latest = None
+                try:
+                    latest = latest_completed(sc)
+                except Exception:   # noqa: BLE001
+                    latest = None
+                if latest:
+                    try:
+                        present = bool(server_has_item(sc, latest))
+                    except Exception:   # noqa: BLE001
+                        present = False
+                    if present:
+                        deps.update_progress(
+                            automation_id, log_line=f'{_LIB[sc]} library: server already has the newest grab — skipping its scan',
+                            log_type='info')
+                        continue
+            to_scan.append(sc)
+
+        waited, server_name = 0, ''
+        if to_scan:
+            scan_scope = 'all' if set(to_scan) == {'movie', 'show'} else to_scan[0]
+            lib_label = _LIB.get(scan_scope, 'video')
+            deps.update_progress(automation_id, phase=f'Asking media server to rescan {lib_label}…', progress=20,
+                                 log_line=f'Triggering server-side {lib_label} scan', log_type='info')
+            refresh = server_refresh(scan_scope) or {}
+            if not refresh.get('ok'):
+                deps.update_progress(automation_id,
+                                     log_line='Server scan trigger unavailable: ' + str(refresh.get('error') or 'unknown'),
+                                     log_type='warning')
+            server_name = refresh.get('server') or ''
+            deps.update_progress(automation_id, phase='Waiting for the server to finish indexing…', progress=55)
+            waited = wait_for_server_scan(lambda: scan_status(scan_scope), sleep,
+                                          fallback_seconds=fallback, cap_seconds=cap)
+        else:
+            deps.update_progress(automation_id, progress=55,
+                                 log_line='Server already has all the new downloads — no scan needed',
+                                 log_type='success')
+
+        # Always emit with the ORIGINAL scope so stage 2 reads everything we grabbed.
+        emit('video_library_scan_completed', {'server': server_name, 'media_type': media_type})
+        done = (f'Server scan finished (~{waited}s) — updating the database' if to_scan
+                else 'Skipped server scan — updating the database')
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                             log_line=f'Server scan finished (~{waited}s) — updating the database',
-                             log_type='success')
-        return {'status': 'completed', '_manages_own_progress': True}
+                             log_line=done, log_type='success')
+        return {'status': 'completed', '_manages_own_progress': True,
+                'scanned': to_scan, 'skipped': [s for s in scopes if s not in to_scan]}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}
