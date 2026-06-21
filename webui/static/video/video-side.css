@@ -1858,7 +1858,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 @media (prefers-reduced-motion: reduce) { .vwl-btn { transition: opacity 0.18s ease; transform: none; } }
 
 /* ── Watchlist page ───────────────────────────────────────────────────────── */
-.vwlp-page { color: var(--text-primary, #fff); padding: 0 0 70px; }
+.vwlp-page { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); color: var(--text-primary, #fff); padding: 0 0 70px; }
 .vwlp-head { position: relative; padding: 30px 40px 0; overflow: hidden; }
 .vwlp-head-glow { position: absolute; top: -190px; left: 50%; transform: translateX(-50%);
     width: 860px; height: 390px; pointer-events: none; z-index: 0;
@@ -1868,17 +1868,20 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwlp-title { font-size: 36px; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
 .vwlp-sub { margin: 7px 0 0; color: rgba(255, 255, 255, 0.55); font-size: 14px; font-weight: 600; }
 
-.vwlp-tabs { display: inline-flex; gap: 3px; padding: 4px; border-radius: 13px;
-    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
-.vwlp-tab { border: 0; background: transparent; color: rgba(255, 255, 255, 0.7);
-    font-size: 13px; font-weight: 800; padding: 8px 16px; border-radius: 9px; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 8px; transition: all 0.15s ease; }
-.vwlp-tab:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
-.vwlp-tab--on { color: #fff; background: rgba(var(--accent-rgb, 88 101 242), 0.9);
-    box-shadow: 0 4px 14px rgba(var(--accent-rgb, 88 101 242), 0.32); }
-.vwlp-tab-n { font-size: 11px; font-weight: 800; min-width: 20px; text-align: center;
-    padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); color: inherit; }
-.vwlp-tab--on .vwlp-tab-n { background: rgba(0, 0, 0, 0.28); }
+/* Tabs match the wishlist: individual pills, SELECTED = accent outline + ring glow
+   (same focus language as the search field), not a filled accent block. */
+.vwlp-tabs { display: inline-flex; gap: 8px; padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.vwlp-tab { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.62); font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
+    padding: 9px 18px; border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.vwlp-tab:hover { color: #fff; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); }
+.vwlp-tab--on { color: #fff; background: rgba(var(--vd-accent-rgb), 0.08);
+    border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
+.vwlp-tab-n { font-size: 11px; font-weight: 800; min-width: 18px; text-align: center;
+    padding: 1px 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6);
+    transition: background 0.2s ease, color 0.2s ease; }
+.vwlp-tab--on .vwlp-tab-n { background: rgba(var(--vd-accent-rgb), 0.25); color: #fff; }
 
 .vwlp-body { padding: 26px 40px 0; }
 .vwlp-loading { padding: 80px 0; text-align: center; }
@@ -1922,15 +1925,18 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 
 /* ── Watchlist page — search toolbar + pagination ─────────────────────────── */
 .vwlp-toolbar { padding: 18px 40px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.vwlp-search { position: relative; flex: 1; max-width: 420px; min-width: 220px; }
-.vwlp-search-ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
-    color: rgba(255, 255, 255, 0.4); pointer-events: none; }
-.vwlp-search-input { width: 100%; padding: 11px 14px 11px 38px; border-radius: 12px;
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
-    color: #fff; font-size: 14px; font-weight: 500; outline: none; transition: border-color 0.15s ease, background 0.15s ease; }
-.vwlp-search-input::placeholder { color: rgba(255, 255, 255, 0.35); }
-.vwlp-search-input:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6);
-    background: rgba(255, 255, 255, 0.07); }
+.vwlp-search { position: relative; display: flex; align-items: center; gap: 10px;
+    flex: 1; max-width: 440px; min-width: 220px; height: 42px; padding: 0 14px; box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; }
+.vwlp-search:focus-within { border-color: rgba(var(--vd-accent-rgb), 0.6);
+    background: rgba(255, 255, 255, 0.07); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
+.vwlp-search-ic { position: static; transform: none; flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.4); pointer-events: none; transition: color 0.2s ease; }
+.vwlp-search:focus-within .vwlp-search-ic { color: rgba(var(--vd-accent-rgb), 0.95); }
+.vwlp-search-input { flex: 1; min-width: 0; width: 100%; height: 100%; padding: 0; border: 0;
+    background: transparent; color: #fff; font-size: 14px; font-weight: 500; outline: none; }
+.vwlp-search-input::placeholder { color: rgba(255, 255, 255, 0.42); }
 
 .vwlp-pagination { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 30px 0 4px; }
 .vwlp-pagination.hidden { display: none; }
@@ -2060,10 +2066,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwlp-pill--ended { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.6); }
 .vwlp-card-meta { display: block; font-size: 11.5px; font-weight: 600; color: rgba(255, 255, 255, 0.45); margin-top: 3px; }
 
-.vwlp-sort { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13px; font-weight: 600;
-    cursor: pointer; outline: none; transition: border-color 0.15s ease; }
-.vwlp-sort:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vwlp-sort { height: 42px; padding: 0 36px 0 14px; box-sizing: border-box; border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.88); font-size: 13.5px; font-weight: 600; font-family: inherit;
+    cursor: pointer; outline: none; -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='rgba(255,255,255,0.45)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 13px center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease; }
+.vwlp-sort:hover { border-color: rgba(255, 255, 255, 0.2); color: #fff; }
+.vwlp-sort:focus { border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
 .vwlp-sort option { background: #16161d; color: #fff; }
 
 /* The eye/get button anchors to these card roots (other surfaces). Position is
@@ -2476,7 +2487,7 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* ══════════════════════════════════════════════════════════════════════════
    Wishlist page (.vwsh-*) — Movies grid + grouped TV show→season→episode tree
    ══════════════════════════════════════════════════════════════════════════ */
-.vwsh-page { color: var(--text-primary, #fff); padding: 0 0 70px; }
+.vwsh-page { --vd-accent-rgb: var(--accent-rgb, 88, 101, 242); color: var(--text-primary, #fff); padding: 0 0 70px; }
 .vwsh-head { position: relative; padding: 30px 40px 0; overflow: hidden; }
 .vwsh-head-glow { position: absolute; top: -190px; left: 50%; transform: translateX(-50%);
     width: 860px; height: 390px; pointer-events: none; z-index: 0;
@@ -2486,25 +2497,41 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-title { font-size: 36px; font-weight: 800; letter-spacing: -0.025em; margin: 0; }
 .vwsh-sub { margin: 7px 0 0; color: rgba(255, 255, 255, 0.55); font-size: 14px; font-weight: 600; }
 
-.vwsh-tabs { display: inline-flex; gap: 3px; padding: 4px; border-radius: 13px;
-    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.08); }
-.vwsh-tab { border: 0; background: transparent; color: rgba(255, 255, 255, 0.7);
-    font-size: 13px; font-weight: 800; padding: 8px 16px; border-radius: 9px; cursor: pointer;
-    display: inline-flex; align-items: center; gap: 8px; transition: all 0.15s ease; }
-.vwsh-tab:hover { color: #fff; background: rgba(255, 255, 255, 0.07); }
-.vwsh-tab--on { color: #fff; background: rgba(var(--accent-rgb, 88 101 242), 0.9);
-    box-shadow: 0 4px 14px rgba(var(--accent-rgb, 88 101 242), 0.32); }
-.vwsh-tab-n { font-size: 11px; font-weight: 800; min-width: 20px; text-align: center;
-    padding: 1px 7px; border-radius: 999px; background: rgba(0, 0, 0, 0.25); color: inherit; }
-.vwsh-tab--on .vwsh-tab-n { background: rgba(0, 0, 0, 0.28); }
+/* Toolbar controls — aligned to the video side's polished language: the
+   calendar's segmented tabs, the search page's focus-ring shell, and
+   custom-chevron selects. All controls share one height (42px) + radius (12px)
+   so the toolbar reads as a single cohesive row. */
+/* Tabs are individual pills; the SELECTED one lights up with an accent outline +
+   ring glow (the same focus language as the search field) rather than a filled
+   accent block. */
+.vwsh-tabs { display: inline-flex; gap: 8px; padding: 0; background: none; border: 0; border-radius: 0; box-shadow: none; }
+.vwsh-tab { border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.62); font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
+    padding: 9px 18px; border-radius: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;
+    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease; }
+.vwsh-tab:hover { color: #fff; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); }
+.vwsh-tab--on { color: #fff; background: rgba(var(--vd-accent-rgb), 0.08);
+    border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
+.vwsh-tab-n { font-size: 11px; font-weight: 800; min-width: 18px; text-align: center;
+    padding: 1px 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.6);
+    transition: background 0.2s ease, color 0.2s ease; }
+.vwsh-tab--on .vwsh-tab-n { background: rgba(var(--vd-accent-rgb), 0.25); color: #fff; }
 
-.vwsh-toolbar { padding: 18px 40px 0; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.vwsh-toolbar { padding: 18px 40px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .vwsh-body { padding: 26px 40px 0; }
-.vwsh-search { position: relative; flex: 1; max-width: 420px; min-width: 220px; }
-.vwsh-search-ic { position: absolute; left: 13px; top: 50%; transform: translateY(-50%); color: rgba(255, 255, 255, 0.35); }
-.vwsh-search-input { width: 100%; padding: 11px 14px 11px 38px; border-radius: 11px; background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13.5px; outline: none; transition: border-color 0.15s ease; }
-.vwsh-search-input:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
+/* search — a bordered shell that lights up on focus (the video-side ring) */
+.vwsh-search { position: relative; display: flex; align-items: center; gap: 10px;
+    flex: 1; max-width: 440px; min-width: 220px; height: 42px; padding: 0 14px; box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease; }
+.vwsh-search:focus-within { border-color: rgba(var(--vd-accent-rgb), 0.6);
+    background: rgba(255, 255, 255, 0.07); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
+.vwsh-search-ic { position: static; transform: none; flex: 0 0 auto;
+    color: rgba(255, 255, 255, 0.4); transition: color 0.2s ease; }
+.vwsh-search:focus-within .vwsh-search-ic { color: rgba(var(--vd-accent-rgb), 0.95); }
+.vwsh-search-input { flex: 1; min-width: 0; width: 100%; height: 100%; padding: 0; border: 0;
+    background: transparent; color: #fff; font-size: 14px; font-weight: 500; outline: none; }
+.vwsh-search-input::placeholder { color: rgba(255, 255, 255, 0.42); }
 
 .vwsh-loading { padding: 50px; text-align: center; }
 .vwsh-state { padding: 70px 24px; text-align: center; }
@@ -2564,18 +2591,25 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vwsh-nebula .vwsh-ep-dot--downloaded { background: #4ade80; box-shadow: 0 0 6px rgba(34, 197, 94, 0.6); }
 .vwsh-nebula .vwsh-ep-dot--failed { background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6); }
 
-/* #5 sort select (toolbar) */
-.vwsh-sort { padding: 11px 14px; border-radius: 12px; background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1); color: #fff; font-size: 13.5px; font-weight: 600;
-    cursor: pointer; outline: none; transition: border-color 0.15s ease; }
-.vwsh-sort:focus { border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.5); }
+/* #5 sort select — custom chevron (no native arrow), matched height/radius/ring */
+.vwsh-sort { height: 42px; padding: 0 36px 0 14px; box-sizing: border-box; border-radius: 12px;
+    background-color: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.88); font-size: 13.5px; font-weight: 600; font-family: inherit;
+    cursor: pointer; outline: none; -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='rgba(255,255,255,0.45)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 13px center;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease; }
+.vwsh-sort:hover { border-color: rgba(255, 255, 255, 0.2); color: #fff; }
+.vwsh-sort:focus { border-color: rgba(var(--vd-accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--vd-accent-rgb), 0.16); }
 .vwsh-sort option { background: #16161d; color: #fff; }
-/* Clear-all (empties the current tab) — red-tinted, sits at the end of the toolbar */
-.vwsh-clear { margin-left: auto; padding: 11px 16px; border-radius: 12px; cursor: pointer;
-    font-size: 13px; font-weight: 700; color: #fca5a5;
-    background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.32);
-    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
-.vwsh-clear:hover { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.55); color: #fecaca; }
+/* Clear-all (empties the current tab) — red danger, same metrics as the row */
+.vwsh-clear { margin-left: auto; height: 42px; padding: 0 16px; box-sizing: border-box; border-radius: 12px;
+    cursor: pointer; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 700;
+    color: #fca5a5; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3);
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease; }
+.vwsh-clear:hover { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.55); color: #fecaca;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14); }
+.vwsh-clear .vwsh-clear-ic { flex: 0 0 auto; }
 .vwsh-clear[hidden] { display: none; }
 
 /* video-only: square-ish bubbles (the music orbs are circles) */
