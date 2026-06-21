@@ -27,11 +27,13 @@ def _default_fetch_airing(today: str) -> List[Dict[str, Any]]:
         today, today, server_source=resolve_video_server(), watchlist_only=True)
 
 
-def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dict[str, Any]]) -> int:
+def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dict[str, Any]],
+                          library_id: Any = None) -> int:
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_episodes_to_wishlist(
-        show_tmdb_id, show_title, episodes, server_source=resolve_video_server())
+        show_tmdb_id, show_title, episodes, library_id=library_id,
+        server_source=resolve_video_server())
 
 
 def _default_season_meta(tmdb_id: Any, season_number: Any):
@@ -82,7 +84,7 @@ def auto_video_add_airing_episodes(
         # Group what to wish for by show: airing today, NOT already owned, with a
         # real season/episode. add_episodes_to_wishlist is idempotent, so re-runs
         # never duplicate.
-        by_show: Dict[tuple, List[Dict[str, Any]]] = {}
+        by_show: Dict[tuple, Dict[str, Any]] = {}
         season_cache: Dict[tuple, tuple] = {}
         for r in rows:
             if r.get('has_file'):
@@ -95,7 +97,12 @@ def auto_video_add_airing_episodes(
             # poster); fall back to the calendar/DB values if TMDB is unavailable.
             poster, emap = _season_lookup(season_meta, tid, sn, season_cache)
             tm = emap.get(en) or {}
-            by_show.setdefault((tid, r.get('show_title')), []).append({
+            # library_id (the show's library row id, given as show_id) is REQUIRED — the
+            # wishlist resolves a show's synopsis + cast from /detail/show/<library_id>;
+            # without it the show shows as un-matched with no synopsis/actors.
+            grp = by_show.setdefault((tid, r.get('show_title')),
+                                     {'library_id': r.get('show_id'), 'eps': []})
+            grp['eps'].append({
                 'season_number': sn,
                 'episode_number': en,
                 'title': r.get('title') or tm.get('title'),
@@ -106,8 +113,8 @@ def auto_video_add_airing_episodes(
             })
 
         added = 0
-        for (tid, title), eps in by_show.items():
-            added += int(add_episodes(tid, title, eps) or 0)
+        for (tid, title), grp in by_show.items():
+            added += int(add_episodes(tid, title, grp['eps'], grp['library_id']) or 0)
         shows = len(by_show)
 
         deps.update_progress(
