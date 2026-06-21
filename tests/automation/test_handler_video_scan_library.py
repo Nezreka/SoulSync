@@ -383,6 +383,44 @@ class TestSmartScanSkip:
             latest_completed=lambda sc: {'title': 'X'}, server_has_item=_boom)
         assert refreshed == ['all']                           # uncertainty → scan (safe)
 
+    def test_waits_for_the_servers_autoscan_then_skips(self):
+        # The file isn't on the server immediately (fresh drop) — it appears on the 3rd
+        # probe. We poll over the grace window and skip the crawl once it shows up.
+        calls = {'show': 0}
+        slept = []
+
+        def _has(sc, item):
+            calls[sc] += 1
+            return calls[sc] >= 3                              # present only on the 3rd check
+
+        deps = _RecordingDeps()
+        refreshed = []
+        res = auto_video_scan_server(
+            {'_automation_id': 'a', 'media_type': 'show', 'probe_grace_minutes': 5}, deps,
+            server_refresh=lambda mt=None: refreshed.append(mt) or {'ok': True},
+            sleep=slept.append, scan_status=lambda mt: False,
+            latest_completed=lambda sc: {'title': 'X'}, server_has_item=_has,
+            emit=lambda ev, data: None)
+        assert refreshed == []                                # never crawled — auto-scan won
+        assert res['skipped'] == ['show'] and len(slept) == 2  # polled twice before it appeared
+
+    def test_probe_grace_zero_checks_once_immediately(self):
+        calls = {'show': 0}
+
+        def _has(sc, item):
+            calls[sc] += 1
+            return False
+
+        deps = _RecordingDeps()
+        refreshed, slept = [], []
+        auto_video_scan_server(
+            {'_automation_id': 'a', 'media_type': 'show', 'probe_grace_minutes': 0}, deps,
+            server_refresh=lambda mt=None: refreshed.append(mt) or {'ok': True},
+            sleep=slept.append, scan_status=lambda mt: False,
+            latest_completed=lambda sc: {'title': 'X'}, server_has_item=_has,
+            emit=lambda ev, data: None)
+        assert calls['show'] == 1 and refreshed == ['show']    # one probe, no grace wait, then scan
+
 
 # ── post-download chain: video_update_database (stage 2) ───────────────────
 class TestUpdateDatabaseStage:
