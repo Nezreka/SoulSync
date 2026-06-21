@@ -1773,6 +1773,9 @@ const _autoIcons = {
     clean_completed_downloads: '\u2705',
     full_cleanup: '\uD83E\uDDF9',
     playlist_pipeline: '\uD83D\uDE80',
+    // Video side
+    video_scan_library: '\uD83C\uDFAC', video_scan_server: '\uD83D\uDD04', video_update_database: '\uD83D\uDDC4\uFE0F',
+    video_add_airing_episodes: '\uD83D\uDCFA', video_deep_scan_movies: '\uD83C\uDFAC', video_deep_scan_tv: '\uD83D\uDCFA',
 };
 
 // --- Inspiration Templates ---
@@ -3362,7 +3365,11 @@ function _autoFormatAction(type) {
         refresh_beatport_cache: 'Refresh Beatport Cache', clean_search_history: 'Clean Search History',
         clean_completed_downloads: 'Clean Completed Downloads',
         full_cleanup: 'Full Cleanup',
-        playlist_pipeline: 'Playlist Pipeline'
+        playlist_pipeline: 'Playlist Pipeline',
+        // Video side
+        video_scan_library: 'Scan Video Library', video_scan_server: 'Scan Video Server',
+        video_update_database: 'Update Video Database', video_add_airing_episodes: 'Wishlist Airing Episodes',
+        video_deep_scan_movies: 'Deep Scan Movie Library', video_deep_scan_tv: 'Deep Scan TV Library',
     };
     return labels[type] || type || 'Unknown';
 }

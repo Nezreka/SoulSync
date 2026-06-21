@@ -218,7 +218,12 @@ ACTIONS: list[dict] = [
           "options": [{"value": "full", "label": "Full (add + refresh)"},
                       {"value": "incremental", "label": "Incremental (recent only)"},
                       {"value": "deep", "label": "Deep (also remove missing)"}],
-          "default": "full"}
+          "default": "full"},
+         {"key": "media_type", "type": "select", "label": "Library",
+          "options": [{"value": "all", "label": "Movies + TV"},
+                      {"value": "movie", "label": "Movies only"},
+                      {"value": "show", "label": "TV only"}],
+          "default": "all"}
      ]},
     # Post-download chain actions (two stages, like music's scan_library +
     # start_database_update). Stage 1 nudges the server; stage 2 reads it in.
