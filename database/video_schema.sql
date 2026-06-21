@@ -549,3 +549,41 @@ CREATE TABLE IF NOT EXISTS video_downloads (
     completed_at  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_video_downloads_status ON video_downloads(status);
+
+-- video_download_history — a PERMANENT record of every grab SoulSync completed
+-- (movies + episodes). video_downloads is the transient working queue (cleaned when
+-- finished); this is the archive that powers the Download History modal AND the
+-- smart post-download scan (newest completed item per library → probe the server).
+CREATE TABLE IF NOT EXISTS video_download_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    download_id    INTEGER,                       -- original video_downloads.id (transient)
+    kind           TEXT NOT NULL,                 -- movie | show
+    media_type     TEXT,                          -- movie | show (normalized; the scan scope)
+    title          TEXT,                          -- movie/show title
+    year           INTEGER,
+    season_number  INTEGER,                       -- episodes only
+    episode_number INTEGER,
+    episode_title  TEXT,
+    release_title  TEXT,                          -- the release/file grabbed
+    source         TEXT,                          -- soulseek | torrent | usenet
+    username       TEXT,                          -- uploader (soulseek)
+    filename       TEXT,                          -- remote filename grabbed
+    dest_path      TEXT,                          -- final placed path
+    size_bytes     INTEGER DEFAULT 0,
+    quality_label  TEXT,                          -- e.g. "1080p", "2160p HDR"
+    resolution     TEXT,                          -- parsed from the release name, best-effort
+    video_codec    TEXT,
+    media_id       TEXT,                          -- movie/show id for the detail deep-link
+    media_source   TEXT,                          -- library | tmdb
+    poster_url     TEXT,
+    outcome        TEXT NOT NULL DEFAULT 'completed', -- completed | import_failed | failed | cancelled
+    error          TEXT,                          -- failure reason (non-completed)
+    grabbed_at     TEXT,                          -- when the download started
+    completed_at   TEXT,                          -- terminal time
+    created_at     TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_vdl_history_kind ON video_download_history(kind);
+CREATE INDEX IF NOT EXISTS idx_vdl_history_completed ON video_download_history(completed_at);
+-- one history row per terminal download (idempotent re-persist / restart-safe)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vdl_history_dedup
+    ON video_download_history(download_id, outcome, dest_path);
