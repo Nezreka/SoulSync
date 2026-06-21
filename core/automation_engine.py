@@ -170,15 +170,16 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'incremental'},
         'owned_by': 'video',
     },
-    # Sonarr-style: once a day, wishlist every episode airing today for the shows you
-    # follow (skipping ones already owned) so they queue up to be grabbed. Uses a 24h
-    # 'schedule' (not 'daily_time', which the seeder doesn't arm) so it actually fires.
+    # Sonarr-style: once a day at 1am (server-local), wishlist every episode airing
+    # today for the shows you follow (skipping ones already owned) so the day's episodes
+    # are queued overnight. A fixed wall-clock 'daily_time' (not a rolling 24h interval
+    # that drifts with restarts) — the seeder now arms timed system triggers, and
+    # _fix_airing_automation_schedule migrates the old 24h-interval row.
     {
         'name': 'Auto-Wishlist Episodes Airing Today',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 24, 'unit': 'hours'},
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '01:00'},
         'action_type': 'video_add_airing_episodes',
-        'initial_delay': 300,  # 5 minutes after startup, then daily
         'owned_by': 'video',
     },
 ]
@@ -323,8 +324,21 @@ class AutomationEngine:
                     self.db.update_automation(existing['id'], next_run=nr)
                     logger.info(f"System automation '{spec['name']}' next_run set to {initial_delay}s from now")
                 else:
-                    logger.info(f"System automation '{spec['name']}' ready (event-based)")
+                    # No initial_delay. A timer-based timed trigger (daily/weekly/
+                    # monthly at a fixed wall-clock time) still needs its next_run
+                    # armed — compute it from the schedule. Genuinely event-based
+                    # triggers (batch_complete, scan_done) have no next_run, so
+                    # next_run_at returns None and we leave them alone. Don't clobber
+                    # an existing future next_run (manual edit / restart-resume).
+                    nr_dt = next_run_at(spec['trigger_type'], spec['trigger_config'],
+                                        now_utc=_utcnow(), default_tz=self._default_tz)
+                    if nr_dt is not None and not existing.get('next_run'):
+                        self.db.update_automation(existing['id'], next_run=_dt_to_db_str(nr_dt))
+                        logger.info(f"System automation '{spec['name']}' next_run armed for {_dt_to_db_str(nr_dt)} (timed)")
+                    else:
+                        logger.info(f"System automation '{spec['name']}' ready (event-based)")
         self._fix_video_scan_default()
+        self._fix_airing_automation_schedule()
 
     def _fix_video_scan_default(self):
         """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
@@ -344,6 +358,31 @@ class AutomationEngine:
                             auto.get('id'))
         except Exception:
             logger.exception("video scan cleanup failed")
+
+    def _fix_airing_automation_schedule(self):
+        """Migrate 'Auto-Wishlist Episodes Airing Today' from the old rolling 24h
+        interval to a fixed daily 1am run.
+
+        It originally shipped as a 'schedule'/24h interval because the seeder only
+        armed interval specs — a 'daily_time' spec sat idle and never fired. The 24h
+        interval fires reliably but at a time that drifts with every restart (5 min
+        after startup, then +24h). Now that the seeder arms timed triggers, rewrite
+        the live row to run at a fixed 1am (better for 'today's airings' — queues the
+        day overnight). Matches only the is_system row; idempotent (no-op once the row
+        is already daily_time)."""
+        try:
+            auto = self.db.get_system_automation_by_action('video_add_airing_episodes')
+            if not auto or auto.get('trigger_type') == 'daily_time':
+                return
+            cfg = {'time': '01:00'}
+            nr_dt = next_run_at('daily_time', cfg, now_utc=_utcnow(), default_tz=self._default_tz)
+            self.db.update_automation(
+                auto['id'], trigger_type='daily_time', trigger_config=json.dumps(cfg),
+                next_run=_dt_to_db_str(nr_dt) if nr_dt is not None else None)
+            logger.info("Migrated 'Auto-Wishlist Episodes Airing Today' to a fixed daily 01:00 (id=%s)",
+                        auto.get('id'))
+        except Exception:
+            logger.exception("airing automation schedule migration failed")
 
     def get_system_automation_next_run_seconds(self, action_type):
         """Get seconds until next run for a system automation. Returns 0 if not found or disabled."""
