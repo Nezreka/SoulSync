@@ -129,3 +129,67 @@ def test_download_sync_does_not_reject_when_track_length_unknown(tmp_path, monke
 
     c._download_sync('dl1', 12345, 'x')
     assert seg_calls                                           # unknown length → no rejection, proceeds
+
+
+# ── faked-header previews: claim full length everywhere, only ~30s of real audio ──
+# (real numbers measured from issue #895's files: every "lossless" FLAC was a 30s
+# preview with STREAMINFO total_samples faked to the full length.)
+from core.hifi_client import is_fake_lossless_bitrate, is_preview_download, parse_ffmpeg_time
+
+
+def test_real_issue895_files_are_all_flagged_by_bitrate():
+    # (size_bytes, claimed_seconds) for the actual files — 16-bit/44.1kHz stereo FLAC.
+    samples = [
+        (4_080_000, 216),   # Save Your Tears  (151 kbps claimed)
+        (6_770_000, 150),   # I Ain't Worried  (362 kbps — the highest, nearest the line)
+        (2_240_000, 326),   # Lose Yourself     (55 kbps)
+        (4_190_000, 285),   # The Real Slim Shady
+        (4_910_000, 170),   # APT
+    ]
+    for size, secs in samples:
+        assert is_fake_lossless_bitrate(size, secs, 44100, 16, 2) is True, (size, secs)
+
+
+def test_real_full_lossless_is_not_flagged():
+    # a genuine 16/44.1 lossless track is ~700-1100 kbps → well above the floor
+    assert is_fake_lossless_bitrate(25_000_000, 216, 44100, 16, 2) is False   # ~926 kbps
+    assert is_fake_lossless_bitrate(12_000_000, 216, 44100, 16, 2) is False   # ~444 kbps, still real
+
+
+def test_bitrate_check_is_conservative_on_unknowns():
+    assert is_fake_lossless_bitrate(0, 216, 44100, 16, 2) is False
+    assert is_fake_lossless_bitrate(4_080_000, 0, 44100, 16, 2) is False
+    assert is_fake_lossless_bitrate(4_080_000, 216, 0, 0, 0) is False
+
+
+def test_is_preview_download_decode_path():
+    # decoded 30s of a claimed 216s → fake, regardless of bitrate
+    fake, why = is_preview_download(30.0, 216.0, is_lossless=False, size_bytes=99_000_000,
+                                    sample_rate=44100, bits_per_sample=16, channels=2)
+    assert fake and "decoded 30s of 216s" in why
+
+
+def test_is_preview_download_bitrate_path_when_no_decoder():
+    # real_seconds=0 (no ffmpeg) → fall back to the lossless bitrate check
+    fake, why = is_preview_download(0.0, 216.0, is_lossless=True, size_bytes=4_080_000,
+                                    sample_rate=44100, bits_per_sample=16, channels=2)
+    assert fake and "kbps lossless" in why
+
+
+def test_is_preview_download_passes_a_real_file():
+    fake, _ = is_preview_download(214.0, 216.0, is_lossless=True, size_bytes=25_000_000,
+                                  sample_rate=44100, bits_per_sample=16, channels=2)
+    assert fake is False
+
+
+def test_is_preview_download_lossy_no_decoder_is_not_flagged():
+    # a lossy tier (mp3/m4a) with no decode info → can't bitrate-check → don't reject
+    fake, _ = is_preview_download(0.0, 216.0, is_lossless=False, size_bytes=2_000_000,
+                                  sample_rate=44100, bits_per_sample=16, channels=2)
+    assert fake is False
+
+
+def test_parse_ffmpeg_time_reads_the_last_progress_line():
+    stderr = "frame=  ... time=00:00:12.34 bitrate=...\nframe= ... time=00:00:30.05 bitrate=..."
+    assert abs(parse_ffmpeg_time(stderr) - 30.05) < 0.01
+    assert parse_ffmpeg_time("no time here") == 0.0
