@@ -1723,7 +1723,7 @@ class VideoDatabase:
             rows = conn.execute(
                 "SELECT e.id, e.show_id, e.season_number, e.episode_number, e.title, "
                 "e.overview, e.air_date, e.runtime_minutes, e.rating, e.has_file, e.monitored, "
-                "(e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
+                "e.still_url, (e.still_url IS NOT NULL AND e.still_url<>'') AS has_still, "
                 "s.tmdb_id AS show_tmdb_id, "
                 "s.title AS show_title, s.network, s.airs_time, s.year AS show_year, s.status AS show_status, "
                 "(s.poster_url IS NOT NULL AND s.poster_url<>'') AS show_has_poster, "

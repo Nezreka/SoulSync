@@ -70,6 +70,10 @@ def auto_video_add_airing_episodes(
                 'episode_number': r.get('episode_number'),
                 'title': r.get('title'),
                 'air_date': r.get('air_date'),
+                # carry the rich metadata so auto-added episodes look like manual ones
+                # (synopsis + still thumbnail), not blank rows
+                'overview': r.get('overview'),
+                'still_url': r.get('still_url'),
             })
 
         added = 0
