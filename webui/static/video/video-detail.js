@@ -410,7 +410,7 @@
         var watching = !!d._vw_watched;
         // Lazily resolve the real watched state once (airing library shows are on
         // by default), then re-render — see the new curated watchlist system.
-        if (isAiringShow && d.source !== 'tmdb' && !d._vw_checked && window.VideoWatchlist) {
+        if (isAiringShow && !d._vw_checked && window.VideoWatchlist) {
             d._vw_checked = true;
             fetch('/api/video/watchlist/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ kind: 'show', tmdb_ids: [d.tmdb_id] }) })
@@ -436,9 +436,9 @@
             html += '<button class="vd-trailer-btn" type="button" data-vd-act="trailer">' +
                 '<span class="vd-trailer-ic">▶</span> Trailer</button>';
         }
-        // Preview (tmdb, un-owned) items have no library row to monitor — acquisition
-        // (add-to-watchlist / get-missing) lands with the downloads phase.
-        if (d.source === 'tmdb') { a.innerHTML = html; return; }
+        // Watchlist (follow an AIRING show to wishlist its new episodes) applies whether
+        // the show is owned or a TMDB preview — the curated watchlist is keyed by
+        // tmdb_id. Ended/cancelled shows are terminal (isAiringShow=false) → no button.
         if (isAiringShow) {
             html +=
                 '<button class="library-artist-watchlist-btn' + (watching ? ' watching' : '') +
@@ -446,7 +446,8 @@
                 '<span class="watchlist-icon">' + (watching ? '✓' : '＋') + '</span>' +
                 '<span class="watchlist-text">' + (watching ? 'In Watchlist' : 'Watchlist') + '</span></button>';
         }
-        if (d.kind === 'show') {     // "Get Missing" filters the episode list (show-only)
+        // "Get Missing" filters the OWNED episode list — library shows only.
+        if (d.kind === 'show' && d.source !== 'tmdb') {
             html += '<button class="discog-download-btn discog-btn-compact" type="button" data-vd-act="missing">' +
                 '<span class="discog-btn-icon">⭳</span><span class="discog-btn-text">Get Missing</span>' +
                 '<span class="discog-btn-shimmer"></span></button>';
@@ -1224,10 +1225,14 @@
         var watching = !!data._vw_watched;
         var apply = function () {
             var url = watching ? '/api/video/watchlist/remove' : '/api/video/watchlist/add';
+            // On a TMDB preview, data.id is the tmdb id (NOT a library row) — don't send
+            // a bogus library_id or library poster proxy; use the TMDB poster instead.
+            var owned = data.source !== 'tmdb';
             var body = watching
                 ? { kind: 'show', tmdb_id: data.tmdb_id }
                 : { kind: 'show', tmdb_id: data.tmdb_id, title: data.title,
-                    library_id: data.id, poster_url: '/api/video/poster/show/' + data.id };
+                    poster_url: owned ? ('/api/video/poster/show/' + data.id) : proxied(data.poster_url) };
+            if (owned) body.library_id = data.id;
             fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
                 .then(function (r) { return r.json(); })
                 .then(function (res) {
