@@ -845,6 +845,19 @@ def test_query_watchlist_paginates_and_searches(db):
     assert db.query_watchlist("person", page=99, limit=3)["pagination"]["page"] == 3
 
 
+def test_query_watchlist_default_sort_is_alphabetical(db):
+    # added out of alphabetical order — a manual follow must NOT float to the top;
+    # everything sorts by name A–Z by default.
+    db.add_to_watchlist("show", 1, "Welcome to Widows Bay")
+    db.add_to_watchlist("show", 2, "From")
+    db.add_to_watchlist("show", 3, "Andor")
+    titles = [it["title"] for it in db.query_watchlist("show")["items"]]
+    assert titles == ["Andor", "From", "Welcome to Widows Bay"]
+    # 'added' is still available opt-in (newest first)
+    added = [it["title"] for it in db.query_watchlist("show", sort="added")["items"]]
+    assert added[0] == "Andor"   # most recently added
+
+
 # ── wishlist (movies + episodes; show/season are bulk ops over episodes) ──────
 
 def test_wishlist_movie_add_is_idempotent(db):
