@@ -230,6 +230,11 @@ ACTIONS: list[dict] = [
     {"type": "video_scan_server", "label": "Scan Video Server", "icon": "refresh", "scope": "video",
      "description": "Tell the media server to rescan your video sections, then fire 'Video Library Scan Done'", "available": True,
      "config_fields": [
+         {"key": "media_type", "type": "select", "label": "Library",
+          "options": [{"value": "all", "label": "Movies + TV"},
+                      {"value": "movie", "label": "Movies only"},
+                      {"value": "show", "label": "TV only"}],
+          "default": "all"},
          {"key": "debounce_seconds", "type": "number", "label": "Wait for indexing (sec)", "default": 120, "min": 10}
      ]},
     {"type": "video_update_database", "label": "Update Video Database", "icon": "database", "scope": "video",
@@ -238,8 +243,20 @@ ACTIONS: list[dict] = [
          {"key": "mode", "type": "select", "label": "Mode",
           "options": [{"value": "incremental", "label": "Incremental (recent only)"},
                       {"value": "full", "label": "Full (add + refresh)"}],
-          "default": "incremental"}
+          "default": "incremental"},
+         {"key": "media_type", "type": "select", "label": "Library",
+          "options": [{"value": "all", "label": "Movies + TV"},
+                      {"value": "movie", "label": "Movies only"},
+                      {"value": "show", "label": "TV only"}],
+          "default": "all"}
      ]},
+    # Per-library deep-scan presets (the system 'Auto-Deep Scan TV/Movie Library' run
+    # these). Scope + deep mode are baked in by the registration wrapper, so no config
+    # fields — drag one in and it just deep-scans that library.
+    {"type": "video_deep_scan_tv", "label": "Deep Scan TV Library", "icon": "search", "scope": "video",
+     "description": "Deep-rescan the TV library: re-read every show and prune ones the server no longer has (never touches movies)", "available": True},
+    {"type": "video_deep_scan_movies", "label": "Deep Scan Movie Library", "icon": "search", "scope": "video",
+     "description": "Deep-rescan the Movie library: re-read every movie and prune ones the server no longer has (never touches TV)", "available": True},
     {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
      "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own", "available": True},
 ]

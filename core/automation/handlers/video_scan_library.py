@@ -31,10 +31,11 @@ from typing import Any, Callable, Dict, Optional
 from core.automation.deps import AutomationDeps
 
 
-def _default_server_refresh() -> Dict[str, Any]:
-    """Production wiring: nudge the media server to rescan its video sections."""
+def _default_server_refresh(media_type: str = "all") -> Dict[str, Any]:
+    """Production wiring: nudge the media server to rescan its video sections.
+    ``media_type`` scopes it to the Movie or TV section; 'all' nudges both."""
     from core.video.sources import refresh_video_server_sections
-    return refresh_video_server_sections()
+    return refresh_video_server_sections(media_type)
 
 
 def _default_run_video_scan(mode: str, media_type: str = "all") -> Dict[str, Any]:
@@ -83,11 +84,11 @@ def auto_video_scan_library(
             log_type='info',
         )
 
-        # Step 1 — best-effort server nudge. A server that can't be triggered
-        # (none configured, or an adapter without refresh support) is surfaced
-        # as a warning, NOT a hard failure: the read below still mirrors whatever
-        # the server currently reports, so the automation stays useful.
-        refresh = server_refresh() or {}
+        # Step 1 — best-effort server nudge, scoped to the same library we're about
+        # to read. A server that can't be triggered (none configured, or an adapter
+        # without refresh support) is surfaced as a warning, NOT a hard failure: the
+        # read below still mirrors whatever the server currently reports.
+        refresh = server_refresh(media_type) or {}
         if not refresh.get('ok'):
             deps.update_progress(
                 automation_id,
@@ -192,21 +193,25 @@ def auto_video_scan_server(
     sleep = sleep or time.sleep
     emit = emit or deps.engine.emit
     automation_id = config.get('_automation_id')
+    media_type = config.get('media_type') or 'all'
+    lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
     try:
         debounce = int(config.get('debounce_seconds') or 120)
     except (TypeError, ValueError):
         debounce = 120
     try:
-        deps.update_progress(automation_id, phase='Asking media server to rescan…', progress=20,
-                             log_line='Triggering server-side video scan', log_type='info')
-        refresh = server_refresh() or {}
+        deps.update_progress(automation_id, phase=f'Asking media server to rescan {lib_label}…', progress=20,
+                             log_line=f'Triggering server-side {lib_label} scan', log_type='info')
+        refresh = server_refresh(media_type) or {}
         if not refresh.get('ok'):
             deps.update_progress(automation_id,
                                  log_line='Server scan trigger unavailable: ' + str(refresh.get('error') or 'unknown'),
                                  log_type='warning')
         deps.update_progress(automation_id, phase=f'Waiting for the server to index ({debounce}s)…', progress=55)
         sleep(debounce)
-        emit('video_library_scan_completed', {'server': refresh.get('server') or ''})
+        # Carry the scope so stage 2 (Update DB) reads only the library we rescanned.
+        emit('video_library_scan_completed',
+             {'server': refresh.get('server') or '', 'media_type': media_type})
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line='Server scan done — updating the database', log_type='success')
         return {'status': 'completed', '_manages_own_progress': True}
@@ -219,16 +224,30 @@ def auto_video_update_database(
     config: Dict[str, Any],
     deps: AutomationDeps,
     *,
-    run_video_scan: Optional[Callable[[str], Dict[str, Any]]] = None,
+    run_video_scan: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Stage 2: read the (now-rescanned) server into video.db — INCREMENTAL by default
-    (newest-first, stop after N consecutive known). Video twin of start_database_update."""
+    (newest-first, stop after N consecutive known). Video twin of start_database_update.
+
+    ``media_type`` scopes it to the Movie or TV library ('all' does both). When fired by
+    the post-download chain it inherits the scope of the scan that ran (carried on the
+    event), so a TV-only rescan updates only TV."""
     run_video_scan = run_video_scan or _default_run_video_scan
     automation_id = config.get('_automation_id')
     mode = config.get('mode') or 'incremental'
+    media_type = (config.get('media_type')
+                  or (config.get('_event_data') or {}).get('media_type')
+                  or 'all')
+    lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
     try:
-        deps.update_progress(automation_id, phase='Reading new media into SoulSync…', progress=40)
-        result = run_video_scan(mode) or {}
+        deps.update_progress(automation_id, phase=f'Reading new {lib_label} media into SoulSync…', progress=40)
+        result = run_video_scan(mode, media_type) or {}
+        if result.get('state') == 'in_progress':
+            deps.update_progress(automation_id, status='finished', phase='Skipped',
+                                 log_line='Another video scan is already running — skipping this run',
+                                 log_type='info')
+            return {'status': 'skipped', 'reason': 'a video scan is already running',
+                    '_manages_own_progress': True}
         if result.get('state') == 'error':
             err = result.get('error') or 'Video database update failed'
             deps.update_progress(automation_id, status='error', phase='Error', log_line=err, log_type='error')
@@ -236,9 +255,14 @@ def auto_video_update_database(
         movies = int(result.get('movies', 0) or 0)
         shows = int(result.get('shows', 0) or 0)
         episodes = int(result.get('episodes', 0) or 0)
+        if media_type == 'movie':
+            summary = f'Video database updated: {movies} movies'
+        elif media_type == 'show':
+            summary = f'Video database updated: {shows} shows, {episodes} episodes'
+        else:
+            summary = f'Video database updated: {movies} movies, {shows} shows, {episodes} episodes'
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                             log_line=f'Video database updated: {movies} movies, {shows} shows, {episodes} episodes',
-                             log_type='success')
+                             log_line=summary, log_type='success')
         return {'status': 'completed', '_manages_own_progress': True,
                 'movies': movies, 'shows': shows, 'episodes': episodes}
     except Exception as e:  # noqa: BLE001
