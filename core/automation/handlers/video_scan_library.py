@@ -239,8 +239,11 @@ def auto_video_update_database(
                   or (config.get('_event_data') or {}).get('media_type')
                   or 'all')
     lib_label = {'movie': 'Movie', 'show': 'TV'}.get(media_type, 'video')
+    # 'deep'/'full' re-read the whole library; 'incremental' only grabs new items.
+    phase = (f'Re-reading the {lib_label} library from the server…' if mode in ('deep', 'full')
+             else f'Reading new {lib_label} media into SoulSync…')
     try:
-        deps.update_progress(automation_id, phase=f'Reading new {lib_label} media into SoulSync…', progress=40)
+        deps.update_progress(automation_id, phase=phase, progress=40)
         result = run_video_scan(mode, media_type) or {}
         if result.get('state') == 'in_progress':
             deps.update_progress(automation_id, status='finished', phase='Skipped',

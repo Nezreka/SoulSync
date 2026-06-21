@@ -254,9 +254,9 @@ ACTIONS: list[dict] = [
     # these). Scope + deep mode are baked in by the registration wrapper, so no config
     # fields — drag one in and it just deep-scans that library.
     {"type": "video_deep_scan_tv", "label": "Deep Scan TV Library", "icon": "search", "scope": "video",
-     "description": "Deep-rescan the TV library: re-read every show and prune ones the server no longer has (never touches movies)", "available": True},
+     "description": "Full reconcile of the TV library: re-read every show from the server and drop ones it no longer has (a read, NOT a Plex disk-scan; never touches movies)", "available": True},
     {"type": "video_deep_scan_movies", "label": "Deep Scan Movie Library", "icon": "search", "scope": "video",
-     "description": "Deep-rescan the Movie library: re-read every movie and prune ones the server no longer has (never touches TV)", "available": True},
+     "description": "Full reconcile of the Movie library: re-read every movie from the server and drop ones it no longer has (a read, NOT a Plex disk-scan; never touches TV)", "available": True},
     {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
      "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own", "available": True},
 ]
