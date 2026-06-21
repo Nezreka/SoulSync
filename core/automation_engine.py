@@ -325,20 +325,21 @@ class AutomationEngine:
         self._fix_video_scan_default()
 
     def _fix_video_scan_default(self):
-        """One-time cleanup: remove the standalone 'Scan Video Library' system
-        automation — it's superseded by the post-download chain (Auto-Scan Video
-        After Downloads → Auto-Update Video Database After Scan). Only deletes the
-        SYSTEM row; a user can still build their own scan automation from the action.
-        Flag-guarded so it runs once."""
+        """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
+        superseded by the post-download chain (Auto-Scan Video After Downloads →
+        Auto-Update Video Database After Scan).
+
+        ``get_system_automation_by_action`` matches ONLY a system-seeded row
+        (is_system=1), so a user's own scan automation is never touched. Idempotent —
+        safe to run on every startup; once the row is gone the lookup returns None and
+        it no-ops. (No flag guard: the old one could latch True without ever deleting,
+        which is exactly why the row survived earlier 'cleanups'.)"""
         try:
-            from config.settings import config_manager
-            if config_manager.get('video_scan_cleanup_v3', False):
-                return
             auto = self.db.get_system_automation_by_action('video_scan_library')
-            if auto and auto.get('is_system'):
+            if auto:
                 self.db.delete_automation(auto['id'])
-                logger.info("Removed superseded 'Scan Video Library' system automation")
-            config_manager.set('video_scan_cleanup_v3', True)
+                logger.info("Removed superseded 'Scan Video Library' system automation (id=%s)",
+                            auto.get('id'))
         except Exception:
             logger.exception("video scan cleanup failed")
 
