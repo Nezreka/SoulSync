@@ -126,3 +126,42 @@ def test_refresh_sections_scopes_by_media_type():
 
     res = src.refresh_sections("all")
     assert secs[0].updated and secs[1].updated and res["sections"] == 2   # both
+
+
+# ── scan-status detection (poll-until-idle uses this) ───────────────────────
+
+def test_plex_is_scanning_reads_section_refreshing_flag_scoped():
+    class Sec:
+        def __init__(self, type_, title, refreshing=False):
+            self.type, self.title, self.refreshing = type_, title, refreshing
+
+    class Srv:
+        def __init__(self, secs): self.library = _Lib(secs)
+        def activities(self): return []
+
+    # TV section refreshing, movie idle
+    secs = [Sec("movie", "Movies", False), Sec("show", "TV Shows", True)]
+    src = PlexVideoSource(Srv(secs), movies_lib="Movies", tv_lib="TV Shows")
+    assert src.is_scanning("show") is True        # TV is mid-scan
+    assert src.is_scanning("movie") is False       # movie idle → not scanning for that scope
+    assert src.is_scanning("all") is True          # either counts
+
+
+def test_plex_is_scanning_falls_back_to_activity_feed():
+    class Sec:
+        def __init__(self, type_, title): self.type, self.title, self.refreshing = type_, title, False
+    class Act:
+        def __init__(self, type_, title): self.type, self.title = type_, title
+    class Srv:
+        def __init__(self, secs, acts): self.library, self._acts = _Lib(secs), acts
+        def activities(self): return self._acts
+    secs = [Sec("movie", "Movies")]
+    src = PlexVideoSource(Srv(secs, [Act("library.refresh", "Scanning Movies…")]),
+                          movies_lib="Movies", tv_lib="TV Shows")
+    assert src.is_scanning("movie") is True        # no refreshing flag, but the feed shows a scan
+
+
+def test_scan_status_helper_is_none_when_no_server(monkeypatch):
+    import core.video.sources as srcmod
+    monkeypatch.setattr(srcmod, "get_active_video_source", lambda: None)
+    assert srcmod.video_server_scan_in_progress("all") is None   # caller falls back to fixed wait

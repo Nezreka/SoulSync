@@ -296,6 +296,21 @@ def refresh_video_server_sections(media_type="all"):
         return {"ok": False, "error": str(e)}
 
 
+def video_server_scan_in_progress(media_type="all"):
+    """True if the active video server is mid-scan for the given library (or either,
+    for 'all'); False if idle; None if it can't be determined — no server, or an
+    adapter that can't report scan state. Callers fall back to a fixed wait on None."""
+    media_type = normalize_media_type(media_type)
+    src = get_active_video_source()
+    if src is None or not hasattr(src, "is_scanning"):
+        return None
+    try:
+        return bool(src.is_scanning(media_type))
+    except Exception:
+        logger.debug("video sources: scan-status check failed", exc_info=True)
+        return None
+
+
 def list_video_libraries():
     """Discover the active server's video libraries for the mapping UI:
     {'server', 'movies': [{'title'}], 'tv': [{'title'}]} or None."""
@@ -375,6 +390,26 @@ class PlexVideoSource:
                 except Exception:
                     logger.exception("Plex: refresh failed for section %s", getattr(s, "title", "?"))
         return {"ok": n > 0, "sections": n}
+
+    def is_scanning(self, media_type="all") -> bool:
+        """True if any SELECTED video section (scoped by media_type) is currently
+        being scanned by Plex. Checks the per-section refreshing flag, then the
+        server activity feed (real-time) — mirrors the music PlexClient check."""
+        sections = []
+        for kind, name in (("movie", self._movies_lib), ("show", self._tv_lib)):
+            if media_type != "all" and media_type != kind:
+                continue
+            sections.extend(self._scan_sections(kind, name))
+        for s in sections:
+            if getattr(s, "refreshing", False):
+                return True
+        titles = {(getattr(s, "title", "") or "").lower() for s in sections}
+        for act in self._server.activities():
+            if getattr(act, "type", "") in ("library.scan", "library.refresh"):
+                at = (getattr(act, "title", "") or "").lower()
+                if any(t and t in at for t in titles):
+                    return True
+        return False
 
     @staticmethod
     def _part_file(obj):
@@ -570,6 +605,26 @@ class JellyfinVideoSource:
             except Exception:
                 logger.exception("Jellyfin: refresh failed for view %s", vid)
         return {"ok": n > 0, "sections": n}
+
+    def is_scanning(self, media_type="all") -> bool:
+        """True if Jellyfin's library-scan scheduled task is running. Jellyfin's
+        scan isn't per-library, so media_type is ignored (any scan counts)."""
+        import requests
+        base = (self._c.base_url or "").rstrip("/")
+        if not base:
+            return False
+        try:
+            r = requests.get(base + "/ScheduledTasks",
+                             headers={"X-Emby-Token": self._c.api_key or ""}, timeout=10)
+            tasks = r.json() if r.ok else []
+        except Exception:
+            return False
+        for task in tasks or []:
+            name = (task.get("Name") or "").lower()
+            if (("scan" in name or "refresh" in name or "library" in name)
+                    and task.get("State") in ("Running", "Cancelling")):
+                return True
+        return False
 
     def counts(self, incremental=False) -> dict:
         def total(view, itype):
