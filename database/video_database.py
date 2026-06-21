@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -1308,6 +1308,144 @@ class VideoDatabase:
             cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled', 'import_failed')")
             conn.commit()
             return cur.rowcount
+        finally:
+            conn.close()
+
+    # ── download history (permanent archive; survives the queue cleanup) ───────
+    @staticmethod
+    def _parse_resolution(*texts) -> str | None:
+        """Best-effort resolution/codec sniff from a release/file name."""
+        import re
+        blob = " ".join(t for t in texts if t)
+        for pat, label in ((r"\b2160p\b|\b4k\b|\buhd\b", "2160p"), (r"\b1080p\b", "1080p"),
+                           (r"\b720p\b", "720p"), (r"\b480p\b", "480p")):
+            if re.search(pat, blob, re.I):
+                return label
+        return None
+
+    @staticmethod
+    def _codec(*texts) -> str | None:
+        import re
+        blob = " ".join(t for t in texts if t)
+        for pat, label in ((r"\b[xh]?265\b|\bhevc\b", "x265"), (r"\b[xh]?264\b|\bavc\b", "x264"),
+                           (r"\bav1\b", "AV1"), (r"\bxvid\b", "XviD")):
+            if re.search(pat, blob, re.I):
+                return label
+        return None
+
+    def record_download_history(self, row: dict) -> int:
+        """Snapshot a finished download (the merged final ``video_downloads`` record)
+        into the permanent history. ``outcome`` is derived from its status. Idempotent
+        per (download_id, outcome, dest_path) so a re-persist / restart never dupes.
+        Returns the new history id, or 0 if it was a duplicate / not worth recording."""
+        if not row:
+            return 0
+        status = row.get("status") or "completed"
+        outcome = {"completed": "completed", "import_failed": "import_failed",
+                   "failed": "failed", "cancelled": "cancelled"}.get(status, status)
+        kind = row.get("kind") or "movie"
+        media_type = "show" if kind == "show" else ("movie" if kind == "movie" else kind)
+        # season/episode live in the retry search_ctx JSON for episode grabs.
+        sn = en = None
+        ctx = row.get("search_ctx")
+        if ctx:
+            try:
+                ctx = json.loads(ctx) if isinstance(ctx, str) else (ctx or {})
+                sn, en = ctx.get("season"), ctx.get("episode")
+            except (ValueError, TypeError):
+                pass
+        rel, fn = row.get("release_title"), row.get("filename")
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO video_download_history
+                       (download_id, kind, media_type, title, year, season_number, episode_number,
+                        release_title, source, username, filename, dest_path, size_bytes,
+                        quality_label, resolution, video_codec, media_id, media_source, poster_url,
+                        outcome, error, grabbed_at, completed_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row.get("id"), kind, media_type, row.get("title"), row.get("year"), sn, en,
+                 rel, row.get("source"), row.get("username"), fn, row.get("dest_path"),
+                 int(row.get("size_bytes") or 0), row.get("quality_label"),
+                 self._parse_resolution(rel, fn, row.get("quality_label")), self._codec(rel, fn),
+                 row.get("media_id"), row.get("media_source"), row.get("poster_url"),
+                 outcome, row.get("error"), row.get("created_at"),
+                 row.get("completed_at")))
+            conn.commit()
+            return cur.lastrowid or 0
+        except Exception:
+            logger.exception("record_download_history failed for download %s", row.get("id"))
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()
+
+    def query_download_history(self, *, kind=None, search=None, outcome=None,
+                               page=1, limit=40) -> dict:
+        """Paged history slice for the modal. ``kind`` ∈ movie|show (None=all);
+        ``outcome`` filters by result. Newest first. {items, pagination}."""
+        try:
+            page = max(1, int(page or 1)); limit = max(1, min(200, int(limit or 40)))
+        except (TypeError, ValueError):
+            page, limit = 1, 40
+        where, args = ["1=1"], []
+        if kind in ("movie", "show"):
+            where.append("kind = ?"); args.append(kind)
+        if outcome:
+            where.append("outcome = ?"); args.append(outcome)
+        s = (search or "").strip()
+        if s:
+            where.append("(title LIKE ? OR release_title LIKE ?) COLLATE NOCASE")
+            args += ["%" + s + "%", "%" + s + "%"]
+        wsql = " WHERE " + " AND ".join(where)
+        conn = self._get_connection()
+        try:
+            total = conn.execute("SELECT COUNT(*) c FROM video_download_history" + wsql, args).fetchone()["c"]
+            rows = conn.execute(
+                "SELECT * FROM video_download_history" + wsql +
+                " ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT ? OFFSET ?",
+                args + [limit, (page - 1) * limit]).fetchall()
+            items = [dict(r) for r in rows]
+        finally:
+            conn.close()
+        total_pages = max(1, (total + limit - 1) // limit)
+        return {"items": items, "pagination": {
+            "page": min(page, total_pages), "total_pages": total_pages, "total_count": total,
+            "has_prev": page > 1, "has_next": page < total_pages}}
+
+    def download_history_detail(self, history_id: int) -> dict | None:
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM video_download_history WHERE id=?", (int(history_id),)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def download_history_counts(self) -> dict:
+        """{movie, show, total} of completed grabs (for the modal tabs/badge)."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT kind, COUNT(*) c FROM video_download_history "
+                "WHERE outcome='completed' GROUP BY kind").fetchall()
+            by = {r["kind"]: r["c"] for r in rows}
+            movie, show = by.get("movie", 0), by.get("show", 0)
+            return {"movie": movie, "show": show, "total": movie + show}
+        finally:
+            conn.close()
+
+    def latest_completed_download(self, media_type: str = "all") -> dict | None:
+        """The most recently completed grab of a type — the probe target for the smart
+        post-download scan. ``media_type`` ∈ movie|show|all."""
+        where, args = ["outcome = 'completed'"], []
+        if media_type in ("movie", "show"):
+            where.append("kind = ?"); args.append(media_type)
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM video_download_history WHERE " + " AND ".join(where) +
+                " ORDER BY COALESCE(completed_at, created_at) DESC, id DESC LIMIT 1", args).fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 

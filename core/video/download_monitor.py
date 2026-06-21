@@ -235,6 +235,15 @@ def _apply_candidate(db, dl_id, row, cand, rest) -> bool:
     return True
 
 
+def _archive_history(db, dl, upd) -> None:
+    """Snapshot a terminal download into the permanent history. Best-effort — a
+    history failure must never disturb the download pipeline."""
+    try:
+        db.record_download_history({**dl, **upd})
+    except Exception:
+        logger.exception("video download %s: history snapshot failed", dl.get("id"))
+
+
 def _fail_or_retry(db, dl, error_msg) -> None:
     """A download just failed/disappeared. Try the next candidate inline; if none,
     hand off to a requery thread; if nothing left, mark it failed for real."""
@@ -246,8 +255,10 @@ def _fail_or_retry(db, dl, error_msg) -> None:
         db.update_video_download(dl["id"], status="searching", error=None)
         _spawn_requery(dl["id"])
         return
-    db.update_video_download(dl["id"], status="failed", error=error_msg or "Download failed",
-                             completed_at=_now())
+    err = error_msg or "Download failed"
+    completed = _now()
+    db.update_video_download(dl["id"], status="failed", error=err, completed_at=completed)
+    _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
 
 
 def _search_for_retry(query, max_seconds=22):
@@ -378,6 +389,10 @@ def _tick(db) -> None:
             upd.setdefault("completed_at", _now())
         try:
             db.update_video_download(dl["id"], **upd)
+            # Snapshot terminal outcomes into the permanent history (survives the
+            # queue cleanup; powers the History modal + smart post-download scan).
+            if upd.get("status") in ("completed", "cancelled", "import_failed"):
+                _archive_history(db, dl, upd)
         except Exception:
             logger.exception("video download %s: failed to persist update", dl.get("id"))
     for k in [k for k in _misses if k not in live_ids]:
