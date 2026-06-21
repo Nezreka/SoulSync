@@ -438,21 +438,18 @@ def test_ensure_system_automations_seeds_video_with_owned_by_and_mode():
     assert json.loads(created['scan_library']['action_config']) == {}
 
 
-def test_video_scan_library_system_automation_is_cleaned_up(monkeypatch):
-    """The old standalone 'Scan Video Library' system automation is deleted once
-    (superseded by the post-download chain). Guard flag stops it re-running."""
-    class _FakeCfg:
-        def __init__(self): self._d = {}
-        def get(self, k, default=None): return self._d.get(k, default)
-        def set(self, k, v): self._d[k] = v
-    monkeypatch.setattr('config.settings.config_manager', _FakeCfg())
-
+def test_video_scan_library_system_automation_is_cleaned_up():
+    """The obsolete standalone 'Scan Video Library' system automation is deleted when
+    present (superseded by the post-download chain). No stuck flag — it just keys off
+    the lookup, so once the row is gone it no-ops."""
+    # present → deleted (matches only the is_system-seeded row)
     db = MagicMock()
     db.get_system_automation_by_action.return_value = {'id': 99, 'is_system': 1}
-    engine = AutomationEngine(db)
+    AutomationEngine(db)._fix_video_scan_default()
+    db.delete_automation.assert_any_call(99)
 
-    engine._fix_video_scan_default()
-    db.delete_automation.assert_called_once_with(99)
-
-    engine._fix_video_scan_default()                 # flag set → no second delete
-    db.delete_automation.assert_called_once()
+    # absent (already gone) → idempotent no-op, never errors or deletes
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_video_scan_default()
+    db2.delete_automation.assert_not_called()
