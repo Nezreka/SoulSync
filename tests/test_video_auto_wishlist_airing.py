@@ -43,6 +43,25 @@ def test_adds_unowned_airings_grouped_by_show():
     assert (1, "Widows Bay", 2) in added and (2, "Another Show", 1) in added
 
 
+def test_episode_synopsis_and_still_are_carried_to_the_wishlist():
+    # auto-added episodes must look like manual ones — synopsis + still, not blank
+    rows = [{"show_tmdb_id": 1, "show_title": "X", "season_number": 1, "episode_number": 2,
+             "title": "Ep", "air_date": "2026-06-21", "has_file": False,
+             "overview": "A synopsis.", "still_url": "/library/metadata/9/thumb/1"}]
+    captured = {}
+
+    def add(tid, title, eps):
+        captured["eps"] = eps
+        return len(eps)
+
+    auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+                                   fetch_airing=lambda t: rows, add_episodes=add,
+                                   today_fn=lambda: "2026-06-21")
+    ep = captured["eps"][0]
+    assert ep["overview"] == "A synopsis."
+    assert ep["still_url"] == "/library/metadata/9/thumb/1"
+
+
 def test_queries_the_calendar_for_today():
     seen = {}
 
