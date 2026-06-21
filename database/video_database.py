@@ -2041,11 +2041,11 @@ class VideoDatabase:
         s = (search or "").strip().lower()
         if s:
             items = [it for it in items if s in (it.get("title") or "").lower()]
-        if sort == "title":
-            items.sort(key=lambda it: (it.get("title") or "").lower())
-        elif sort == "added":   # explicit follows (have a date) newest-first; airing defaults last
+        if sort == "added":   # opt-in: explicit follows (have a date) newest-first
             items.sort(key=lambda it: (it.get("date_added") or ""), reverse=True)
-        # "default": keep the natural effective order (follows first, then airing A–Z)
+        else:   # "default" / "title": alphabetical by name — a manual follow is no more
+                # special than an auto-added airing show, so they sort together A–Z
+            items.sort(key=lambda it: (it.get("sort_title") or it.get("title") or "").lower())
         total = len(items)
         total_pages = max(1, (total + limit - 1) // limit)
         page = min(page, total_pages)
