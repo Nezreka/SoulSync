@@ -35,7 +35,8 @@ def test_adds_unowned_airings_grouped_by_show():
 
     res = auto_video_add_airing_episodes(
         {"_automation_id": "a1"}, _Deps(),
-        fetch_airing=lambda today: rows, add_episodes=add, today_fn=lambda: "2026-06-21")
+        fetch_airing=lambda today: rows, add_episodes=add, today_fn=lambda: "2026-06-21",
+        season_meta=lambda *a: None)
 
     assert res["status"] == "completed"
     assert res["episodes_added"] == 3        # 2 of Widows Bay + 1 of Another Show
@@ -43,11 +44,19 @@ def test_adds_unowned_airings_grouped_by_show():
     assert (1, "Widows Bay", 2) in added and (2, "Another Show", 1) in added
 
 
-def test_episode_synopsis_and_still_are_carried_to_the_wishlist():
-    # auto-added episodes must look like manual ones — synopsis + still, not blank
-    rows = [{"show_tmdb_id": 1, "show_title": "X", "season_number": 1, "episode_number": 2,
+def test_uses_tmdb_season_metadata_like_a_manual_add():
+    # the SAME TMDB source the manual 'add to wishlist' uses — absolute still + overview
+    # + season poster — preferred over the patchy DB values.
+    rows = [{"show_tmdb_id": 5, "show_title": "Y", "season_number": 2, "episode_number": 3,
              "title": "Ep", "air_date": "2026-06-21", "has_file": False,
-             "overview": "A synopsis.", "still_url": "/library/metadata/9/thumb/1"}]
+             "overview": "db overview", "still_url": "/db/still"}]
+
+    def season_meta(tid, sn):
+        assert (tid, sn) == (5, 2)
+        return {"poster_url": "https://img/tmdb/s2.jpg",
+                "episodes": [{"episode_number": 3, "overview": "TMDB overview",
+                              "still_url": "https://img/tmdb/s2e3.jpg"}]}
+
     captured = {}
 
     def add(tid, title, eps):
@@ -56,9 +65,28 @@ def test_episode_synopsis_and_still_are_carried_to_the_wishlist():
 
     auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
                                    fetch_airing=lambda t: rows, add_episodes=add,
-                                   today_fn=lambda: "2026-06-21")
+                                   today_fn=lambda: "2026-06-21", season_meta=season_meta)
     ep = captured["eps"][0]
-    assert ep["overview"] == "A synopsis."
+    assert ep["overview"] == "TMDB overview"                 # TMDB preferred over DB
+    assert ep["still_url"] == "https://img/tmdb/s2e3.jpg"
+    assert ep["season_poster_url"] == "https://img/tmdb/s2.jpg"
+
+
+def test_falls_back_to_db_values_when_tmdb_unavailable():
+    # if the TMDB fetch returns nothing, still carry the calendar/DB overview + still
+    rows = [{"show_tmdb_id": 1, "show_title": "X", "season_number": 1, "episode_number": 2,
+             "has_file": False, "overview": "db synopsis", "still_url": "/library/metadata/9/thumb/1"}]
+    captured = {}
+
+    def add(tid, title, eps):
+        captured["eps"] = eps
+        return len(eps)
+
+    auto_video_add_airing_episodes({"_automation_id": "a"}, _Deps(),
+                                   fetch_airing=lambda t: rows, add_episodes=add,
+                                   today_fn=lambda: "2026-06-21", season_meta=lambda *a: None)
+    ep = captured["eps"][0]
+    assert ep["overview"] == "db synopsis"
     assert ep["still_url"] == "/library/metadata/9/thumb/1"
 
 
