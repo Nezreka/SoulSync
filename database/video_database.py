@@ -1261,6 +1261,33 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def media_tmdb_id(self, kind: str, media_id) -> tuple:
+        """(tmdb_id, imdb_id) for a library movie/show row — used to resolve sidecar /
+        subtitle metadata for an owned re-grab (whose media_id is the library id, not a
+        TMDB id). (None, None) if the row is gone."""
+        table = "movies" if str(kind or "").lower() == "movie" else "shows"
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT tmdb_id, imdb_id FROM %s WHERE id = ?" % table, (media_id,)
+            ).fetchone()
+            return (row["tmdb_id"], row["imdb_id"]) if row else (None, None)
+        finally:
+            conn.close()
+
+    def get_import_failed_video_downloads(self) -> list:
+        """Downloads that finished but couldn't be auto-placed (sample / wrong episode /
+        not-an-upgrade / corrupt / pack / parse fail). Their file is still on disk at
+        ``dest_path`` — the Import page surfaces these for manual placement."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM video_downloads WHERE status = 'import_failed' ORDER BY id DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
     def update_video_download(self, dl_id: int, **fields) -> None:
         """Patch a download row; ``updated_at`` is always bumped."""
         if not fields:
@@ -1278,7 +1305,7 @@ class VideoDatabase:
     def clear_finished_video_downloads(self) -> int:
         conn = self._get_connection()
         try:
-            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled')")
+            cur = conn.execute("DELETE FROM video_downloads WHERE status IN ('completed', 'failed', 'cancelled', 'import_failed')")
             conn.commit()
             return cur.rowcount
         finally:

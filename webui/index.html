@@ -1282,6 +1282,33 @@
                         </div>
                     </div>
                 </section>
+                <!-- Import page — downloads that finished but couldn't be auto-placed
+                     (sample / wrong episode / not-an-upgrade / corrupt). Resolve each by
+                     hand: pick the right title (library-first → TMDB) and place, or
+                     dismiss. Driven by video/video-import.js via data-vimp-* hooks. -->
+                <section class="video-subpage" data-video-subpage="video-import" hidden>
+                    <div class="vimp-page">
+                        <div class="vimp-head">
+                            <div class="vimp-head-titles">
+                                <h1 class="vimp-title">Import <span class="vimp-count" data-vimp-count></span></h1>
+                                <p class="vimp-sub">Downloads that need a hand &mdash; place them by hand or dismiss</p>
+                            </div>
+                            <button class="vimp-refresh" type="button" data-vimp-refresh>Refresh</button>
+                        </div>
+                        <div class="vimp-body">
+                            <div class="vimp-loading hidden" data-vimp-loading>
+                                <div class="loading-spinner"></div>
+                                <div class="loading-text">Loading&hellip;</div>
+                            </div>
+                            <div class="vimp-grid" data-vimp-grid></div>
+                            <div class="vimp-state hidden" data-vimp-empty>
+                                <div class="vimp-state-ic">&#10003;</div>
+                                <div class="vimp-state-title">Nothing needs attention</div>
+                                <div class="vimp-state-sub">Finished downloads that can't be auto-filed show up here for manual placement.</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
                 <!-- Downloads page — every grab from the video side lives here (live status).
                      Reuses the music downloads page's .adl-* layout/look for parity;
                      driven by video/video-downloads-page.js via data-vdpg-* hooks. -->
@@ -5874,6 +5901,94 @@
                                     </small>
                                 </div>
                             </div>
+                            <!-- Video Library Organization — uses the SAME settings vocabulary as the
+                                 music "File Organization" section (.settings-group / .form-group /
+                                 .checkbox-label / .form-select / .settings-hint / .test-button). -->
+                            <div class="settings-group" data-stg="library" data-video-only>
+                                <h3>📁 Library Organization</h3>
+
+                                <div class="form-group">
+                                    <label>Movie Path Template:</label>
+                                    <input type="text" id="vo-movie-template" placeholder="$title ($year)/$title ($year) $quality">
+                                    <small class="settings-hint">Variables: $title, $titlefirst, $year, $quality (e.g. Bluray-1080p), $resolution, $source, $codec, $edition, $tmdbid, $imdbid. Folders split on "/", the last segment is the filename.</small>
+                                    <small class="settings-hint">Example: <code id="vo-movie-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Episode Path Template:</label>
+                                    <input type="text" id="vo-episode-template" placeholder="$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality">
+                                    <small class="settings-hint">Variables: $series, $season (01), $seasonraw (1), $episode (01), $episodetitle, $year, $quality, $resolution, $source, $codec, $tvdbid.</small>
+                                    <small class="settings-hint">Example: <code id="vo-episode-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>When a file finishes:</label>
+                                    <select id="vo-transfer-mode" class="form-select">
+                                        <option value="copy">Copy in, then remove the source (kept for torrents)</option>
+                                        <option value="move">Move into the library</option>
+                                    </select>
+                                    <small class="settings-hint">How a finished download moves from the download folder into your library.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-verify">
+                                        <span>Verify with ffprobe</span>
+                                    </label>
+                                    <small class="settings-hint">Tag by the file's real resolution and reject corrupt / sample files. Needs ffmpeg; falls back to the release name when absent.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-replace">
+                                        <span>Replace an existing copy when the new one is better</span>
+                                    </label>
+                                    <small class="settings-hint">Deletes the old file when an upgrade lands.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-subs">
+                                        <span>Carry matching subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Bring sibling .srt / .ass files alongside the video, renamed to match.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-artwork">
+                                        <span>Save artwork into the folder</span>
+                                    </label>
+                                    <small class="settings-hint">Download the full artwork set &mdash; poster.jpg, fanart.jpg, clearlogo.png (plus season posters for shows) &mdash; next to the movie / into the show folder. Off by default; Plex/Jellyfin usually fetch their own once the folder is named cleanly. Turn on to pin specific art or for offline/local-assets setups.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-nfo">
+                                        <span>Write NFO metadata files</span>
+                                    </label>
+                                    <small class="settings-hint">Write Kodi/Jellyfin-style movie.nfo / tvshow.nfo (title, plot, rating, genres, cast, ids) so the library is fully portable. Off by default &mdash; Plex ignores these, but Jellyfin/Kodi/Emby use them.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="vo-subs-dl">
+                                        <span>Download subtitles</span>
+                                    </label>
+                                    <small class="settings-hint">Fetch external .srt files from OpenSubtitles next to the video (uses your OpenSubtitles API key on the enrichment settings). Off by default &mdash; the free tier is daily-quota-limited, and most releases already carry embedded subs.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Subtitle Languages:</label>
+                                    <input type="text" id="vo-sub-langs" placeholder="en">
+                                    <small class="settings-hint">Comma-separated language codes to fetch, in priority order (e.g. <code>en,es</code>). One .srt per language is written as &lt;video&gt;.&lt;lang&gt;.srt.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <button class="test-button" id="vo-reset" style="background: #666;">&#128260; Reset to Defaults</button>
+                                    <small class="settings-hint">Restores the Radarr/Sonarr standard layout.</small>
+                                </div>
+                            </div>
                             <!-- Video Preferences — lives on the Library settings tab -->
                             <div class="settings-group" data-stg="library" data-video-only>
                                 <h3>Video Preferences</h3>
@@ -10336,6 +10451,7 @@
     <script src="{{ url_for('static', filename='video/video-watchlist.js', v=static_v) }}"></script>
     <!-- Video wishlist page (isolated; tabbed movies / TV, grouped show tree) -->
     <script src="{{ url_for('static', filename='video/video-wishlist.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-import.js', v=static_v) }}"></script>
     <!-- Video worker orbs (isolated copy of the music orbs; idles into the
          floating-orb animation around the SoulSync logo on the video dashboard) -->
     <script src="{{ url_for('static', filename='video/video-worker-orbs.js', v=static_v) }}"></script>

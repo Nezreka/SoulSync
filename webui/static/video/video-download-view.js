@@ -57,8 +57,7 @@
                 '<div class="vdl-sec-head">' +
                     '<div class="vdl-sec-label">Sources</div>' +
                     '<span class="vdl-src-actions vdl-src-actions--head">' +
-                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-best title="Search every source, then download the single best release for your quality profile">' +
-                            '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto</span></button>' +
+                        '<button class="vdl-search-all vdl-auto-all" type="button" data-vdl-auto-best title="Search every source, then download the single best release for your quality profile">AUTO</button>' +
                     '</span>' +
                 '</div>' +
                 '<div class="vdl-sources" data-vdl-sources><div class="vdl-src-empty">Loading sources…</div></div>' +
@@ -73,10 +72,8 @@
             '<span class="vdl-src-main"><span class="vdl-src-name">' + esc(m.name) + '</span>' +
                 '<span class="vdl-src-meta"><span class="vdl-src-status" data-vdl-status>Ready</span></span></span>' +
             '<span class="vdl-src-actions">' +
-                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '" title="Search and pick a release yourself">' +
-                    '<span class="vdl-btn-ic" aria-hidden="true">⌕</span><span>Manual</span></button>' +
-                '<button class="vdl-src-auto" type="button" data-vdl-auto="' + s + '" title="Search and auto-grab the best release for your quality profile">' +
-                    '<span class="vdl-btn-ic vdl-btn-ic--auto" aria-hidden="true">✦</span><span>Auto</span></button>' +
+                '<button class="vdl-src-search" type="button" data-vdl-search="' + s + '" title="Search and pick a release yourself">MANUAL</button>' +
+                '<button class="vdl-src-auto" type="button" data-vdl-auto="' + s + '" title="Search and auto-grab the best release for your quality profile">AUTO</button>' +
             '</span>' +
             '</div>';
     }
@@ -523,42 +520,32 @@
     // demoted to a mono one-liner; a stat strip (size / uploader / group) sits below.
     // The card is a column so a live download tracker can drop in under it on grab.
     function resultCardHTML(r, i) {
-        // Cinematic release CARD: a bold quality badge (resolution over source) anchors
-        // the left, the RELEASE NAME is the hero, the meta is a row of crisp pills, and
-        // size · verdict · Get sit on the right. The outer .vdl-res is a column so the
+        // Flat / brutalist release card: a bracketed quality block + release name on
+        // line 1, an UPPERCASE dot-separated spec line, then the verdict + a hard
+        // [ GET ] button. Monospace, sharp, no chrome. .vdl-res stays a column so the
         // live download tracker docks under it on grab.
-        var tag = function (t, mod) { return '<span class="vdl-tag' + (mod ? ' vdl-tag--' + mod : '') + '">' + esc(t) + '</span>'; };
-        var tags = [];
-        if (r.codec) tags.push(tag(String(r.codec).toUpperCase()));
-        if (r.audio) tags.push(tag(String(r.audio).toUpperCase().replace('-', ' ')));
-        if (r.hdr) tags.push(tag(String(r.hdr).toUpperCase(), 'hdr'));
-        if (r.repack) tags.push(tag('REPACK', 'rep'));
-        if (r.group) tags.push(tag(r.group, 'grp'));
-        var avail = r.username
-            ? '<span class="vdl-avail"><span class="vdl-avail-ic">●</span>' + esc(r.username) + (r.peers > 1 ? ' · ' + r.peers : '') + '</span>'
-            : '<span class="vdl-avail vdl-avail--seed">▲ ' + (r.seeders || 0) + '</span>';
-        var flag = r.accepted
-            ? '<span class="vdl-flag vdl-flag--ok" title="Meets your quality profile">✓</span>'
-            : '<span class="vdl-flag vdl-flag--no" title="' + esc(r.rejected || 'Filtered out') + '">✕</span>';
+        var meta = [SRC_LABEL[r.source] || r.source || ''];
+        if (r.codec) meta.push(String(r.codec).toUpperCase());
+        if (r.audio) meta.push(String(r.audio).toUpperCase().replace('-', ' '));
+        if (r.hdr) meta.push(String(r.hdr).toUpperCase());
+        if (r.repack) meta.push('REPACK');
+        meta.push(r.username ? r.username + (r.peers > 1 ? ' (' + r.peers + ')' : '') : (r.seeders || 0) + ' SEED');
+        if (r.group) meta.push(r.group);
+        meta.push(r.size_gb + ' GB');
+        var verdict = r.accepted
+            ? '<span class="vdl-r-verdict vdl-r-verdict--ok">&#10003; MEETS PROFILE</span>'
+            : '<span class="vdl-r-verdict vdl-r-verdict--no" title="' + esc(r.rejected || '') + '">&#10007; ' + esc((r.rejected || 'FILTERED').toUpperCase()) + '</span>';
         var grab = (r.accepted && r.username)
-            ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Download this release">' +
-                '<span class="vdl-res-grab-ic" aria-hidden="true">⤓</span><span>Get</span></button>'
+            ? '<button class="vdl-res-grab" type="button" data-vdl-grab="' + i + '" title="Download this release">[ GET ]</button>'
             : '';
-        var srcWord = SRC_LABEL[r.source] || r.source || '';
         return '<div class="vdl-res' + (r.accepted ? ' vdl-res--ok' : ' vdl-res--rejected') + '" data-vdl-card="' + i + '">' +
             '<div class="vdl-res-main">' +
-                '<div class="vdl-q">' +
-                    '<span class="vdl-q-res vdl-q-res--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
-                    (srcWord ? '<span class="vdl-q-src">' + esc(srcWord) + '</span>' : '') +
+                '<div class="vdl-r-l1">' +
+                    '<span class="vdl-r-q vdl-r-q--' + resKind(r.resolution) + '">' + esc(RES_LABEL[r.resolution] || r.resolution || '?') + '</span>' +
+                    '<span class="vdl-r-title" title="' + esc(r.title) + '">' + esc(r.title) + '</span>' +
                 '</div>' +
-                '<div class="vdl-info">' +
-                    '<div class="vdl-info-title" title="' + esc(r.title) + '">' + esc(r.title) + '</div>' +
-                    '<div class="vdl-info-tags">' + tags.join('') + avail + '</div>' +
-                '</div>' +
-                '<div class="vdl-res-right">' +
-                    '<span class="vdl-size">' + esc(String(r.size_gb)) + '<span class="vdl-size-u">GB</span></span>' +
-                    flag + grab +
-                '</div>' +
+                '<div class="vdl-r-l2">' + esc(meta.filter(Boolean).join('  ·  ')) + '</div>' +
+                '<div class="vdl-r-l3">' + verdict + grab + '</div>' +
             '</div>' +
         '</div>';
     }
@@ -700,7 +687,8 @@
                 '<input type="checkbox" class="vdl-season-cb" data-vdl-season-all="' + sn + '">' +
                 '<span class="vdl-season-name">' + esc(s.title || ('Season ' + sn)) + '</span>' +
                 '<span class="vdl-season-meta" data-vdl-season-meta>' + total + ' eps</span>' +
-                '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season">⌕</button>' +
+                '<button class="vdl-season-grab" type="button" data-vdl-season-grab="' + sn + '" title="Auto-grab every missing episode in this season, one at a time">Grab season</button>' +
+                '<button class="vdl-season-search" type="button" data-vdl-season-search="' + sn + '" title="Search this season as a pack">⌕</button>' +
                 '<span class="vdl-season-chev" aria-hidden="true">⌄</span>' +
             '</div>' +
             '<div class="vdl-season-body">' +
@@ -768,7 +756,7 @@
         var container = e.currentTarget; var st = container._dl; if (!st) return;
         var grab = e.target.closest('[data-vdl-grab]');
         if (grab) { doGrab(grab); return; }
-        // Episode-scope search (a source row inside an expanded episode → its own panel).
+        // Episode-scope Manual search (a source row inside an expanded episode).
         var srch = e.target.closest('[data-vdl-search]');
         if (srch) {
             var epEl = srch.closest('.vdl-ep'); if (!epEl) return;
@@ -780,6 +768,23 @@
                 [srch.closest('.vdl-src')]);
             return;
         }
+        // Episode-scope Auto (search this source, then auto-grab the best) — mirrors the
+        // movie per-source Auto, scoped to the episode.
+        var au = e.target.closest('[data-vdl-auto]');
+        if (au) {
+            var epA = au.closest('.vdl-ep'); if (!epA) return;
+            var pa = (epA.getAttribute('data-vdl-ep') || '').split('_');
+            var sa = au.getAttribute('data-vdl-auto');
+            var resA = au.closest('[data-vdl-src-block]').querySelector('[data-vdl-results-for="' + sa + '"]');
+            var rowA = au.closest('.vdl-src');
+            searchInto(container, resA,
+                { scope: 'episode', title: st.title, season: +pa[0], episode: +pa[1], source: sa },
+                [rowA], function () { _autoPick(resA, rowA); });
+            return;
+        }
+        // Grab whole season — auto-grab every MISSING episode individually (episode-level).
+        var sg = e.target.closest('[data-vdl-season-grab]');
+        if (sg) { grabSeason(container, st, +sg.getAttribute('data-vdl-season-grab')); return; }
         // Season-scope search → season PACK.
         var ss = e.target.closest('[data-vdl-season-search]');
         if (ss) {
@@ -831,6 +836,63 @@
         var srcs = (container._dl.sources || []).filter(function (s) { return SRC_META[s]; });
         if (!srcs.length) { panel.innerHTML = '<div class="vdl-ep-srcs"><div class="vdl-src-empty">No source configured.</div></div>'; return; }
         panel.innerHTML = '<div class="vdl-ep-srcs">' + srcs.map(function (s) { return srcBlockHTML(s, true); }).join('') + '</div>';
+    }
+
+    // ── Grab whole season (episode level) ──────────────────────────────────────
+    // We DON'T grab a multi-file pack; we run the per-episode auto-grab for every
+    // MISSING episode, throttled, reusing searchInto + _autoPick — so each episode
+    // takes the exact same path a manual per-episode Auto would. A hidden scratch
+    // holds the headless result panels; the grabs surface on the Downloads page.
+    // (Pack-folder grabbing can come later; this covers the common case.)
+    function ensureScratch(container) {
+        var s = container.querySelector('[data-vdl-grab-scratch]');
+        if (!s) {
+            s = document.createElement('div');
+            s.setAttribute('data-vdl-grab-scratch', '');
+            s.style.display = 'none';
+            container.appendChild(s);
+        }
+        return s;
+    }
+
+    function autoGrabEpisode(container, st, sn, en, src) {
+        // Resolves once the SEARCH settles (the grab POST fires inside _autoPick);
+        // throttling the searches is what protects slskd from a burst.
+        return new Promise(function (resolve) {
+            var panel = document.createElement('div');
+            panel.className = 'vdl-results vdl-res-noanim';
+            ensureScratch(container).appendChild(panel);
+            searchInto(container, panel,
+                { scope: 'episode', title: st.title, season: sn, episode: en, source: src },
+                [], function () { _autoPick(panel, null); resolve(); });
+        });
+    }
+
+    function grabSeason(container, st, sn) {
+        var src = (st.sources || []).filter(function (s) { return SRC_META[s]; })[0];
+        if (!src) { toast('No download source configured', 'error'); return; }
+        var eps = [];
+        for (var k in st.epMeta) {
+            if (k.indexOf(sn + '_') === 0 && st.epMeta[k].state === 'missing') eps.push(+k.split('_')[1]);
+        }
+        eps.sort(function (a, b) { return a - b; });
+        if (!eps.length) { toast('No missing episodes in this season', 'info'); return; }
+        var btn = container.querySelector('[data-vdl-season-grab="' + sn + '"]');
+        if (btn) { btn.disabled = true; btn.textContent = 'Grabbing 0/' + eps.length; }
+        toast('Auto-grabbing ' + eps.length + ' missing episode' + (eps.length > 1 ? 's' : '') + ' — watch Downloads', 'info');
+        var idx = 0, active = 0, done = 0, MAX = 3;
+        function pump() {
+            while (active < MAX && idx < eps.length) {
+                active++;
+                autoGrabEpisode(container, st, sn, eps[idx++], src).then(function () {
+                    active--; done++;
+                    if (btn) btn.textContent = done < eps.length ? 'Grabbing ' + done + '/' + eps.length : 'Season queued';
+                    if (done >= eps.length) { if (btn) btn.disabled = false; }
+                    else pump();
+                });
+            }
+        }
+        pump();
     }
 
     function setSeasonSel(container, sn, on) {

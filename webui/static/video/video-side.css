@@ -3107,107 +3107,79 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-reason { font-size: 12px; font-weight: 600; }
 .vdl-reason--ok { color: rgba(143, 231, 175, 0.85); }
 .vdl-reason--no { color: rgba(251, 205, 122, 0.92); }
-/* ── sources: redesigned ──────────────────────────────────────────────────
-   Header "all" buttons share the same Manual(secondary)/Auto(hero) language as
-   the per-source pair — Manual = quiet ghost, Auto = filled + soft glow + sheen. */
-.vdl-search-all { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 13px; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 800; letter-spacing: 0.01em;
-    color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.14); transition: background 0.16s, border-color 0.16s, transform 0.16s, box-shadow 0.18s; }
-.vdl-search-all:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.28);
-    transform: translateY(-1px); box-shadow: 0 7px 18px -10px rgba(0, 0, 0, 0.8); }
-.vdl-search-all:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
-/* Auto all = the hero header action, in the page accent */
-.vdl-auto-all { --glow: var(--accent-rgb); color: #06210f; border-color: transparent;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72));
-    box-shadow: 0 5px 16px -7px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    animation: vdlAutoGlow 3s ease-in-out infinite; }
-.vdl-auto-all:hover { color: #06210f; background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.82));
-    filter: brightness(1.05); }
-.vdl-auto-all::after { content: ''; position: absolute; inset: 0; transform: translateX(-130%);
-    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.55) 50%, transparent 65%); }
-.vdl-auto-all:hover::after { animation: vdlSheen 0.7s ease 1; }
+/* ── sources: FLAT / BRUTALIST ────────────────────────────────────────────
+   Sharp corners, hard 1px borders, flat colour, monospace, UPPERCASE. No
+   gradients, no glow, no rounded pills. Tool-like and confident.
+   Shared mono stack: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace */
+.vdl-search-all { display: inline-flex; align-items: center; padding: 7px 15px; border-radius: 0; cursor: pointer;
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85); background: transparent; border: 1px solid rgba(255, 255, 255, 0.22);
+    transition: background 0.12s, color 0.12s, border-color 0.12s; }
+.vdl-search-all:hover { background: rgba(255, 255, 255, 0.1); color: #fff; border-color: rgba(255, 255, 255, 0.4); }
+.vdl-search-all:disabled { opacity: 0.4; cursor: default; }
+/* Auto all = the one filled action — flat solid accent, inverts on hover */
+.vdl-auto-all { color: #08111f; background: rgb(var(--accent-rgb)); border-color: rgb(var(--accent-rgb)); }
+.vdl-auto-all:hover { color: rgb(var(--accent-rgb)); background: transparent; border-color: rgb(var(--accent-rgb)); }
 
-.vdl-sources { display: flex; flex-direction: column; gap: 10px; }
-/* a source = a sleek dark-glass row; the brand colour is an ACCENT (icon + edge
-   light + hover wash), not a full colour wash — calmer + more premium. */
-.vdl-src { --src: 130 130 150; position: relative; overflow: hidden; display: flex; align-items: center; gap: 14px;
-    padding: 12px 13px; border-radius: 14px; border: 1px solid rgba(255, 255, 255, 0.07);
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); animation: vdlSlide 0.46s both;
-    transition: transform 0.2s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.2s, box-shadow 0.25s, background 0.2s; }
-/* a thin brand light on the left edge — extends + brightens on hover */
-.vdl-src::before { content: ''; position: absolute; left: 0; top: 16%; bottom: 16%; width: 3px; border-radius: 3px;
-    background: rgb(var(--src)); opacity: 0.5; box-shadow: 0 0 12px 1px rgba(var(--src), 0.55);
-    transition: opacity 0.2s, top 0.2s, bottom 0.2s; }
+.vdl-sources { display: flex; flex-direction: column; gap: 7px; }
+/* a source = a flat sharp row with a hard brand left-bar; hover does a hard
+   2px shift + brand border (no lift, no shadow, no gradient). */
+.vdl-src { --src: 130 130 150; position: relative; display: flex; align-items: center; gap: 12px;
+    padding: 11px 13px; border-radius: 0; border: 1px solid rgba(255, 255, 255, 0.14);
+    border-left: 3px solid rgb(var(--src)); background: rgba(255, 255, 255, 0.018);
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    transition: background 0.12s, border-color 0.12s, transform 0.12s; }
 .vdl-src[data-vdl-src="soulseek"] { --src: 74 163 255; }
 .vdl-src[data-vdl-src="torrent"] { --src: 245 158 11; }
 .vdl-src[data-vdl-src="usenet"] { --src: 168 85 247; }
 .vdl-src[data-vdl-src="youtube"] { --src: 255 64 64; }
-.vdl-src:hover { transform: translateY(-2px); border-color: rgba(var(--src), 0.42);
-    background: linear-gradient(180deg, rgba(var(--src), 0.07), rgba(255, 255, 255, 0.015));
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 16px 34px -18px rgba(var(--src), 0.85); }
-.vdl-src:hover::before { top: 0; bottom: 0; opacity: 1; }
-/* brand icon tile — glassy, with an inner highlight + brand halo */
-.vdl-src-icon { position: relative; flex-shrink: 0; width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
-    background: linear-gradient(150deg, rgba(var(--src), 0.42), rgba(var(--src), 0.1));
-    border: 1px solid rgba(var(--src), 0.42);
-    box-shadow: 0 7px 20px -9px rgb(var(--src)), inset 0 1px 0 rgba(255, 255, 255, 0.25); transition: transform 0.25s cubic-bezier(0.2, 0.7, 0.2, 1); }
-.vdl-src:hover .vdl-src-icon { transform: translateY(-1px) scale(1.05); }
-.vdl-src-emoji { font-size: 20px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4)); }
+.vdl-src:hover { transform: translateX(2px); border-color: rgba(var(--src), 0.55);
+    border-left-color: rgb(var(--src)); background: rgba(var(--src), 0.06); }
+/* brand icon tile — flat sharp square, hard brand border */
+.vdl-src-icon { flex-shrink: 0; width: 36px; height: 36px; border-radius: 0; display: grid; place-items: center;
+    background: rgba(var(--src), 0.16); border: 1px solid rgba(var(--src), 0.5); }
+.vdl-src-emoji { font-size: 17px; line-height: 1; }
 .vdl-src-main { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
-.vdl-src-name { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.vdl-src-name { font-size: 13px; font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 0.07em; }
 .vdl-src-meta { display: inline-flex; align-items: center; }
-/* status is now a brand-tinted pill (was bare text) so the row reads "designed" */
-.vdl-src-status { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px;
-    font-size: 11px; font-weight: 800; letter-spacing: 0.01em; color: rgba(255, 255, 255, 0.62);
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.09); white-space: nowrap; }
-.vdl-src-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: rgb(var(--src));
-    box-shadow: 0 0 8px 0 rgba(var(--src), 0.9); animation: vdlDot 2.2s ease-in-out infinite; }
+/* status = flat sharp mono chip with a hard square dot (no glow) */
+.vdl-src-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 0;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(255, 255, 255, 0.5);
+    background: transparent; border: 1px solid rgba(255, 255, 255, 0.13); white-space: nowrap; }
+.vdl-src-status::before { content: ''; width: 6px; height: 6px; border-radius: 0; background: rgb(var(--src));
+    animation: vdlDot 2.2s ease-in-out infinite; }
 .vdl-src--scanning .vdl-src-status::before { animation-duration: 0.7s; }
-.vdl-src-status--soon { color: #fbcd7a; }
-.vdl-src-status--scanning { color: rgb(var(--src)); background: rgba(var(--src), 0.14); border-color: rgba(var(--src), 0.3); }
+.vdl-src-status--soon { color: #fbcd7a; border-color: rgba(245, 158, 11, 0.4); }
+.vdl-src-status--scanning { color: rgb(var(--src)); border-color: rgba(var(--src), 0.5); }
 .vdl-src-status--scanning::after { content: ''; animation: vdlDots 1.1s steps(1) infinite; }
-.vdl-src-status--done { color: #6cd391; background: rgba(108, 211, 145, 0.14); border-color: rgba(108, 211, 145, 0.32); }
-.vdl-src-status--done::before { background: #6cd391; box-shadow: 0 0 8px 0 rgba(108, 211, 145, 0.9); animation: none; }
-.vdl-src-status--none { color: #fbcd7a; background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.32); }
-.vdl-src-status--none::before { background: #fbcd7a; box-shadow: none; animation: none; }
-/* legacy dot element is folded into the status pill now */
+.vdl-src-status--done { color: #6cd391; border-color: rgba(108, 211, 145, 0.5); }
+.vdl-src-status--done::before { background: #6cd391; animation: none; }
+.vdl-src-status--none { color: #fbcd7a; border-color: rgba(245, 158, 11, 0.5); }
+.vdl-src-status--none::before { background: #fbcd7a; animation: none; }
 .vdl-src-dot { display: none; }
-/* moving scan bar along the bottom of a row while "searching" — in the source brand */
-.vdl-src--scanning::after { content: ''; position: absolute; left: 0; bottom: 0; height: 2px; width: 38%;
-    border-radius: 2px; background: linear-gradient(90deg, transparent, rgb(var(--src)), transparent);
-    box-shadow: 0 0 10px 1px rgba(var(--src), 0.7); animation: vdlScan 0.9s ease-in-out infinite; }
+/* hard brand scan bar along the bottom while "searching" — flat, no glow */
+.vdl-src--scanning::after { content: ''; position: absolute; left: 0; bottom: -1px; height: 2px; width: 38%;
+    background: rgb(var(--src)); animation: vdlScan 0.9s ease-in-out infinite; }
 
-/* the two per-source actions: Manual = quiet ghost, Auto = hero (brand-filled,
-   soft continuous glow, sheen sweep on hover). Matched height + radius. */
-.vdl-src-actions { flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; }
-.vdl-btn-ic { font-size: 12.5px; line-height: 1; opacity: 0.95; }
-.vdl-btn-ic--auto { font-size: 13px; }
-.vdl-src-auto:hover .vdl-btn-ic--auto { animation: vdlSparkle 0.6s ease 1; }
-.vdl-src-search { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; padding: 8px 13px; border-radius: 10px;
-    cursor: pointer; font-size: 12px; font-weight: 800; letter-spacing: 0.01em; color: rgba(255, 255, 255, 0.92);
-    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(var(--src), 0.34);
-    transition: background 0.16s, border-color 0.16s, transform 0.16s, box-shadow 0.18s; }
-.vdl-src-search:hover { background: rgba(var(--src), 0.18); border-color: rgba(var(--src), 0.62);
-    transform: translateY(-1px); box-shadow: 0 6px 16px -8px rgb(var(--src)); }
-.vdl-src-search:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
-.vdl-src-auto { --glow: var(--src); position: relative; overflow: hidden; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
-    padding: 8px 14px; border-radius: 10px; cursor: pointer; font-size: 12px; font-weight: 850; letter-spacing: 0.01em;
-    color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4); border: 1px solid rgba(var(--src), 0.55);
-    background: linear-gradient(135deg, rgba(var(--src), 0.96), rgba(var(--src), 0.56));
-    box-shadow: 0 6px 18px -7px rgb(var(--src)), inset 0 1px 0 rgba(255, 255, 255, 0.26);
-    animation: vdlAutoGlow 3s ease-in-out infinite; transition: transform 0.16s, box-shadow 0.2s, filter 0.16s; }
-.vdl-src-auto:hover { transform: translateY(-1px); filter: brightness(1.06);
-    box-shadow: 0 9px 22px -7px rgb(var(--src)), inset 0 1px 0 rgba(255, 255, 255, 0.32); }
-.vdl-src-auto::after { content: ''; position: absolute; inset: 0; transform: translateX(-130%);
-    background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.45) 50%, transparent 65%); }
-.vdl-src-auto:hover::after { animation: vdlSheen 0.7s ease 1; }
-.vdl-src-auto:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; filter: none; animation: none; }
-.vdl-src-empty { font-size: 13px; color: rgba(255, 255, 255, 0.5); padding: 12px 14px; border-radius: 12px;
-    background: rgba(255, 255, 255, 0.03); border: 1px dashed rgba(255, 255, 255, 0.12); }
-/* (the Auto-pick highlight now lives with the flat result list — .vdl-res--auto
-   .vdl-res-main below — so the chosen row is tinted + ringed in place.) */
+/* the two per-source actions = a SEGMENTED pair (shared seam): MANUAL ghost
+   outline, AUTO flat solid brand. Sharp, mono, UPPERCASE; AUTO inverts on hover. */
+.vdl-src-actions { flex-shrink: 0; display: inline-flex; align-items: stretch; }
+.vdl-src-search, .vdl-src-auto { padding: 7px 14px; border-radius: 0; cursor: pointer;
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; border: 1px solid;
+    transition: background 0.12s, color 0.12s, border-color 0.12s; }
+.vdl-src-search { background: transparent; color: rgba(255, 255, 255, 0.82);
+    border-color: rgba(255, 255, 255, 0.24); border-right-width: 0; }
+.vdl-src-search:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+.vdl-src-search:disabled { opacity: 0.4; cursor: default; }
+.vdl-src-auto { background: rgb(var(--src)); color: #08111f; border-color: rgb(var(--src)); }
+.vdl-src-auto:hover { background: transparent; color: rgb(var(--src)); }
+.vdl-src-auto:disabled { opacity: 0.4; cursor: default; }
+.vdl-src-empty { font-size: 13px; color: rgba(255, 255, 255, 0.5); padding: 12px 14px; border-radius: 0;
+    background: transparent; border: 1px dashed rgba(255, 255, 255, 0.16); }
+/* (the Auto-pick highlight now lives with the brutalist result cards — .vdl-res--auto
+   below — so the chosen card is ringed with a hard offset shadow in place.) */
 @media (max-width: 560px) {
     .vdl-src { flex-wrap: wrap; }
     .vdl-src .vdl-src-actions { width: 100%; }
@@ -3301,6 +3273,11 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     transition: all 0.15s ease; }
 .vdl-season-search:hover { background: rgba(var(--accent-rgb), 0.3); border-color: rgba(var(--accent-rgb), 0.6);
     transform: translateY(-1px); }
+.vdl-season-grab { flex-shrink: 0; height: 28px; padding: 0 12px; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 700;
+    background: rgba(var(--accent-rgb), 0.16); border: 1px solid rgba(var(--accent-rgb), 0.4); color: #fff;
+    white-space: nowrap; transition: all 0.15s ease; }
+.vdl-season-grab:hover { background: rgba(var(--accent-rgb), 0.32); border-color: rgba(var(--accent-rgb), 0.65); transform: translateY(-1px); }
+.vdl-season-grab:disabled { opacity: 0.7; cursor: progress; transform: none; }
 .vdl-season-chev { flex-shrink: 0; font-size: 13px; color: rgba(255, 255, 255, 0.5); transition: transform 0.25s ease; }
 .vdl-season--open .vdl-season-chev { transform: rotate(180deg); }
 .vdl-season-body { max-height: 0; overflow: hidden; transition: max-height 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
@@ -3338,8 +3315,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-ep-search { max-height: 0; overflow: hidden; transition: max-height 0.3s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .vdl-ep--open .vdl-ep-search { max-height: 360px; }
 .vdl-ep-srcs { display: flex; flex-direction: column; gap: 7px; padding: 3px 14px 12px 42px; }
-.vdl-src--mini { padding: 8px 11px; border-radius: 10px; animation: none; }
-.vdl-src--mini .vdl-src-icon { width: 32px; height: 32px; border-radius: 9px; }
+.vdl-src--mini { padding: 8px 11px; border-radius: 0; animation: none; }
+.vdl-src--mini .vdl-src-icon { width: 30px; height: 30px; border-radius: 0; }
 .vdl-src--mini .vdl-src-emoji { font-size: 15px; }
 .vdl-src--mini .vdl-src-name { font-size: 13px; }
 
@@ -3373,87 +3350,74 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdl-res-demo { background: rgba(245, 158, 11, 0.14); color: #fbcd7a; }
 .vdl-res-err { color: #fbcd7a; }
 
-/* ── result cards: cinematic, card-based ────────────────────────────────────
-   A bold quality badge (resolution over source) anchors the left, the release
-   NAME is the hero, the meta is a row of crisp pills, then size · verdict · Get.
-   .vdl-res is a column so the live tracker docks under the chosen card on grab. */
-.vdl-res { position: relative; display: flex; flex-direction: column; border-radius: 14px; overflow: hidden;
-    margin-bottom: 9px; animation: vdlRise 0.34s cubic-bezier(0.2, 0.7, 0.2, 1) both;
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
-    border: 1px solid rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    transition: transform 0.18s cubic-bezier(0.2, 0.7, 0.2, 1), border-color 0.18s, box-shadow 0.22s; }
-.vdl-res-main { display: flex; align-items: center; gap: 14px; padding: 12px 14px; }
-.vdl-res:hover { transform: translateY(-2px); border-color: rgba(var(--accent-rgb), 0.4);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 18px 34px -20px rgba(0, 0, 0, 0.95); }
-.vdl-res--rejected { opacity: 0.48; }
-.vdl-res--rejected:hover { opacity: 0.85; }
-/* accepted releases get a faint accent edge; the grabbed/auto pick lights up fully */
-.vdl-res--ok::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: linear-gradient(rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.4)); box-shadow: 0 0 14px 0 rgba(var(--accent-rgb), 0.4); }
-.vdl-res--grabbed { border-color: rgba(var(--accent-rgb), 0.55); }
-.vdl-res--auto { border-color: rgba(var(--accent-rgb), 0.85) !important;
-    box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.5), 0 18px 36px -16px rgba(var(--accent-rgb), 0.85); }
-/* quality badge — bold + cinematic, resolution over the source word */
-.vdl-q { flex-shrink: 0; width: 58px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.vdl-q-res { width: 100%; text-align: center; font-size: 15px; font-weight: 900; letter-spacing: -0.02em; color: #06210f;
-    padding: 7px 0; border-radius: 11px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 5px 14px -7px rgba(0, 0, 0, 0.7); }
-.vdl-q-res--4k { background: linear-gradient(140deg, #ffd76a, #f0a830); }
-.vdl-q-res--1080 { background: linear-gradient(140deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.7)); }
-.vdl-q-res--720 { background: linear-gradient(140deg, #8fb3ff, #5f86d6); color: #0a1020; }
-.vdl-q-res--sd { background: linear-gradient(140deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0.22)); color: #11141a; }
-.vdl-q-src { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: rgba(255, 255, 255, 0.42); }
-.vdl-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
-.vdl-info-title { font-size: 13.5px; font-weight: 700; color: #fff; letter-spacing: -0.01em;
+/* ── result cards: FLAT / BRUTALIST ──────────────────────────────────────────
+   3 hard lines per card: [QUALITY] + release name · UPPERCASE dot-separated spec
+   · verdict + a [ GET ] button. Monospace, sharp corners, hard borders, flat
+   colour. .vdl-res stays a column so the live tracker docks under it on grab. */
+.vdl-res { position: relative; display: flex; flex-direction: column; border-radius: 0;
+    margin-bottom: 7px; background: rgba(255, 255, 255, 0.018);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    transition: background 0.12s, border-color 0.12s, transform 0.12s; }
+.vdl-res-main { display: flex; flex-direction: column; gap: 7px; padding: 11px 13px; }
+.vdl-res:hover { transform: translateX(2px); border-color: rgba(var(--accent-rgb), 0.5);
+    background: rgba(255, 255, 255, 0.04); }
+.vdl-res--rejected { opacity: 0.42; }
+.vdl-res--rejected:hover { opacity: 0.8; }
+/* accepted releases get a hard accent left-bar; grabbed/auto pick gets a hard offset shadow */
+.vdl-res--ok { border-left: 3px solid rgb(var(--accent-rgb)); }
+.vdl-res--grabbed { border-color: rgb(var(--accent-rgb)); }
+.vdl-res--auto { border-color: rgb(var(--accent-rgb)) !important;
+    box-shadow: 4px 4px 0 0 rgba(var(--accent-rgb), 0.55); }
+/* line 1 — bracketed quality block + release name */
+.vdl-r-l1 { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.vdl-r-q { flex-shrink: 0; font-size: 11px; font-weight: 800; letter-spacing: 0.03em; padding: 3px 8px;
+    border-radius: 0; color: #08111f; }
+.vdl-r-q--4k { background: #f0a830; }
+.vdl-r-q--1080 { background: rgb(var(--accent-rgb)); }
+.vdl-r-q--720 { background: #7fa8e8; color: #0a1020; }
+.vdl-r-q--sd { background: rgba(255, 255, 255, 0.45); color: #11141a; }
+.vdl-r-title { font-size: 12.5px; font-weight: 600; color: #fff;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vdl-info-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.vdl-tag { font-size: 10px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; padding: 3px 7px; border-radius: 6px;
-    background: rgba(255, 255, 255, 0.07); color: rgba(255, 255, 255, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); }
-.vdl-tag--hdr { background: linear-gradient(100deg, rgba(245, 158, 11, 0.38), rgba(168, 85, 247, 0.38)); color: #fff; border-color: transparent; }
-.vdl-tag--rep { background: rgba(108, 211, 145, 0.16); color: #8fe7af; border-color: transparent; }
-.vdl-tag--grp { background: transparent; color: rgba(255, 255, 255, 0.42); border-color: rgba(255, 255, 255, 0.12);
-    font-family: 'JetBrains Mono', ui-monospace, monospace; text-transform: none; letter-spacing: 0; }
-.vdl-avail { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: #8fe7af; }
-.vdl-avail-ic { font-size: 8px; color: #6cd391; }
-.vdl-avail--seed { color: rgba(255, 255, 255, 0.55); }
-.vdl-res-right { flex-shrink: 0; display: flex; align-items: center; gap: 11px; }
-.vdl-size { font-size: 14px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.vdl-size-u { font-size: 9.5px; font-weight: 700; color: rgba(255, 255, 255, 0.4); margin-left: 1px; }
-.vdl-flag { flex-shrink: 0; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px;
-    font-size: 12px; font-weight: 900; }
-.vdl-flag--ok { background: rgba(108, 211, 145, 0.18); color: #6cd391; }
-.vdl-flag--no { background: rgba(245, 158, 11, 0.16); color: #fbcd7a; }
-/* Get — the accent hero pill */
-.vdl-res-grab { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 8px 15px; border-radius: 10px;
-    cursor: pointer; font-size: 12px; font-weight: 850; letter-spacing: 0.01em; color: #06210f; border: none;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.72));
-    box-shadow: 0 5px 14px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.32);
-    transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.2s ease; }
-.vdl-res-grab:hover { transform: translateY(-1px); filter: brightness(1.07);
-    box-shadow: 0 8px 18px -6px rgb(var(--accent-rgb)), inset 0 1px 0 rgba(255, 255, 255, 0.4); }
-.vdl-res-grab-ic { font-size: 14px; line-height: 1; }
-.vdl-res-grab--busy { opacity: 0.7; cursor: progress; }
+/* line 2 — UPPERCASE dot-separated spec line */
+.vdl-r-l2 { font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* line 3 — verdict (left) + GET (right) */
+.vdl-r-l3 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vdl-r-verdict { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdl-r-verdict--ok { color: #6cd391; }
+.vdl-r-verdict--no { color: #e8a23a; }
+/* GET — the one filled action: flat solid accent, inverts on hover */
+.vdl-res-grab { flex-shrink: 0; padding: 6px 16px; border-radius: 0; cursor: pointer;
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.06em; color: #08111f;
+    background: rgb(var(--accent-rgb)); border: 1px solid rgb(var(--accent-rgb));
+    transition: background 0.12s, color 0.12s; }
+.vdl-res-grab:hover { background: transparent; color: rgb(var(--accent-rgb)); }
+.vdl-res-grab--busy { opacity: 0.6; cursor: progress; }
 .vdl-btn--busy { opacity: 0.7; cursor: progress; }
 @media (max-width: 520px) {
-    .vdl-res-main { flex-wrap: wrap; }
-    .vdl-info { flex-basis: 100%; order: 3; }
+    .vdl-r-l1 { flex-wrap: wrap; }
 }
 
 /* live download tracker docked under the grabbed card */
-.vdl-res-track { padding: 10px 13px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.22); animation: vdlRise 0.3s both; }
+.vdl-res-track { padding: 10px 13px 12px; border-top: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(0, 0, 0, 0.22);
+    font-family: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace; }
 .vdl-res-track-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.vdl-res-track-state { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 800; color: #fff; }
-.vdl-res-track-pct { font-size: 12px; font-weight: 800; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; }
-.vdl-res-track-go { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 9px;
-    cursor: pointer; font-size: 11.5px; font-weight: 800; color: #fff; background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.18); transition: background 0.15s, border-color 0.15s, transform 0.15s; }
-.vdl-res-track-go:hover { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.32); transform: translateY(-1px); }
-.vdl-res-track-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.vdl-res-track-fill { display: block; height: 100%; width: 0; border-radius: 999px;
-    background: linear-gradient(90deg, rgba(var(--accent-rgb), 0.82), rgb(var(--accent-rgb)));
-    box-shadow: 0 0 10px 0 rgba(var(--accent-rgb), 0.6); transition: width 0.5s ease; }
-.vdl-res-track--done .vdl-res-track-fill { background: linear-gradient(90deg, #58d39a, #6cd391); box-shadow: 0 0 10px 0 rgba(108, 211, 145, 0.6); }
-.vdl-res-track--fail .vdl-res-track-fill { background: linear-gradient(90deg, #f0a830, #fbcd7a); box-shadow: none; }
+.vdl-res-track-state { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase; color: #fff; }
+.vdl-res-track-pct { font-size: 11px; font-weight: 700; color: rgba(255, 255, 255, 0.6); font-variant-numeric: tabular-nums; }
+.vdl-res-track-go { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: 0;
+    cursor: pointer; font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #fff;
+    background: transparent; border: 1px solid rgba(255, 255, 255, 0.24); transition: background 0.12s, color 0.12s, border-color 0.12s; }
+.vdl-res-track-go:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.4); }
+.vdl-res-track-bar { height: 5px; border-radius: 0; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.vdl-res-track-fill { display: block; height: 100%; width: 0; border-radius: 0;
+    background: rgb(var(--accent-rgb)); transition: width 0.5s ease; }
+.vdl-res-track--done .vdl-res-track-fill { background: #6cd391; }
+.vdl-res-track--fail .vdl-res-track-fill { background: #f0a830; }
 .vdl-res-track--done .vdl-res-track-state { color: #8fe7af; }
 .vdl-res-track--fail .vdl-res-track-state { color: #fbcd7a; }
 .vdl-res-track-spin { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0;
@@ -3541,3 +3505,79 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 }
 .em-retry-global:hover { transform: none; background: rgba(245, 158, 11, 0.24); }
 .em-retry-global:disabled { opacity: 0.55; cursor: default; }
+
+/* ── Import page (manual / failed-import resolution) — video/video-import.js ──── */
+.vimp-page { max-width: 1080px; margin: 0 auto; padding: 8px 4px 40px; }
+.vimp-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.vimp-title { font-size: 26px; font-weight: 800; color: #fff; letter-spacing: -0.02em; margin: 0; display: flex; align-items: center; gap: 10px; }
+.vimp-count { font-size: 13px; font-weight: 800; color: #06210f; background: rgb(var(--accent-rgb)); border-radius: 999px; padding: 2px 10px; min-width: 22px; text-align: center; }
+.vimp-count:empty { display: none; }
+.vimp-sub { font-size: 13.5px; color: rgba(255, 255, 255, 0.5); margin: 4px 0 0; }
+.vimp-refresh { flex-shrink: 0; padding: 8px 16px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 700;
+    color: rgba(255, 255, 255, 0.9); background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14);
+    transition: background 0.15s, border-color 0.15s; }
+.vimp-refresh:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.28); }
+
+.vimp-grid { display: flex; flex-direction: column; gap: 10px; }
+.vimp-card { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 14px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.022));
+    border: 1px solid rgba(255, 255, 255, 0.08); }
+.vimp-card-main { flex: 1; min-width: 0; }
+.vimp-card-title { font-size: 14.5px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vimp-card-file { font-size: 12px; color: rgba(255, 255, 255, 0.5); font-family: 'JetBrains Mono', ui-monospace, monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.vimp-card-reason { font-size: 12px; font-weight: 600; color: #e8a23a; margin-top: 5px; }
+.vimp-card-side { flex-shrink: 0; display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
+.vimp-card-kind { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255, 255, 255, 0.45); }
+.vimp-card-actions { display: flex; gap: 8px; }
+.vimp-btn { padding: 7px 14px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s, filter 0.15s; }
+.vimp-btn--place { color: #06210f; background: rgb(var(--accent-rgb)); }
+.vimp-btn--place:hover { filter: brightness(1.08); }
+.vimp-btn--place:disabled { opacity: 0.5; cursor: default; filter: none; }
+.vimp-btn--dismiss, .vimp-btn--ghost { color: rgba(255, 255, 255, 0.85); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.14); }
+.vimp-btn--dismiss:hover, .vimp-btn--ghost:hover { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.28); }
+
+.vimp-state { text-align: center; padding: 64px 20px; }
+.vimp-state-ic { font-size: 38px; color: #6cd391; }
+.vimp-state-title { font-size: 17px; font-weight: 700; color: #fff; margin-top: 10px; }
+.vimp-state-sub { font-size: 13px; color: rgba(255, 255, 255, 0.45); margin-top: 6px; }
+
+/* resolve modal */
+.vimp-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.vimp-modal-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); backdrop-filter: blur(3px); }
+.vimp-modal-card { position: relative; width: 100%; max-width: 540px; max-height: 86vh; display: flex; flex-direction: column;
+    background: #15171d; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8); }
+.vimp-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 12px; }
+.vimp-modal-title { font-size: 18px; font-weight: 800; color: #fff; margin: 0; }
+.vimp-modal-file { font-size: 12px; color: rgba(255, 255, 255, 0.5); margin-top: 4px; word-break: break-word; }
+.vimp-modal-x { flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; cursor: pointer; font-size: 20px; line-height: 1;
+    color: rgba(255, 255, 255, 0.6); background: transparent; border: none; }
+.vimp-modal-x:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.vimp-kindtabs { display: flex; gap: 8px; padding: 0 20px 12px; }
+.vimp-kindtab { padding: 7px 16px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 700;
+    color: rgba(255, 255, 255, 0.7); background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); }
+.vimp-kindtab--on { color: #06210f; background: rgb(var(--accent-rgb)); border-color: transparent; }
+.vimp-search { padding: 0 20px 10px; }
+.vimp-search-input { width: 100%; padding: 10px 13px; border-radius: 10px; font-size: 14px; color: #fff;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.14); }
+.vimp-search-input:focus { outline: none; border-color: rgba(var(--accent-rgb), 0.6); }
+.vimp-results { overflow-y: auto; padding: 0 12px; display: flex; flex-direction: column; gap: 4px; min-height: 80px; }
+.vimp-res-note { font-size: 13px; color: rgba(255, 255, 255, 0.45); padding: 18px 8px; text-align: center; }
+.vimp-res { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px; border-radius: 10px; cursor: pointer; text-align: left;
+    background: transparent; border: 1px solid transparent; }
+.vimp-res:hover { background: rgba(255, 255, 255, 0.05); }
+.vimp-res--on { background: rgba(var(--accent-rgb), 0.14); border-color: rgba(var(--accent-rgb), 0.5); }
+.vimp-res-img, .vimp-res-ph { width: 38px; height: 56px; border-radius: 6px; flex-shrink: 0; object-fit: cover; }
+.vimp-res-ph { display: grid; place-items: center; font-size: 18px; background: rgba(255, 255, 255, 0.06); }
+.vimp-res-info { min-width: 0; display: flex; flex-direction: column; }
+.vimp-res-title { font-size: 13.5px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vimp-res-meta { font-size: 11.5px; color: rgba(255, 255, 255, 0.5); margin-top: 2px; }
+.vimp-res--owned .vimp-res-meta { color: #6cd391; }
+.vimp-ep { display: flex; gap: 10px; flex-wrap: wrap; padding: 12px 20px 4px; }
+.vimp-ep-field { font-size: 12px; font-weight: 600; color: rgba(255, 255, 255, 0.6); display: flex; flex-direction: column; gap: 4px; }
+.vimp-ep-field--wide { flex: 1; min-width: 140px; }
+.vimp-ep-field input { padding: 8px 11px; border-radius: 9px; font-size: 13px; color: #fff;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.14); width: 90px; }
+.vimp-ep-field--wide input { width: 100%; }
+.vimp-modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 20px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); margin-top: 8px; }

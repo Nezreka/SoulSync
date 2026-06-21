@@ -23,11 +23,10 @@ _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encod
 def test_each_source_has_manual_and_auto_buttons():
     assert 'data-vdl-search="' in _VIEW          # Manual (pick yourself)
     assert 'data-vdl-auto="' in _VIEW            # Auto (best pick)
-    # Renamed for clarity: Manual vs Auto (icon + label now split into spans).
-    assert '>Manual<' in _VIEW and '>Auto<' in _VIEW
-    # The harsh lightning was redesigned out in favour of a monochrome sparkle.
-    assert '⚡' not in _VIEW
-    assert 'vdl-btn-ic--auto' in _VIEW
+    # Flat/brutalist: plain UPPERCASE labels, no icon spans, no decorative glyphs.
+    assert '>MANUAL<' in _VIEW and '>AUTO<' in _VIEW
+    assert '⚡' not in _VIEW and '✦' not in _VIEW   # lightning + sparkle redesigned out
+    assert 'vdl-btn-ic' not in _VIEW             # icon spans are gone in the brutalist buttons
 
 
 def test_header_has_single_auto_best_button():
@@ -78,3 +77,30 @@ def test_auto_button_is_styled():
     assert '.vdl-src-auto' in _CSS
     assert '.vdl-res--auto' in _CSS          # the chosen card gets a ring
     assert '.vdl-src-actions' in _CSS
+
+
+# --- Grab whole season (episode-level batch) ------------------------------
+
+def test_episode_per_source_auto_is_wired():
+    # the show modal now routes the per-episode Auto button (was previously dead),
+    # reusing searchInto + _autoPick at episode scope
+    assert "closest('[data-vdl-auto]')" in _VIEW
+    assert "scope: 'episode'" in _VIEW
+    assert "_autoPick(resA, rowA)" in _VIEW
+
+
+def test_grab_whole_season_button_and_batch():
+    assert 'data-vdl-season-grab="' in _VIEW          # per-season button
+    assert '>Grab season<' in _VIEW
+    assert 'function grabSeason(' in _VIEW
+    assert 'function autoGrabEpisode(' in _VIEW
+    # episode-LEVEL: it loops missing episodes and auto-grabs each (no pack grab)
+    assert "st.epMeta[k].state === 'missing'" in _VIEW
+    assert ".vdl-season-grab" in _CSS
+
+
+def test_season_grab_reuses_the_single_grab_path():
+    # each episode goes through the same searchInto + _autoPick as a manual Auto,
+    # so the batch can't diverge from the single path
+    assert 'autoGrabEpisode(container, st, sn, eps[idx++], src)' in _VIEW
+    assert 'searchInto(container, panel,' in _VIEW

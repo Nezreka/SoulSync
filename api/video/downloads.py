@@ -135,6 +135,20 @@ def register_routes(bp):
         body = request.get_json(silent=True) or {}
         return jsonify(save(get_video_db(), body))
 
+    @bp.route("/organization", methods=["GET"])
+    def video_organization():
+        """The library-organisation settings: naming templates + post-process toggles."""
+        from . import get_video_db
+        from core.video.organization import load
+        return jsonify(load(get_video_db()))
+
+    @bp.route("/organization", methods=["POST"])
+    def video_organization_save():
+        from . import get_video_db
+        from core.video.organization import save
+        body = request.get_json(silent=True) or {}
+        return jsonify(save(get_video_db(), body))
+
     @bp.route("/downloads/evaluate", methods=["POST"])
     def video_quality_evaluate():
         """Judge a video file the user already owns against their quality profile —

@@ -163,7 +163,7 @@
         { id: 'video-calendar', label: 'Calendar' },
         { id: 'video-automations', label: 'Automations' },
         { id: 'video-tools', label: 'Tools' },
-        { id: 'video-import', label: 'Import', shared: true },
+        { id: 'video-import', label: 'Import' },
         { id: 'video-settings', label: 'Settings' },
         { id: 'video-issues', label: 'Issues', shared: true },
         { id: 'video-help', label: 'Help & Docs', shared: true },

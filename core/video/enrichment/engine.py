@@ -435,6 +435,19 @@ class VideoEnrichmentEngine:
                 return None
         return cached or None
 
+    def tmdb_full_detail(self, kind, tmdb_id) -> dict | None:
+        """Raw TMDB full detail (absolute image URLs + metadata) WITHOUT the
+        owned→library redirect — for sidecar / NFO writing, which needs the data even
+        for titles already in the library."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled:
+            return None
+        try:
+            return w.client.full_detail(kind, tmdb_id, region=self._region())
+        except Exception:
+            logger.exception("tmdb_full_detail failed for %s %s", kind, tmdb_id)
+            return None
+
     def tmdb_detail(self, kind, tmdb_id) -> dict | None:
         """Full detail for a TMDB title not in the library — same shape as the
         library detail (source='tmdb', direct image URLs, nothing owned). If it IS
