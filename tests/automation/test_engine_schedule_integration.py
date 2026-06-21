@@ -453,3 +453,40 @@ def test_video_scan_library_system_automation_is_cleaned_up():
     db2.get_system_automation_by_action.return_value = None
     AutomationEngine(db2)._fix_video_scan_default()
     db2.delete_automation.assert_not_called()
+
+
+def test_airing_automation_migrates_24h_interval_to_daily_1am():
+    """The old rolling-24h 'Auto-Wishlist Episodes Airing Today' row is rewritten to a
+    fixed daily 01:00 (server-local) so it stops drifting with restarts."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'schedule',
+        'trigger_config': json.dumps({'interval': 24, 'unit': 'hours'})}
+    eng = AutomationEngine(db)
+    eng._default_tz = 'UTC'
+    eng._fix_airing_automation_schedule()
+
+    db.update_automation.assert_called_once()
+    args, kwargs = db.update_automation.call_args
+    assert args[0] == 42
+    assert kwargs['trigger_type'] == 'daily_time'
+    assert json.loads(kwargs['trigger_config']) == {'time': '01:00'}
+    # next_run is armed for 01:00 UTC (the next occurrence)
+    assert kwargs['next_run'].endswith(' 01:00:00')
+
+
+def test_airing_automation_migration_is_idempotent():
+    """Once the row is already daily_time, re-running the migration is a no-op (it
+    must not rewrite a user's edited time or re-arm next_run every startup)."""
+    db = MagicMock()
+    db.get_system_automation_by_action.return_value = {
+        'id': 42, 'is_system': 1, 'trigger_type': 'daily_time',
+        'trigger_config': json.dumps({'time': '06:30'})}
+    AutomationEngine(db)._fix_airing_automation_schedule()
+    db.update_automation.assert_not_called()
+
+    # absent (fresh install, created straight as daily_time) → no-op, never errors
+    db2 = MagicMock()
+    db2.get_system_automation_by_action.return_value = None
+    AutomationEngine(db2)._fix_airing_automation_schedule()
+    db2.update_automation.assert_not_called()
