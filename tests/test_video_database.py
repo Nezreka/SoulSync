@@ -851,11 +851,13 @@ def test_query_watchlist_default_sort_is_alphabetical(db):
     db.add_to_watchlist("show", 1, "Welcome to Widows Bay")
     db.add_to_watchlist("show", 2, "From")
     db.add_to_watchlist("show", 3, "Andor")
-    titles = [it["title"] for it in db.query_watchlist("show")["items"]]
-    assert titles == ["Andor", "From", "Welcome to Widows Bay"]
+    db.add_to_watchlist("show", 4, " Holy Marvels with Dennis Quaid")   # dirty leading space
+    titles = [it["title"].strip() for it in db.query_watchlist("show")["items"]]
+    # a leading-space title must NOT jump the queue — sorts under H
+    assert titles == ["Andor", "From", "Holy Marvels with Dennis Quaid", "Welcome to Widows Bay"]
     # 'added' is still available opt-in (newest first)
-    added = [it["title"] for it in db.query_watchlist("show", sort="added")["items"]]
-    assert added[0] == "Andor"   # most recently added
+    added = [it["title"].strip() for it in db.query_watchlist("show", sort="added")["items"]]
+    assert added[0] == "Holy Marvels with Dennis Quaid"   # most recently added
 
 
 # ── wishlist (movies + episodes; show/season are bulk ops over episodes) ──────
