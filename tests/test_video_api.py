@@ -1081,3 +1081,38 @@ def test_enrichment_youtube_status_route(tmp_path):
     assert client.post("/api/video/enrichment/youtube/resume").get_json()["status"] == "running"
     # unknown service still 404s
     assert client.get("/api/video/enrichment/bogus/status").status_code == 404
+
+
+def test_download_history_endpoints(tmp_path):
+    client, videoapi = _make_client(tmp_path)
+    db = videoapi._video_db
+    db.record_download_history({
+        "id": 1, "kind": "movie", "title": "Dune", "year": 2024, "status": "completed",
+        "release_title": "Dune.2024.2160p.x265", "dest_path": "/m/Dune.mkv",
+        "size_bytes": 9_000_000_000, "completed_at": "2026-06-20 10:30:00"})
+
+    # list + counts
+    r = client.get("/api/video/downloads/history")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["success"] and body["counts"]["movie"] == 1
+    assert body["items"][0]["title"] == "Dune"
+    assert body["items"][0]["resolution"] == "2160p"
+
+    # kind filter
+    assert client.get("/api/video/downloads/history?kind=show").get_json()["pagination"]["total_count"] == 0
+
+    # detail
+    hid = body["items"][0]["id"]
+    d = client.get(f"/api/video/downloads/history/{hid}").get_json()
+    assert d["success"] and d["item"]["dest_path"] == "/m/Dune.mkv"
+    assert client.get("/api/video/downloads/history/99999").status_code == 404
+
+
+def test_download_history_routes_registered():
+    from api.video import create_video_blueprint
+    app = Flask(__name__)
+    app.register_blueprint(create_video_blueprint(), url_prefix="/api/video")
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    assert "/api/video/downloads/history" in rules
+    assert "/api/video/downloads/history/<int:history_id>" in rules

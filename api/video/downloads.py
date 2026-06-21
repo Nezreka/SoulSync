@@ -122,6 +122,32 @@ def register_routes(bp):
         save_source(db, body)         # download_mode + hybrid_order (validated)
         return jsonify({"status": "saved"})
 
+    @bp.route("/downloads/history", methods=["GET"])
+    def video_downloads_history():
+        """Paged permanent history of grabs (movies + episodes). ?kind=movie|show,
+        ?search=, ?outcome=, ?page=, ?limit=. Always returns counts for the tabs."""
+        from . import get_video_db
+        try:
+            db = get_video_db()
+            kind = request.args.get("kind")
+            res = db.query_download_history(
+                kind=kind if kind in ("movie", "show") else None,
+                search=request.args.get("search", ""),
+                outcome=request.args.get("outcome") or None,
+                page=request.args.get("page", 1), limit=request.args.get("limit", 40))
+            return jsonify({"success": True, "counts": db.download_history_counts(), **res})
+        except Exception:
+            logger.exception("Failed to list video download history")
+            return jsonify({"success": False, "error": "Failed to load history"}), 500
+
+    @bp.route("/downloads/history/<int:history_id>", methods=["GET"])
+    def video_downloads_history_detail(history_id):
+        from . import get_video_db
+        d = get_video_db().download_history_detail(history_id)
+        if not d:
+            return jsonify({"success": False, "error": "not found"}), 404
+        return jsonify({"success": True, "item": d})
+
     @bp.route("/downloads/quality", methods=["GET"])
     def video_quality_profile():
         from . import get_video_db
