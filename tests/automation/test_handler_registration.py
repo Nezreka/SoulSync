@@ -181,6 +181,25 @@ class TestActionHandlerRegistration:
         assert not missing, f"register_all dropped: {missing}"
         assert not extra, f"register_all added unexpected: {extra}"
 
+    def test_deep_scans_route_to_readonly_update_in_deep_mode(self, monkeypatch):
+        """A deep scan is a full READ + reconcile (music's full-refresh equivalent) —
+        it must NOT nudge Plex to rescan its disk. So the deep-scan action types route
+        to the read-only update-database handler in 'deep' mode, scoped per library,
+        never to the nudge+read scan-library handler."""
+        import core.automation.handlers.registration as reg
+        seen = []
+        monkeypatch.setattr(reg, 'auto_video_update_database',
+                            lambda config, deps: seen.append(config) or {'status': 'completed'})
+        monkeypatch.setattr(reg, 'auto_video_scan_library',
+                            lambda *a, **k: pytest.fail('deep scan must not nudge the server'))
+        engine = _RecordingEngine()
+        register_all(_build_deps(engine))
+
+        engine.action_handlers['video_deep_scan_tv']['handler']({'_automation_id': 'x'})
+        engine.action_handlers['video_deep_scan_movies']['handler']({})
+        assert seen[0]['media_type'] == 'show' and seen[0]['mode'] == 'deep'
+        assert seen[1]['media_type'] == 'movie' and seen[1]['mode'] == 'deep'
+
     def test_guarded_actions_have_a_guard(self):
         engine = _RecordingEngine()
         register_all(_build_deps(engine))
