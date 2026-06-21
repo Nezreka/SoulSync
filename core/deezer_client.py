@@ -117,6 +117,48 @@ def _is_full_track_payload(payload: Optional[Dict[str, Any]]) -> bool:
     return 'track_position' in payload and 'contributors' in payload
 
 
+def resolve_album_track_positions(session, base_url, album_ids, cache=None, sleep_s=0.2):
+    """Build ``{str(track_id): track_position}`` for a set of Deezer album ids.
+
+    Deezer PLAYLIST and SEARCH track objects (and even the album object's embedded
+    ``tracks.data``) omit ``track_position`` — only ``/album/<id>/tracks`` and
+    ``/track/<id>`` carry it. So numbering playlist tracks by their playlist index
+    silently poisons the real album track number, which then rides onto the
+    downloaded file's tag. This resolves the authoritative position per album
+    (cache-first, best-effort — a failed album just isn't in the map)."""
+    import time as _time
+    positions: Dict[str, int] = {}
+    for aid in album_ids:
+        aid = str(aid)
+        at_list = None
+        if cache:
+            try:
+                ct = cache.get_entity('deezer', 'album_tracks', aid)
+                if ct and ct.get('data'):
+                    at_list = ct['data']
+            except Exception:   # noqa: BLE001 - cache is best-effort
+                at_list = None
+        if at_list is None:
+            try:
+                if sleep_s:
+                    _time.sleep(sleep_s)   # respect Deezer rate limits
+                r = session.get(f"{base_url}/album/{aid}/tracks", params={'limit': 500}, timeout=10)
+                if getattr(r, 'ok', False):
+                    at_list = (r.json() or {}).get('data', [])
+                    if cache and at_list is not None:
+                        try:
+                            cache.store_entity('deezer', 'album_tracks', aid, {'data': at_list})
+                        except Exception:   # noqa: BLE001
+                            pass
+            except Exception:   # noqa: BLE001 - never let metadata resolution break the fetch
+                at_list = None
+        for at in (at_list or []):
+            tp = at.get('track_position')
+            if at.get('id') and tp:
+                positions[str(at['id'])] = tp
+    return positions
+
+
 # ==================== Dataclasses (match iTunesClient / SpotifyClient format) ====================
 
 @dataclass
@@ -1357,6 +1399,16 @@ class DeezerClient:
 
                 raw_tracks.extend(page_tracks)
 
+            # Real album track positions — playlist tracks don't carry track_position,
+            # so numbering by playlist index would poison the downloaded file's tag.
+            album_ids = {str(t.get('album', {}).get('id')) for t in raw_tracks if t.get('album', {}).get('id')}
+            try:
+                from core.metadata.cache import get_metadata_cache
+                _cache = get_metadata_cache()
+            except Exception:
+                _cache = None
+            track_positions = resolve_album_track_positions(self.session, self.BASE_URL, album_ids, _cache)
+
             # Normalize tracks
             tracks: List[Dict[str, Any]] = []
             for i, t in enumerate(raw_tracks, start=1):
@@ -1368,7 +1420,8 @@ class DeezerClient:
                     'artists': [artist_name],
                     'album': t.get('album', {}).get('title', ''),
                     'duration_ms': t.get('duration', 0) * 1000,
-                    'track_number': i,
+                    # REAL album position; the playlist index is a last resort only.
+                    'track_number': track_positions.get(str(t.get('id'))) or i,
                 })
 
             result = {
