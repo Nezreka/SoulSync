@@ -28,12 +28,20 @@ def _default_fetch_airing(today: str) -> List[Dict[str, Any]]:
 
 
 def _default_add_episodes(show_tmdb_id: Any, show_title: Any, episodes: List[Dict[str, Any]],
-                          library_id: Any = None) -> int:
+                          library_id: Any = None, poster_url: Any = None) -> int:
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
     return get_video_db().add_episodes_to_wishlist(
-        show_tmdb_id, show_title, episodes, library_id=library_id,
+        show_tmdb_id, show_title, episodes, poster_url=poster_url, library_id=library_id,
         server_source=resolve_video_server())
+
+
+def _show_poster_url(library_id: Any) -> Optional[str]:
+    """The SAME poster a manual add stores for a library show — the show poster proxy
+    path the wishlist orb renders directly. Mirrors the get-modal's
+    pUrl = '/api/video/poster/show/<library_id>'. Without it the orb falls back to the
+    show's initials, reading as 'not matched'."""
+    return ('/api/video/poster/show/%s' % library_id) if library_id is not None else None
 
 
 def _default_season_meta(tmdb_id: Any, season_number: Any):
@@ -114,7 +122,8 @@ def auto_video_add_airing_episodes(
 
         added = 0
         for (tid, title), grp in by_show.items():
-            added += int(add_episodes(tid, title, grp['eps'], grp['library_id']) or 0)
+            added += int(add_episodes(tid, title, grp['eps'], grp['library_id'],
+                                      _show_poster_url(grp['library_id'])) or 0)
         shows = len(by_show)
 
         deps.update_progress(
