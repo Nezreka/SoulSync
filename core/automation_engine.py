@@ -170,13 +170,15 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'incremental'},
         'owned_by': 'video',
     },
-    # Sonarr-style: each day, wishlist every episode airing today for the shows you
-    # follow (skipping ones already owned) so they queue up to be grabbed.
+    # Sonarr-style: once a day, wishlist every episode airing today for the shows you
+    # follow (skipping ones already owned) so they queue up to be grabbed. Uses a 24h
+    # 'schedule' (not 'daily_time', which the seeder doesn't arm) so it actually fires.
     {
         'name': 'Auto-Wishlist Episodes Airing Today',
-        'trigger_type': 'daily_time',
-        'trigger_config': {'time': '01:00'},
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 24, 'unit': 'hours'},
         'action_type': 'video_add_airing_episodes',
+        'initial_delay': 300,  # 5 minutes after startup, then daily
         'owned_by': 'video',
     },
 ]
