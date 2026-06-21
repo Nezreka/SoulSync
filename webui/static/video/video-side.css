@@ -291,6 +291,19 @@ body[data-side="video"] .dashboard-header-sweep {
     display: none !important;
 }
 
+/* The Automations subpage hosts the SHARED music builder, whose
+   .automations-builder-view is height:100% so its trigger/action sidebar + canvas
+   scroll independently (like #automations-page on the music side). A .video-subpage
+   is height:auto by default (other pages scroll in normal document flow), so that
+   height:100% collapsed to content height and the sidebar grew instead of scrolling.
+   #video-page-host is itself a .page (height:100%), so giving JUST this subpage a
+   definite height makes the builder's chain resolve. Scoped to automations so every
+   other video page keeps its natural scroll. */
+.video-subpage[data-video-subpage="video-automations"]:not([hidden]) {
+    height: 100%;
+    min-height: 0;
+}
+
 /* ── Placeholder content (for pages not built yet) ─────────────────────── */
 .video-placeholder-slot {
     padding: 48px 40px;
