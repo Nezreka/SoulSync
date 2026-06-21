@@ -63,3 +63,11 @@ def test_garbage_never_raises():
     p = parse_release(None)
     assert p["resolution"] is None and p["title"] == ""
     assert parse_release(12345)["title"] == "12345"
+
+
+def test_plain_web_is_recognised_as_a_source():
+    # 'WEB' (not just 'WEB-DL') is extremely common — must parse as web-dl
+    assert parse_release("Show S01E01 1080p WEB h264-GRP")["source"] == "web-dl"
+    assert parse_release("Movie.2020.WEB.x265")["source"] == "web-dl"
+    # but it must NOT mis-grab the WEB inside WEBRip
+    assert parse_release("Movie 1080p WEBRip x264")["source"] == "webrip"

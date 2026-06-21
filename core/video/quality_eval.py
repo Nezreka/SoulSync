@@ -109,7 +109,14 @@ def tier_key(source, resolution) -> str:
     ladder tier (junk sources like cam/screener have no tier)."""
     pre = _SRC_TIER.get(source)
     if not pre:
-        return ""
+        # A loosely-named release with a known resolution but NO recognised source
+        # (very common — lots of releases tag '1080p' but not the source) → assume web
+        # so it still lands on a tier instead of being rejected as 'unknown quality'.
+        # ffprobe verifies the real quality after download.
+        if resolution and not source:
+            pre = "web"
+        else:
+            return ""
     if pre == "dvd":
         return "dvd"
     return (pre + "-" + resolution) if resolution else ""
