@@ -1331,6 +1331,10 @@
                                             </div>
                                             <div class="adl-controls-right">
                                                 <span class="adl-count" data-vdpg-sub></span>
+                                                <button class="adl-history-btn" type="button" data-vdh-open title="Download history">
+                                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                                                    History <span class="adl-history-n" data-vdh-count hidden>0</span>
+                                                </button>
                                                 <button class="adl-cancel-all-btn" type="button" data-vdpg-cancel-all style="display:none">Cancel All</button>
                                                 <button class="adl-clear-btn" type="button" data-vdpg-clear style="display:none">Clear Finished</button>
                                             </div>
@@ -10432,6 +10436,7 @@
     <!-- Download VIEW renderer (movie / show / youtube): per-source search + quality verdict;
          rendered inline inside the get-modal (not its own modal) -->
     <script src="{{ url_for('static', filename='video/video-download-view.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-download-history.js', v=static_v) }}"></script>
     <!-- Downloads page (isolated): live status of every grab from the video side -->
     <script src="{{ url_for('static', filename='video/video-downloads-page.js', v=static_v) }}"></script>
     <!-- Automations page (shared system automations, video view) -->
