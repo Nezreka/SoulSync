@@ -1092,7 +1092,11 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
     disc_num = original_search.get("disc_number")
     if disc_num is None and album_info:
         disc_num = album_info.get("disc_number")
-    metadata["disc_number"] = disc_num if disc_num is not None else 1
+    # Floor to >=1: a 0 / '' / non-numeric disc must not slip through (the old
+    # `is not None` let a literal 0 past, which then read as disc-less downstream
+    # and ungrouped the track in Jellyfin/Plex). Also feeds the "Disc N" folder org.
+    from core.imports.track_number import normalize_disc_number
+    metadata["disc_number"] = normalize_disc_number(disc_num)
 
     if album_ctx and album_ctx.get("release_date"):
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
