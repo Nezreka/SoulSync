@@ -41,8 +41,8 @@ function _initImportFileTab() {
 
 function _importFileRead(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['csv', 'tsv', 'txt'].includes(ext)) {
-        showToast('Unsupported file type. Use CSV, TSV, or TXT.', 'error');
+    if (!['csv', 'tsv', 'txt', 'm3u', 'm3u8'].includes(ext)) {
+        showToast('Unsupported file type. Use CSV, TSV, TXT, M3U, or M3U8.', 'error');
         return;
     }
 
@@ -50,7 +50,8 @@ function _importFileRead(file) {
     reader.onload = (e) => {
         _importFileState.rawText = e.target.result;
         _importFileState.fileName = file.name;
-        _importFileState.fileType = (ext === 'txt') ? 'text' : 'csv';
+        _importFileState.fileType = (ext === 'm3u' || ext === 'm3u8') ? 'm3u'
+                                  : (ext === 'txt') ? 'text' : 'csv';
         _importFileParseAndPreview();
     };
     reader.readAsText(file);
@@ -103,6 +104,66 @@ function _importFileParseCsv(text, delimiter) {
     return { headers, rows };
 }
 
+// Parse an M3U / M3U8 playlist into track objects. Handles both the simple form
+// (one media path per line) and the extended form (#EXTINF:<secs>,<artist> - <title>
+// followed by the path). SoulSync's own export is extended M3U and replaces the path
+// of an un-located track with a "# MISSING: ..." comment — those are exactly the
+// tracks a user imports to go match/download, so a pending #EXTINF is flushed even
+// when no path line follows it. Returns { tracks, playlistName }.
+function _importFileParseM3u(text) {
+    const lines = (text || '').split(/\r?\n/);
+    const tracks = [];
+    let playlistName = '';
+    let pending = null;   // { duration_ms, artist, title } from the last #EXTINF
+
+    function splitArtistTitle(s) {
+        const i = s.indexOf(' - ');
+        return i !== -1
+            ? { artist: s.slice(0, i).trim(), title: s.slice(i + 3).trim() }
+            : { artist: '', title: s.trim() };
+    }
+    function pushTrack(artist, title, duration_ms) {
+        if (!title && !artist) return;
+        tracks.push({ track_name: title || '', artist_name: artist || '', album_name: '', duration_ms: duration_ms || 0 });
+    }
+    function flushPending() {
+        if (pending) { pushTrack(pending.artist, pending.title, pending.duration_ms); pending = null; }
+    }
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.charAt(0) === '#') {
+            if (/^#EXTINF:/i.test(line)) {
+                flushPending();   // a prior #EXTINF whose path was missing still counts
+                const rest = line.slice(8);                 // after "#EXTINF:"
+                const comma = rest.indexOf(',');
+                const secs = parseFloat(comma === -1 ? rest : rest.slice(0, comma));
+                const meta = comma === -1 ? '' : rest.slice(comma + 1).trim();
+                const { artist, title } = splitArtistTitle(meta);
+                pending = { duration_ms: (!isNaN(secs) && secs > 0) ? Math.round(secs * 1000) : 0, artist, title };
+            } else if (/^#PLAYLIST:/i.test(line)) {
+                playlistName = line.slice(line.indexOf(':') + 1).trim();
+            }
+            // ignore #EXTM3U, #GENERATED, "# MISSING:", #EXTALB, and other directives
+            continue;
+        }
+        // A non-# line is a media path/URL — the entry for the pending #EXTINF, if any.
+        if (pending && (pending.title || pending.artist)) {
+            pushTrack(pending.artist, pending.title, pending.duration_ms);
+            pending = null;
+        } else {
+            // Simple M3U with no #EXTINF: derive artist/title from the file name.
+            pending = null;
+            const base = (line.split(/[\\/]/).pop() || line).replace(/\.[^.]+$/, '');
+            const { artist, title } = splitArtistTitle(base);
+            pushTrack(artist, title, 0);
+        }
+    }
+    flushPending();   // trailing #EXTINF with no following path
+    return { tracks, playlistName };
+}
+
 function _importFileAutoMapColumns(headers) {
     const map = {};
     const lowerHeaders = headers.map(h => h.toLowerCase().trim());
@@ -139,7 +200,14 @@ function _importFileParseAndPreview() {
     const state = _importFileState;
     const text = state.rawText;
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // M3U/M3U8 is self-describing — no column mapping or order/separator needed.
+        const { tracks, playlistName } = _importFileParseM3u(text);
+        state.rows = tracks;            // already track objects
+        state.headers = [];
+        state.columnMap = {};
+        state.m3uPlaylistName = playlistName || '';
+    } else if (state.fileType === 'text') {
         // Plain text: one track per line
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         state.rows = lines;
@@ -163,7 +231,15 @@ function _importFileBuildTracks() {
     const state = _importFileState;
     state.parsedTracks = [];
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // Tracks were already parsed by _importFileParseM3u; just copy them through.
+        state.parsedTracks = state.rows.map(t => ({
+            track_name: t.track_name || '',
+            artist_name: t.artist_name || '',
+            album_name: t.album_name || '',
+            duration_ms: t.duration_ms || 0
+        }));
+    } else if (state.fileType === 'text') {
         const orderEl = document.getElementById('import-file-text-order');
         const sepEl = document.getElementById('import-file-text-separator');
         const order = orderEl ? orderEl.value : 'artist-title';
@@ -249,10 +325,12 @@ function _importFileRenderPreview() {
         _importFileRenderColumnMapping();
     }
 
-    // Pre-fill playlist name from filename (strip extension)
+    // Pre-fill playlist name: prefer the M3U's own #PLAYLIST: directive, else the filename.
     const nameInput = document.getElementById('import-file-playlist-name');
     if (nameInput && !nameInput.value) {
-        nameInput.value = state.fileName.replace(/\.[^.]+$/, '');
+        nameInput.value = (state.fileType === 'm3u' && state.m3uPlaylistName)
+            ? state.m3uPlaylistName
+            : state.fileName.replace(/\.[^.]+$/, '');
     }
     // Update button state
     const btn = document.getElementById('import-file-import-btn');

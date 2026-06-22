@@ -722,8 +722,8 @@ const HELPER_CONTENT = {
     },
     '.sync-tab-button[data-tab="import-file"]': {
         title: 'Import from File',
-        description: 'Import track lists from CSV, TSV, or plain text files. Drag and drop or browse for a file, map columns, then create a playlist for sync.',
-        tips: ['Supports CSV, TSV, and plain text (one track per line)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
+        description: 'Import track lists from CSV, TSV, M3U/M3U8, or plain text files. Drag and drop or browse for a file, map columns, then create a playlist for sync.',
+        tips: ['Supports CSV, TSV, M3U/M3U8, and plain text (one track per line)', 'M3U/M3U8 is read automatically (artist, title, duration from #EXTINF)', 'Column mapping for CSV/TSV files', 'Creates a mirrored playlist for persistent state'],
         docsId: 'sync-import-file'
     },
     '.sync-tab-button[data-tab="mirrored"]': {
