@@ -100,6 +100,7 @@ class WishlistService:
         source_type: str = "manual",
         source_context: Dict[str, Any] = None,
         profile_id: int = 1,
+        user_initiated: bool = False,
     ) -> bool:
         """
         Directly add a track to the wishlist.
@@ -110,6 +111,8 @@ class WishlistService:
             source_type: Source type ('playlist', 'album', 'manual')
             source_context: Additional context information
             profile_id: Profile to add to
+            user_initiated: True for an explicit user add — bypasses + clears the
+                ignore-list while keeping the real source_type (#874/#897).
         """
         if track_data is None:
             track_data = spotify_track_data
@@ -124,6 +127,7 @@ class WishlistService:
             source_type=source_type,
             source_info=source_context or {},
             profile_id=profile_id,
+            user_initiated=user_initiated,
         )
 
     def add_spotify_track_to_wishlist(

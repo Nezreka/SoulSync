@@ -8925,8 +8925,15 @@ class MusicDatabase:
         source_info: Dict[str, Any] = None,
         profile_id: int = 1,
         track_data: Dict[str, Any] = None,
+        user_initiated: bool = False,
     ) -> bool:
-        """Add a failed track to the wishlist for retry"""
+        """Add a failed track to the wishlist for retry.
+
+        ``user_initiated`` marks an explicit user add (e.g. the library album
+        "add to wishlist" modal). Like ``source_type == 'manual'`` it bypasses
+        the ignore-list gate AND clears any stale ignore — but unlike changing
+        ``source_type`` it preserves the real provenance ('album'), which the
+        wishlist categorisation (Albums vs Singles) relies on (#874/#897)."""
         try:
             if track_data is not None and spotify_track_data is None:
                 spotify_track_data = track_data
@@ -8956,7 +8963,7 @@ class MusicDatabase:
                 # clear any stale ignore so it sticks. Fail-open: any error here
                 # must never block a legitimate wishlist add.
                 try:
-                    if source_type == 'manual':
+                    if source_type == 'manual' or user_initiated:
                         self.remove_from_wishlist_ignore(track_id, profile_id=profile_id)
                     elif self.is_track_ignored(track_id, profile_id=profile_id):
                         logger.info("Skipping wishlist add — track is on the ignore-list (#874): %s", track_id)
