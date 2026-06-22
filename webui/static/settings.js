@@ -1223,6 +1223,25 @@ async function loadSettingsData() {
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        // Show the cookies.txt paste box only in "custom" mode. We never echo the
+        // stored cookie back to the UI (it's secret + lives in a file, not config);
+        // if one is already saved, say so via placeholder so a blank save won't wipe it.
+        const _ytCookieSel = document.getElementById('youtube-cookies-browser');
+        const _ytPasteBox = document.getElementById('youtube-cookies-paste');
+        const _ytPasteGroup = document.getElementById('youtube-cookies-paste-group');
+        if (_ytCookieSel && _ytPasteGroup) {
+            const _toggleYtPaste = () => {
+                _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
+            };
+            if (_ytPasteBox && settings.youtube?.cookies_file) {
+                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
+            }
+            _toggleYtPaste();
+            if (!_ytCookieSel.dataset.pasteToggleBound) {
+                _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.dataset.pasteToggleBound = '1';
+            }
+        }
 
         // Update UI based on download source mode
         updateDownloadSourceUI();
@@ -3223,6 +3242,9 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+            // Raw cookies.txt blob — backend validates, writes it to a file, and stores
+            // only the path (never echoed back). Blank = keep any already-saved file.
+            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,

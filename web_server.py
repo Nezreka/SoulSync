@@ -3126,6 +3126,22 @@ def handle_settings():
                                              f"in Manage Profiles first.",
                                     "members_without_password": _stranded}), 400
 
+            # YouTube pasted cookies.txt (server/Docker path): pull it out BEFORE the
+            # generic persist so the raw cookie blob never lands in config.json — it's
+            # secret + bulky. We validate up front and store only a file path.
+            _yt_in = new_settings.get('youtube')
+            _yt_paste = _yt_in.pop('cookies_paste', None) if isinstance(_yt_in, dict) else None
+            if _yt_paste is not None and str(_yt_paste).strip():
+                from core.youtube_cookies import looks_like_cookiefile, write_pasted_cookiefile
+                if not looks_like_cookiefile(_yt_paste):
+                    return jsonify({"success": False,
+                                    "error": "That doesn't look like a cookies.txt file. Export it "
+                                             "with a 'Get cookies.txt LOCALLY' browser extension and "
+                                             "paste the whole file."}), 400
+                _cookie_path = str(config_manager.config_path.parent / "youtube_cookies.txt")
+                if write_pasted_cookiefile(_yt_paste, _cookie_path):
+                    config_manager.set('youtube.cookies_file', _cookie_path)
+
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
@@ -14910,15 +14926,20 @@ def clean_youtube_artist(artist_string):
 
 def _youtube_cookie_opts():
     """yt-dlp cookie options matching the rest of the app (Settings → YouTube).
-    Per-video extraction needs these to get past YouTube's bot checks."""
-    opts = {}
+
+    Per-video extraction needs these to get past YouTube's bot checks, and private
+    playlists (a user's "Liked Music", list=LM) need them to be visible at all. The
+    dropdown is either a browser name (cookiesfrombrowser, local installs) or the
+    PASTE_MODE sentinel, in which case we point yt-dlp at the pasted cookies.txt that
+    server/Docker users supply. Precedence + emptiness live in core.youtube_cookies."""
+    from core.youtube_cookies import build_youtube_cookie_opts
     try:
-        cb = config_manager.get('youtube.cookies_browser', '')
-        if cb:
-            opts['cookiesfrombrowser'] = (cb,)
+        mode = config_manager.get('youtube.cookies_browser', '')
+        path = config_manager.get('youtube.cookies_file', '')
+        exists = bool(path) and os.path.exists(path)
+        return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
-        pass
-    return opts
+        return {}
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
