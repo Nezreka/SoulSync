@@ -276,6 +276,9 @@ ACTIONS: list[dict] = [
      "description": "Clear completed downloads and empty directories", "available": True},
     {"type": "video_full_cleanup", "label": "Full Cleanup", "icon": "trash", "scope": "video",
      "description": "Clear quarantine, download queue, import folder, and search history in one sweep", "available": True},
+    # Custom (NOT a shared handler): backs up video_library.db, not the music DB.
+    {"type": "video_backup_database", "label": "Backup Database", "icon": "save", "scope": "video",
+     "description": "Create a timestamped backup of the video library database", "available": True},
 ]
 
 

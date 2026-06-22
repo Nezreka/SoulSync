@@ -26,6 +26,7 @@ from core.automation.handlers.maintenance import (
     auto_cleanup_wishlist,
     auto_update_discovery_pool,
     auto_backup_database,
+    auto_backup_video_database,
     auto_refresh_beatport_cache,
 )
 from core.automation.handlers.download_cleanup import (
@@ -167,6 +168,11 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_full_cleanup',
         lambda config: auto_full_cleanup(config, deps),
+    )
+    # Video DB backup — its OWN handler (video_library.db, not the music DB).
+    engine.register_action_handler(
+        'video_backup_database',
+        lambda config: auto_backup_video_database(config, deps),
     )
     engine.register_action_handler(
         'clean_completed_downloads',

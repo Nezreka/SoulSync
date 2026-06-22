@@ -63,6 +63,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_clean_search_history',
     'video_clean_completed_downloads',
     'video_full_cleanup',
+    'video_backup_database',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).

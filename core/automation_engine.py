@@ -209,6 +209,14 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 900,
         'owned_by': 'video',
     },
+    {
+        'name': 'Auto-Backup Database',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 3, 'unit': 'days'},
+        'action_type': 'video_backup_database',
+        'initial_delay': 600,
+        'owned_by': 'video',
+    },
     # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
     # and TV are independent libraries — a TV scan never pulls in new movies and
     # vice-versa. Fixed weekly deep scan (re-read + prune removed) at 02:00 server-
