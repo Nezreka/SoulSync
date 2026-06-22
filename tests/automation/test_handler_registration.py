@@ -61,6 +61,7 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_update_database',
     'video_add_airing_episodes',
     'video_clean_search_history',
+    'video_clean_completed_downloads',
 })
 
 # Action names that MUST register a guard (duplicate-run prevention).

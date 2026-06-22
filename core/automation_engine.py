@@ -193,6 +193,14 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 600,
         'owned_by': 'video',
     },
+    {
+        'name': 'Clean Completed Downloads',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 5, 'unit': 'minutes'},
+        'action_type': 'video_clean_completed_downloads',
+        'initial_delay': 300,
+        'owned_by': 'video',
+    },
     # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
     # and TV are independent libraries — a TV scan never pulls in new movies and
     # vice-versa. Fixed weekly deep scan (re-read + prune removed) at 02:00 server-
