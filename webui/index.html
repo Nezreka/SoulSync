@@ -1636,6 +1636,31 @@
                                         <p class="progress-details-label" data-video-scan-detail>0 movies, 0 shows</p>
                                     </div>
                                 </div>
+                                <!-- Server Scan: tells the media server to rescan its OWN folders so
+                                     newly-downloaded files get indexed (distinct from the Library Scan
+                                     above, where SoulSync READS the server into its DB). -->
+                                <div class="tool-card">
+                                    <div class="tool-card-header">
+                                        <h4 class="tool-card-title" data-video-srvscan-title>Server Scan</h4>
+                                        <button class="tool-help-button" data-tool="video-server-scan" title="Learn more about this tool">?</button>
+                                    </div>
+                                    <p class="tool-card-info">Tell the media server to scan its folders for newly-downloaded movies &amp; episodes — then a Library Scan pulls them into SoulSync.</p>
+                                    <div class="tool-card-controls">
+                                        <select data-video-srvscan-target aria-label="Which library the server should scan" title="Movies and TV are separate server libraries — scan one or both">
+                                            <option value="all">All Libraries</option>
+                                            <option value="movie">Movies Only</option>
+                                            <option value="show">TV Shows Only</option>
+                                        </select>
+                                        <button type="button" data-video-srvscan-run>Scan Server</button>
+                                    </div>
+                                    <div class="tool-card-progress-section">
+                                        <p class="progress-phase-label" data-video-srvscan-phase>Idle</p>
+                                        <div class="progress-bar-container">
+                                            <div class="progress-bar-fill" data-video-srvscan-bar style="width: 0%;"></div>
+                                        </div>
+                                        <p class="progress-details-label" data-video-srvscan-detail></p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -10425,6 +10450,7 @@
     <script src="{{ url_for('static', filename='video/video-side.js', v=static_v) }}"></script>
     <!-- Shared video scan controller (triggers + polls scans for all video pages) -->
     <script src="{{ url_for('static', filename='video/video-scan.js', v=static_v) }}"></script>
+    <script src="{{ url_for('static', filename='video/video-server-scan.js', v=static_v) }}"></script>
     <!-- Video settings additions (isolated; library mapping on the settings page) -->
     <script src="{{ url_for('static', filename='video/video-settings.js', v=static_v) }}"></script>
     <!-- Video enrichment dashboard buttons (isolated; polls /api/video/enrichment) -->
