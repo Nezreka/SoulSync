@@ -801,8 +801,8 @@ class HiFiClient(DownloadSourcePlugin):
             info = getattr(mf, 'info', None) if mf is not None else None
             if info is not None:
                 return float(getattr(info, 'length', 0) or 0)
-        except Exception:
-            pass
+        except Exception as _probe_err:   # noqa: BLE001
+            logger.debug("mutagen audio-length probe failed for %s: %s", path, _probe_err)
         return 0.0
 
     @staticmethod
