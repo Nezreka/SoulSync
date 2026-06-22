@@ -140,6 +140,81 @@ def compute_new_default_pushes(all_defaults, offered, legacy_baseline, existing)
     return to_add, new_offered
 
 
+_EXTINF_RE = re.compile(r'#EXTINF:\s*([0-9]+(?:\.[0-9]+)?)')
+
+
+def sum_hls_segment_seconds(playlist_text: str) -> float:
+    """Total audio seconds an HLS media playlist actually provides — the sum of its
+    ``#EXTINF`` segment durations. This is the authoritative "how much audio is really
+    here" signal: a PREVIEW manifest serves only ~30s of segments even though the track
+    is full-length, so summing EXTINF catches it before we waste the download. Returns
+    0.0 when the playlist has no EXTINF lines (master playlists, legacy manifests) — the
+    caller treats 0 as 'unknown', never as 'preview'."""
+    total = 0.0
+    for m in _EXTINF_RE.finditer(playlist_text or ''):
+        try:
+            total += float(m.group(1))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def is_short_audio(actual_seconds: float, expected_seconds: float, threshold: float = 0.8) -> bool:
+    """True when ``actual`` is meaningfully shorter than ``expected`` — i.e. a preview
+    clip or a truncated/corrupt download. Conservative: returns False whenever either
+    value is missing/zero (unknown ⇒ never reject), and only trips below ``threshold``
+    of the expected length (previews are ~15% of full, so the margin is huge)."""
+    try:
+        a, e = float(actual_seconds or 0), float(expected_seconds or 0)
+    except (TypeError, ValueError):
+        return False
+    if a <= 0 or e <= 0:
+        return False
+    return a < e * threshold
+
+
+def is_fake_lossless_bitrate(size_bytes, claimed_seconds, sample_rate, bits_per_sample,
+                             channels, min_ratio: float = 0.30) -> bool:
+    """True when a 'lossless' file's data is FAR too small for its claimed length — the
+    fingerprint of a ~30s preview whose STREAMINFO/container was faked to the full
+    duration (so every length header reads 'full' and only the bitrate gives it away).
+    Real FLAC is ~40-75% of raw PCM; a preview padded to full length implies single-digit
+    %. Conservative: 0 / bad inputs return False (never reject on unknowns)."""
+    try:
+        sz, secs = float(size_bytes or 0), float(claimed_seconds or 0)
+        sr, bits, ch = int(sample_rate or 0), int(bits_per_sample or 0), int(channels or 0)
+    except (TypeError, ValueError):
+        return False
+    if sz <= 0 or secs <= 0 or sr <= 0 or bits <= 0 or ch <= 0:
+        return False
+    return (sz * 8 / secs) < (sr * bits * ch) * min_ratio
+
+
+def parse_ffmpeg_time(stderr_text) -> float:
+    """The last ``time=HH:MM:SS.xx`` ffmpeg prints while decoding — the REAL decoded
+    length (immune to a faked container/STREAMINFO duration). 0.0 if not found."""
+    last = 0.0
+    for m in re.finditer(r'time=(\d+):(\d+):(\d+(?:\.\d+)?)', stderr_text or ''):
+        last = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    return last
+
+
+def is_preview_download(real_seconds, reference_seconds, *, is_lossless, size_bytes,
+                        sample_rate, bits_per_sample, channels):
+    """Is a finished file a preview/truncated fake? Two independent signals, so it fires
+    even when the fakery declares full length at every layer:
+      1. DECODED length far below the reference (the ground truth, when a decoder ran);
+      2. for lossless, an impossibly-low implied bitrate (no decoder needed).
+    Returns ``(is_fake, reason)``."""
+    if real_seconds and is_short_audio(real_seconds, reference_seconds):
+        return True, "decoded %.0fs of %.0fs" % (real_seconds, reference_seconds)
+    if is_lossless and is_fake_lossless_bitrate(size_bytes, reference_seconds, sample_rate,
+                                                bits_per_sample, channels):
+        kbps = (float(size_bytes) * 8 / reference_seconds / 1000) if reference_seconds else 0
+        return True, "%.0fkbps lossless over %.0fs (far too low — a ~30s preview)" % (kbps, reference_seconds)
+    return False, ""
+
+
 # Run the new-default push at most once per process.
 _pushed_new_defaults = False
 
@@ -662,6 +737,7 @@ class HiFiClient(DownloadSourcePlugin):
             logger.warning(f"Failed to parse HLS playlist for track {track_id}: {e}")
             return None
 
+        media_text = playlist_text   # the playlist that actually carries the EXTINF segments
         if '#EXT-X-STREAM-INF' in playlist_text and segment_uris:
             playlist_uri = segment_uris[0]
             try:
@@ -669,6 +745,7 @@ class HiFiClient(DownloadSourcePlugin):
                 variant_resp = self.session.get(playlist_uri, allow_redirects=True, timeout=30)
                 variant_resp.raise_for_status()
                 variant_text = variant_resp.text
+                media_text = variant_text
                 init_uri, segment_uris = self._parse_hls_playlist(variant_text, playlist_uri)
             except Exception as e:
                 logger.warning(f"Failed to fetch variant playlist for track {track_id}: {e}")
@@ -687,6 +764,9 @@ class HiFiClient(DownloadSourcePlugin):
             'extension': q_info['extension'],
             'codec': q_info['codec'],
             'quality': quality,
+            # Real audio length the manifest provides (sum of EXTINF) — used to reject
+            # preview manifests before downloading. 0.0 = unknown (don't reject).
+            'manifest_duration': sum_hls_segment_seconds(media_text),
         }
 
     def _get_legacy_track_manifest(self, track_id: int, quality: str = 'lossless') -> Optional[Dict]:
@@ -711,15 +791,57 @@ class HiFiClient(DownloadSourcePlugin):
             'quality': quality,
         }
 
+    @staticmethod
+    def _probe_audio_seconds(path) -> float:
+        """Real decoded audio length of a finished file, via mutagen (already a dep).
+        0.0 on any failure — the caller treats 0 as 'unknown' and never rejects on it."""
+        try:
+            from mutagen import File as _MutagenFile
+            mf = _MutagenFile(str(path))
+            info = getattr(mf, 'info', None) if mf is not None else None
+            if info is not None:
+                return float(getattr(info, 'length', 0) or 0)
+        except Exception as _probe_err:   # noqa: BLE001
+            logger.debug("mutagen audio-length probe failed for %s: %s", path, _probe_err)
+        return 0.0
+
+    @staticmethod
+    def _find_ffmpeg():
+        ff = shutil.which('ffmpeg')
+        if ff:
+            return ff
+        cand = Path(__file__).parent.parent / 'tools' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
+        return str(cand) if cand.exists() else None
+
+    def _probe_real_seconds(self, path) -> float:
+        """REAL decoded audio length via ffmpeg — decodes the actual frames, so it sees
+        through a faked STREAMINFO/container duration (a 30s preview claiming full
+        length decodes to 30s). 0.0 if ffmpeg is unavailable or on error."""
+        ff = self._find_ffmpeg()
+        if not ff:
+            return 0.0
+        try:
+            proc = subprocess.run(
+                [ff, '-hide_banner', '-nostdin', '-i', str(path), '-map', '0:a:0', '-f', 'null', '-'],
+                capture_output=True, text=True, timeout=180)
+            return parse_ffmpeg_time(proc.stderr)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _flac_props(path):
+        """(sample_rate, bits_per_sample, channels) for the bitrate sanity check, or None."""
+        try:
+            from mutagen.flac import FLAC
+            si = FLAC(str(path)).info
+            return (si.sample_rate, si.bits_per_sample, si.channels)
+        except Exception:
+            return None
+
     def _demux_flac(self, input_path: Path, output_path: Path) -> None:
-        ffmpeg = shutil.which('ffmpeg')
+        ffmpeg = self._find_ffmpeg()
         if not ffmpeg:
-            tools_dir = Path(__file__).parent.parent / 'tools'
-            ffmpeg_candidate = tools_dir / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg')
-            if ffmpeg_candidate.exists():
-                ffmpeg = str(ffmpeg_candidate)
-            else:
-                raise RuntimeError('ffmpeg is required to demux FLAC from MP4. Install ffmpeg and retry.')
+            raise RuntimeError('ffmpeg is required to demux FLAC from MP4. Install ffmpeg and retry.')
 
         try:
             result = subprocess.run(
@@ -836,6 +958,15 @@ class HiFiClient(DownloadSourcePlugin):
 
         MIN_AUDIO_SIZE = 100 * 1024
 
+        # Expected track length (for the preview/truncation guards). Best-effort: a 0
+        # here just disables the duration checks for this track, never rejects.
+        expected_s = 0.0
+        try:
+            info = self.get_track_info(track_id) or {}
+            expected_s = float(info.get('duration_s') or 0)
+        except Exception:
+            expected_s = 0.0
+
         for q_key in chain:
             if self.shutdown_check and self.shutdown_check():
                 logger.info("Shutdown detected, aborting HiFi download")
@@ -851,6 +982,18 @@ class HiFiClient(DownloadSourcePlugin):
             ):
                 logger.warning(f"No HLS manifest at quality {q_key}, trying next")
                 continue
+
+            # Preview guard #1 (pre-download): a preview manifest serves only ~30s of
+            # segments for a full-length track. A preview means THIS SOURCE only has a
+            # preview of the track — lower quality tiers are the SAME preview — so abort
+            # HiFi entirely and let the orchestrator fall through to the next SOURCE
+            # (soulseek/youtube/…), rather than landing a lower-tier preview.
+            manifest_s = float(manifest_info.get('manifest_duration') or 0)
+            if is_short_audio(manifest_s, expected_s):
+                logger.warning(
+                    "HiFi has only a PREVIEW of '%s' (manifest %.0fs of %.0fs at %s) — "
+                    "failing HiFi so the next source is tried", display_name, manifest_s, expected_s, q_key)
+                return None
 
             extension = manifest_info['extension']
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
@@ -930,6 +1073,31 @@ class HiFiClient(DownloadSourcePlugin):
                                    f"({final_size} bytes), trying next")
                     out_path.unlink(missing_ok=True)
                     continue
+
+                # Preview guard #2 (post-download): the real catch. HiFi previews fake the
+                # FULL length in every header — manifest EXTINF, m4a moov, FLAC
+                # total_samples — so only the DECODED audio (or, for lossless, the
+                # bitrate) reveals the ~30s truth. Reference = the largest length any
+                # header claims (so the file's own faked claim becomes the bar its real
+                # audio must clear); is_preview_download decodes + bitrate-checks.
+                ref_s = max(expected_s, self._probe_audio_seconds(out_path))
+                real_s = self._probe_real_seconds(out_path)
+                props = self._flac_props(out_path) if is_flac else None
+                fake, why = is_preview_download(
+                    real_s, ref_s, is_lossless=is_flac, size_bytes=final_size,
+                    sample_rate=(props[0] if props else 0),
+                    bits_per_sample=(props[1] if props else 0),
+                    channels=(props[2] if props else 0))
+                if fake:
+                    # A preview at this tier means the SOURCE only has a preview — every
+                    # lower tier is the same 30s clip (and the lossy ones dodge the
+                    # bitrate check). Abort HiFi so the orchestrator tries the next
+                    # SOURCE, instead of cascading down into an accepted lower-tier preview.
+                    logger.warning(
+                        "HiFi has only a PREVIEW of '%s' (%s at %s) — failing HiFi so the "
+                        "next source is tried", display_name, why, q_key)
+                    out_path.unlink(missing_ok=True)
+                    return None
 
                 logger.info(f"HiFi download complete ({q_key}): {out_path} "
                             f"({final_size / (1024*1024):.1f} MB)")

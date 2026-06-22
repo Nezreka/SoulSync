@@ -501,6 +501,10 @@ def add_album_track_to_wishlist(
             source_type=source_type,
             source_context=enhanced_source_context,
             profile_id=runtime.profile_id,
+            # Explicit user click in the album modal — must bypass + clear the
+            # ignore-list, even if the user previously cancelled this track
+            # (otherwise the add is silently dropped — carlosjfcasero, #897).
+            user_initiated=True,
         )
 
         if success:

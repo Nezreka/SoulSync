@@ -173,6 +173,32 @@ async def _database_only_find_track(spotify_track, candidate_pool=None):
                 logger.debug("sync match cache fast-path failed: %s", e)
         # --- End cache fast-path ---
 
+        # Durable manual library match (#787) — survives a library rescan (the
+        # sync_match_cache above does not), so a user's Find & Add pairing keeps
+        # sticking across auto-syncs instead of being re-matched from scratch (#895
+        # follow-up). Self-heals a stale library id via the stored file path.
+        if spotify_id:
+            try:
+                from core.artists.map import get_current_profile_id
+                m = db.find_manual_library_match_by_source_track_id(
+                    get_current_profile_id(), str(spotify_id), active_server)
+                if m:
+                    lib_id = m.get('library_track_id')
+                    dt = db.get_track_by_id(lib_id) if lib_id is not None else None
+                    if not dt and m.get('library_file_path'):
+                        new_id = db.find_track_id_by_file_path(m['library_file_path'])
+                        dt = db.get_track_by_id(new_id) if new_id else None
+                    if dt:
+                        class DatabaseTrackDurable:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        logger.debug(f"Durable manual match hit: '{original_title}' → {lib_id}")
+                        return DatabaseTrackDurable(dt), 1.0
+            except Exception as e:
+                logger.debug("durable manual match fast-path failed: %s", e)
+
         # Try each artist
         for artist in spotify_track.artists:
             if isinstance(artist, str):

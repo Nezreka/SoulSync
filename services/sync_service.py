@@ -599,38 +599,63 @@ class PlaylistSyncService:
             spotify_id = getattr(spotify_track, 'id', '') or ''
             active_server = config_manager.get_active_media_server()
 
-            # --- Sync match cache fast-path ---
+            # --- User-confirmed match fast-path (Find & Add / manual match) ---
             if spotify_id:
+                cache_db = MusicDatabase()
+
+                def _materialize(server_track_id):
+                    """Turn a stored library track id into the actual server item the
+                    sync needs (DB row for Jellyfin/Navidrome/SoulSync, Plex fetchItem)."""
+                    if server_track_id is None:
+                        return None
+                    dbt = cache_db.get_track_by_id(server_track_id)
+                    if not dbt:
+                        return None
+                    if server_type in ("jellyfin", "navidrome", "soulsync"):
+                        class DbTrackFromCache:
+                            def __init__(self, db_t):
+                                self.ratingKey = db_t.id
+                                self.title = db_t.title
+                                self.id = db_t.id
+                        return DbTrackFromCache(dbt)
+                    try:
+                        at = media_client.server.fetchItem(int(server_track_id))
+                        return at if (at and hasattr(at, 'ratingKey')) else None
+                    except Exception:
+                        return None
+
+                # 1) Volatile sync_match_cache — fast, but wiped on every library rescan.
                 try:
-                    cache_db = MusicDatabase()
                     cached = cache_db.read_sync_match_cache(spotify_id, active_server)
                     if cached:
-                        server_track_id = cached['server_track_id']
-                        db_track_check = cache_db.get_track_by_id(server_track_id)
-                        if db_track_check:
-                            if server_type in ("jellyfin", "navidrome", "soulsync"):
-                                class DbTrackFromCache:
-                                    def __init__(self, db_t):
-                                        self.ratingKey = db_t.id
-                                        self.title = db_t.title
-                                        self.id = db_t.id
-                                actual_track = DbTrackFromCache(db_track_check)
-                            else:
-                                try:
-                                    actual_track = media_client.server.fetchItem(int(server_track_id))
-                                    if not (actual_track and hasattr(actual_track, 'ratingKey')):
-                                        actual_track = None
-                                except Exception:
-                                    actual_track = None
-
-                            if actual_track:
-                                logger.debug(f"Sync cache hit: '{original_title}' → server track {server_track_id}")
-                                return actual_track, cached['confidence']
-
-                        logger.debug(f"Sync cache stale for '{original_title}' — track {server_track_id} gone")
+                        actual_track = _materialize(cached['server_track_id'])
+                        if actual_track:
+                            logger.debug(f"Sync cache hit: '{original_title}' → server track {cached['server_track_id']}")
+                            return actual_track, cached['confidence']
+                        logger.debug(f"Sync cache stale for '{original_title}' — track {cached['server_track_id']} gone")
                 except Exception as cache_err:
                     logger.debug(f"Sync cache lookup error: {cache_err}")
-            # --- End cache fast-path ---
+
+                # 2) Durable manual library match (#787) — SURVIVES a rescan (the cache
+                #    above does not). Without this, a user's Find & Add pairing is
+                #    re-matched from scratch on the next auto-sync after a library scan,
+                #    so they have to Find & Add the same track again (#895 follow-up).
+                #    Self-heals a stale library id via the stored file path.
+                try:
+                    from core.artists.map import get_current_profile_id
+                    m = cache_db.find_manual_library_match_by_source_track_id(
+                        get_current_profile_id(), str(spotify_id), active_server)
+                    if m:
+                        actual_track = _materialize(m.get('library_track_id'))
+                        if not actual_track and m.get('library_file_path'):
+                            new_id = cache_db.find_track_id_by_file_path(m['library_file_path'])
+                            actual_track = _materialize(new_id)
+                        if actual_track:
+                            logger.debug(f"Durable manual match hit: '{original_title}' → {m.get('library_track_id')}")
+                            return actual_track, 1.0
+                except Exception as durable_err:
+                    logger.debug(f"Durable manual match lookup error: {durable_err}")
+            # --- End match fast-path ---
 
             # Try each artist (same as modal logic)
             for artist in spotify_track.artists:
