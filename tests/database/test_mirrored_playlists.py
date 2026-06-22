@@ -92,3 +92,36 @@ def test_native_ids_still_used_verbatim(tmp_path):
                              profile_id=1)
     rows = db.get_mirrored_playlist_tracks(pid)
     assert rows[0]["source_track_id"] == "spotify123"         # native id untouched
+
+
+def test_backfill_fills_existing_empty_ids_idempotently(tmp_path):
+    # #901 backfill: a file-import playlist mirrored BEFORE the fix has empty-id rows.
+    # The backfill assigns the SAME stable ids a fresh import would, so existing
+    # Find & Add matches start working without a re-import.
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    pid = db.mirror_playlist(source="file", source_playlist_id="old", name="Old",
+                             tracks=[{"track_name": "Slow Ride", "artist_name": "Foghat"}], profile_id=1)
+    # simulate a pre-fix row: blank out the id
+    with db._get_connection() as conn:
+        conn.execute("UPDATE mirrored_playlist_tracks SET source_track_id = '' WHERE playlist_id = ?", (pid,))
+        conn.commit()
+
+    n = db._backfill_mirrored_track_source_ids()
+    assert n == 1
+    rows = db.get_mirrored_playlist_tracks(pid)
+    from core.playlists.source_refs import stable_source_track_id
+    assert rows[0]["source_track_id"] == stable_source_track_id(
+        {"track_name": "Slow Ride", "artist_name": "Foghat"})   # same id a fresh import gives
+
+    # idempotent — second run touches nothing
+    assert db._backfill_mirrored_track_source_ids() == 0
+
+
+def test_backfill_leaves_native_ids_untouched(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    pid = db.mirror_playlist(source="spotify", source_playlist_id="sp", name="Sp",
+                             tracks=[{"track_name": "S", "artist_name": "A", "source_track_id": "spotify123"}],
+                             profile_id=1)
+    db._backfill_mirrored_track_source_ids()
+    rows = db.get_mirrored_playlist_tracks(pid)
+    assert rows[0]["source_track_id"] == "spotify123"
