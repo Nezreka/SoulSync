@@ -32,6 +32,8 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/scan/request" in rules
     assert "/api/video/scan/status" in rules
     assert "/api/video/scan/stop" in rules
+    assert "/api/video/scan/server" in rules
+    assert "/api/video/scan/server/status" in rules
     assert "/api/video/library" in rules
     assert "/api/video/libraries" in rules
     assert "/api/video/server" in rules
@@ -92,6 +94,46 @@ def test_scan_request_threads_mode_and_media_type(tmp_path, monkeypatch):
     # TV-only
     client.post("/api/video/scan/request", json={"media_type": "show"})
     assert calls["media_type"] == "show"
+
+
+def test_server_scan_triggers_refresh_with_media_type(tmp_path, monkeypatch):
+    # The Server Scan tool tells the media server to rescan its OWN folders. The
+    # endpoint must thread media_type (Movies / TV / both) to the source refresh.
+    client, _ = _make_client(tmp_path)
+    calls = {}
+
+    import core.video.sources as sources_mod
+
+    def _refresh(media_type="all"):
+        calls["mt"] = media_type
+        return {"ok": True, "sections": [media_type]}
+    monkeypatch.setattr(sources_mod, "refresh_video_server_sections", _refresh)
+
+    r = client.post("/api/video/scan/server", json={"media_type": "movie"})
+    assert r.get_json() == {"ok": True, "sections": ["movie"]}
+    assert calls["mt"] == "movie"
+
+    calls.clear()
+    client.post("/api/video/scan/server", json={})       # default → both libraries
+    assert calls["mt"] == "all"
+
+
+def test_server_scan_status_reports_scanning_flag(tmp_path, monkeypatch):
+    client, _ = _make_client(tmp_path)
+    import core.video.sources as sources_mod
+
+    seen = {}
+
+    def _inprog(media_type="all"):
+        seen["mt"] = media_type
+        return True
+    monkeypatch.setattr(sources_mod, "video_server_scan_in_progress", _inprog)
+    assert client.get("/api/video/scan/server/status?media_type=show").get_json() == {"scanning": True}
+    assert seen["mt"] == "show"
+
+    # None (adapter can't report) passes straight through as JSON null
+    monkeypatch.setattr(sources_mod, "video_server_scan_in_progress", lambda mt="all": None)
+    assert client.get("/api/video/scan/server/status").get_json() == {"scanning": None}
 
 
 def test_discover_trailer_returns_key(tmp_path, monkeypatch):
