@@ -148,8 +148,8 @@ def resolve_album_track_positions(session, base_url, album_ids, cache=None, slee
                     if cache and at_list is not None:
                         try:
                             cache.store_entity('deezer', 'album_tracks', aid, {'data': at_list})
-                        except Exception:   # noqa: BLE001
-                            pass
+                        except Exception as _cache_err:   # noqa: BLE001
+                            logger.debug("album_tracks cache store failed for %s: %s", aid, _cache_err)
             except Exception:   # noqa: BLE001 - never let metadata resolution break the fetch
                 at_list = None
         for at in (at_list or []):
