@@ -1274,6 +1274,7 @@ async function loadSettingsData() {
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
         document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+        document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
@@ -2936,6 +2937,21 @@ async function saveSettings(quiet = false) {
         }
     }
 
+    // Validate the optional "Playlist File Naming" template before saving: it's a
+    // filename (no path separator) and must include $title — mirrors the server-side
+    // rule so a broken value can't be stored. Empty = feature off (allowed).
+    const _plItemTpl = (document.getElementById('template-playlist-item')?.value || '').trim();
+    if (_plItemTpl) {
+        if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
+            showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
+            return;
+        }
+        if (!_plItemTpl.includes('$title')) {
+            showToast('Playlist File Naming must include $title so every file has a name.', 'error');
+            return;
+        }
+    }
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -3141,6 +3157,7 @@ async function saveSettings(quiet = false) {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
+                playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value
             }
         },

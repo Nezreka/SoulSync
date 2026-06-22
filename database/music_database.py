@@ -7288,6 +7288,18 @@ class MusicDatabase:
                 variations.append(normalized_name.title())
                 variations.append(normalized_name)
 
+            # Leading-"The" toggle — a leading "The" is noise for artist identity
+            # ("The Black Eyed Peas" == "Black Eyed Peas"). Without this, a request for
+            # one variant never fetches a library track filed under the other, so it
+            # "fails to match" and re-downloads a duplicate. Search BOTH forms; the
+            # confidence scorer still decides (50/50 title/artist), so this only widens
+            # the candidate fetch — it can't merge genuinely different artists on its own.
+            stripped = artist_name.strip()
+            if stripped.lower().startswith("the ") and stripped[4:].strip():
+                variations.append(stripped[4:].strip())     # "The Black Eyed Peas" -> "Black Eyed Peas"
+            elif stripped:
+                variations.append("The " + stripped)        # "Black Eyed Peas" -> "The Black Eyed Peas"
+
             # Add more aliases here in the future
             if "korn" in name_lower:
                 if "KoЯn" not in variations:
@@ -8913,8 +8925,15 @@ class MusicDatabase:
         source_info: Dict[str, Any] = None,
         profile_id: int = 1,
         track_data: Dict[str, Any] = None,
+        user_initiated: bool = False,
     ) -> bool:
-        """Add a failed track to the wishlist for retry"""
+        """Add a failed track to the wishlist for retry.
+
+        ``user_initiated`` marks an explicit user add (e.g. the library album
+        "add to wishlist" modal). Like ``source_type == 'manual'`` it bypasses
+        the ignore-list gate AND clears any stale ignore — but unlike changing
+        ``source_type`` it preserves the real provenance ('album'), which the
+        wishlist categorisation (Albums vs Singles) relies on (#874/#897)."""
         try:
             if track_data is not None and spotify_track_data is None:
                 spotify_track_data = track_data
@@ -8944,7 +8963,7 @@ class MusicDatabase:
                 # clear any stale ignore so it sticks. Fail-open: any error here
                 # must never block a legitimate wishlist add.
                 try:
-                    if source_type == 'manual':
+                    if source_type == 'manual' or user_initiated:
                         self.remove_from_wishlist_ignore(track_id, profile_id=profile_id)
                     elif self.is_track_ignored(track_id, profile_id=profile_id):
                         logger.info("Skipping wishlist add — track is on the ignore-list (#874): %s", track_id)

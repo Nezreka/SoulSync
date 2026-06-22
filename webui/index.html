@@ -1917,8 +1917,8 @@
                                     <div class="import-file-zone-icon">📄</div>
                                     <div class="import-file-zone-title">Drop your file here</div>
                                     <div class="import-file-zone-subtitle">or click to browse</div>
-                                    <div class="import-file-zone-formats">Supported: CSV, TSV, TXT</div>
-                                    <input type="file" id="import-file-input" accept=".csv,.tsv,.txt" style="display:none">
+                                    <div class="import-file-zone-formats">Supported: CSV, TSV, TXT, M3U, M3U8</div>
+                                    <input type="file" id="import-file-input" accept=".csv,.tsv,.txt,.m3u,.m3u8" style="display:none">
                                 </div>
                                 <div class="import-file-format-hints">
                                     <div class="import-file-hint">
@@ -1928,6 +1928,10 @@
                                     <div class="import-file-hint">
                                         <span class="import-file-hint-label">TXT</span>
                                         <span class="import-file-hint-text">One track per line (e.g. Artist - Title). Format and separator can be adjusted after upload.</span>
+                                    </div>
+                                    <div class="import-file-hint">
+                                        <span class="import-file-hint-label">M3U / M3U8</span>
+                                        <span class="import-file-hint-text">Standard playlist files. Artist, title and duration are read automatically from #EXTINF lines (or the file name for simple playlists).</span>
                                     </div>
                                 </div>
                             </div>
@@ -5620,6 +5624,13 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Playlist File Naming:</label>
+                                    <input type="text" id="template-playlist-item"
+                                        placeholder="Leave empty to keep the library filename">
+                                    <small class="settings-hint">Renames the files inside each "Organize by Playlist" folder (your real library files are never touched). <strong>Filename only — no folders.</strong> Variables: $position (playlist order), $artist, $album, $track, $title. Must include $title and cannot contain "/". Example: <code>$position - $artist - $title</code> → <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library filename.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Music Video Path Template:</label>
                                     <input type="text" id="template-video-path"
                                         placeholder="$artist/$title-video">
@@ -7316,6 +7327,10 @@
                             </div>
                         </div>
                         <div class="wishlist-page-header-right">
+                            <button class="btn btn--secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                                Ignored
+                            </button>
                             <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
                                 Cleanup
