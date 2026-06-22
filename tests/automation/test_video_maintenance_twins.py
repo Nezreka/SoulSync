@@ -92,3 +92,24 @@ def test_video_clean_completed_downloads_reuses_the_music_handler():
     handlers = _registered_handlers()
     assert "video_clean_completed_downloads" in handlers
     assert "clean_completed_downloads" in handlers
+
+
+# ── Phase 4: Full Cleanup ───────────────────────────────────────────────────
+
+def test_video_full_cleanup_is_video_scoped_only():
+    assert "video_full_cleanup" in _action_types("video")
+    assert "video_full_cleanup" not in _action_types("music")
+    assert "full_cleanup" in _action_types("music")
+    assert "full_cleanup" not in _action_types("video")
+
+
+def test_video_full_cleanup_seeds_one_video_owned_system_row():
+    rows = _system_by_action("video_full_cleanup")
+    assert len(rows) == 1 and rows[0]["owned_by"] == "video"
+    assert rows[0]["trigger_config"] == {"interval": 12, "unit": "hours"}
+
+
+def test_video_full_cleanup_reuses_the_music_handler():
+    handlers = _registered_handlers()
+    assert "video_full_cleanup" in handlers
+    assert "full_cleanup" in handlers

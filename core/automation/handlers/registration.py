@@ -165,6 +165,10 @@ def register_all(deps: AutomationDeps) -> None:
         lambda config: auto_clean_completed_downloads(config, deps),
     )
     engine.register_action_handler(
+        'video_full_cleanup',
+        lambda config: auto_full_cleanup(config, deps),
+    )
+    engine.register_action_handler(
         'clean_completed_downloads',
         lambda config: auto_clean_completed_downloads(config, deps),
     )
