@@ -3748,3 +3748,20 @@ img.vdh-poster--none { font-size: 0; }
     transition: all 0.15s ease; }
 .vdh-more:hover { color: #fff; background: rgba(255, 255, 255, 0.1); }
 @media (max-width: 620px) { .vdh-detail { grid-template-columns: 1fr; padding-left: 16px; } }
+
+/* ── Video Tools scan cards ──────────────────────────────────────────────
+   The video scan cards carry THREE controls (target + mode + action button),
+   one more than music's two, so the shared no-wrap flex row overflowed and clipped
+   the button. Scoped to the video Tools page (music's .tool-card-controls is
+   untouched): let the row wrap, two selects share the top row, the button drops
+   to its own full-width row. */
+.video-subpage[data-video-subpage="video-tools"] .tool-card-controls {
+    flex-wrap: wrap;
+}
+.video-subpage[data-video-subpage="video-tools"] .tool-card-controls select {
+    flex: 1 1 140px;          /* two selects share the top row, each ≥140px */
+    min-width: 0;
+}
+.video-subpage[data-video-subpage="video-tools"] .tool-card-controls button {
+    flex: 1 1 100%;           /* action button takes its own full-width row */
+}
