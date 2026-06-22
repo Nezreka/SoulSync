@@ -3404,16 +3404,18 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.4': [
-        { date: 'June 2026 — 2.7.4 release' },
-        { title: 'Re-identify a track (#889)', desc: 'filed a track under the wrong release? a new ⇄ button in the library Enhanced view lets you re-identify it — search any source (tabs, defaults to your active one), see the same song across its single / EP / album with type badges, pick the right one, and soulsync re-files the file you already have under that release with the correct year, in-album track number, and art. replace the original or keep both.', page: 'artists' },
-        { title: 'Track titles no longer keep the "01 - " (#890)', desc: 'files with no embedded title tag used to import as "01 - Song Title" (the filename stem) — which never matched the canonical "Song Title", so the real track showed as a false "missing". the number prefix is now stripped, conservatively, so titles like "7 Rings" or "1-800-273-8255" are left alone.', page: 'library' },
-        { title: 'Clear dead cover-art folders (#891)', desc: 'a Library Reorganize that moves an album now sweeps the leftover cover.jpg / .lrc / sidecars from the old folder so it actually empties. plus an opt-in "Remove Residual Files" toggle on the Empty Folder Cleaner clears the image-/sidecar-only folders you already have.', page: 'tools' },
-        { title: 'AAC as an opt-in quality tier (#886)', desc: 'soulseek downloads can now include AAC (.m4a) as a selectable quality tier, ranked above MP3 and below FLAC. purely additive — off by default; every existing profile behaves exactly as before until you enable it.', page: 'settings' },
-        { title: 'Spotify Free enrichment status (#887)', desc: 'if you run enrichment on Spotify Free (no spotify auth), the dashboard button now reads "Running (Spotify Free)" instead of wrongly showing "Not Authenticated".', page: 'dashboard' },
-        { title: 'Cleaner album imports (Sokhi)', desc: 'songs from the same album now group under one canonical release id (no more split discographies or mixed cover art), a single can be matched to its parent album, a mid-enrichment crash on an art-less file no longer leaves it untagged, and a sequel digit glued to a CJK title no longer matches the wrong album.', page: 'library' },
-        { title: 'More fixes', desc: 'NZBGet imports from the finished location instead of the incomplete "….#NZBID" folder (#884); setting your timezone to Australia/Sydney no longer makes the cache-maintenance job loop every 5 seconds (#885); and the artist-detail header no longer bleeds the blurred artist photo behind it.', page: 'downloads' },
-        { title: 'Earlier versions', desc: '2.7.3 added the Quality Upgrade Finder (find + upgrade tracks you own in worse quality than available), a wishlist ignore-list (#874), quarantine duplicate-grouping (#876), the "Track 01" position fix, and Tidal discovery/favorites fixes (#867, #880). 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.' },
+    '2.7.5': [
+        { date: 'June 2026 — 2.7.5 release' },
+        { title: 'Special-edition cover art', desc: 'a special edition (e.g. *Clair Obscur: Expedition 33 (Gustave Edition)*) no longer ends up with the standard edition\'s art. musicbrainz albums resolved cover art at release-GROUP scope (one representative cover, ~always the standard), so a pinned release now prefers its OWN cover and only falls back to the group/provider art when the release has none.', page: 'library' },
+        { title: 'Deezer track numbers', desc: 'a track grabbed from a deezer playlist/wishlist now gets its REAL in-album track number (e.g. "Apologize" = 16 on Shock Value), not the playlist index — resolved from deezer\'s album endpoint, which playlist/search results don\'t carry.', page: 'downloads' },
+        { title: '"The" duplicate fix', desc: 'wanting "I Gotta Feeling" by "The Black Eyed Peas" when you own it under "Black Eyed Peas" (or vice-versa) no longer fails to match and re-downloads a duplicate. the matcher now searches both forms across a leading "The"; the scorer still has the final say.', page: 'downloads' },
+        { title: 'HiFi previews rejected (#895)', desc: 'HiFi was serving 30-second preview files dressed up as full songs (faked length in the header). soulsync now catches them — short manifests, faked-header files that decode to ~30s, and a lossless-bitrate check — and aborts the HiFi source instead of cascading into a lower-tier copy of the same preview.', page: 'downloads' },
+        { title: 'Import M3U / M3U8 playlists (#893)', desc: 'the "import from file" tool now reads M3U/M3U8 playlists — extended #EXTINF (artist/title/duration) and simple path-only files — and round-trips with soulsync\'s own M3U export.', page: 'sync' },
+        { title: 'Name files in playlist folders', desc: 'an opt-in template ($position - $artist - $title) renames the files INSIDE each Organize-by-Playlist folder so they sort/play the way you want. filename only (rejects "/", requires $title), defaults to keeping the library filename, works for symlink + copy modes.', page: 'settings' },
+        { title: 'Manage the ignore-list (#897)', desc: 'the wishlist ignore-list now has a "🚫 Ignored" button right on the wishlist page (it was buried in a modal). and manually re-adding a previously-cancelled track no longer gets silently blocked — an explicit add bypasses + clears the ignore.', page: 'downloads' },
+        { title: 'Find & Add is remembered', desc: 'a manual match you set on a synced playlist is no longer forgotten on the next auto-sync. replace-mode re-matched from scratch; the matcher now honors the durable manual-match, not just the volatile cache a rescan wipes.', page: 'sync' },
+        { title: 'Unraid template fixes (#899)', desc: 'the Unraid template now points its TemplateURL / Icon at the canonical files in this repo (raw URLs, not the dead third-party ones), and maps /app/MusicVideos so music-video downloads land on a share.', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.7.4 added re-identify (re-file an imported track under the right release without re-downloading) + library/import cleanups (#889/#890/#891). 2.7.3 added the Quality Upgrade Finder and the wishlist ignore-list (#874); 2.7.2 brought playlist-folder mirroring + server-playlist M3U export; 2.7.1 added download verification + a review queue (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.' },
     ],
 };
 
@@ -3444,38 +3446,42 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Re-identify a track (#889)",
-        description: "filed a track under the wrong release? re-identify it from the library without re-downloading — soulsync re-files the file you already have under the release you pick.",
+        title: "Matching & metadata accuracy",
+        description: "a batch of fixes so downloads land with the right numbers, art, and no duplicates.",
         features: [
-            "a ⇄ button in the Enhanced library view opens a search across any configured source (tabs, defaults to your active one)",
-            "see the same song across its single / EP / album, each with a type badge, and pick the right collection",
-            "it re-files under that release with the correct year, in-album track number, and album art",
-            "replace the original entry or keep both — and it can never delete the file if you pick the release it's already in",
-        ],
-        usage_note: "Library → an artist → Enhanced view → ⇄ on a track",
-    },
-    {
-        title: "Cleaner libraries & imports",
-        description: "a batch of fixes that keep the library tidy and matchable.",
-        features: [
-            "#890 — track titles no longer keep the \"01 - \" from a filename (which caused false \"missing\" tracks); stripped conservatively so \"7 Rings\" / \"1-800-273-8255\" are left alone",
-            "#891 — a reorganize now sweeps leftover cover.jpg / .lrc from the old folder, plus an opt-in \"Remove Residual Files\" toggle clears image-only folders you already have",
-            "Sokhi — same-album songs group under one canonical release (no split discographies / mixed cover art); a single can match its parent album; a mid-enrichment crash no longer leaves a file untagged; a CJK-title sequel-digit no longer matches the wrong album",
+            "special-edition cover art — a pinned release (e.g. a \"Gustave Edition\") now uses its OWN cover instead of musicbrainz's release-group representative (usually the standard edition)",
+            "deezer track numbers — a track from a deezer playlist/wishlist gets its REAL in-album track number (e.g. \"Apologize\" = 16 on Shock Value), resolved from the album endpoint, not the playlist index",
+            "\"The\" dedup — \"The Black Eyed Peas\" and \"Black Eyed Peas\" now match across a leading \"The\", so a track you already own doesn't fail to match and re-download a duplicate",
         ],
     },
     {
-        title: "Quality & sources",
-        description: "more control over downloads, plus a couple of source fixes.",
+        title: "HiFi previews (#895)",
+        description: "HiFi was serving 30-second preview files disguised as full songs (full length faked in the header).",
         features: [
-            "#886 — AAC (.m4a) as an opt-in soulseek quality tier, ranked above MP3 and below FLAC; off by default so nothing changes until you enable it",
-            "#887 — enrichment on Spotify Free now reads \"Running (Spotify Free)\" instead of \"Not Authenticated\"",
-            "#884 — NZBGet imports from the finished location, not the incomplete \"….#NZBID\" folder",
-            "#885 — Australia/Sydney timezone no longer makes the cache-maintenance job loop every 5 seconds",
+            "rejects them three ways — short preview manifests, faked-header files that decode to ~30s, and a lossless-bitrate sanity check",
+            "aborts the HiFi source instead of cascading into a lower-tier copy of the same preview — you get a clean fail + fallback, not a broken file",
         ],
     },
     {
-        title: "Earlier in 2.7.3 / 2.7.2 / 2.7.1 / 2.7.0",
-        description: "2.7.3 added the Quality Upgrade Finder (find + upgrade tracks you own in worse quality than available), a wishlist ignore-list (#874), quarantine duplicate-grouping (#876), the \"Track 01\" position fix, and Tidal discovery/favorites fixes (#867, #880). 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification (acoustid checks every download) + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.",
+        title: "Playlists",
+        description: "import from more formats, name files your way, and keep your manual matches.",
+        features: [
+            "#893 — import M3U / M3U8 playlists in the \"import from file\" tool (extended #EXTINF + simple path-only files); round-trips with soulsync's own M3U export",
+            "organize-by-playlist file naming — an opt-in template ($position - $artist - $title) renames the files inside each playlist folder so they sort/play in order; filename only, defaults to keeping the library name, works for symlink + copy",
+            "find & add is remembered — a manual match on a synced playlist survives the next auto-sync; the matcher honors the durable manual-match, not just the volatile cache a rescan wipes",
+        ],
+    },
+    {
+        title: "Ignore-list & packaging",
+        description: "manage the wishlist ignore-list, and a couple of Unraid template fixes.",
+        features: [
+            "#897 — a \"🚫 Ignored\" button now lives right on the wishlist page (it was buried in a modal), and manually re-adding a previously-cancelled track no longer gets silently blocked",
+            "#899 — the Unraid template points TemplateURL / Icon at the canonical files in this repo (not a dead third-party repo) and maps /app/MusicVideos so music-video downloads land on a share",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.4 / 2.7.3 / 2.7.2 / 2.7.1 / 2.7.0",
+        description: "2.7.4 added re-identify (re-file an imported track under the right release without re-downloading) plus library/import cleanups (#889/#890/#891). 2.7.3 added the Quality Upgrade Finder and the wishlist ignore-list (#874); 2.7.2 brought playlist-folder mirroring + server-playlist M3U export and ReplayGain / Empty-Folder maintenance jobs; 2.7.1 added download verification (acoustid checks every download) + a review queue and closed the websocket login-bypass (#852); 2.7.0 made multi-user real — per-profile streaming accounts, opt-in login, reverse-proxy support.",
         features: [],
     },
 ];
