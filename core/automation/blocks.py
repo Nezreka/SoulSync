@@ -265,6 +265,13 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "prune_ended", "type": "checkbox", "label": "Also remove ended/canceled shows from the watchlist", "default": True}
      ]},
+    # Video twins of the music maintenance actions. Distinct action_type (the
+    # system seeder keys on action_type, so a shared key would collide with the
+    # music row) but the SAME shared handler — the cleanup operates on the common
+    # download/search state, so behaviour stays identical. scope='video' keeps
+    # them on the video builder only; the music blocks above are untouched.
+    {"type": "video_clean_search_history", "label": "Clean Search History", "icon": "trash-2", "scope": "video",
+     "description": "Remove old searches from Soulseek", "available": True},
 ]
 
 

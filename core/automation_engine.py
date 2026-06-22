@@ -182,6 +182,17 @@ SYSTEM_AUTOMATIONS = [
         'action_type': 'video_add_airing_episodes',
         'owned_by': 'video',
     },
+    # Video twins of the music maintenance jobs — same schedule + shared handler,
+    # distinct action_type + owned_by='video' so they seed as separate rows and
+    # show on the video Automations page (music's copies are untouched).
+    {
+        'name': 'Clean Search History',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_clean_search_history',
+        'initial_delay': 600,
+        'owned_by': 'video',
+    },
     # Video twin of music's 'Auto-Deep Scan Library', split into TWO because Movies
     # and TV are independent libraries — a TV scan never pulls in new movies and
     # vice-versa. Fixed weekly deep scan (re-read + prune removed) at 02:00 server-
