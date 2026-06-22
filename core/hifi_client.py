@@ -984,14 +984,16 @@ class HiFiClient(DownloadSourcePlugin):
                 continue
 
             # Preview guard #1 (pre-download): a preview manifest serves only ~30s of
-            # segments for a full-length track. Catch it from the EXTINF sum before
-            # wasting the download, so the orchestrator falls through to the next source.
+            # segments for a full-length track. A preview means THIS SOURCE only has a
+            # preview of the track — lower quality tiers are the SAME preview — so abort
+            # HiFi entirely and let the orchestrator fall through to the next SOURCE
+            # (soulseek/youtube/…), rather than landing a lower-tier preview.
             manifest_s = float(manifest_info.get('manifest_duration') or 0)
             if is_short_audio(manifest_s, expected_s):
                 logger.warning(
-                    "HiFi served a PREVIEW manifest at %s for '%s' (%.0fs of %.0fs) — skipping",
-                    q_key, display_name, manifest_s, expected_s)
-                continue
+                    "HiFi has only a PREVIEW of '%s' (manifest %.0fs of %.0fs at %s) — "
+                    "failing HiFi so the next source is tried", display_name, manifest_s, expected_s, q_key)
+                return None
 
             extension = manifest_info['extension']
             safe_name = re.sub(r'[<>:"/\\|?*]', '_', display_name)
@@ -1087,11 +1089,15 @@ class HiFiClient(DownloadSourcePlugin):
                     bits_per_sample=(props[1] if props else 0),
                     channels=(props[2] if props else 0))
                 if fake:
+                    # A preview at this tier means the SOURCE only has a preview — every
+                    # lower tier is the same 30s clip (and the lossy ones dodge the
+                    # bitrate check). Abort HiFi so the orchestrator tries the next
+                    # SOURCE, instead of cascading down into an accepted lower-tier preview.
                     logger.warning(
-                        "HiFi served a PREVIEW/truncated file at %s for '%s' (%s) — rejecting",
-                        q_key, display_name, why)
+                        "HiFi has only a PREVIEW of '%s' (%s at %s) — failing HiFi so the "
+                        "next source is tried", display_name, why, q_key)
                     out_path.unlink(missing_ok=True)
-                    continue
+                    return None
 
                 logger.info(f"HiFi download complete ({q_key}): {out_path} "
                             f"({final_size / (1024*1024):.1f} MB)")
