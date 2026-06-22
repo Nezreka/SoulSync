@@ -108,7 +108,7 @@ def prune_ended_show_follows(deps, automation_id=None, *, fetch_follows=None,
                 deps.update_progress(
                     automation_id, log_line="Removed ended show '%s' from the watchlist"
                     % (f.get('title') or tid), log_type='info')
-            except Exception:   # noqa: BLE001
+            except Exception:   # noqa: BLE001, S110 - a progress-log failure must not abort pruning
                 pass
     return removed
 

@@ -253,7 +253,7 @@ def probe_present_libraries(candidates, has_item, sleep, *, grace_seconds: int =
                 if has_item(scope, item):
                     present.add(scope)
                     continue
-            except Exception:   # noqa: BLE001 - uncertainty → keep probing, then scan
+            except Exception:   # noqa: BLE001, S110 - uncertainty → keep probing, then scan
                 pass
             still.append((scope, item))
         pending = still
