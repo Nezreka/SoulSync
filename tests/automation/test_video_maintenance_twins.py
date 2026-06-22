@@ -48,8 +48,7 @@ def test_video_clean_search_history_seeds_one_video_owned_system_row():
     assert row["trigger_config"] == {"interval": 1, "unit": "hours"}
 
 
-def test_video_clean_search_history_reuses_the_music_handler():
-    # Registered to the SAME handler function as the music action (identical behaviour).
+def _registered_handlers():
     from core.automation.handlers import register_all
 
     class _Eng:
@@ -60,10 +59,36 @@ def test_video_clean_search_history_reuses_the_music_handler():
         def register_progress_callbacks(self, *a, **k):
             pass
 
-    import core.automation.handlers.registration as reg
-    eng = _Eng()
-    # Build minimal deps via the test helper the registration suite uses.
     from tests.automation.test_handler_registration import _build_deps
+    eng = _Eng()
     register_all(_build_deps(eng))
-    assert "video_clean_search_history" in eng.handlers
-    assert "clean_search_history" in eng.handlers
+    return eng.handlers
+
+
+def test_video_clean_search_history_reuses_the_music_handler():
+    # Registered to the SAME handler function as the music action (identical behaviour).
+    handlers = _registered_handlers()
+    assert "video_clean_search_history" in handlers
+    assert "clean_search_history" in handlers
+
+
+# ── Phase 3: Clean Completed Downloads ──────────────────────────────────────
+
+def test_video_clean_completed_downloads_is_video_scoped_only():
+    assert "video_clean_completed_downloads" in _action_types("video")
+    assert "video_clean_completed_downloads" not in _action_types("music")
+    # music original untouched
+    assert "clean_completed_downloads" in _action_types("music")
+    assert "clean_completed_downloads" not in _action_types("video")
+
+
+def test_video_clean_completed_downloads_seeds_one_video_owned_system_row():
+    rows = _system_by_action("video_clean_completed_downloads")
+    assert len(rows) == 1 and rows[0]["owned_by"] == "video"
+    assert rows[0]["trigger_config"] == {"interval": 5, "unit": "minutes"}
+
+
+def test_video_clean_completed_downloads_reuses_the_music_handler():
+    handlers = _registered_handlers()
+    assert "video_clean_completed_downloads" in handlers
+    assert "clean_completed_downloads" in handlers

@@ -272,6 +272,8 @@ ACTIONS: list[dict] = [
     # them on the video builder only; the music blocks above are untouched.
     {"type": "video_clean_search_history", "label": "Clean Search History", "icon": "trash-2", "scope": "video",
      "description": "Remove old searches from Soulseek", "available": True},
+    {"type": "video_clean_completed_downloads", "label": "Clean Completed Downloads", "icon": "check-square", "scope": "video",
+     "description": "Clear completed downloads and empty directories", "available": True},
 ]
 
 

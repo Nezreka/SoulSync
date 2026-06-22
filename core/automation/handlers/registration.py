@@ -161,6 +161,10 @@ def register_all(deps: AutomationDeps) -> None:
         lambda config: auto_clean_search_history(config, deps),
     )
     engine.register_action_handler(
+        'video_clean_completed_downloads',
+        lambda config: auto_clean_completed_downloads(config, deps),
+    )
+    engine.register_action_handler(
         'clean_completed_downloads',
         lambda config: auto_clean_completed_downloads(config, deps),
     )
