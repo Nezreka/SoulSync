@@ -1388,8 +1388,14 @@ async function loadSettingsData() {
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);
 
-        // Reduce effects toggle
-        const reduceEffects = settings.ui_appearance?.reduce_effects === true; // default false
+        // Reduce effects toggle. This flag is device-scoped: localStorage (set by the
+        // live toggle and by weak-hardware auto-detect) is the source of truth for THIS
+        // machine; the server value is only the cross-device default used when this
+        // device has never chosen. Prefer localStorage when present so opening Settings
+        // doesn't clobber an auto-enabled (or manually-set) per-device choice.
+        const serverReduce = settings.ui_appearance?.reduce_effects === true; // default false
+        const localReduce = localStorage.getItem('soulsync-reduce-effects'); // '1' | '0' | null
+        const reduceEffects = localReduce !== null ? (localReduce === '1') : serverReduce;
         const reduceCheckbox = document.getElementById('reduce-effects-enabled');
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
