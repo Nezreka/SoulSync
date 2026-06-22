@@ -13933,16 +13933,20 @@ class MusicDatabase:
                     logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
 
                 # Replace all tracks
+                from core.playlists.source_refs import stable_source_track_id
                 cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
                 for i, t in enumerate(tracks):
+                    # File-import / iTunes-only tracks arrive with no native id; give
+                    # them a DETERMINISTIC one so a Find & Add manual match can be
+                    # recorded and found (it keys on source_track_id) instead of being
+                    # silently dropped and re-appearing as "extra" (#901).
+                    sid = stable_source_track_id(t)
                     extra = t.get('extra_data')
                     if extra and not isinstance(extra, str):
                         extra = json.dumps(extra)
                     # Restore preserved discovery data if the incoming track doesn't have its own
-                    if not extra:
-                        sid = t.get('source_track_id')
-                        if sid and sid in old_extra_map:
-                            extra = old_extra_map[sid]
+                    if not extra and sid and sid in old_extra_map:
+                        extra = old_extra_map[sid]
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
                             (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
@@ -13951,7 +13955,7 @@ class MusicDatabase:
                         playlist_id, i + 1,
                         t.get('track_name', ''), t.get('artist_name', ''),
                         t.get('album_name', ''), t.get('duration_ms', 0),
-                        t.get('image_url'), t.get('source_track_id'), extra
+                        t.get('image_url'), sid or None, extra
                     ))
                 conn.commit()
                 logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")

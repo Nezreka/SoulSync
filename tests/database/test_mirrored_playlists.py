@@ -60,3 +60,35 @@ def test_mirror_playlist_refresh_preserves_existing_description(tmp_path):
     assert refreshed_id == playlist_id
     playlist = db.get_mirrored_playlist(playlist_id)
     assert playlist["description"] == "https://open.spotify.com/playlist/abc"
+
+
+def test_file_import_tracks_get_a_stable_source_track_id(tmp_path):
+    # #901: file-import tracks arrive with no source_track_id; mirror_playlist must
+    # assign a deterministic one so a Find & Add manual match can key on it (and so
+    # discovery extra_data survives a re-import).
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    file_tracks = [
+        {"track_name": "Slow Ride", "artist_name": "Foghat", "album_name": "Fool for the City"},
+        {"track_name": "I Gotta Feeling", "artist_name": "The Black Eyed Peas"},
+    ]
+    pid = db.mirror_playlist(source="file", source_playlist_id="myfile", name="From File",
+                             tracks=file_tracks, profile_id=1)
+    rows = db.get_mirrored_playlist_tracks(pid)
+    ids = [r["source_track_id"] for r in rows]
+    assert all(i and i.startswith("file:") for i in ids)      # no empty ids
+    assert len(set(ids)) == 2                                  # distinct per song
+
+    # Re-import the SAME file → SAME ids (stable), so a recorded match still keys.
+    db.mirror_playlist(source="file", source_playlist_id="myfile", name="From File",
+                       tracks=list(file_tracks), profile_id=1)
+    rows2 = db.get_mirrored_playlist_tracks(pid)
+    assert [r["source_track_id"] for r in rows2] == ids
+
+
+def test_native_ids_still_used_verbatim(tmp_path):
+    db = MusicDatabase(str(tmp_path / "music.db"))
+    pid = db.mirror_playlist(source="spotify", source_playlist_id="sp", name="Sp",
+                             tracks=[{"track_name": "S", "artist_name": "A", "source_track_id": "spotify123"}],
+                             profile_id=1)
+    rows = db.get_mirrored_playlist_tracks(pid)
+    assert rows[0]["source_track_id"] == "spotify123"         # native id untouched
