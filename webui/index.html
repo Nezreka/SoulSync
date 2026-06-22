@@ -5624,6 +5624,13 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>Playlist File Naming:</label>
+                                    <input type="text" id="template-playlist-item"
+                                        placeholder="Leave empty to keep the library filename">
+                                    <small class="settings-hint">Renames the files inside each "Organize by Playlist" folder (your real library files are never touched). <strong>Filename only — no folders.</strong> Variables: $position (playlist order), $artist, $album, $track, $title. Must include $title and cannot contain "/". Example: <code>$position - $artist - $title</code> → <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library filename.</small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Music Video Path Template:</label>
                                     <input type="text" id="template-video-path"
                                         placeholder="$artist/$title-video">

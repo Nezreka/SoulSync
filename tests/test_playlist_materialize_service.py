@@ -59,8 +59,12 @@ class _RebuildDB:
 
 
 class _Cfg:
-    def __init__(self, root, mode="symlink"):
-        self._d = {"playlists.materialize_path": root, "playlists.materialize_mode": mode}
+    def __init__(self, root, mode="symlink", item_template=""):
+        self._d = {
+            "playlists.materialize_path": root,
+            "playlists.materialize_mode": mode,
+            "file_organization.templates": {"playlist_item": item_template},
+        }
 
     def get(self, key, default=None):
         return self._d.get(key, default)
@@ -266,3 +270,30 @@ def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):
     assert name == "Mix" and s.linked == 1           # only A owned; Gone skipped
     assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
     assert not (tmp_path / "Playlists" / "Off").exists()
+
+
+def test_playlist_item_template_renames_entries(tmp_path: Path):
+    """The custom-naming opt-in: a configured playlist_item template renames the
+    files INSIDE the playlist folder (real library file untouched), with $position
+    coming straight from playlist order."""
+    a = (tmp_path / "Music" / "Artist X" / "07 - A.flac")
+    a.parent.mkdir(parents=True, exist_ok=True)
+    a.write_bytes(b"audio")
+    db = _RebuildDB({"A": str(a)})
+    cfg = _Cfg(str(tmp_path / "Playlists"), mode="copy", item_template="$position - $title")
+    results = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+    assert results[0][0] == "Mix"
+    mix = tmp_path / "Playlists" / "Mix"
+    assert sorted(p.name for p in mix.iterdir()) == ["01 - A.flac"]   # templated, NOT "07 - A.flac"
+
+
+def test_empty_playlist_item_template_keeps_library_filename(tmp_path: Path):
+    """Back-compat: with no template configured, entries keep the library filename."""
+    a = (tmp_path / "Music" / "Artist X" / "07 - A.flac")
+    a.parent.mkdir(parents=True, exist_ok=True)
+    a.write_bytes(b"audio")
+    db = _RebuildDB({"A": str(a)})
+    cfg = _Cfg(str(tmp_path / "Playlists"), mode="copy")   # item_template="" (default)
+    rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
+    mix = tmp_path / "Playlists" / "Mix"
+    assert sorted(p.name for p in mix.iterdir()) == ["07 - A.flac"]   # unchanged
