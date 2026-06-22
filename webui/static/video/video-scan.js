@@ -37,6 +37,11 @@
     }
 
     function counts(s) {
+        // Reflect the scan target so a movies-only / TV-only scan doesn't show a
+        // confusing "0 shows" half. 'all' shows both.
+        var mt = s.media_type || 'all';
+        if (mt === 'movie') return (s.movies || 0) + ' movies';
+        if (mt === 'show') return (s.shows || 0) + ' shows, ' + (s.episodes || 0) + ' episodes';
         return (s.movies || 0) + ' movies, ' + (s.shows || 0) + ' shows';
     }
 
@@ -134,16 +139,18 @@
             });
     }
 
-    function start(mode) {
+    function start(mode, mediaType) {
         if (scanning) return;
         scanning = true;
-        var pending = { state: 'scanning', phase: 'starting', mode: mode, movies: 0, shows: 0, percent: 0 };
+        mediaType = mediaType || 'all';      // 'all' | 'movie' | 'show'
+        var pending = { state: 'scanning', phase: 'starting', mode: mode,
+                        media_type: mediaType, movies: 0, shows: 0, percent: 0 };
         reflectProgress(pending);
         emit('soulsync:video-scan-progress', pending);
         fetch(REQUEST_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            body: JSON.stringify({ mode: mode })
+            body: JSON.stringify({ mode: mode, media_type: mediaType })
         })
             .then(function () { setTimeout(poll, 600); })
             .catch(function () {
@@ -193,11 +200,12 @@
                 e.preventDefault();
                 if (scanning) { stop(); return; }   // button doubles as Cancel mid-scan
                 var sel = document.querySelector('[data-video-scan-select]');
-                start(sel ? sel.value : 'full');
+                var tgt = document.querySelector('[data-video-scan-target]');
+                start(sel ? sel.value : 'full', tgt ? tgt.value : 'all');
             });
         }
         document.addEventListener('soulsync:video-scan-start', function (e) {
-            start((e.detail && e.detail.mode) || 'full');
+            start((e.detail && e.detail.mode) || 'full', (e.detail && e.detail.media_type) || 'all');
         });
         document.addEventListener('soulsync:video-page-shown', function (e) {
             if (e && e.detail === 'video-tools') { loadToolStats(); resumeIfScanning(); }
