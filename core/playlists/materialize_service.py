@@ -155,11 +155,20 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
     source IDs), resolving to disk, and rebuilding WITH prune. Because it's driven
     by current membership, a track that has LEFT the playlist drops out of the set
     and its symlink is pruned. Returns ``(playlist_name, RebuildSummary)``."""
+    import os as _os
+
     from core.library.path_resolver import resolve_library_file_path
+    from core.playlists.item_naming import render_playlist_item_name
 
     root = docker_resolve_path(config_manager.get("playlists.materialize_path", "./Playlists"))
     mode = normalize_mode(config_manager.get("playlists.materialize_mode", "symlink"))
-    real_paths: List[str] = []
+    item_template = ((config_manager.get("file_organization.templates", {}) or {})
+                     .get("playlist_item", "") or "").strip()
+
+    # Resolve owned tracks to real paths IN PLAYLIST ORDER, keeping the metadata
+    # so an optional custom filename template ($position/$artist/$title/...) can
+    # be applied. $position is the playlist index, which is exactly this order.
+    resolved: List[dict] = []
     seen = set()
     for t in (db.get_mirrored_playlist_tracks(playlist["id"]) or []):
         title = (t.get("track_name") or "").strip()
@@ -175,9 +184,32 @@ def _rebuild_one_from_db(db, config_manager, playlist: dict):
         real = resolve_library_file_path(getattr(db_track, "file_path", None), config_manager=config_manager)
         if real and real not in seen:
             seen.add(real)
-            real_paths.append(real)
+            resolved.append({
+                "real": real,
+                "title": title,
+                "artist": artist,
+                "album": (t.get("album_name") or t.get("album") or "").strip(),
+                "track": getattr(db_track, "track_number", None),
+            })
+
+    real_paths: List[str] = [r["real"] for r in resolved]
+
+    dest_names = None
+    if item_template:
+        width = max(2, len(str(len(resolved))))   # zero-pad $position for correct sorting
+        dest_names = [
+            render_playlist_item_name(
+                item_template,
+                title=r["title"], artist=r["artist"], album=r["album"], track=r["track"],
+                position=f"{i:0{width}d}",
+                ext=_os.path.splitext(r["real"])[1],
+                fallback_name=_os.path.basename(r["real"]),
+            )
+            for i, r in enumerate(resolved, start=1)
+        ]
+
     name = playlist.get("name") or "Unnamed Playlist"
-    return name, rebuild_playlist_folder(root, name, real_paths, mode)   # prune_stale=True
+    return name, rebuild_playlist_folder(root, name, real_paths, mode, dest_names=dest_names)   # prune_stale=True
 
 
 def rebuild_organized_playlists_from_db(db, config_manager, *, profile_id: int = 1):
