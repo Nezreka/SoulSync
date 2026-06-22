@@ -992,6 +992,39 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+        self._backfill_mirrored_track_source_ids()
+
+    def _backfill_mirrored_track_source_ids(self) -> int:
+        """One-time, idempotent: assign a stable source_track_id to mirrored tracks
+        that have none (file-import / iTunes-only playlists imported before #901), so
+        their existing Find & Add matches start sticking without a manual re-import.
+        Only touches empty-id rows, so it's a no-op once they're filled."""
+        from core.playlists.source_refs import stable_source_track_id
+        updated = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, track_name, artist_name, album_name
+                    FROM mirrored_playlist_tracks
+                    WHERE source_track_id IS NULL OR source_track_id = ''
+                """)
+                rows = cursor.fetchall()
+                for r in rows:
+                    sid = stable_source_track_id({
+                        'track_name': r['track_name'], 'artist_name': r['artist_name'],
+                        'album_name': r['album_name']})
+                    if sid:
+                        cursor.execute(
+                            "UPDATE mirrored_playlist_tracks SET source_track_id = ? WHERE id = ?",
+                            (sid, r['id']))
+                        updated += 1
+                conn.commit()
+            if updated:
+                logger.info("Backfilled stable source_track_id on %d mirrored tracks (#901)", updated)
+        except Exception as e:
+            logger.error("mirrored track source_id backfill failed: %s", e)
+        return updated
 
     # Bump when the schema's generation meaningfully changes. Stamped into
     # PRAGMA user_version as a backstop indicator; nothing GATES on it yet.
