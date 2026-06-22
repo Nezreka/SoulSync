@@ -154,6 +154,12 @@ def register_all(deps: AutomationDeps) -> None:
         'clean_search_history',
         lambda config: auto_clean_search_history(config, deps),
     )
+    # Video twin — same handler, distinct action_type so the system seeder
+    # (keyed on action_type) creates a separate video-owned row.
+    engine.register_action_handler(
+        'video_clean_search_history',
+        lambda config: auto_clean_search_history(config, deps),
+    )
     engine.register_action_handler(
         'clean_completed_downloads',
         lambda config: auto_clean_completed_downloads(config, deps),
