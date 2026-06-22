@@ -307,11 +307,9 @@ body.reduce-effects .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Above the nav (the sidebar gives its children z-index:1) so nav items
-       scrolling up sit BEHIND the header — i.e. in its backdrop, where the
-       blur below can actually act on them. Without this they paint in front
-       and backdrop-filter has nothing to blur. */
-    z-index: 2;
+    /* Same stacking level as the nav (z-index:1) — sits in the normal sidebar
+       flow rather than forced above everything. */
+    z-index: 1;
     overflow: hidden;
     flex-shrink: 0;
 
