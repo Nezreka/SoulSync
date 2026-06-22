@@ -159,3 +159,24 @@ def resolve_track_number(
     # value the pre-fix resolver would have used. A correctly-named file
     # with a stale/wrong embedded tag is therefore never regressed.
     return _coerce_positive(embedded_track_number)
+
+
+def normalize_disc_number(value) -> int:
+    """Coerce a disc value to a positive int, defaulting to 1.
+
+    Every track in a multi-disc album MUST carry a disc number, or Jellyfin/Plex
+    leave the disc-less ones floating ungrouped above the disc sections (Sokhi's
+    "tracks 3/9/15 at the top"). Upstream sources can hand back 0, None, '', or a
+    non-numeric string for some tracks — especially when a track resolved to a
+    different edition than its siblings — and the tag-writer only wrote the disc
+    tag when it was truthy, so those tracks lost it entirely on the clear-then-
+    rewrite. Flooring to >=1 here means a track is never written disc-less.
+    """
+    try:
+        n = int(value)                      # int, float, or clean int-string
+    except (TypeError, ValueError):
+        try:
+            n = int(float(str(value).strip()))   # tolerate "2.0"
+        except (TypeError, ValueError):
+            return 1
+    return n if n >= 1 else 1
