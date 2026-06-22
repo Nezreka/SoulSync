@@ -340,14 +340,20 @@ body.reduce-effects .sidebar::after {
         rgba(var(--accent-rgb), 0.06) 60%,
         transparent 100%
     );
+    /* Animate transform (compositor-only) instead of `left` (which forced a
+       layout recalc every frame). The element width is 60% of the header, so
+       translateX(400%) = 240% of header width — the same travel `left:-100%`
+       → `left:140%` produced. Pixel-identical path, no per-frame layout. */
+    transform: translateX(0);
+    will-change: transform, opacity;
     animation: sidebar-header-sweep 8s ease-in-out infinite;
     pointer-events: none;
 }
 
 @keyframes sidebar-header-sweep {
-    0%, 100% { left: -100%; opacity: 0; }
+    0%, 100% { transform: translateX(0); opacity: 0; }
     10% { opacity: 1; }
-    50% { left: 140%; opacity: 1; }
+    50% { transform: translateX(400%); opacity: 1; }
     60% { opacity: 0; }
 }
 
