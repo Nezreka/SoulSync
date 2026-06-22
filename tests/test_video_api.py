@@ -62,6 +62,38 @@ def test_blueprint_exposes_dashboard_route():
     assert "/api/video/discover/trailer" in rules
 
 
+def test_scan_request_threads_mode_and_media_type(tmp_path, monkeypatch):
+    # The Tools-page scan can target one library (movies / TV) or both. The
+    # endpoint must pass BOTH mode and media_type through to the scanner — movies
+    # and TV are independent, so a TV scan must never touch movies.
+    client, _ = _make_client(tmp_path)
+    calls = {}
+
+    class _FakeScanner:
+        def request_scan(self, source_factory, mode="full", media_type="all"):
+            calls["mode"] = mode
+            calls["media_type"] = media_type
+            return {"status": "started", "mode": mode, "media_type": media_type}
+
+    import core.video.scanner as scanner_mod
+    import core.video.sources as sources_mod
+    monkeypatch.setattr(scanner_mod, "get_video_scanner", lambda db: _FakeScanner())
+    monkeypatch.setattr(sources_mod, "get_active_video_source", lambda: None)
+
+    # default body → both libraries, full
+    assert client.post("/api/video/scan/request", json={}).get_json()["media_type"] == "all"
+    assert calls == {"mode": "full", "media_type": "all"}
+
+    # explicit movies-only deep scan
+    r = client.post("/api/video/scan/request", json={"mode": "deep", "media_type": "movie"})
+    assert calls == {"mode": "deep", "media_type": "movie"}
+    assert r.get_json() == {"status": "started", "mode": "deep", "media_type": "movie"}
+
+    # TV-only
+    client.post("/api/video/scan/request", json={"media_type": "show"})
+    assert calls["media_type"] == "show"
+
+
 def test_discover_trailer_returns_key(tmp_path, monkeypatch):
     client, _ = _make_client(tmp_path)
     import core.video.enrichment.engine as eng_mod

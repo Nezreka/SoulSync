@@ -1616,7 +1616,12 @@
                                         </div>
                                     </div>
                                     <div class="tool-card-controls">
-                                        <select data-video-scan-select>
+                                        <select data-video-scan-target aria-label="Which library to scan" title="Movies and TV are separate libraries — scan one or both">
+                                            <option value="all">All Libraries</option>
+                                            <option value="movie">Movies Only</option>
+                                            <option value="show">TV Shows Only</option>
+                                        </select>
+                                        <select data-video-scan-select aria-label="Scan type">
                                             <option value="incremental">Incremental Update</option>
                                             <option value="full">Full Refresh</option>
                                             <option value="deep">Deep Scan</option>
