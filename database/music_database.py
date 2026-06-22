@@ -7288,6 +7288,18 @@ class MusicDatabase:
                 variations.append(normalized_name.title())
                 variations.append(normalized_name)
 
+            # Leading-"The" toggle — a leading "The" is noise for artist identity
+            # ("The Black Eyed Peas" == "Black Eyed Peas"). Without this, a request for
+            # one variant never fetches a library track filed under the other, so it
+            # "fails to match" and re-downloads a duplicate. Search BOTH forms; the
+            # confidence scorer still decides (50/50 title/artist), so this only widens
+            # the candidate fetch — it can't merge genuinely different artists on its own.
+            stripped = artist_name.strip()
+            if stripped.lower().startswith("the ") and stripped[4:].strip():
+                variations.append(stripped[4:].strip())     # "The Black Eyed Peas" -> "Black Eyed Peas"
+            elif stripped:
+                variations.append("The " + stripped)        # "Black Eyed Peas" -> "The Black Eyed Peas"
+
             # Add more aliases here in the future
             if "korn" in name_lower:
                 if "KoЯn" not in variations:
