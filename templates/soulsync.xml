@@ -13,8 +13,8 @@
   <Overview>Music discovery and automation platform. Find new music, curate playlists, sync libraries, and integrate with popular streaming services, Soulseek (slskd), and media servers.</Overview>
   <Category>MediaApp:Music</Category>
   <WebUI>http://[IP]:[PORT:8008]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/snuffomega/SoulSync_unraid/main/soulsync.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/snuffomega/SoulSync_unraid/main/soulsync.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/Nezreka/SoulSync/main/templates/soulsync.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
