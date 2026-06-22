@@ -96,7 +96,9 @@ def test_download_sync_skips_preview_manifests_and_never_downloads(tmp_path, mon
 
     result = c._download_sync('dl1', 12345, 'The Weeknd - Save Your Tears')
     assert result is None                                       # → orchestrator falls back
-    assert tiers                                                # it did consult the manifest(s)
+    # A preview means the SOURCE only has a preview — every lower tier is the same clip,
+    # so it must ABORT on the first preview, not cascade down into a lower-tier preview.
+    assert tiers == ['lossless']
 
 
 def test_download_sync_proceeds_past_the_gate_for_a_full_manifest(tmp_path, monkeypatch):
@@ -115,6 +117,27 @@ def test_download_sync_proceeds_past_the_gate_for_a_full_manifest(tmp_path, monk
 
     c._download_sync('dl1', 12345, 'x')
     assert seg_calls                                           # it got PAST the preview gate to download
+
+
+def test_download_sync_aborts_on_a_faked_full_length_file_no_tier_cascade(tmp_path, monkeypatch):
+    # The real #895 case: manifest + container claim FULL length, but the finished file
+    # decodes to 30s. It must abort HiFi (return None) on the first tier — NOT drop to the
+    # lossy 'high' tier (the same 30s preview, which dodges the bitrate check).
+    monkeypatch.setattr(hc, 'config_manager', _Cfg())
+    c = _bare_client(tmp_path)
+    c.get_track_info = lambda tid: {'duration_s': 215}
+    tiers = []
+    c._get_hls_manifest = lambda tid, quality='lossless': (
+        tiers.append(quality) or
+        {'segment_uris': ['seg'], 'init_uri': None, 'extension': 'flac', 'manifest_duration': 215.0})
+    c._download_segment_with_retry = lambda url: b'\x00' * 200_000      # > MIN_AUDIO_SIZE
+    c._demux_flac = lambda i, o: o.write_bytes(b'\x00' * 200_000)        # produce the 'flac'
+    c._probe_real_seconds = lambda p: 30.0                              # decodes to 30s
+    c._probe_audio_seconds = lambda p: 215.0                           # faked container claim
+    c._flac_props = lambda p: (44100, 16, 2)
+
+    result = c._download_sync('dl1', 12345, 'The Weeknd - Save Your Tears')
+    assert result is None and tiers == ['lossless']                    # aborted, did NOT try 'high'
 
 
 def test_download_sync_does_not_reject_when_track_length_unknown(tmp_path, monkeypatch):
