@@ -27163,6 +27163,113 @@ def export_watchlist():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ── Playlist export to ListenBrainz / JSPF (#903) ────────────────────────────
+# Resolve each mirrored-playlist track to a MusicBrainz recording MBID (cache -> DB ->
+# file tag -> live MB), build a JSPF, and either hand it back as a download or create the
+# playlist directly on ListenBrainz. Runs in a background thread with live status the
+# mirrored-playlist card polls. Entirely additive — new routes + an in-memory job registry.
+_playlist_export_jobs = {}
+_playlist_export_jobs_lock = threading.Lock()
+
+
+def _run_playlist_export(job_id, playlist_id, title, mode):
+    job = _playlist_export_jobs[job_id]
+    try:
+        from core.exports.export_sources import build_resolve_fn
+        from core.exports.playlist_export import resolve_playlist_tracks
+        from core.exports.jspf_export import build_jspf
+
+        db = get_database()
+        tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+        job['total'] = len(tracks)
+        job['phase'] = 'resolving'
+
+        resolve_fn = build_resolve_fn()
+
+        def on_progress(done, total, stats):
+            job['done'] = done
+            job['stats'] = dict(stats)
+
+        out = resolve_playlist_tracks(tracks, resolve_fn, on_progress=on_progress)
+        jspf, summary = build_jspf(title, out['resolved'], creator='SoulSync')
+        job['summary'] = summary
+        job['jspf'] = jspf
+        job['stats'] = out['stats']
+
+        if mode == 'push':
+            job['phase'] = 'pushing'
+            from core.listenbrainz_client import ListenBrainzClient
+            client = ListenBrainzClient()
+            res = client.create_playlist(title, jspf['playlist']['track'])
+            job['push'] = res
+            if res.get('success'):
+                job['phase'] = 'done'
+            else:
+                job['phase'] = 'error'
+                job['error'] = res.get('error') or 'ListenBrainz push failed'
+        else:
+            job['phase'] = 'done'
+    except Exception as e:
+        logger.error(f"[Playlist Export] job {job_id} failed: {e}")
+        job['phase'] = 'error'
+        job['error'] = str(e)
+
+
+@app.route('/api/playlists/<playlist_id>/export/listenbrainz', methods=['POST'])
+def start_playlist_export_listenbrainz(playlist_id):
+    """Start a background export of a mirrored playlist to ListenBrainz/JSPF.
+
+    Body: {"mode": "download"|"push"} (default "download"). Returns {job_id} to poll."""
+    try:
+        body = request.get_json(silent=True) or {}
+        mode = 'push' if body.get('mode') == 'push' else 'download'
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': mode, 'phase': 'starting', 'done': 0, 'total': 0,
+                'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export, args=(job_id, playlist_id, title, mode), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Playlist export start failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/export/status/<job_id>', methods=['GET'])
+def playlist_export_status(job_id):
+    """Live status for an export job (polled by the mirrored-playlist card)."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job:
+        return jsonify({"success": False, "error": "unknown job"}), 404
+    # Don't ship the full JSPF on every poll — just status + coverage.
+    out = {k: v for k, v in job.items() if k != 'jspf'}
+    out['has_download'] = bool(job.get('jspf'))
+    return jsonify({"success": True, "job": out})
+
+
+@app.route('/api/playlists/export/download/<job_id>', methods=['GET'])
+def playlist_export_download(job_id):
+    """Download a completed export's JSPF file."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job or not job.get('jspf'):
+        return jsonify({"success": False, "error": "no export available"}), 404
+    import json as _json
+    safe = re.sub(r'[^\w\-]+', '_', (job.get('title') or 'playlist')).strip('_') or 'playlist'
+    return Response(
+        _json.dumps(job['jspf'], indent=2, ensure_ascii=False),
+        mimetype='application/jspf+json',
+        headers={'Content-Disposition': f'attachment; filename="{safe}.jspf"'},
+    )
+
+
 @app.route('/api/library/artists/export', methods=['GET'])
 def export_library_artists():
     """Export the WHOLE library artist roster (name + every source id/url we have,
