@@ -333,6 +333,14 @@
             .catch(function () { /* best-effort */ });
     }
 
+    // Rebuild the whole rail stack (genre/curated shelves + the prepended personalized rows).
+    function reloadRails() {
+        renderShelves();
+        loadMoreLike();
+        loadGaps();
+        loadForYou();
+    }
+
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
     function renderShelves() {
         var host = $('[data-vdsc-shelves]'); if (!host) return;
@@ -546,12 +554,30 @@
             hide.addEventListener('change', function () {
                 page.classList.toggle('vdsc-hide-owned', hide.checked);
                 try { localStorage.setItem('vdsc_hideowned', hide.checked ? '1' : '0'); } catch (e) { /* ignore */ }
-                // The rails are now server-filtered for owned (and page deeper), so rebuild
-                // them with the new state instead of just CSS-hiding cards in place.
-                renderShelves();
-                loadMoreLike();
-                loadGaps();
-                loadForYou();
+                reloadRails();   // rails are server-filtered now (owned + paged deeper) — rebuild
+            });
+        }
+        // Rail language preference — multi-select chips, persisted server-side; rebuilds the rails.
+        var langWrap = $('[data-vdsc-langs]');
+        if (langWrap) {
+            fetch('/api/video/discover/languages', { headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var set = {}; ((d && d.languages) || ['en']).forEach(function (c) { set[c] = 1; });
+                    langWrap.querySelectorAll('.vdsc-lang').forEach(function (b) {
+                        b.classList.toggle('vdsc-lang--on', !!set[b.getAttribute('data-lang')]);
+                    });
+                }).catch(function () { /* default chip state stands */ });
+            langWrap.addEventListener('click', function (e) {
+                var btn = e.target.closest('.vdsc-lang'); if (!btn) return;
+                btn.classList.toggle('vdsc-lang--on');
+                var langs = Array.prototype.map.call(langWrap.querySelectorAll('.vdsc-lang--on'),
+                    function (b) { return b.getAttribute('data-lang'); });
+                if (!langs.length) { btn.classList.add('vdsc-lang--on'); return; }   // never allow empty
+                fetch('/api/video/discover/languages', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ languages: langs }),
+                }).then(function () { reloadRails(); }).catch(function () { /* ignore */ });
             });
         }
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
