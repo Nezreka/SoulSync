@@ -7783,7 +7783,8 @@ def get_verification_config():
     queue collapses to quarantine-only in the UI."""
     try:
         enabled = bool(config_manager.get('acoustid.enabled', False))
-        return jsonify({"success": True, "acoustid_enabled": enabled})
+        require_verified = bool(config_manager.get('acoustid.require_verified', False))
+        return jsonify({"success": True, "acoustid_enabled": enabled, "require_verified": require_verified})
     except Exception as e:
         return jsonify({"success": True, "acoustid_enabled": True, "error": str(e)})
 

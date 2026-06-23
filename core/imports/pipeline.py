@@ -529,7 +529,7 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                                 context,
                                 verification_msg,
                                 automation_engine,
-                                trigger='acoustid',
+                                trigger='acoustid_unverified' if _skip_as_fail else 'acoustid',
                             )
                             _mark_task_quarantined(context, quarantine_path)
                             logger.error(f"File quarantined due to verification failure: {quarantine_path}")
