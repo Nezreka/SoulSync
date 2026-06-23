@@ -33,29 +33,28 @@ AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.
 @register_job
 class QualityUpgradeScannerJob(RepairJob):
     job_id = 'quality_upgrade_scanner'
-    display_name = 'Quality Upgrade Scanner'
-    description = 'Flags library tracks below your quality profile'
+    display_name = 'Quality Check (flag only — you decide per finding)'
+    description = 'Flags library tracks below your quality profile; you choose re-download / delete / ignore per finding'
     help_text = (
-        'Scans your music library folder and verifies every track with the SAME '
-        'two-stage check the download/import pipeline runs:\n'
-        '1. Real-audio guard — ffmpeg actually decodes the file (truncation + '
+        'FLAG-ONLY quality job. Walks your music library folder on disk (so it also '
+        'catches loose files not in the DB) and checks every track against your v3 '
+        'quality profile — then just FLAGS what is below profile. Unlike the active '
+        '"Quality Upgrade Finder", it does NOT search a replacement; you decide what '
+        'to do per finding: Re-download / Delete / Ignore.\n\n'
+        'Two-stage check (same as the download/import pipeline):\n'
+        '1. Real-audio guard (optional, ffmpeg) — decodes the file (truncation + '
         'silence detection) to catch broken/incomplete audio the header hides.\n'
         '2. Quality gate — measured bit depth / sample rate / bitrate vs your '
-        'configured quality profile.\n'
-        'A track flagged here is one the downloader would also reject. Because it '
-        'decodes each file, a full scan takes real time (seconds per track), not '
-        'milliseconds — that\'s the deep verification doing its job.\n\n'
+        'profile targets.\n\n'
         'Settings:\n'
-        '- deep_audio_verify (default on): run the ffmpeg decode guard. Turn off '
-        'for a fast header-only pass.\n'
+        '- Deep audio verify (default OFF): run the ffmpeg decode guard. Off = fast '
+        'header-only quality pass (milliseconds/track). On = full decode '
+        '(seconds/track, CPU-heavy) but catches broken/silent audio.\n'
         '- library_tracks_only (default off): only check files matched to a '
-        'library DB track.\n\n'
-        'Each below-profile track is reported as a finding. You can:\n'
-        '• Re-download — add the track to your wishlist and remove the low-quality file\n'
-        '• Delete — remove the low-quality file\n'
-        '• Ignore — dismiss the finding and keep the file\n\n'
+        'library DB track (skip loose/orphan files).\n\n'
         'The scan only reports — it never deletes or re-downloads on its own. '
-        'Profile targets and fallback come straight from Settings → Quality.'
+        'Use the sibling "Quality Upgrade Finder" instead if you want it to actively '
+        'find and queue a better version for you.'
     )
     icon = 'repair-icon-lossless'
     default_enabled = False
@@ -65,7 +64,11 @@ class QualityUpgradeScannerJob(RepairJob):
     # audio file in the Music Library output folder, which is what users expect
     # ("check my library folder"). DB matching after a reset is unreliable and
     # would wrongly skip everything. Turn ON to ignore non-DB files.
-    default_settings = {'library_tracks_only': False, 'deep_audio_verify': True}
+    #
+    # deep_audio_verify default OFF: the ffmpeg decode is the CPU-heavy step. Most
+    # users want the fast header-only quality pass; turn it on for a deep scan that
+    # also catches broken/silent audio. (Matches the download pipeline's default.)
+    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False}
     setting_options = {'library_tracks_only': [True, False],
                        'deep_audio_verify': [True, False]}
     auto_fix = False  # User chooses fix action per finding
@@ -140,10 +143,10 @@ class QualityUpgradeScannerJob(RepairJob):
         _settings = self._get_settings(context)
         library_only = _settings.get('library_tracks_only', False)
         # Deep verify = run the ffmpeg AudioGuard (real decode) per file, exactly
-        # like the download pipeline. Slower than a header read but it's the
-        # whole point: it verifies the REAL audio, not just the metadata. On by
-        # default; can be turned off for a fast header-only pass.
-        deep_verify = _settings.get('deep_audio_verify', True)
+        # like the download pipeline. Slower than a header read (seconds vs ms) but
+        # it verifies the REAL audio, not just the metadata. OFF by default (the
+        # decode is the CPU-heavy step); turn on for a deep scan.
+        deep_verify = _settings.get('deep_audio_verify', False)
 
         probe_failed = 0
         not_in_library = 0

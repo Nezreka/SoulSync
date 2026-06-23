@@ -1698,6 +1698,12 @@ function switchRepairTab(tab) {
 // Turn a snake_case setting key into a human label. Handles acronym fix-ups
 // (EP, ID, URL, MB, AC, OS) that the naive Title-Case would otherwise botch.
 function _prettifyRepairSettingKey(key) {
+    // Full-key label overrides — for settings whose plain prettified name
+    // doesn't convey an important cost/behaviour (e.g. that it runs ffmpeg).
+    const fullKeyLabels = {
+        'deep_audio_verify': 'Deep Audio Verify (ffmpeg decode — CPU heavy)',
+    };
+    if (fullKeyLabels[key]) return fullKeyLabels[key];
     const words = key.replace(/^_+/, '').split('_');
     const acronyms = { 'eps': 'EPs', 'id': 'ID', 'url': 'URL', 'mb': 'MB',
                        'ac': 'AC', 'os': 'OS', 'api': 'API', 'mp3': 'MP3',

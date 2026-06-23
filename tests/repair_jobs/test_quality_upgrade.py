@@ -149,7 +149,24 @@ def _row(track_id=1, title='Song One', path='/music/a.mp3', bitrate=128, duratio
     return (track_id, title, path, bitrate, duration, artist, album, album_id, track_number)
 
 
+def _stub_quality(monkeypatch, *, meets: bool):
+    """Stub the v3 quality path so scan() works on fake (non-existent) file paths.
+
+    The job now probes the REAL file (mutagen) and checks it against the v3
+    ranked targets. Tests use fake paths, so we resolve the path to itself,
+    return a dummy measured quality, and force the meets/below verdict.
+    """
+    from core.quality.model import AudioQuality
+    monkeypatch.setattr(qu, 'targets_from_profile', lambda profile: (['target'], False))
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality',
+                        lambda p: AudioQuality(format='mp3', bitrate=128))
+    monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, targets: meets)
+
+
 def _stub_engine(monkeypatch):
+    # Below-profile by default — the finding-creating tests want a flagged track.
+    _stub_quality(monkeypatch, meets=False)
     monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
     monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
     monkeypatch.setattr(
@@ -346,8 +363,9 @@ def test_find_track_in_album_exact_title_with_track_number(monkeypatch):
 
 
 def test_scan_skips_tracks_meeting_quality(monkeypatch):
-    # A 320 kbps MP3 meets the balanced profile → no finding, no metadata calls.
+    # A track that meets the profile → no finding, no metadata calls.
     db = _FakeDB([_row(track_id=2, title='Good Song', bitrate=320)], BALANCED)
+    _stub_quality(monkeypatch, meets=True)
 
     def _boom(*a, **k):  # must never be called for an acceptable track
         raise AssertionError("matching should not run for an acceptable track")

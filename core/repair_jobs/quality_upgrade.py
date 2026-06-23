@@ -39,6 +39,11 @@ from core.discovery.quality_scanner import (
 )
 from core.library.file_tags import read_embedded_tags
 from core.library.path_resolver import resolve_library_file_path
+# v3 quality: probe the real file + check it against the ranked profile targets,
+# the SAME definition the download import guard uses. Module-level so they're
+# monkeypatchable in tests.
+from core.imports.file_ops import probe_audio_quality
+from core.quality.selection import targets_from_profile, quality_meets_profile
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
@@ -436,45 +441,58 @@ def _find_best_match(engine: Any, source_priority: List[str], title: str, artist
 @register_job
 class QualityUpgradeJob(RepairJob):
     job_id = 'quality_upgrade'
-    display_name = 'Quality Upgrade Finder'
-    description = 'Finds library tracks below your preferred quality and proposes a better version'
+    display_name = 'Quality Upgrade Finder (active — proposes a replacement)'
+    description = 'Finds library tracks below your quality profile and actively searches a better version to add to the wishlist'
     help_text = (
-        'Scans your library (or just your watchlist artists) and compares each '
-        "track against your Quality Profile using BOTH the file format and its "
-        'bitrate — so a 128 kbps MP3 is no longer treated the same as a 320 kbps '
-        'one, and enabling MP3-320/256 in your profile actually counts.\n\n'
-        'For every track below your preferred quality it resolves the exact better '
-        'version using the most precise identity available, in order: the source '
-        "track ID enrichment wrote into the file → the file's ISRC → the album's "
-        'tracklist (by stored album ID or album search) → a name/artist search. The '
-        'fuzzy steps also reject candidates whose length is off (wrong live/edit cut). '
-        'It skips tracks it already proposed, so re-runs are cheap. Nothing is queued '
-        'automatically: applying a finding adds that matched track — with its album '
-        'context — to the wishlist, the same as any other download.\n\n'
+        'ACTIVE quality job. For every library track below your quality profile it '
+        'goes one step further than the Quality Check (flag-only) scanner: it '
+        'actively SEARCHES your metadata source for the exact better version and '
+        'attaches it to the finding, so Apply adds that track straight to your '
+        'wishlist.\n\n'
+        'Quality is judged the SAME way as the download/import pipeline — it reads '
+        'the REAL file with mutagen (measured bit depth / sample rate / bitrate) and '
+        'checks it against your v3 quality profile targets (strict: fallback is '
+        'ignored, that\'s a download-time concession, not "good enough" for an '
+        'upgrade). So a 128 kbps MP3, a 16-bit FLAC where you want 24-bit, etc. are '
+        'all caught accurately.\n\n'
+        'For every below-profile track it resolves the better version by the most '
+        'precise identity available, in order: the source track ID enrichment wrote '
+        "into the file → the file's ISRC → the album's tracklist (by stored album ID "
+        'or album search) → a name/artist search (with a duration guard against wrong '
+        'live/edit cuts). It skips tracks it already proposed, so re-runs are cheap. '
+        'Nothing is queued automatically — applying a finding adds the matched track '
+        '(with album context) to the wishlist, like any other download.\n\n'
         'Settings:\n'
         '- Scope: "watchlist" (watchlisted artists only) or "all" (whole library)\n'
-        '- Min confidence: minimum match confidence (0-1) to surface a finding\n\n'
-        'Note: detecting fake/transcoded lossless files is handled by the separate '
-        'Fake Lossless Detector job.'
+        '- Min confidence: minimum match confidence (0-1) to surface a finding\n'
+        '- Deep audio verify (default OFF): also run the ffmpeg decode guard '
+        '(truncation + silence) per track — catches broken/incomplete files the '
+        'header hides, but decodes every file (seconds per track, CPU-heavy).\n\n'
+        'Sibling job: "Quality Check (flag only)" finds the same below-profile tracks '
+        'but only flags them for you to decide per finding (re-download / delete / '
+        'ignore) instead of searching a replacement. Fake/transcoded lossless '
+        'detection is the separate Fake Lossless Detector job.'
     )
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7}
-    setting_options = {'scope': ['watchlist', 'all']}
+    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7, 'deep_audio_verify': False}
+    setting_options = {'scope': ['watchlist', 'all'], 'deep_audio_verify': [True, False]}
     auto_fix = False
 
     def _get_settings(self, context: JobContext) -> Dict[str, Any]:
         cfg = context.config_manager
         scope = 'watchlist'
         min_conf = 0.7
+        deep_verify = False
         if cfg:
             scope = cfg.get(self.get_config_key('settings.scope'), 'watchlist') or 'watchlist'
             try:
                 min_conf = float(cfg.get(self.get_config_key('settings.min_confidence'), 0.7))
             except (TypeError, ValueError):
                 min_conf = 0.7
-        return {'scope': scope, 'min_confidence': min_conf}
+            deep_verify = cfg.get(self.get_config_key('settings.deep_audio_verify'), False) is True
+        return {'scope': scope, 'min_confidence': min_conf, 'deep_audio_verify': deep_verify}
 
     def _load_tracks(self, db: Any, scope: str) -> List[dict]:
         conn = db._get_connection()
@@ -530,11 +548,18 @@ class QualityUpgradeJob(RepairJob):
         settings = self._get_settings(context)
         scope = settings['scope']
         min_conf = settings['min_confidence']
+        deep_verify = settings['deep_audio_verify']
 
+        # v3 quality: judge the REAL file (mutagen-measured bit depth / sample rate
+        # / bitrate) against the profile's ranked targets — the SAME definition the
+        # download import guard uses. Strict: fallback is ignored (a download-time
+        # concession, not "good enough" for an upgrade). targets_from_profile /
+        # quality_meets_profile / probe_audio_quality are imported at module level.
         db = context.db
         quality_profile = db.get_quality_profile()
-        if preferred_quality_floor(quality_profile) is None:
-            logger.info("[Quality Upgrade] No quality buckets enabled in profile — nothing to flag")
+        targets, _fallback = targets_from_profile(quality_profile)
+        if not targets:
+            logger.info("[Quality Upgrade] No quality targets in profile — nothing to flag")
             return result
 
         try:
@@ -583,13 +608,38 @@ class QualityUpgradeJob(RepairJob):
                 result.findings_skipped_dedup += 1
                 continue
 
-            if meets_preferred_quality(file_path, bitrate, quality_profile):
+            # v3 quality decision — probe the REAL file. Resolve the library path
+            # first (the DB stores a possibly-relative path).
+            resolved_path = resolve_library_file_path(file_path) if file_path else None
+            if not resolved_path and file_path and os.path.isfile(file_path):
+                resolved_path = file_path
+
+            measured_aq = probe_audio_quality(resolved_path) if resolved_path else None
+
+            # Optional ffmpeg deep verify (default off): a truncated/silent file is
+            # treated as "needs a replacement" just like a below-profile one.
+            broken_reason = None
+            if deep_verify and resolved_path:
+                try:
+                    from core.imports.silence import detect_broken_audio
+                    broken_reason = detect_broken_audio(resolved_path)
+                except Exception as e:
+                    logger.debug("[Quality Upgrade] deep verify failed for %s: %s", file_path, e)
+
+            if measured_aq is None and not broken_reason:
+                # Can't read the file → can't judge it; leave it alone.
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 25 == 0:
                     context.update_progress(i + 1, total)
                 continue
 
-            # Below preferred quality — find a better version to propose.
+            if not broken_reason and measured_aq is not None and quality_meets_profile(measured_aq, targets):
+                result.skipped += 1
+                if context.update_progress and (i + 1) % 25 == 0:
+                    context.update_progress(i + 1, total)
+                continue
+
+            # Below profile (or broken) — find a better version to propose.
             if engine is None:
                 from core.matching_engine import MusicMatchingEngine
                 engine = MusicMatchingEngine()
@@ -602,12 +652,14 @@ class QualityUpgradeJob(RepairJob):
                 logger.info("[Quality Upgrade] Spotify rate-limited — stopping scan early")
                 return result
 
-            current_rank = classify_track_quality(file_path, bitrate)
-            current_label = _rank_label(current_rank)
+            current_label = measured_aq.label() if measured_aq is not None else 'broken/unreadable'
+            if broken_reason:
+                current_label = f'{current_label} (broken: {broken_reason})' if measured_aq is not None else f'broken ({broken_reason})'
             if context.report_progress:
+                _why = 'broken audio' if broken_reason else 'low quality'
                 context.report_progress(
                     scanned=i + 1, total=total,
-                    log_line=f'Low quality ({current_label}): {artist_name} - {title}',
+                    log_line=f'{_why} ({current_label}): {artist_name} - {title}',
                     log_type='info')
 
             # Read the identifiers enrichment embedded in the file once (ISRC +
