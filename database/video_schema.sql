@@ -78,6 +78,8 @@ CREATE TABLE IF NOT EXISTS movies (
     studio               TEXT,
     content_rating       TEXT,            -- e.g. PG-13
     tagline              TEXT,
+    tmdb_collection_id   INTEGER,         -- TMDB belongs_to_collection id (franchise); for "complete your collections" gaps
+    tmdb_collection_name TEXT,            -- collection display name (e.g. "The Matrix Collection")
     rating               REAL,            -- TMDB audience score (0-10)
     rating_critic        REAL,            -- critic score (0-100) when offered
     imdb_rating          REAL,            -- IMDb (0-10, via OMDb)
@@ -96,6 +98,7 @@ CREATE TABLE IF NOT EXISTS movies (
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_movies_collection ON movies(tmdb_collection_id);
 CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
 CREATE INDEX IF NOT EXISTS idx_movies_release    ON movies(release_date);
 -- Upsert/stale-removal key: the server's native id. Multiple NULLs are allowed

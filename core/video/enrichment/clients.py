@@ -97,6 +97,12 @@ class TMDBClient:
             if kind == "movie":
                 meta["release_date"] = dr.get("release_date")
                 meta["runtime_minutes"] = dr.get("runtime")
+                # Franchise/collection (belongs_to_collection is a standard movie-detail
+                # field) — persisted so "complete your collections" gaps can diff it (#discover).
+                bc = dr.get("belongs_to_collection")
+                if bc and bc.get("id"):
+                    meta["tmdb_collection_id"] = bc.get("id")
+                    meta["tmdb_collection_name"] = bc.get("name")
             else:
                 meta["first_air_date"] = dr.get("first_air_date")
                 meta["last_air_date"] = dr.get("last_air_date")
@@ -837,7 +843,7 @@ class OMDBClient:
             err = ""
             try:
                 err = ((r.json() or {}).get("Error") or "").strip()
-            except Exception:
+            except Exception:  # noqa: S110 - best-effort error-body parse; we raise OMDbAuthError below regardless
                 pass
             raise OMDbAuthError(err or "OMDb rejected the API key (HTTP 401)")
         r.raise_for_status()
