@@ -82,11 +82,11 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-bottom-right-radius: 24px;
 
-    /* Soft floating shadow with inner glow */
+    /* Soft floating shadow with inner glow — dropped the 0 4px 16px duplicate and the
+       0 0 60px accent glow (60px blur at 6% opacity: nearly invisible but a costly
+       shadow pass). One outer + the two insets read the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        0 0 60px rgba(var(--accent-rgb), 0.06),
+        0 8px 30px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.1),
         inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 
@@ -8256,10 +8256,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     margin: 20px;
-    /* Soft floating shadow */
+    /* Soft floating shadow — one outer layer instead of two stacked (this is a
+       near-fullscreen element, so each shadow pass is expensive); the single
+       slightly-stronger blur reads the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 8px 28px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -8915,8 +8916,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .service-card {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: the 90% opaque bg made blur(12px) invisible (x3 cards,
+       pure GPU waste). Bumped to 0.97 so the now-unblurred sliver is imperceptible. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px 22px;
@@ -9687,8 +9689,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .stat-card-dashboard {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: 90% opaque bg made blur(12px) invisible (x3, GPU waste);
+       0.97 keeps it looking solid. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px;
@@ -10094,9 +10097,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .activity-feed-container {
     /* Premium glassmorphic foundation */
     background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
+            rgba(26, 26, 26, 0.97) 0%,
+            rgba(18, 18, 18, 0.99) 100%);
+    /* backdrop-filter dropped: 95-99% opaque bg already hid the blur (GPU waste). */
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
