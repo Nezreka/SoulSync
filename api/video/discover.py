@@ -282,13 +282,19 @@ def register_routes(bp):
         if providers and "," in providers:
             providers = providers.replace(",", "|")   # TMDB with_watch_providers OR-join
         sort = request.args.get("sort") or "popularity.desc"
-        lang = (request.args.get("lang") or "").strip() or None       # explicit (foreign rail)
+        lang = (request.args.get("lang") or "").strip().lower() or None  # explicit (foreign rail / browse)
+        # The Browse-all grid sends `lang=any` to opt OUT of the rail language preference
+        # entirely (ad-hoc search shows every language); a real code (en/ko/…) filters to it.
+        any_lang = lang in ("any", "all")
+        if any_lang:
+            lang = None
         hide_owned = (request.args.get("hide_owned") or "") in ("1", "true", "yes")
         # Preferred original-languages (multi) for GENERAL/curated rails — so the feeds
         # aren't flooded with foreign titles (e.g. Bollywood in Popular/Trending). A rail
-        # with an explicit `lang` (a dedicated foreign rail) bypasses this. Default 'en'.
+        # with an explicit `lang` (a dedicated foreign rail) or `lang=any` (browse) bypasses
+        # this. Default 'en'.
         prefer_langs = None
-        if not lang:
+        if not lang and not any_lang:
             try:
                 from . import get_video_db
                 raw = get_video_db().get_setting("discover_languages", "en") or "en"
