@@ -796,6 +796,77 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def owned_movie_tmdb_ids(self, server_source=None) -> set:
+        """Set of TMDB ids the user OWNS (movies with a file) — for diffing against
+        franchise/filmography lists in the gap engine."""
+        sql = "SELECT DISTINCT tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL"
+        args: list = []
+        if server_source:
+            sql += " AND server_source=?"
+            args.append(server_source)
+        conn = self._get_connection()
+        try:
+            return {r["tmdb_id"] for r in conn.execute(sql, args)}
+        except sqlite3.Error:
+            return set()
+        finally:
+            conn.close()
+
+    def owned_movie_collections(self, server_source=None, limit: int = 12) -> list:
+        """Franchises the user has STARTED (owns >=1 movie in), most-invested first —
+        drives the 'Complete your collections' gap rails. Returns
+        [{collection_id, name, owned_count}]."""
+        sql = ("SELECT tmdb_collection_id AS cid, "
+               "MAX(tmdb_collection_name) AS name, COUNT(*) AS c "
+               "FROM movies WHERE has_file=1 AND tmdb_collection_id IS NOT NULL")
+        args: list = []
+        if server_source:
+            sql += " AND server_source=?"
+            args.append(server_source)
+        sql += " GROUP BY tmdb_collection_id ORDER BY c DESC, name LIMIT ?"
+        args.append(int(limit))
+        conn = self._get_connection()
+        try:
+            return [{"collection_id": r["cid"], "name": r["name"], "owned_count": r["c"]}
+                    for r in conn.execute(sql, args)]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def top_owned_people(self, jobs=("Director", "Creator"), min_titles: int = 2,
+                         limit: int = 8, server_source=None) -> list:
+        """People the user owns the most titles from (e.g. directors), busiest first —
+        drives the 'More from <person>' gap rails. Returns
+        [{person_id, tmdb_id, name, owned_count}] for people with a TMDB id and at
+        least ``min_titles`` owned movies in the given crew ``jobs``."""
+        job_list = [j for j in (jobs or []) if j]
+        if not job_list:
+            return []
+        placeholders = ",".join("?" for _ in job_list)
+        sql = (f"SELECT p.id AS pid, p.tmdb_id AS tmdb_id, p.name AS name, "
+               f"COUNT(DISTINCT c.movie_id) AS c "
+               f"FROM credits c JOIN people p ON p.id = c.person_id "
+               f"JOIN movies m ON m.id = c.movie_id "
+               f"WHERE m.has_file=1 AND c.department='crew' AND c.job IN ({placeholders}) "
+               f"AND p.tmdb_id IS NOT NULL")
+        args: list = list(job_list)
+        if server_source:
+            sql += " AND m.server_source=?"
+            args.append(server_source)
+        sql += " GROUP BY p.id HAVING c >= ? ORDER BY c DESC, p.name LIMIT ?"
+        args.append(int(min_titles))
+        args.append(int(limit))
+        conn = self._get_connection()
+        try:
+            return [{"person_id": r["pid"], "tmdb_id": r["tmdb_id"],
+                     "name": r["name"], "owned_count": r["c"]}
+                    for r in conn.execute(sql, args)]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
     def apply_ratings(self, kind: str, item_id: int, ratings: dict) -> None:
         """Store IMDb / RT / Metacritic scores (from OMDb) + mark ratings_synced.
         Ratings are dynamic, so these overwrite (unlike gap-only metadata)."""
