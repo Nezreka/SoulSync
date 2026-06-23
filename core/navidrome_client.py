@@ -1192,7 +1192,11 @@ class NavidromeClient(MediaServerClient):
 
             primary = existing_playlists[0]
             existing_tracks = self.get_playlist_tracks(primary.id)
-            current_ids = [str(t.id) for t in existing_tracks if getattr(t, 'id', None)]
+            # #905: NavidromeTrack exposes the Subsonic song id as `ratingKey` (NOT `.id`,
+            # which doesn't exist) — same as append_to_playlist reads it. Reading `t.id` here
+            # made current_ids ALWAYS empty, so reconcile thought the playlist was empty and
+            # re-added every track each sync (playlists doubling) while removing nothing.
+            current_ids = [str(t.ratingKey) for t in existing_tracks if getattr(t, 'ratingKey', None)]
             desired_ids = []
             for t in tracks:
                 tid = (str(t.ratingKey) if hasattr(t, 'ratingKey')
