@@ -133,15 +133,128 @@
         var sub = [it.year, it.kind === 'movie' ? 'Movie' : 'TV'].filter(Boolean).join(' · ');
         var cb = window.VideoGet ? VideoGet.cardButton({ kind: it.kind, tmdbId: it.tmdb_id,
             libraryId: it.library_id, title: it.title, poster: it.poster, status: it.status, source: source }) : '';
+        // 'Not interested' — un-owned cards only (you can't be uninterested in what you own).
+        var notInt = (!owned && it.tmdb_id) ? '<button class="vsr-notint" type="button" title="Not interested" ' +
+            'aria-label="Not interested" data-ig-kind="' + it.kind + '" data-ig-id="' + it.tmdb_id + '" ' +
+            'data-ig-title="' + esc(it.title || '') + '" data-ig-year="' + (it.year || '') + '" ' +
+            'data-ig-poster="' + esc(it.poster || '') + '">✕</button>' : '';
         return '<a class="vsr-card' + (owned ? ' vsr-card--owned' : '') + '" href="' + href + '" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id +
-            '" style="--vgm-h:' + hueOf(it.title) + '">' + cb +
+            '" style="--vgm-h:' + hueOf(it.title) + '">' + cb + notInt +
             '<div class="vsr-poster">' + img + ribbon + rating +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +
             '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
     }
     function hydrateGet(root) { if (window.VideoWatchlist) VideoWatchlist.hydrate(root); }
+
+    // ── 'Not interested' + ignore-list management ─────────────────────────────
+    function postIgnore(payload) {
+        return fetch('/api/video/discover/ignore', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        }).then(function (r) { return r.ok ? r.json() : null; });
+    }
+    function wireNotInterested() {
+        if (state._notIntWired) return; state._notIntWired = true;
+        document.addEventListener('click', function (e) {
+            var b = e.target.closest('.vsr-notint'); if (!b) return;
+            e.preventDefault(); e.stopPropagation();
+            postIgnore({ action: 'add', kind: b.getAttribute('data-ig-kind'),
+                tmdb_id: parseInt(b.getAttribute('data-ig-id'), 10),
+                title: b.getAttribute('data-ig-title'),
+                year: parseInt(b.getAttribute('data-ig-year'), 10) || null,
+                poster: b.getAttribute('data-ig-poster') || null });
+            var card = b.closest('.vsr-card');
+            if (card) { card.style.transition = 'opacity .2s, transform .2s'; card.style.opacity = '0'; card.style.transform = 'scale(.92)'; setTimeout(function () { card.remove(); }, 200); }
+        }, true);
+    }
+    function igRowHtml(it, btnLabel) {
+        return '<button class="vdsc-ig-res" type="button" data-ig-kind="' + it.kind + '" data-ig-id="' + it.tmdb_id +
+            '" data-ig-title="' + esc(it.title || '') + '" data-ig-year="' + (it.year || '') + '" data-ig-poster="' + esc(it.poster || '') + '">' +
+            (it.poster ? '<img src="' + esc(it.poster) + '" alt="">' : '<span class="vdsc-ig-ph">' + (it.kind === 'movie' ? '🎬' : '📺') + '</span>') +
+            '<span class="vdsc-ig-rn">' + esc(it.title || 'Untitled') + (it.year ? ' (' + it.year + ')' : '') + '</span>' +
+            '<span class="vdsc-ig-add">' + btnLabel + '</span></button>';
+    }
+    function renderIgnoreList(ov) {
+        var box = ov.querySelector('[data-ig-list]');
+        fetch('/api/video/discover/ignore', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var items = (d && d.items) || [];
+                if (!items.length) {
+                    box.innerHTML = '<div class="vdsc-ig-empty"><div class="vdsc-ig-empty-ic">🙈</div>' +
+                        '<div>Nothing hidden yet.</div><div class="vdsc-ig-empty-sub">Hover any Discover card and hit ✕, or search above to hide a title.</div></div>';
+                    return;
+                }
+                box.innerHTML = '<div class="vdsc-ig-count">' + items.length + ' hidden</div><div class="vdsc-ig-grid">' +
+                    items.map(function (it) {
+                        return '<div class="vdsc-ig-card" data-ig-kind="' + it.kind + '" data-ig-id="' + it.tmdb_id + '">' +
+                            (it.poster ? '<img class="vdsc-ig-poster" src="' + esc(it.poster) + '" alt="">'
+                                       : '<div class="vdsc-ig-poster vdsc-ig-ph">' + (it.kind === 'movie' ? '🎬' : '📺') + '</div>') +
+                            '<div class="vdsc-ig-meta"><span class="vdsc-ig-name">' + esc(it.title || 'Untitled') + '</span>' +
+                            (it.year ? '<span class="vdsc-ig-yr">' + it.year + '</span>' : '') + '</div>' +
+                            '<button class="vdsc-ig-remove" type="button">Un-hide</button></div>';
+                    }).join('') + '</div>';
+            }).catch(function () { box.innerHTML = '<div class="vdsc-ig-empty">Could not load the list.</div>'; });
+    }
+    function openIgnoreModal() {
+        var ex = document.getElementById('vdsc-ignore-modal'); if (ex) ex.remove();
+        var ov = document.createElement('div');
+        ov.id = 'vdsc-ignore-modal';
+        ov.className = 'vdsc-ig-overlay';
+        ov.innerHTML =
+            '<div class="vdsc-ig-modal" role="dialog" aria-label="Not interested list">' +
+                '<div class="vdsc-ig-head"><div><div class="vdsc-ig-title">Not Interested</div>' +
+                    '<div class="vdsc-ig-sub">Titles hidden from Discover — they won\'t show in any rail or recommendation.</div></div>' +
+                    '<button class="vdsc-ig-close" type="button" aria-label="Close">✕</button></div>' +
+                '<div class="vdsc-ig-search"><input type="text" class="vdsc-ig-input" placeholder="Search a movie or show to hide…">' +
+                    '<div class="vdsc-ig-results" data-ig-results></div></div>' +
+                '<div class="vdsc-ig-list" data-ig-list><div class="vdsc-ig-empty">Loading…</div></div>' +
+            '</div>';
+        document.body.appendChild(ov);
+        requestAnimationFrame(function () { ov.classList.add('vdsc-ig-in'); });
+        var close = function () { ov.classList.remove('vdsc-ig-in'); setTimeout(function () { ov.remove(); }, 180); };
+        ov.addEventListener('click', function (e) { if (e.target === ov || e.target.closest('.vdsc-ig-close')) close(); });
+        document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
+
+        renderIgnoreList(ov);
+
+        var input = ov.querySelector('.vdsc-ig-input');
+        var resBox = ov.querySelector('[data-ig-results]');
+        var t = null;
+        input.addEventListener('input', function () {
+            clearTimeout(t);
+            var q = input.value.trim();
+            if (q.length < 2) { resBox.innerHTML = ''; return; }
+            t = setTimeout(function () {
+                fetch('/api/video/search?q=' + encodeURIComponent(q), { headers: { Accept: 'application/json' } })
+                    .then(function (r) { return r.ok ? r.json() : null; })
+                    .then(function (d) {
+                        var items = ((d && d.results) || []).filter(function (x) {
+                            return x.tmdb_id && (x.kind === 'movie' || x.kind === 'show');
+                        }).slice(0, 8);
+                        resBox.innerHTML = items.length ? items.map(function (x) { return igRowHtml(x, '+ Hide'); }).join('')
+                            : '<div class="vdsc-ig-nores">No matches</div>';
+                    }).catch(function () { resBox.innerHTML = ''; });
+            }, 300);
+        });
+        resBox.addEventListener('click', function (e) {
+            var b = e.target.closest('.vdsc-ig-res'); if (!b) return;
+            postIgnore({ action: 'add', kind: b.getAttribute('data-ig-kind'),
+                tmdb_id: parseInt(b.getAttribute('data-ig-id'), 10), title: b.getAttribute('data-ig-title'),
+                year: parseInt(b.getAttribute('data-ig-year'), 10) || null, poster: b.getAttribute('data-ig-poster') || null })
+                .then(function () { input.value = ''; resBox.innerHTML = ''; renderIgnoreList(ov); });
+        });
+        ov.querySelector('[data-ig-list]').addEventListener('click', function (e) {
+            var b = e.target.closest('.vdsc-ig-remove'); if (!b) return;
+            var c = b.closest('.vdsc-ig-card');
+            postIgnore({ action: 'remove', kind: c.getAttribute('data-ig-kind'),
+                tmdb_id: parseInt(c.getAttribute('data-ig-id'), 10) })
+                .then(function () { c.style.opacity = '0'; c.style.transform = 'scale(.9)';
+                    setTimeout(function () { renderIgnoreList(ov); }, 160); });
+        });
+    }
 
     // ── hero slideshow ────────────────────────────────────────────────────────
     function loadHero() {
@@ -549,6 +662,8 @@
         var hero = $('[data-vdsc-hero]');
         if (hero) { hero.addEventListener('mouseenter', stopHeroTimer); hero.addEventListener('mouseleave', startHeroTimer); }
 
+        var igBtn = $('[data-vdsc-ignore-open]'); if (igBtn && !igBtn._wired) { igBtn._wired = 1; igBtn.addEventListener('click', openIgnoreModal); }
+        wireNotInterested();
         var apply = $('[data-vdsc-apply]'); if (apply) apply.addEventListener('click', applyFilter);
         var clear = $('[data-vdsc-clear]'); if (clear) clear.addEventListener('click', closeCategory);
         var more = $('[data-vdsc-more]'); if (more) more.addEventListener('click', function () { loadGrid(false); });
