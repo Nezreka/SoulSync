@@ -2364,6 +2364,15 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-lang:hover { color: rgba(255, 255, 255, 0.85); }
 .vdsc-lang--on { color: #fff; background: rgba(var(--accent-rgb, 88 101 242), 0.85); border-color: transparent; }
 
+/* ── Page-wide Discover controls (sit above the Browse panel; affect every rail) ── */
+.vdsc-global { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px;
+    padding: 11px 16px; margin: 14px 0 6px; border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); }
+.vdsc-global-label { font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.32); margin-right: 2px; }
+.vdsc-global .vdsc-toggle { margin-left: 0; }
+.vdsc-global .vdsc-langs { margin-left: 0; }
+
 /* ── 'Not interested' card button ──────────────────────────────────────────── */
 .vsr-card { position: relative; }
 .vsr-notint { position: absolute; top: 6px; left: 6px; z-index: 6; width: 24px; height: 24px;
