@@ -476,8 +476,8 @@ class QualityUpgradeJob(RepairJob):
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7, 'deep_audio_verify': False}
-    setting_options = {'scope': ['watchlist', 'all'], 'deep_audio_verify': [True, False]}
+    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7, 'deep_audio_verify': False, 'require_top_target': False}
+    setting_options = {'scope': ['watchlist', 'all'], 'deep_audio_verify': [True, False], 'require_top_target': [True, False]}
     auto_fix = False
 
     def _get_settings(self, context: JobContext) -> Dict[str, Any]:
@@ -485,6 +485,7 @@ class QualityUpgradeJob(RepairJob):
         scope = 'watchlist'
         min_conf = 0.7
         deep_verify = False
+        require_top = False
         if cfg:
             scope = cfg.get(self.get_config_key('settings.scope'), 'watchlist') or 'watchlist'
             try:
@@ -492,7 +493,8 @@ class QualityUpgradeJob(RepairJob):
             except (TypeError, ValueError):
                 min_conf = 0.7
             deep_verify = cfg.get(self.get_config_key('settings.deep_audio_verify'), False) is True
-        return {'scope': scope, 'min_confidence': min_conf, 'deep_audio_verify': deep_verify}
+            require_top = cfg.get(self.get_config_key('settings.require_top_target'), False) is True
+        return {'scope': scope, 'min_confidence': min_conf, 'deep_audio_verify': deep_verify, 'require_top_target': require_top}
 
     def _load_tracks(self, db: Any, scope: str) -> List[dict]:
         conn = db._get_connection()
@@ -549,6 +551,7 @@ class QualityUpgradeJob(RepairJob):
         scope = settings['scope']
         min_conf = settings['min_confidence']
         deep_verify = settings['deep_audio_verify']
+        require_top = settings['require_top_target']
 
         # v3 quality: judge the REAL file (mutagen-measured bit depth / sample rate
         # / bitrate) against the profile's ranked targets — the SAME definition the
@@ -561,6 +564,12 @@ class QualityUpgradeJob(RepairJob):
         if not targets:
             logger.info("[Quality Upgrade] No quality targets in profile — nothing to flag")
             return result
+
+        # require_top_target: only the highest-priority target (targets[0]) counts
+        # as "good enough". A 16-bit FLAC is flagged even when 16-bit is an accepted
+        # fallback, because the user's preferred quality is 24-bit. Default off so
+        # existing behaviour (any target satisfied = skip) is unchanged.
+        check_targets = targets[:1] if require_top and len(targets) > 1 else targets
 
         try:
             tracks = self._load_tracks(db, scope)
@@ -633,7 +642,7 @@ class QualityUpgradeJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
-            if not broken_reason and measured_aq is not None and quality_meets_profile(measured_aq, targets):
+            if not broken_reason and measured_aq is not None and quality_meets_profile(measured_aq, check_targets):
                 result.skipped += 1
                 if context.update_progress and (i + 1) % 25 == 0:
                     context.update_progress(i + 1, total)
@@ -737,8 +746,9 @@ class QualityUpgradeJob(RepairJob):
                         file_path=file_path,
                         title=f'Upgrade: {artist_name} - {title} ({current_label})',
                         description=(
-                            f'"{title}" by {artist_name} is {current_label}, below your preferred '
-                            f'quality. Best match: "{_track_name(best)}" via {source} '
+                            f'"{title}" by {artist_name} is {current_label}'
+                            + (f', below your preferred quality ({targets[0].label})' if require_top and len(targets) > 1 else ', below your preferred quality')
+                            + f'. Best match: "{_track_name(best)}" via {source} '
                             f'({_MATCH_NOTE.get(matched_via, "matched") if matched_via != "search" else f"confidence {conf:.0%}"}). '
                             'Apply to add it to the wishlist.'),
                         details={

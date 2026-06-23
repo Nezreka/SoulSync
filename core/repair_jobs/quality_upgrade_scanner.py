@@ -68,9 +68,10 @@ class QualityUpgradeScannerJob(RepairJob):
     # deep_audio_verify default OFF: the ffmpeg decode is the CPU-heavy step. Most
     # users want the fast header-only quality pass; turn it on for a deep scan that
     # also catches broken/silent audio. (Matches the download pipeline's default.)
-    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False}
+    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False, 'require_top_target': False}
     setting_options = {'library_tracks_only': [True, False],
-                       'deep_audio_verify': [True, False]}
+                       'deep_audio_verify': [True, False],
+                       'require_top_target': [True, False]}
     auto_fix = False  # User chooses fix action per finding
 
     def scan(self, context: JobContext) -> JobResult:
@@ -147,6 +148,10 @@ class QualityUpgradeScannerJob(RepairJob):
         # it verifies the REAL audio, not just the metadata. OFF by default (the
         # decode is the CPU-heavy step); turn on for a deep scan.
         deep_verify = _settings.get('deep_audio_verify', False)
+        # require_top_target: flag files that meet a lower target but not the
+        # highest-priority one (e.g. 16-bit FLAC when 24-bit is preferred).
+        require_top = _settings.get('require_top_target', False)
+        check_targets = targets[:1] if require_top and len(targets) > 1 else targets
 
         probe_failed = 0
         not_in_library = 0
@@ -203,7 +208,7 @@ class QualityUpgradeScannerJob(RepairJob):
                 probe_failed += 1
                 result.skipped += 1
                 continue
-            elif not quality_meets_profile(aq, targets):
+            elif not quality_meets_profile(aq, check_targets):
                 issue = 'below_profile'
                 current_label = aq.label()
             else:
@@ -222,11 +227,13 @@ class QualityUpgradeScannerJob(RepairJob):
                          f'verification (ffmpeg): {broken_reason}')
                 _severity = 'warning'
             else:
-                _title = f'Below quality: {disp_title} ({current_label})'
-                _desc = (f'"{disp_title}" by {disp_artist} is {current_label}, '
-                         f'which does not meet your quality profile '
-                         f'({", ".join(target_labels[:3])}'
-                         f'{"…" if len(target_labels) > 3 else ""}).')
+                _pref = targets[0].label if require_top and len(targets) > 1 else None
+                _title = f'{"Upgradeable" if _pref else "Below quality"}: {disp_title} ({current_label})'
+                _desc = (f'"{disp_title}" by {disp_artist} is {current_label}'
+                         + (f', below your preferred quality ({_pref}).' if _pref else
+                            f', which does not meet your quality profile '
+                            f'({", ".join(target_labels[:3])}'
+                            f'{"…" if len(target_labels) > 3 else ""}).'))
                 _severity = 'info'
 
             if context.report_progress:
