@@ -601,7 +601,9 @@ function renderMirroredCard(p, container) {
         <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
+        <button class="mirrored-card-export" onclick="event.stopPropagation(); exportMirroredPlaylist(${p.id}, '${_escJs(p.display_name || p.name)}')" title="Export to ListenBrainz / JSPF">📤</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
+        <div class="mirrored-card-export-status" id="export-status-${p.id}" style="display:none;"></div>
     `;
     card.addEventListener('click', () => {
         const st = youtubePlaylistStates[hash];
@@ -642,6 +644,101 @@ function renderMirroredCard(p, container) {
     if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
         pollMirroredPipelineStatus(p.id, p.name);
     }
+}
+
+// ── Playlist export to ListenBrainz / JSPF (#903) ───────────────────────────
+// Export button on the mirrored-playlist card -> pick a destination -> background job
+// resolves each track to a MusicBrainz recording MBID (cache/DB/file/MusicBrainz) and either
+// downloads the .jspf or pushes the playlist straight to ListenBrainz, with live status on the card.
+function exportMirroredPlaylist(playlistId, name) {
+    const existing = document.getElementById('pl-export-modal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'pl-export-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="width:420px;max-width:92vw;background:linear-gradient(135deg,rgba(26,26,30,0.98),rgba(18,18,22,0.99));border:1px solid rgba(var(--accent-rgb),0.25);border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.55);">
+            <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">Export playlist</div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.55);margin-bottom:18px;">${_esc(name)} → ListenBrainz</div>
+            <button class="pl-export-choice" data-mode="push" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(var(--accent-rgb),0.12);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to ListenBrainz</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create the playlist directly on your ListenBrainz account (needs your LB token).</div>
+            </button>
+            <button class="pl-export-choice" data-mode="download" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Download .jspf file</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Save a JSPF playlist you can upload to ListenBrainz manually.</div>
+            </button>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Each track is matched to its MusicBrainz recording ID (cached → library → file tag → MusicBrainz). Tracks without an ID can't be included — you'll see how many matched.</div>
+            <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
+        </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            overlay.remove();
+            _startPlaylistExport(playlistId, mode, name);
+        });
+    });
+    document.body.appendChild(overlay);
+}
+
+async function _startPlaylistExport(playlistId, mode, name) {
+    _setExportStatus(playlistId, `<span style="color:#a78bfa;">Starting export…</span>`);
+    try {
+        const resp = await fetch(`/api/playlists/${playlistId}/export/listenbrainz`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode }),
+        });
+        const data = await resp.json();
+        if (!data.success || !data.job_id) {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">Export failed to start</span>`);
+            return;
+        }
+        _pollPlaylistExport(data.job_id, playlistId, mode, name);
+    } catch (e) {
+        _setExportStatus(playlistId, `<span style="color:#ef4444;">Export error</span>`);
+    }
+}
+
+async function _pollPlaylistExport(jobId, playlistId, mode, name) {
+    try {
+        const resp = await fetch(`/api/playlists/export/status/${jobId}`);
+        const data = await resp.json();
+        const job = data.job || {};
+        const st = job.stats || {};
+        if (job.phase === 'resolving') {
+            const pct = job.total ? Math.round(100 * (job.done || 0) / job.total) : 0;
+            _setExportStatus(playlistId, `<span style="color:#38bdf8;">Matching ${job.done || 0}/${job.total || 0} (${pct}%)${st.resolved != null ? ` · ${st.resolved} matched` : ''}</span>`);
+        } else if (job.phase === 'pushing') {
+            _setExportStatus(playlistId, `<span style="color:#a78bfa;">Pushing to ListenBrainz…</span>`);
+        } else if (job.phase === 'done') {
+            const sum = job.summary || {};
+            const cov = `${sum.included || 0}/${sum.total || 0} matched${sum.skipped ? ` · ${sum.skipped} unmatched` : ''}`;
+            if (mode === 'download') {
+                window.location = `/api/playlists/export/download/${jobId}`;
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Downloaded · ${cov}</span>`, 8000);
+            } else {
+                const url = (job.push && job.push.playlist_url) || '';
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Synced to ListenBrainz · ${cov}</span>` + (url ? ` <a href="${url}" target="_blank" style="color:#38bdf8;">view</a>` : ''), 12000);
+                if (typeof showToast === 'function') showToast(`Playlist synced to ListenBrainz (${cov})`, 'success');
+            }
+            return;
+        } else if (job.phase === 'error') {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">${_esc(job.error || 'Export failed')}</span>`, 10000);
+            return;
+        }
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 1000);
+    } catch (e) {
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 2000);
+    }
+}
+
+function _setExportStatus(playlistId, html, autoHideMs) {
+    const el = document.getElementById(`export-status-${playlistId}`);
+    if (!el) return;
+    el.innerHTML = html;
+    el.style.display = '';
+    if (autoHideMs) setTimeout(() => { if (el) el.style.display = 'none'; }, autoHideMs);
 }
 
 function updateMirroredCardPhase(urlHash, phase) {
