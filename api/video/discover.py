@@ -85,6 +85,31 @@ def register_routes(bp):
             logger.exception("discover morelike failed")
             return jsonify({"rails": []})
 
+    @bp.route("/discover/foryou", methods=["GET"])
+    def video_discover_foryou():
+        """A single 'Recommended for you' wall blended from many owned titles — a title
+        recommended by more of your library ranks higher (consensus)."""
+        from . import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        from core.video.discovery_recs import blend_recommendations
+        try:
+            from core.video.sources import resolve_video_server
+            srv = resolve_video_server()
+        except Exception:
+            srv = None
+        db = get_video_db()
+        eng = get_video_enrichment_engine()
+        try:
+            seeds = db.random_owned_titles(6, srv)   # up to 6 movies + 6 shows
+            seed_ids = [s["tmdb_id"] for s in seeds if s.get("tmdb_id")]
+            rec_lists = [eng.recommendations(s["kind"], s["tmdb_id"])
+                         for s in seeds if s.get("tmdb_id")]
+            items = blend_recommendations(rec_lists, exclude_ids=seed_ids, limit=40)
+            return jsonify({"items": items})
+        except Exception:
+            logger.exception("discover foryou failed")
+            return jsonify({"items": []})
+
     @bp.route("/discover/gaps", methods=["GET"])
     def video_discover_gaps():
         """'What am I missing?' rails — franchises you've started but not finished, and

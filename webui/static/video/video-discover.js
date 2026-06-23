@@ -309,6 +309,30 @@
             .catch(function () { /* gaps are best-effort */ });
     }
 
+    // ── "Recommended for you" — one wall blended from across your library, prepended on top ─
+    function loadForYou() {
+        fetch('/api/video/discover/foryou', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var items = (d && d.items) || [];
+                var host = $('[data-vdsc-shelves]');
+                if (items.length < 6 || !host) return;
+                var html = '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--foryou" data-vdsc-loaded="1">' +
+                    '<div class="vdsc-shelf-head">' +
+                        '<h3 class="vdsc-shelf-title">Recommended for you</h3>' +
+                        '<div class="vdsc-shelf-nav">' +
+                            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
+                            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="vdsc-rail" data-vdsc-rail>' + items.map(card).join('') + '</div>' +
+                '</section>';
+                host.insertAdjacentHTML('afterbegin', html);
+                hydrateGet(host);
+            })
+            .catch(function () { /* best-effort */ });
+    }
+
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
     function renderShelves() {
         var host = $('[data-vdsc-shelves]'); if (!host) return;
@@ -527,6 +551,7 @@
                 renderShelves();
                 loadMoreLike();
                 loadGaps();
+                loadForYou();
             });
         }
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
@@ -565,6 +590,7 @@
                 renderShelves();
                 loadMoreLike();   // prepend personalized 'More like…' rails when ready
                 loadGaps();       // prepend 'what am I missing' (franchise + person) gap rails
+                loadForYou();     // prepend the blended 'Recommended for you' wall (sits on top)
             });
     }
     function showEmpty() {
