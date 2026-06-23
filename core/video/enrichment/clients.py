@@ -512,9 +512,11 @@ class TMDBClient:
         return self._disc_map((r.json() or {}).get("results"), kind)
 
     def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
-                 sort_by="popularity.desc", page=1, region="US"):
+                 sort_by="popularity.desc", page=1, region="US", language=None):
         """Browse /discover/{movie,tv} filtered by genre / year / decade / streaming
-        provider (``providers`` is a TMDB provider id; needs ``region``)."""
+        provider (``providers`` is a TMDB provider id; needs ``region``). ``language``
+        restricts to an original-language (ISO-639-1, e.g. 'en') so general rails aren't
+        flooded with foreign-language titles; pass a non-English code for a foreign rail."""
         if not self.api_key:
             return []
         import requests
@@ -522,6 +524,8 @@ class TMDBClient:
         path = "/discover/movie" if is_movie else "/discover/tv"
         params = {"api_key": self.api_key, "sort_by": sort_by, "page": page,
                   "include_adult": "false", "vote_count.gte": 40}
+        if language:
+            params["with_original_language"] = language
         if genre:
             params["with_genres"] = genre
         if providers:

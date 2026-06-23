@@ -186,6 +186,8 @@ def register_routes(bp):
         decade = request.args.get("decade") or None
         providers = request.args.get("providers") or None
         sort = request.args.get("sort") or "popularity.desc"
+        lang = (request.args.get("lang") or "").strip() or None       # original-language filter
+        hide_owned = (request.args.get("hide_owned") or "") in ("1", "true", "yes")
 
         def fetch(p):
             if key == "trending":
@@ -193,19 +195,31 @@ def register_routes(bp):
             if key:
                 return eng.discover_curated(key, page=p)
             return eng.discover_filter(kind, genre=genre, year=year, decade=decade,
-                                       providers=providers, sort_by=sort, page=p)
+                                       providers=providers, sort_by=sort, page=p, language=lang)
 
         try:
             items, seen = [], set()
-            for p in range(page, page + pages):
-                for it in (fetch(p) or []):
+            # Hiding owned + a huge library means most popular titles are already owned, so
+            # page DEEPER and drop owned server-side until the rail has enough un-owned to
+            # look full (instead of the client CSS-hiding most of a 2-page batch to nothing).
+            target = 24 if hide_owned else 0
+            max_pages = 8 if hide_owned else pages
+            for offset in range(max_pages):
+                batch = fetch(page + offset) or []
+                for it in batch:
                     dk = (it.get("kind"), it.get("tmdb_id"))
                     if dk in seen:
                         continue
                     seen.add(dk)
+                    if hide_owned and it.get("library_id") is not None:
+                        continue
                     items.append(it)
-                if key == "trending":
-                    break        # trending is a fixed list — extra pages just repeat it
+                if key == "trending" or not batch:
+                    break        # trending is a fixed list; empty batch = TMDB ran out
+                if target and len(items) >= target:
+                    break        # enough un-owned collected
+                if not hide_owned and offset + 1 >= pages:
+                    break        # normal mode: respect the requested page count
             return jsonify({"items": items, "page": page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)
