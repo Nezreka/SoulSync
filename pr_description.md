@@ -1,43 +1,41 @@
-# soulsync 2.7.5 — `dev` → `main`
+# soulsync 2.7.6 — `dev` → `main`
 
-patch release on top of 2.7.4. a fix-heavy cycle — matching & artwork accuracy, the HiFi preview mess — plus a few quality-of-life features (M3U import, per-playlist file naming, ignore-list management).
+patch release on top of 2.7.5. the headline is going the *other* way with playlists — exporting them TO listenbrainz — plus youtube liked-music sync, a deep-scan data-loss guard, and a round of dashboard performance work.
 
 ---
 
 ## what's new
 
-### matching & metadata accuracy
-- **deezer track numbers** — a track grabbed from a deezer playlist/wishlist now gets its REAL in-album track number (e.g. "Apologize" = 16 on *Shock Value*), not the playlist index. deezer's playlist/search results don't carry the position, so we resolve it from the album endpoint.
-- **special-edition cover art** — a special edition (e.g. *Clair Obscur: Expedition 33 (Gustave Edition)*) no longer ends up with the standard edition's art. musicbrainz albums were resolving cover art at release-GROUP scope (a single representative cover, ~always the standard), so a pinned release now prefers its OWN cover and only falls back to the group/provider art when the release has none of its own.
-- **"The" dedup** — wanting "I Gotta Feeling" by "The Black Eyed Peas" when you own it under "Black Eyed Peas" (or vice-versa) no longer fails to match and re-downloads a duplicate. the matcher now searches both forms across a leading "The"; the confidence scorer still has the final say, so it can't merge genuinely different artists.
+### export playlists to listenbrainz (#903)
+soulsync already pulls playlists IN from everywhere — now it can push one back OUT. every mirrored-playlist card gets a 📤 export button: pick **download .jspf** (a standard playlist file you can hand-upload anywhere) or **sync to listenbrainz** (creates the playlist straight on your LB account). each track is matched to its musicbrainz *recording* id via a cheapest-first waterfall — cache → your library (`musicbrainz_recording_id`) → the file's own tag → a live musicbrainz lookup — with the result cached so the same song never costs twice. live "matching N/M · X matched" status shows on the card, and re-syncing **updates the same LB playlist in place** instead of making duplicates. tracks that can't be resolved to an MBID are skipped (LB requires them) and counted so you see the coverage.
 
-### HiFi previews (#895)
-HiFi was serving 30-second preview files dressed up as full songs (full length faked in the header). soulsync now rejects them three ways — short preview manifests, faked-header files that decode to ~30s, and a lossless-bitrate sanity check — and ABORTS the HiFi source instead of cascading down into a lower-tier copy of the same preview. (this was also an upstream Tidal-ban outage; the guard means you get a clean fail + fallback instead of a broken file.)
+### youtube liked-music sync (#902)
+you can now sync your youtube music **Liked Music** playlist (`music.youtube.com/playlist?list=LM`). it's a private playlist, so it needs auth — and the existing "read a browser's cookies" option only works when the browser is on the same machine. added a **"paste cookies.txt"** option in Settings → YouTube so server/docker installs (and anyone on a browser like Zen that yt-dlp can't read) can supply their login from anywhere.
 
-### playlists
-- **M3U / M3U8 import (#893)** — the "import from file" tool now reads M3U/M3U8 playlists (the most common file-playlist format, and the one soulsync itself exports). parses extended `#EXTINF` (artist/title/duration) and simple path-only playlists, and round-trips with soulsync's own export.
-- **organize-by-playlist file naming** — an opt-in template (`$position - $artist - $title`) renames the files INSIDE each playlist folder so they sort/play the way you want (e.g. in playlist order on a dumb player). filename only — validated to reject "/" and require `$title` — defaults to empty (keep the library filename), and works for both symlink and copy modes.
-- **find & add is remembered** — a manual match you set on a synced playlist is no longer forgotten on the next auto-sync. replace-mode re-matched from scratch and ignored your durable pick; the matcher now consults the durable manual-match table, not just the volatile cache a library rescan wipes.
+### deep scan won't relocate your library (#904)
+a standalone Deep Scan moves files it doesn't recognize into Staging for import. if the DB was empty/out of sync with disk (a volume swap, a DB reset, external tag edits), it treated your **entire** library as "unrecognized" and relocated all of it — one user lost ~1,500 tracks into Staging. now a guard refuses the move when the unrecognized share is implausibly large (the desync signature), leaves everything in place, and warns instead. plus a **"Transfer is my permanent library — never move files out"** toggle for people whose Transfer folder *is* their live library.
 
-### ignore-list (#897)
-- the wishlist ignore-list now has a "🚫 Ignored" button right on the wishlist page — it was buried in a modal most people never opened.
-- manually re-adding a previously-cancelled track no longer gets silently blocked by the ignore-list. an explicit user add now bypasses + clears the ignore while keeping the real source type (so the Albums/Singles split is unaffected).
+### dashboard performance
+a pass at the "soulsync makes my GPU work hard just sitting there" complaints. the sidebar sweep animates `transform` instead of `left` (no per-frame layout), particle glows are pre-rendered sprites instead of per-frame gradients, blur radii + redundant/invisible card shadows are trimmed, and low-power machines auto-drop to performance mode. all the visible effects stay; they're just cheaper to draw.
 
-### docker / packaging (#899)
-the Unraid template pointed its `TemplateURL` / `Icon` at a dead third-party repo — now points at the canonical files in this repo (raw URLs, not the HTML `/blob/` ones), and maps `/app/MusicVideos` so music-video downloads land on a share instead of an anonymous volume.
+### fixes
+- **file-import manual matches stick (#901)** — a manual match on a file-imported playlist track is no longer forgotten on re-sync (the tracks now carry a stable id; existing ones are backfilled once).
+- **manual match heals a stale Plex key** — a Find & Add match whose stored Plex ratingKey went stale is now re-resolved against a live Plex search instead of silently breaking.
+- **multi-disc albums** — a track now files into the Disc folder that matches its own disc tag (no more disc-2 tracks landing in Disc 1), and a track is never written disc-less.
+- **auto-download track numbers** — a track auto-grabbed from the playlist pipeline / wishlist / watchlist now gets its real in-album position instead of being tagged `1/1`.
 
 ---
 
 ## a brief recap of what came before
-2.7.4 was **re-identify** (re-file an imported track under the right release without re-downloading) plus library/import cleanups (#889/#890/#891). 2.7.3 added the Quality Upgrade Finder and the wishlist ignore-list (#874). 2.7.2 brought playlist-folder mirroring + server-playlist M3U export; 2.7.1 added download verification + a review queue (#852); 2.7.0 made multi-user real — per-profile accounts, opt-in login, reverse-proxy support.
+2.7.5 was a fix-heavy cycle — matching & artwork accuracy, the HiFi preview mess (#895) — plus M3U import (#893), ignore-list management (#897), and per-playlist file naming. 2.7.4 was re-identify; 2.7.3 the Quality Upgrade Finder + ignore-list (#874); 2.7.2 playlist-folder mirroring + M3U export; 2.7.1 download verification + a review queue (#852); 2.7.0 made multi-user real.
 
 ---
 
 ## tests
-additive + gated — every new behavior is opt-in or defaults to today's behavior. new seam/regression tests across deezer track positions, the HiFi preview guards, the "The" dedup, M3U parsing, the ignore-list manual-add bypass, the playlist item-naming template, and the release-scope cover-art helper. relevant suites green; `ruff check .` clean app-wide.
+additive + fail-safe — new behavior is opt-in or guarded, nothing existing rewired. new seam/regression suites across the listenbrainz export (JSPF build, the MBID waterfall + dedup, the persistent cache, the LB create/update-in-place client), the youtube cookie precedence, and the #904 deep-scan guard (incl. the 1,500-file regression). the listenbrainz push + update-in-place were also validated live against a real account. relevant suites green; `ruff check` clean on touched modules.
 
 ## post-merge
-- [ ] tag `v2.7.5` on `main`
-- [ ] docker-publish with `version_tag: 2.7.5`
+- [ ] tag `v2.7.6` on `main`
+- [ ] docker-publish with `version_tag: 2.7.6`
 - [ ] discord announce (auto-fired by the workflow)
-- [ ] reply on #893 / #895 / #897 / #899
+- [ ] reply on #902 / #903 / #904
