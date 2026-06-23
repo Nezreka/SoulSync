@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -66,6 +66,7 @@ _ENRICH = {
 _ENRICH_META_COLS = {
     "movies": {"overview", "backdrop_url", "logo_url", "release_date", "status", "content_rating",
                "runtime_minutes", "studio", "tagline", "rating", "rating_critic",
+               "tmdb_collection_id", "tmdb_collection_name",
                "imdb_id", "tmdb_id"},
     "shows": {"overview", "backdrop_url", "logo_url", "status", "network", "content_rating",
               "tagline", "rating", "first_air_date", "last_air_date", "airs_time",
@@ -139,6 +140,8 @@ _COLUMN_MIGRATIONS = [
     ("movies", "tagline", "TEXT"),
     ("movies", "rating", "REAL"),
     ("movies", "rating_critic", "REAL"),
+    ("movies", "tmdb_collection_id", "INTEGER"),
+    ("movies", "tmdb_collection_name", "TEXT"),
     ("shows", "tagline", "TEXT"),
     ("shows", "rating", "REAL"),
     ("shows", "first_air_date", "TEXT"),
