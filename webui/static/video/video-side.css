@@ -2449,15 +2449,19 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-ig-empty-ic { font-size: 40px; margin-bottom: 10px; }
 .vdsc-ig-empty-sub { font-size: 12.5px; color: rgba(255, 255, 255, 0.38); margin-top: 6px; }
 
-/* rails: a gentle fade-in when filled + per-title hue on hover */
-.vdsc-shelf--in .vdsc-rail { animation: vdscFade 0.45s ease both; }
-@keyframes vdscFade { from { opacity: 0.35; } to { opacity: 1; } }
+/* rails: cards cascade in (staggered by --i) when the row fills, instead of one block flash.
+   `backwards` fill holds the hidden start-state during the delay, then releases so :hover works. */
+.vdsc-shelf--in .vdsc-rail .vsr-card {
+    animation: vdscCardIn 0.42s cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+    animation-delay: calc(var(--i, 0) * 40ms);
+}
+@keyframes vdscCardIn { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 .vdsc-rail .vsr-card, .vdsc-grid .vsr-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
 .vdsc-rail .vsr-card:hover, .vdsc-grid .vsr-card:hover {
     box-shadow: 0 14px 36px rgba(0, 0, 0, 0.5), 0 0 26px -6px hsla(var(--vgm-h, 230), 80%, 58%, 0.5); }
 
 @media (prefers-reduced-motion: reduce) {
-    .vdsc-shelf--in .vdsc-rail { animation: none; }
+    .vdsc-shelf--in .vdsc-rail .vsr-card { animation: none; }
     .vdsc-amb { transition: none; }
 }
 
