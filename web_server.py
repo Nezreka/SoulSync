@@ -27200,9 +27200,13 @@ def _run_playlist_export(job_id, playlist_id, title, mode):
             job['phase'] = 'pushing'
             from core.listenbrainz_client import ListenBrainzClient
             client = ListenBrainzClient()
-            res = client.create_playlist(title, jspf['playlist']['track'])
+            # Re-export updates the same LB playlist in place instead of duplicating it (#903).
+            existing = db.get_playlist_export_target(int(playlist_id), 'listenbrainz')
+            res = client.create_or_update_playlist(title, jspf['playlist']['track'], existing_mbid=existing)
             job['push'] = res
             if res.get('success'):
+                if res.get('playlist_mbid'):
+                    db.set_playlist_export_target(int(playlist_id), 'listenbrainz', res['playlist_mbid'])
                 job['phase'] = 'done'
             else:
                 job['phase'] = 'error'

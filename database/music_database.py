@@ -2097,6 +2097,19 @@ class MusicDatabase:
                 )
             """)
 
+            # Remember which external playlist a mirrored playlist was exported to, so a
+            # re-export UPDATES it in place instead of creating a duplicate (#903). Keyed by
+            # (mirrored playlist, target service) -> the target's playlist id (LB recording MBID).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS playlist_export_targets (
+                    mirrored_playlist_id INTEGER NOT NULL,
+                    target TEXT NOT NULL,
+                    target_playlist_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (mirrored_playlist_id, target)
+                )
+            """)
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
@@ -14165,6 +14178,42 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating custom_name for playlist {playlist_id}: {e}")
+            return False
+
+    def get_playlist_export_target(self, mirrored_playlist_id: int, target: str) -> Optional[str]:
+        """The external playlist id this mirror was last exported to (or None). #903."""
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT target_playlist_mbid FROM playlist_export_targets "
+                    "WHERE mirrored_playlist_id = ? AND target = ? LIMIT 1",
+                    (int(mirrored_playlist_id), target),
+                )
+                row = cur.fetchone()
+                if row:
+                    return (row[0] if not hasattr(row, "keys") else row["target_playlist_mbid"]) or None
+        except Exception as e:
+            logger.debug(f"get_playlist_export_target failed: {e}")
+        return None
+
+    def set_playlist_export_target(self, mirrored_playlist_id: int, target: str, target_mbid: str) -> bool:
+        """Remember the external playlist id for this mirror (idempotent). #903."""
+        if not target_mbid:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO playlist_export_targets "
+                    "(mirrored_playlist_id, target, target_playlist_mbid, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    (int(mirrored_playlist_id), target, target_mbid),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.debug(f"set_playlist_export_target failed: {e}")
             return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:

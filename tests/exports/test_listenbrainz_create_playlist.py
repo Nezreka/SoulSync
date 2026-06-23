@@ -84,3 +84,77 @@ def test_create_ok_but_partial_add_failure(monkeypatch):
     assert res["success"] is True
     assert res["playlist_mbid"] == "PL"
     assert res["added"] == 0
+
+
+# ── update-in-place + create-or-update (#903 no-duplicate re-export) ──────────
+
+def _route(existing_count=None):
+    """Build a fake _make_request_with_retry; records calls. existing_count=None -> GET 404."""
+    calls = []
+    def fake(method, url, **kw):
+        calls.append((method, url, kw.get("json")))
+        if method == "GET" and "/playlist/" in url:
+            if existing_count is None:
+                return _Resp(404, {})
+            return _Resp(200, {"playlist": {"track": [{} for _ in range(existing_count)]}})
+        if url.endswith("/playlist/create"):
+            return _Resp(200, {"playlist_mbid": "NEW-MBID"})
+        return _Resp(200, {})  # item/add, item/delete, edit, delete
+    return fake, calls
+
+
+def test_update_playlist_clears_then_re_adds_same_mbid(monkeypatch):
+    c = _client()
+    fake, calls = _route(existing_count=3)
+    monkeypatch.setattr(c, "_make_request_with_retry", fake)
+    res = c.update_playlist("EXIST-MBID", "New Title", _tracks(5))
+    assert res["success"] is True and res["updated"] is True
+    assert res["playlist_mbid"] == "EXIST-MBID"          # stable URL/MBID
+    assert res["added"] == 5
+    urls = [u for _, u, _ in calls]
+    assert any("/item/delete" in u for u in urls)        # cleared existing
+    assert any("/item/add" in u for u in urls)           # re-added
+    assert any("/playlist/edit/EXIST-MBID" in u for u in urls)  # title refreshed
+
+
+def test_update_playlist_reports_gone(monkeypatch):
+    c = _client()
+    fake, _ = _route(existing_count=None)                # GET 404 -> gone
+    monkeypatch.setattr(c, "_make_request_with_retry", fake)
+    res = c.update_playlist("DEAD-MBID", "T", _tracks(2))
+    assert res["success"] is False
+    assert res["gone"] is True
+
+
+def test_create_or_update_updates_when_existing(monkeypatch):
+    c = _client()
+    fake, _ = _route(existing_count=2)
+    monkeypatch.setattr(c, "_make_request_with_retry", fake)
+    res = c.create_or_update_playlist("T", _tracks(4), existing_mbid="EXIST")
+    assert res["updated"] is True and res["playlist_mbid"] == "EXIST"
+
+
+def test_create_or_update_falls_back_to_create_when_gone(monkeypatch):
+    c = _client()
+    fake, _ = _route(existing_count=None)                # remembered playlist deleted on LB
+    monkeypatch.setattr(c, "_make_request_with_retry", fake)
+    res = c.create_or_update_playlist("T", _tracks(4), existing_mbid="DEAD")
+    assert res["success"] is True
+    assert res["updated"] is False                       # fell back to create
+    assert res["playlist_mbid"] == "NEW-MBID"
+
+
+def test_create_or_update_creates_when_no_existing(monkeypatch):
+    c = _client()
+    fake, _ = _route()
+    monkeypatch.setattr(c, "_make_request_with_retry", fake)
+    res = c.create_or_update_playlist("T", _tracks(3), existing_mbid=None)
+    assert res["playlist_mbid"] == "NEW-MBID" and res["updated"] is False
+
+
+def test_delete_playlist(monkeypatch):
+    c = _client()
+    monkeypatch.setattr(c, "_make_request_with_retry", lambda *a, **k: _Resp(200, {}))
+    assert c.delete_playlist("MBID") is True
+    monkeypatch.setattr(c, "_make_request_with_retry", lambda *a, **k: _Resp(404, {}))
+    assert c.delete_playlist("MBID") is False
