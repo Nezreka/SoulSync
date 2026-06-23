@@ -273,6 +273,33 @@
             .catch(function () { /* personalization is best-effort */ });
     }
 
+    // ── "What am I missing?" gap rails — franchises you've started but not finished,
+    //    and more from the directors/creators you own the most (prepended on top). ──
+    function loadGaps() {
+        fetch('/api/video/discover/gaps', { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+                var rails = (d && d.rails) || [];
+                var host = $('[data-vdsc-shelves]');
+                if (!rails.length || !host) return;
+                var html = rails.map(function (rl) {
+                    return '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--gap" data-vdsc-loaded="1">' +
+                        '<div class="vdsc-shelf-head">' +
+                            '<h3 class="vdsc-shelf-title">' + esc(rl.title) + '</h3>' +
+                            '<div class="vdsc-shelf-nav">' +
+                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
+                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
+                            '</div>' +
+                        '</div>' +
+                        '<div class="vdsc-rail" data-vdsc-rail>' + (rl.items || []).map(card).join('') + '</div>' +
+                    '</section>';
+                }).join('');
+                host.insertAdjacentHTML('afterbegin', html);
+                hydrateGet(host);
+            })
+            .catch(function () { /* gaps are best-effort */ });
+    }
+
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
     function renderShelves() {
         var host = $('[data-vdsc-shelves]'); if (!host) return;
@@ -517,6 +544,7 @@
                 renderGenreChips();
                 renderShelves();
                 loadMoreLike();   // prepend personalized 'More like…' rails when ready
+                loadGaps();       // prepend 'what am I missing' (franchise + person) gap rails
             });
     }
     function showEmpty() {
