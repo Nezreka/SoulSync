@@ -94,30 +94,41 @@
         { title: 'Hindi Cinema', q: 'kind=movie&sort=popularity.desc&lang=hi' },
     ];
 
-    function buildShelfList() {
-        var out = [], used = {};
-        var gm = idMap(state.genres.movie), gs = idMap(state.genres.show);
-        // personalized first — seeded from what you actually own
+    // The page is organised into a FIXED, authored sequence of groups (each with a header).
+    // Static rails are placed into their group here; the async personalized rows fill their
+    // group's body when they arrive — so the on-screen order is stable no matter which fetch
+    // returns first. The order of the returned array IS the order on screen.
+    function buildSections() {
+        var gm = idMap(state.genres.movie), gs = idMap(state.genres.show), used = {};
+        var taste = [];
         (state.taste.movie || []).slice(0, 3).forEach(function (name) {
             var id = gm[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' }); used['m:' + name.toLowerCase()] = 1; }
+            if (id != null) { taste.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' }); used['m:' + name.toLowerCase()] = 1; }
         });
         (state.taste.show || []).slice(0, 2).forEach(function (name) {
             var id = gs[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc' }); }
+            if (id != null) taste.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc' });
         });
-        // 'On your streaming services' — only when the user has set their subscriptions.
+        var foryou = [];
         if (state.myProviders && state.myProviders.length) {
-            out.push({ title: 'On your streaming services',
+            foryou.push({ title: 'On your streaming services',
                 q: 'kind=movie&providers=' + state.myProviders.join(',') + '&sort=popularity.desc' });
         }
-        out = out.concat(CURATED);
+        var genre = [];
         GENRE_RAILS.forEach(function (name) {
             var id = gm[name.toLowerCase()];
             if (id != null && !used['m:' + name.toLowerCase()])
-                out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
+                genre.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
         });
-        return out.concat(GEM_RAILS).concat(DECADE_RAILS).concat(FOREIGN_RAILS);
+        // foryou/collection/taste are also fed by async loaders (loadForYou/loadGaps/loadMoreLike).
+        return [
+            { id: 'foryou', label: 'For you', rails: foryou },
+            { id: 'collection', label: 'Finish your collection', rails: [] },
+            { id: 'taste', label: 'More of what you like', rails: taste },
+            { id: 'popular', label: 'Trending & popular', rails: CURATED },
+            { id: 'genre', label: 'Browse by genre', rails: genre },
+            { id: 'corners', label: 'Hidden gems & more', rails: GEM_RAILS.concat(DECADE_RAILS).concat(FOREIGN_RAILS) },
+        ];
     }
 
     // ── card (mirrors the search title card: owned ribbon + get button) ───────
@@ -381,7 +392,7 @@
             });
     }
 
-    // ── "More like <owned title>" rails (pre-filled, prepended above the stack) ─
+    // ── "More like <owned title>" rails → the "More of what you like" group (after taste rails) ─
     function loadMoreLike() {
         var gen = state.railGen || 0;
         fetch('/api/video/discover/morelike', { headers: { Accept: 'application/json' } })
@@ -389,29 +400,21 @@
             .then(function (d) {
                 if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
-                var host = $('[data-vdsc-shelves]');
-                if (!rails.length || !host) return;
+                var body = $('[data-group-body="taste"]');
+                if (!rails.length || !body) return;
                 var html = rails.map(function (rl) {
-                    return '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--ml" data-vdsc-loaded="1">' +
-                        '<div class="vdsc-shelf-head">' +
-                            '<h3 class="vdsc-shelf-title">' + esc(rl.title) + '</h3>' +
-                            '<div class="vdsc-shelf-nav">' +
-                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
-                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
-                            '</div>' +
-                        '</div>' +
-                        '<div class="vdsc-rail" data-vdsc-rail>' + (rl.items || []).map(card).join('') + '</div>' +
-                    '</section>';
+                    return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--ml');
                 }).join('');
-                host.insertAdjacentHTML('afterbegin', html);
-                staggerWithin(host);
-                hydrateGet(host);
+                body.insertAdjacentHTML('beforeend', html);
+                revealGroup('taste');
+                staggerWithin(body);
+                hydrateGet(body);
             })
             .catch(function () { /* personalization is best-effort */ });
     }
 
-    // ── "What am I missing?" gap rails — franchises you've started but not finished,
-    //    and more from the directors/creators you own the most (prepended on top). ──
+    // ── "What am I missing?" gaps — unfinished franchises + more from directors you own most.
+    //    Fills the "Finish your collection" group (async-only; hidden until these arrive). ──
     function loadGaps() {
         var gen = state.railGen || 0;
         fetch('/api/video/discover/gaps', { headers: { Accept: 'application/json' } })
@@ -419,28 +422,20 @@
             .then(function (d) {
                 if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
-                var host = $('[data-vdsc-shelves]');
-                if (!rails.length || !host) return;
+                var body = $('[data-group-body="collection"]');
+                if (!rails.length || !body) return;
                 var html = rails.map(function (rl) {
-                    return '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--gap" data-vdsc-loaded="1">' +
-                        '<div class="vdsc-shelf-head">' +
-                            '<h3 class="vdsc-shelf-title">' + esc(rl.title) + '</h3>' +
-                            '<div class="vdsc-shelf-nav">' +
-                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
-                                '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
-                            '</div>' +
-                        '</div>' +
-                        '<div class="vdsc-rail" data-vdsc-rail>' + (rl.items || []).map(card).join('') + '</div>' +
-                    '</section>';
+                    return filledShelfHtml(rl.title, (rl.items || []).map(card).join(''), 'vdsc-shelf--gap');
                 }).join('');
-                host.insertAdjacentHTML('afterbegin', html);
-                staggerWithin(host);
-                hydrateGet(host);
+                body.insertAdjacentHTML('beforeend', html);
+                revealGroup('collection');
+                staggerWithin(body);
+                hydrateGet(body);
             })
             .catch(function () { /* gaps are best-effort */ });
     }
 
-    // ── "Recommended for you" — one wall blended from across your library, prepended on top ─
+    // ── "Recommended for you" — one blended wall at the top of the "For you" group ─
     function loadForYou() {
         var gen = state.railGen || 0;
         fetch('/api/video/discover/foryou', { headers: { Accept: 'application/json' } })
@@ -448,21 +443,14 @@
             .then(function (d) {
                 if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var items = (d && d.items) || [];
-                var host = $('[data-vdsc-shelves]');
-                if (items.length < 6 || !host) return;
-                var html = '<section class="vdsc-shelf vdsc-shelf--in vdsc-shelf--foryou" data-vdsc-loaded="1">' +
-                    '<div class="vdsc-shelf-head">' +
-                        '<h3 class="vdsc-shelf-title">Recommended for you</h3>' +
-                        '<div class="vdsc-shelf-nav">' +
-                            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
-                            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
-                        '</div>' +
-                    '</div>' +
-                    '<div class="vdsc-rail" data-vdsc-rail>' + items.map(card).join('') + '</div>' +
-                '</section>';
-                host.insertAdjacentHTML('afterbegin', html);
-                staggerWithin(host);
-                hydrateGet(host);
+                var body = $('[data-group-body="foryou"]');
+                if (items.length < 6 || !body) return;
+                // afterbegin: sits above the (static) "On your streaming services" rail in the group.
+                body.insertAdjacentHTML('afterbegin',
+                    filledShelfHtml('Recommended for you', items.map(card).join(''), 'vdsc-shelf--foryou'));
+                revealGroup('foryou');
+                staggerWithin(body);
+                hydrateGet(body);
             })
             .catch(function () { /* best-effort */ });
     }
@@ -485,24 +473,50 @@
     }
 
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
+    function shelfNav(seeAll) {
+        return '<div class="vdsc-shelf-nav">' +
+            (seeAll ? '<button class="vdsc-seeall" type="button" data-vdsc-seeall>See all</button>' : '') +
+            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
+            '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
+        '</div>';
+    }
+    // A lazy rail (skeleton until scrolled into view, then filled by fillShelf).
+    function lazyShelfHtml(sh) {
+        return '<section class="vdsc-shelf" data-vdsc-q="' + esc(sh.q) + '" data-vdsc-title="' + esc(sh.title) + '">' +
+            '<div class="vdsc-shelf-head"><h3 class="vdsc-shelf-title">' + esc(sh.title) + '</h3>' + shelfNav(true) + '</div>' +
+            '<div class="vdsc-rail" data-vdsc-rail>' +
+                '<div class="vdsc-skel">' + Array(8).join('<div class="vdsc-skel-card"></div>') + '</div>' +
+            '</div>' +
+        '</section>';
+    }
+    // A pre-filled rail (async personalized rows already carry their items — no skeleton).
+    function filledShelfHtml(title, itemsHtml, cls) {
+        return '<section class="vdsc-shelf vdsc-shelf--in ' + cls + '" data-vdsc-loaded="1">' +
+            '<div class="vdsc-shelf-head"><h3 class="vdsc-shelf-title">' + esc(title) + '</h3>' + shelfNav(false) + '</div>' +
+            '<div class="vdsc-rail" data-vdsc-rail>' + itemsHtml + '</div>' +
+        '</section>';
+    }
     function renderShelves() {
         var host = $('[data-vdsc-shelves]'); if (!host) return;
-        host.innerHTML = buildShelfList().map(function (sh) {
-            return '<section class="vdsc-shelf" data-vdsc-q="' + esc(sh.q) + '" data-vdsc-title="' + esc(sh.title) + '">' +
-                '<div class="vdsc-shelf-head">' +
-                    '<h3 class="vdsc-shelf-title">' + esc(sh.title) + '</h3>' +
-                    '<div class="vdsc-shelf-nav">' +
-                        '<button class="vdsc-seeall" type="button" data-vdsc-seeall>See all</button>' +
-                        '<button class="vdsc-arrow" type="button" data-vdsc-scroll="-1" aria-label="Scroll left">‹</button>' +
-                        '<button class="vdsc-arrow" type="button" data-vdsc-scroll="1" aria-label="Scroll right">›</button>' +
-                    '</div>' +
-                '</div>' +
-                '<div class="vdsc-rail" data-vdsc-rail>' +
-                    '<div class="vdsc-skel">' + Array(8).join('<div class="vdsc-skel-card"></div>') + '</div>' +
-                '</div>' +
+        host.innerHTML = buildSections().map(function (sec) {
+            var rails = sec.rails.map(lazyShelfHtml).join('');
+            // Groups with no static rails (async-only, e.g. gaps) start hidden — revealed when filled.
+            var emptyCls = sec.rails.length ? '' : ' vdsc-group--empty';
+            return '<section class="vdsc-group' + emptyCls + '" data-group="' + sec.id + '">' +
+                '<h2 class="vdsc-group-head">' + esc(sec.label) + '</h2>' +
+                '<div class="vdsc-group-body" data-group-body="' + sec.id + '">' + rails + '</div>' +
             '</section>';
         }).join('');
         observeShelves();
+    }
+    // Reveal a group's header once an async loader has put rails in it.
+    function revealGroup(id) {
+        var g = $('[data-group="' + id + '"]');
+        if (g) g.classList.remove('vdsc-group--empty');
+    }
+    // Hide a group whose body has no shelves left (every rail failed / returned nothing).
+    function pruneGroup(g) {
+        if (g && !g.querySelector('.vdsc-shelf')) g.classList.add('vdsc-group--empty');
     }
     function observeShelves() {
         if (state.io) state.io.disconnect();
@@ -542,17 +556,18 @@
         if (!shelf || shelf.getAttribute('data-vdsc-loaded')) return;
         shelf.setAttribute('data-vdsc-loaded', '1');
         var rail = $('[data-vdsc-rail]', shelf);
+        var grp = shelf.closest('.vdsc-group');
         // Normal: 2 pages (~40 items). Hiding owned: let the backend page DEEPER and drop
         // owned server-side, so a huge library's rail still fills instead of CSS-hiding to ~nothing.
         var q = shelf.getAttribute('data-vdsc-q') + (isHideOwned() ? '&hide_owned=1' : '&pages=2');
         cachedFetch(LIST_URL + '?' + q)
             .then(function (d) {
                 var items = (d && d.items) || [];
-                if (!items.length) { shelf.remove(); return; }    // drop empty shelves
+                if (!items.length) { shelf.remove(); pruneGroup(grp); return; }   // drop empty shelves
                 if (rail) { rail.innerHTML = items.map(card).join(''); stagger(rail); hydrateGet(rail); }
                 shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
             })
-            .catch(function () { shelf.remove(); });
+            .catch(function () { shelf.remove(); pruneGroup(grp); });
     }
 
     // ── category / filter grid (paged) ────────────────────────────────────────
