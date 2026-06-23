@@ -19,6 +19,7 @@
     var state = {
         loaded: false, wired: false, mode: 'shelves',
         genres: { movie: [], show: [] }, taste: { movie: [], show: [] },
+        myProviders: [],   // saved streaming services -> 'On your streaming services' rail
         io: null,
         hero: { items: [], idx: 0, timer: null },
         cat: { title: '', q: '', page: 1, paginates: true, busy: false, hasMore: false },
@@ -105,6 +106,11 @@
             var id = gs[name.toLowerCase()];
             if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc' }); }
         });
+        // 'On your streaming services' — only when the user has set their subscriptions.
+        if (state.myProviders && state.myProviders.length) {
+            out.push({ title: 'On your streaming services',
+                q: 'kind=movie&providers=' + state.myProviders.join(',') + '&sort=popularity.desc' });
+        }
         out = out.concat(CURATED);
         GENRE_RAILS.forEach(function (name) {
             var id = gm[name.toLowerCase()];
@@ -701,6 +707,31 @@
                 }).then(function () { reloadRails(); }).catch(function () { /* ignore */ });
             });
         }
+        // 'My streaming services' preference — multi-select; drives the 'On your services' rail.
+        var provWrap = $('[data-vdsc-myprov]');
+        if (provWrap && !provWrap._wired) {
+            provWrap._wired = 1;
+            fetch('/api/video/discover/providers-pref', { headers: { Accept: 'application/json' } })
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (d) {
+                    var on = {}; ((d && d.providers) || []).forEach(function (c) { on[String(c)] = 1; });
+                    state.myProviders = (d && d.providers) || [];
+                    provWrap.querySelectorAll('.vdsc-lang').forEach(function (b) {
+                        b.classList.toggle('vdsc-lang--on', !!on[b.getAttribute('data-prov')]);
+                    });
+                }).catch(function () { /* chips stay off */ });
+            provWrap.addEventListener('click', function (e) {
+                var btn = e.target.closest('.vdsc-lang'); if (!btn) return;
+                btn.classList.toggle('vdsc-lang--on');
+                var provs = Array.prototype.map.call(provWrap.querySelectorAll('.vdsc-lang--on'),
+                    function (b) { return b.getAttribute('data-prov'); });
+                state.myProviders = provs;
+                fetch('/api/video/discover/providers-pref', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ providers: provs }),
+                }).then(function () { reloadRails(); }).catch(function () { /* ignore */ });
+            });
+        }
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
         var sentinel = $('[data-vdsc-sentinel]');
         if (sentinel && AUTO) {
@@ -726,11 +757,13 @@
     function loadMeta() {
         var jget = function (u) { return fetch(u, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }); };
-        Promise.all([jget('/api/video/discover/genres'), jget('/api/video/discover/taste')])
+        Promise.all([jget('/api/video/discover/genres'), jget('/api/video/discover/taste'),
+                     jget('/api/video/discover/providers-pref')])
             .then(function (res) {
                 var g = res[0] || {}, t = res[1] || {};
                 state.genres = { movie: g.movie || [], show: g.show || [] };
                 state.taste = { movie: t.movie || [], show: t.show || [] };
+                state.myProviders = (res[2] && res[2].providers) || [];
                 // Genres are a static TMDB endpoint — empty means TMDB isn't set up.
                 if (!state.genres.movie.length && !state.genres.show.length) { showEmpty(); return; }
                 renderGenreChips();

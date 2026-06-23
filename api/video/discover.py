@@ -223,6 +223,28 @@ def register_routes(bp):
             logger.exception("discover languages get/set failed")
             return jsonify({"languages": ["en"]})
 
+    @bp.route("/discover/providers-pref", methods=["GET", "POST"])
+    def video_discover_providers_pref():
+        """The user's subscribed streaming services (TMDB provider ids) — drives the
+        'On your streaming services' rail. POST {providers:[8,9]} (or '8,9'); GET returns them."""
+        from . import get_video_db
+        db = get_video_db()
+        try:
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                p = body.get("providers")
+                if isinstance(p, list):
+                    val = ",".join(str(c).strip() for c in p if str(c).strip())
+                else:
+                    val = ",".join(c.strip() for c in str(p or "").split(",") if c.strip())
+                db.set_setting("discover_providers", val)
+                return jsonify({"success": True, "providers": [c for c in val.split(",") if c]})
+            raw = db.get_setting("discover_providers", "") or ""
+            return jsonify({"providers": [c.strip() for c in raw.split(",") if c.strip()]})
+        except Exception:
+            logger.exception("discover providers-pref failed")
+            return jsonify({"providers": []})
+
     @bp.route("/discover/genres", methods=["GET"])
     def video_discover_genres():
         """Genre id→name maps for both kinds (powers the genre rails + filter)."""
@@ -257,6 +279,8 @@ def register_routes(bp):
         year = request.args.get("year") or None
         decade = request.args.get("decade") or None
         providers = request.args.get("providers") or None
+        if providers and "," in providers:
+            providers = providers.replace(",", "|")   # TMDB with_watch_providers OR-join
         sort = request.args.get("sort") or "popularity.desc"
         lang = (request.args.get("lang") or "").strip() or None       # explicit (foreign rail)
         hide_owned = (request.args.get("hide_owned") or "") in ("1", "true", "yes")
