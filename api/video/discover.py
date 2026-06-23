@@ -137,6 +137,7 @@ def register_routes(bp):
                 logger.exception("collection-id backfill batch failed")
 
             owned = db.owned_movie_tmdb_ids(srv)
+            ignored = db.ignored_keys()
             rails = []
             # Complete your collections — top franchises you've started, missing entries.
             for coll in db.owned_movie_collections(srv, limit=8):
@@ -152,6 +153,9 @@ def register_routes(bp):
                     continue
                 missing = filmography_gaps(owned, p.get("credits") or [],
                                            kinds=("movie",), min_vote_count=50, limit=30)
+                if ignored:
+                    missing = [m for m in missing
+                               if f"{m.get('kind')}:{m.get('tmdb_id')}" not in ignored]
                 if len(missing) >= 3:
                     rails.append({"title": "More from " + person["name"], "kind": "person",
                                   "items": missing})
@@ -175,6 +179,26 @@ def register_routes(bp):
             logger.exception("discover trailer failed")
             tr = None
         return jsonify({"trailer": tr or None})
+
+    @bp.route("/discover/ignore", methods=["GET", "POST"])
+    def video_discover_ignore():
+        """The Discover 'Not interested' list. GET -> {items}. POST
+        {action:'add'|'remove', kind, tmdb_id, title?, year?, poster?}."""
+        from . import get_video_db
+        db = get_video_db()
+        try:
+            if request.method == "GET":
+                return jsonify({"items": db.list_ignored()})
+            body = request.get_json(silent=True) or {}
+            kind, tmdb_id = body.get("kind"), body.get("tmdb_id")
+            if body.get("action") == "remove":
+                db.remove_ignored(kind, tmdb_id)
+                return jsonify({"success": True})
+            ok = db.add_ignored(kind, tmdb_id, body.get("title"), body.get("year"), body.get("poster"))
+            return jsonify({"success": ok})
+        except Exception:
+            logger.exception("discover ignore failed")
+            return jsonify({"success": False, "items": []})
 
     @bp.route("/discover/languages", methods=["GET", "POST"])
     def video_discover_languages():

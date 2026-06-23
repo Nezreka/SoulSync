@@ -31,7 +31,7 @@ logger = get_logger("video_database")
 
 # Bump when video_schema.sql changes in a way worth recording. Stored in
 # PRAGMA user_version as a backstop indicator (nothing gates on it yet).
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 _DEFAULT_DB_PATH = "database/video_library.db"
 _SCHEMA_FILE = Path(__file__).resolve().parent / "video_schema.sql"
@@ -814,6 +814,58 @@ class VideoDatabase:
             return set()
         finally:
             conn.close()
+
+    # ── Discover ignore list ("Not interested") ──────────────────────────────
+    def add_ignored(self, kind: str, tmdb_id, title=None, year=None, poster_url=None) -> bool:
+        """Hide a title from Discover (movie/show level). Idempotent."""
+        if kind not in ("movie", "show") or tmdb_id is None:
+            return False
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO video_ignored (kind, tmdb_id, title, year, poster_url) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (kind, int(tmdb_id), title, int(year) if year else None, poster_url),
+                )
+                conn.commit()
+                return True
+        except (sqlite3.Error, TypeError, ValueError) as e:
+            logger.debug(f"add_ignored failed: {e}")
+            return False
+
+    def remove_ignored(self, kind: str, tmdb_id) -> bool:
+        """Un-hide a title."""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("DELETE FROM video_ignored WHERE kind=? AND tmdb_id=?",
+                             (kind, int(tmdb_id)))
+                conn.commit()
+                return True
+        except (sqlite3.Error, TypeError, ValueError) as e:
+            logger.debug(f"remove_ignored failed: {e}")
+            return False
+
+    def list_ignored(self) -> list:
+        """All ignored titles, most-recently-added first — drives the manage modal."""
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    "SELECT kind, tmdb_id, title, year, poster_url FROM video_ignored "
+                    "ORDER BY added_at DESC"
+                ).fetchall()
+                return [{"kind": r["kind"], "tmdb_id": r["tmdb_id"], "title": r["title"],
+                         "year": r["year"], "poster": r["poster_url"]} for r in rows]
+        except sqlite3.Error:
+            return []
+
+    def ignored_keys(self) -> set:
+        """Set of 'kind:tmdb_id' strings for fast Discover filtering."""
+        try:
+            with self._get_connection() as conn:
+                return {f"{r['kind']}:{r['tmdb_id']}"
+                        for r in conn.execute("SELECT kind, tmdb_id FROM video_ignored")}
+        except sqlite3.Error:
+            return set()
 
     def movies_missing_collection(self, server_source=None, limit: int = 20) -> list:
         """Owned, TMDB-matched movies whose franchise (tmdb_collection_id) hasn't been
