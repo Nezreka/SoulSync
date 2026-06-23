@@ -482,6 +482,8 @@ class TMDBClient:
                 "year": ((it.get("release_date") if is_movie else it.get("first_air_date")) or "")[:4] or None,
                 "rating": it.get("vote_average") or None,
                 "overview": it.get("overview") or None,
+                "original_language": it.get("original_language") or None,   # for the language filter
+                "popularity": it.get("popularity") or None,                  # for blended ranking
                 "poster": (self.POSTER_W + it["poster_path"]) if it.get("poster_path") else None,
                 "backdrop": (self.BACKDROP_W + it["backdrop_path"]) if it.get("backdrop_path") else None,
             })

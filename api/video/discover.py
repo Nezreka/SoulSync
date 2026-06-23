@@ -176,6 +176,29 @@ def register_routes(bp):
             tr = None
         return jsonify({"trailer": tr or None})
 
+    @bp.route("/discover/languages", methods=["GET", "POST"])
+    def video_discover_languages():
+        """Get/set the preferred original-languages for general rails (ISO-639-1 codes).
+        POST {languages: ['en','ko']} (or 'en,ko'); GET returns the current list."""
+        from . import get_video_db
+        db = get_video_db()
+        try:
+            if request.method == "POST":
+                body = request.get_json(silent=True) or {}
+                langs = body.get("languages")
+                if isinstance(langs, list):
+                    val = ",".join(str(c).strip().lower() for c in langs if str(c).strip())
+                else:
+                    val = ",".join(c.strip().lower() for c in str(langs or "").split(",") if c.strip())
+                db.set_setting("discover_languages", val or "en")
+                return jsonify({"success": True,
+                                "languages": [c for c in (val or "en").split(",") if c]})
+            raw = db.get_setting("discover_languages", "en") or "en"
+            return jsonify({"languages": [c.strip() for c in raw.split(",") if c.strip()]})
+        except Exception:
+            logger.exception("discover languages get/set failed")
+            return jsonify({"languages": ["en"]})
+
     @bp.route("/discover/genres", methods=["GET"])
     def video_discover_genres():
         """Genre id→name maps for both kinds (powers the genre rails + filter)."""
@@ -211,8 +234,19 @@ def register_routes(bp):
         decade = request.args.get("decade") or None
         providers = request.args.get("providers") or None
         sort = request.args.get("sort") or "popularity.desc"
-        lang = (request.args.get("lang") or "").strip() or None       # original-language filter
+        lang = (request.args.get("lang") or "").strip() or None       # explicit (foreign rail)
         hide_owned = (request.args.get("hide_owned") or "") in ("1", "true", "yes")
+        # Preferred original-languages (multi) for GENERAL/curated rails — so the feeds
+        # aren't flooded with foreign titles (e.g. Bollywood in Popular/Trending). A rail
+        # with an explicit `lang` (a dedicated foreign rail) bypasses this. Default 'en'.
+        prefer_langs = None
+        if not lang:
+            try:
+                from . import get_video_db
+                raw = get_video_db().get_setting("discover_languages", "en") or "en"
+                prefer_langs = {c.strip().lower() for c in raw.split(",") if c.strip()} or None
+            except Exception:
+                prefer_langs = {"en"}
 
         def fetch(p):
             if key == "trending":
@@ -224,11 +258,11 @@ def register_routes(bp):
 
         try:
             items, seen = [], set()
-            # Hiding owned + a huge library means most popular titles are already owned, so
-            # page DEEPER and drop owned server-side until the rail has enough un-owned to
-            # look full (instead of the client CSS-hiding most of a 2-page batch to nothing).
-            target = 24 if hide_owned else 0
-            max_pages = 8 if hide_owned else pages
+            # When filtering (hide-owned or language), page DEEPER and drop items server-side
+            # until the rail has ~enough to look full — instead of returning a half-empty rail.
+            need_fill = hide_owned or bool(prefer_langs)
+            target = 24 if need_fill else 0
+            max_pages = 8 if need_fill else pages
             for offset in range(max_pages):
                 batch = fetch(page + offset) or []
                 for it in batch:
@@ -238,13 +272,17 @@ def register_routes(bp):
                     seen.add(dk)
                     if hide_owned and it.get("library_id") is not None:
                         continue
+                    if prefer_langs:
+                        ol = (it.get("original_language") or "").lower()
+                        if ol and ol not in prefer_langs:
+                            continue   # known foreign language not in your preference
                     items.append(it)
                 if key == "trending" or not batch:
                     break        # trending is a fixed list; empty batch = TMDB ran out
                 if target and len(items) >= target:
-                    break        # enough un-owned collected
-                if not hide_owned and offset + 1 >= pages:
-                    break        # normal mode: respect the requested page count
+                    break        # enough collected
+                if not target and offset + 1 >= pages:
+                    break        # no filtering: respect the requested page count
             return jsonify({"items": items, "page": page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)

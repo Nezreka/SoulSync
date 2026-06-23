@@ -72,10 +72,10 @@
         'talk': '148, 163, 184', 'news': '148, 163, 184',
     };
     var DECADE_RAILS = [
-        { title: 'Best of the 2010s', q: 'kind=movie&decade=2010&sort=vote_average.desc&lang=en' },
-        { title: '2000s Favorites', q: 'kind=movie&decade=2000&sort=vote_average.desc&lang=en' },
-        { title: '’90s Classics', q: 'kind=movie&decade=1990&sort=vote_average.desc&lang=en' },
-        { title: 'Retro ’80s', q: 'kind=movie&decade=1980&sort=vote_average.desc&lang=en' },
+        { title: 'Best of the 2010s', q: 'kind=movie&decade=2010&sort=vote_average.desc' },
+        { title: '2000s Favorites', q: 'kind=movie&decade=2000&sort=vote_average.desc' },
+        { title: '’90s Classics', q: 'kind=movie&decade=1990&sort=vote_average.desc' },
+        { title: 'Retro ’80s', q: 'kind=movie&decade=1980&sort=vote_average.desc' },
     ];
     // Dedicated foreign-language rails so non-English titles live HERE rather than
     // leaking into the general genre/decade rails (which are pinned to lang=en).
@@ -93,17 +93,17 @@
         // personalized first — seeded from what you actually own
         (state.taste.movie || []).slice(0, 3).forEach(function (name) {
             var id = gm[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc&lang=en' }); used['m:' + name.toLowerCase()] = 1; }
+            if (id != null) { out.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' }); used['m:' + name.toLowerCase()] = 1; }
         });
         (state.taste.show || []).slice(0, 2).forEach(function (name) {
             var id = gs[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc&lang=en' }); }
+            if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc' }); }
         });
         out = out.concat(CURATED);
         GENRE_RAILS.forEach(function (name) {
             var id = gm[name.toLowerCase()];
             if (id != null && !used['m:' + name.toLowerCase()])
-                out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc&lang=en' });
+                out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
         });
         return out.concat(DECADE_RAILS).concat(FOREIGN_RAILS);
     }
