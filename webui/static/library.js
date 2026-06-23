@@ -3964,13 +3964,19 @@ async function ensureEnhancedAlbumCanonicalTracks(album) {
     }
 }
 
-// Loose title key for owned<->canonical matching. Lowercase, drop bracketed
-// annotations ((feat. X), [Explicit]) and punctuation so editions line up.
+// Loose title key for owned<->canonical matching. Mirrors the Reorganize
+// matcher (core.library_reorganize._normalize_title), which already maps these
+// same multi-disc tracks correctly: drop only the featured-artist credit, then
+// treat every other separator (brackets, dashes, slashes, punctuation) as
+// whitespace — so "X (Main Theme)" and "X - Main Theme" collapse to the same key
+// while "(feat. Y)" is removed. Keeping bracket CONTENT (not deleting it) is what
+// makes editions line up.
 function _normTitleForMatch(value) {
     return String(value || '')
         .toLowerCase()
-        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/[([]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]/g, ' ')  // (feat. Y) / [ft Y]
+        .replace(/\s+(?:feat|ft|featuring)\b\.?\s.*$/g, ' ')          // trailing  feat. Y …
+        .replace(/[^a-z0-9]+/g, ' ')                                  // all other separators -> space (KEEP content)
         .trim();
 }
 
