@@ -14576,12 +14576,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     transform: scale(1.1);
 }
 
-/* Live export status line on the card (Matching N/M, Synced, etc.) */
-.mirrored-card-export-status {
-    flex-basis: 100%;
-    font-size: 11.5px;
-    margin-top: 6px;
-    padding-left: 2px;
+/* Live export status, injected inline into the card's .card-meta line. */
+.export-status-span {
+    font-size: inherit;
+    white-space: nowrap;
 }
 
 .mirrored-card-delete:hover {
