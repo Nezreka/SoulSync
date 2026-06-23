@@ -77,8 +77,14 @@
         { title: '’90s Classics', q: 'kind=movie&decade=1990&sort=vote_average.desc' },
         { title: 'Retro ’80s', q: 'kind=movie&decade=1980&sort=vote_average.desc' },
     ];
+    // Hidden gems — highly-rated titles that aren't blockbusters (vote_average.desc, with the
+    // backend's vote_count floor keeping out single-vote noise). Subject to the language filter.
+    var GEM_RAILS = [
+        { title: 'Hidden Gems', q: 'kind=movie&sort=vote_average.desc' },
+        { title: 'Critically Acclaimed Shows', q: 'kind=show&sort=vote_average.desc' },
+    ];
     // Dedicated foreign-language rails so non-English titles live HERE rather than
-    // leaking into the general genre/decade rails (which are pinned to lang=en).
+    // leaking into the general genre/decade rails (which respect your language preference).
     var FOREIGN_RAILS = [
         { title: 'Korean Cinema', q: 'kind=movie&sort=popularity.desc&lang=ko' },
         { title: 'Japanese Films', q: 'kind=movie&sort=popularity.desc&lang=ja' },
@@ -105,7 +111,7 @@
             if (id != null && !used['m:' + name.toLowerCase()])
                 out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
         });
-        return out.concat(DECADE_RAILS).concat(FOREIGN_RAILS);
+        return out.concat(GEM_RAILS).concat(DECADE_RAILS).concat(FOREIGN_RAILS);
     }
 
     // ── card (mirrors the search title card: owned ribbon + get button) ───────
