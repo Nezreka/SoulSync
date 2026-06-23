@@ -91,13 +91,19 @@ class EmptyFolderCleanerJob(RepairJob):
         ignore_disposable = False
         try:
             if context.config_manager:
-                ignore_junk = bool(context.config_manager.get(
-                    'repair.jobs.empty_folder_cleaner.remove_junk_files', True))
-                # #891: also clear folders left holding only images / .lrc / sidecars
-                # (what a reorganize leaves behind). Opt-in — default off.
-                ignore_disposable = bool(context.config_manager.get(
-                    'repair.jobs.empty_folder_cleaner.remove_residual_files', False))
-        except Exception:  # noqa: S110 — setting read is best-effort; defaults to True
+                # #912: job settings are persisted as a nested dict under
+                # `repair.jobs.<id>.settings` (see RepairWorker.set_job_settings / get_job_config).
+                # The old flat-key reads ('repair.jobs.empty_folder_cleaner.remove_residual_files')
+                # never matched what the UI saves, so the #891 opt-in toggle silently did nothing —
+                # the scan always fell back to the False default and skipped every image/.lrc folder.
+                job_settings = context.config_manager.get(
+                    'repair.jobs.empty_folder_cleaner.settings', {}) or {}
+                if isinstance(job_settings, dict):
+                    ignore_junk = bool(job_settings.get('remove_junk_files', True))
+                    # #891: also clear folders left holding only images / .lrc / sidecars
+                    # (what a reorganize leaves behind). Opt-in — default off.
+                    ignore_disposable = bool(job_settings.get('remove_residual_files', False))
+        except Exception:  # noqa: S110 — setting read is best-effort; defaults to junk-only
             pass
 
         flagged = set()   # dir paths we'd remove → a parent sees them as "gone"
