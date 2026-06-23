@@ -5126,12 +5126,21 @@
                                         Only import AcoustID-verified tracks (reject "could not confirm")
                                     </label>
                                     <div class="help-text" style="margin-top:4px">
-                                        When <strong>on</strong>, a download that AcoustID runs but <em>cannot confirm</em>
+                                        When <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
                                         (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
-                                        <strong>quarantined and the next candidate is tried</strong>, instead of being
-                                        imported as unverified. Only a clean AcoustID <strong>pass</strong> is kept.
-                                        Transient lookup errors (rate-limit / outage) still import, so an AcoustID outage
-                                        never stalls your downloads. Requires AcoustID to be enabled.
+                                        <strong>quarantined</strong> instead of imported. Downloads then try the next
+                                        candidate; imports just quarantine (no candidate to retry). Only a clean AcoustID
+                                        <strong>pass</strong> is kept.
+                                        <br><br>
+                                        ⚠️ <strong>Use with care.</strong> AcoustID "could not confirm" is <em>common</em>
+                                        for perfectly good tracks — anything not in its fingerprint database: new/obscure
+                                        releases, classical, remixes, live cuts, remasters, non-Latin-script titles. With
+                                        this on, <strong>all of those get quarantined</strong>, so you may end up with many
+                                        legitimate files to review and approve by hand. Nothing is lost (quarantined files
+                                        can be approved), but expect manual cleanup. Leave this <strong>off</strong> to keep
+                                        the safer default: unconfirmed tracks import with the ⚠ "unverified" badge so you can
+                                        review them without anything being blocked. Transient lookup errors (rate-limit /
+                                        outage) always import, so an AcoustID outage never stalls you. Requires AcoustID enabled.
                                     </div>
                                 </div>
 
