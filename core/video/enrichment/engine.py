@@ -436,6 +436,20 @@ class VideoEnrichmentEngine:
                 return []
         return self._stamp_owned(items)
 
+    def movie_collection(self, tmdb_id) -> dict | None:
+        """A movie's TMDB franchise membership {id, name} (belongs_to_collection), or
+        {id: None} when it belongs to no collection. Used to backfill already-matched
+        movies that predate the collection column."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not tmdb_id:
+            return None
+        try:
+            meta = w.client.match("movie", None, None, known_id=tmdb_id) or {}
+            return {"id": meta.get("tmdb_collection_id"), "name": meta.get("tmdb_collection_name")}
+        except Exception:
+            logger.exception("movie_collection backfill failed for %s", tmdb_id)
+            return None
+
     def trailer(self, kind, tmdb_id) -> dict | None:
         """Best YouTube trailer for a title (cached a day — trailers don't move)."""
         w = self.workers.get("tmdb")

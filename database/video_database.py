@@ -815,13 +815,47 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def movies_missing_collection(self, server_source=None, limit: int = 20) -> list:
+        """Owned, TMDB-matched movies whose franchise (tmdb_collection_id) hasn't been
+        backfilled yet — drives the lazy collection-id backfill. Returns [{id, tmdb_id}]."""
+        sql = ("SELECT id, tmdb_id FROM movies WHERE has_file=1 AND tmdb_id IS NOT NULL "
+               "AND tmdb_collection_id IS NULL")
+        args: list = []
+        if server_source:
+            sql += " AND server_source=?"
+            args.append(server_source)
+        sql += " LIMIT ?"
+        args.append(int(limit))
+        conn = self._get_connection()
+        try:
+            return [{"id": r["id"], "tmdb_id": r["tmdb_id"]} for r in conn.execute(sql, args)]
+        except sqlite3.Error:
+            return []
+        finally:
+            conn.close()
+
+    def set_movie_collection(self, movie_id: int, collection_id, name) -> None:
+        """Persist a movie's TMDB collection id/name (backfill). collection_id may be
+        None — recorded as 0 so the row isn't re-checked forever (a movie with no
+        franchise). 0 is excluded from the gap rails."""
+        conn = self._get_connection()
+        try:
+            conn.execute("UPDATE movies SET tmdb_collection_id=?, tmdb_collection_name=? WHERE id=?",
+                         (int(collection_id) if collection_id else 0, name, int(movie_id)))
+            conn.commit()
+        except sqlite3.Error:
+            pass
+        finally:
+            conn.close()
+
     def owned_movie_collections(self, server_source=None, limit: int = 12) -> list:
         """Franchises the user has STARTED (owns >=1 movie in), most-invested first —
         drives the 'Complete your collections' gap rails. Returns
         [{collection_id, name, owned_count}]."""
         sql = ("SELECT tmdb_collection_id AS cid, "
                "MAX(tmdb_collection_name) AS name, COUNT(*) AS c "
-               "FROM movies WHERE has_file=1 AND tmdb_collection_id IS NOT NULL")
+               "FROM movies WHERE has_file=1 AND tmdb_collection_id IS NOT NULL "
+               "AND tmdb_collection_id != 0")
         args: list = []
         if server_source:
             sql += " AND server_source=?"
