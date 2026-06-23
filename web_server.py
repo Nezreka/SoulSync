@@ -14993,7 +14993,12 @@ def parse_youtube_playlist(url):
             'no_warnings': True,
             'extract_flat': 'in_playlist',  # Only extract basic info, no individual video metadata
             'skip_download': True,  # Don't download, just extract IDs and basic info
-            'lazy_playlist': False,  # Force full playlist resolution (prevents ~100 entry cap)
+            'lazy_playlist': False,  # Force full playlist resolution
+            # #908 / yt-dlp #16943: a YouTube-side regression caps the webpage-based playlist
+            # path at the first ~100-item page (Liked Music came back as only 104). Skipping the
+            # webpage and paging via the InnerTube API directly gets far more — verified live
+            # 100 -> 200+ on a large playlist. Remove once the upstream fix (PR #16948) ships.
+            'extractor_args': {'youtubetab': {'skip': ['webpage']}},
         }
         ydl_opts.update(_youtube_cookie_opts())
         
