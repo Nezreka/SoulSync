@@ -5416,20 +5416,34 @@ function _pollRedownloadProgress(taskId, overlay) {
 async function redownloadLibraryAlbum(album, artistName, btn) {
     const albumName = album.title || '';
     const spotifyAlbumId = album.spotify_album_id || '';
+    const itunesAlbumId = album.itunes_album_id || '';
 
-    if (!spotifyAlbumId && !albumName) {
+    if (!spotifyAlbumId && !itunesAlbumId && !albumName) {
         showToast('No album ID or name available for redownload', 'warning');
         return;
     }
+
+    // Fetch a specific album edition by its source id. The iTunes endpoint returns a
+    // Spotify-shaped payload, so all the downstream handling is identical.
+    const fetchAlbumBySource = (source, id, name, artist) => {
+        const params = new URLSearchParams({ name: name || albumName, artist: artist || artistName || '' });
+        const base = source === 'itunes' ? '/api/itunes/album/' : '/api/spotify/album/';
+        return fetch(`${base}${encodeURIComponent(id)}?${params}`);
+    };
 
     const origText = btn ? btn.innerHTML : '';
     try {
         if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
 
+        // #911 — redownload the edition the user ACTUALLY matched, using the album row's
+        // stored source id. A fresh search can resolve to a different edition (e.g. a
+        // single-volume release instead of the matched full collection), so use the
+        // spotify/iTunes id when present and only fall back to a search if neither exists.
         let response;
         if (spotifyAlbumId) {
-            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
+            response = await fetchAlbumBySource('spotify', spotifyAlbumId);
+        } else if (itunesAlbumId) {
+            response = await fetchAlbumBySource('itunes', itunesAlbumId);
         }
 
         if (!response || !response.ok) {
@@ -5441,13 +5455,15 @@ async function redownloadLibraryAlbum(album, artistName, btn) {
             });
             if (!searchResp.ok) throw new Error('Album search failed');
             const searchData = await searchResp.json();
-            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
+            const spotHit = searchData.spotify_albums?.[0];
+            const found = spotHit || searchData.itunes_albums?.[0];
             if (!found || !found.id) {
                 showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
                 return;
             }
-            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
+            // Fetch from the MATCHING source endpoint — the old fallback always hit the
+            // Spotify endpoint, which is wrong for an iTunes search hit.
+            response = await fetchAlbumBySource(spotHit ? 'spotify' : 'itunes', found.id, found.name, found.artist);
         }
 
         if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
