@@ -2619,6 +2619,10 @@ async function _verifLoadConfig() {
         const r = await fetch('/api/verification/config');
         const d = await r.json();
         _verifAcoustidEnabled = !!(d && d.acoustid_enabled);
+        // When require_verified is on, nothing ever lands in the library as
+        // "unverified" — unconfirmed tracks go straight to quarantine instead.
+        // Collapse the sub-view to quarantine-only just like the no-AcoustID case.
+        if (_verifAcoustidEnabled && d && d.require_verified) _verifAcoustidEnabled = false;
     } catch (e) { _verifAcoustidEnabled = true; }
     _verifConfigLoading = false;
     if (_verifAcoustidEnabled === false) {
@@ -2626,7 +2630,7 @@ async function _verifLoadConfig() {
         const pill = document.querySelector('.adl-pill[data-filter="unverified"]');
         if (pill) {
             pill.textContent = '🛡 Quarantine';
-            pill.title = 'Files that failed import checks and were NOT imported. (AcoustID is not configured, so there is no unverified review queue.)';
+            pill.title = 'Files that failed import checks and were NOT imported. (AcoustID is not configured or require-verified is on, so there is no unverified review queue.)';
         }
         if (_adlFilter === 'unverified') { _verifLoadQuarantine(true); _adlRender(); }
     }
@@ -2655,6 +2659,7 @@ async function _verifLoadQuarantine(force) {
 const _VERIF_QUAR_TRIGGERS = {
     integrity: ['DURATION / INTEGRITY', 'verif-rb-int'],
     acoustid: ['ACOUSTID MISMATCH', 'verif-rb-force'],
+    acoustid_unverified: ['ACOUSTID UNVERIFIED', 'verif-rb-unv'],
     bit_depth: ['BIT DEPTH FILTER', 'verif-rb-int'],
 };
 
