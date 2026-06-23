@@ -41,8 +41,8 @@ function _initImportFileTab() {
 
 function _importFileRead(file) {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (!['csv', 'tsv', 'txt'].includes(ext)) {
-        showToast('Unsupported file type. Use CSV, TSV, or TXT.', 'error');
+    if (!['csv', 'tsv', 'txt', 'm3u', 'm3u8'].includes(ext)) {
+        showToast('Unsupported file type. Use CSV, TSV, TXT, M3U, or M3U8.', 'error');
         return;
     }
 
@@ -50,7 +50,8 @@ function _importFileRead(file) {
     reader.onload = (e) => {
         _importFileState.rawText = e.target.result;
         _importFileState.fileName = file.name;
-        _importFileState.fileType = (ext === 'txt') ? 'text' : 'csv';
+        _importFileState.fileType = (ext === 'm3u' || ext === 'm3u8') ? 'm3u'
+                                  : (ext === 'txt') ? 'text' : 'csv';
         _importFileParseAndPreview();
     };
     reader.readAsText(file);
@@ -103,6 +104,66 @@ function _importFileParseCsv(text, delimiter) {
     return { headers, rows };
 }
 
+// Parse an M3U / M3U8 playlist into track objects. Handles both the simple form
+// (one media path per line) and the extended form (#EXTINF:<secs>,<artist> - <title>
+// followed by the path). SoulSync's own export is extended M3U and replaces the path
+// of an un-located track with a "# MISSING: ..." comment — those are exactly the
+// tracks a user imports to go match/download, so a pending #EXTINF is flushed even
+// when no path line follows it. Returns { tracks, playlistName }.
+function _importFileParseM3u(text) {
+    const lines = (text || '').split(/\r?\n/);
+    const tracks = [];
+    let playlistName = '';
+    let pending = null;   // { duration_ms, artist, title } from the last #EXTINF
+
+    function splitArtistTitle(s) {
+        const i = s.indexOf(' - ');
+        return i !== -1
+            ? { artist: s.slice(0, i).trim(), title: s.slice(i + 3).trim() }
+            : { artist: '', title: s.trim() };
+    }
+    function pushTrack(artist, title, duration_ms) {
+        if (!title && !artist) return;
+        tracks.push({ track_name: title || '', artist_name: artist || '', album_name: '', duration_ms: duration_ms || 0 });
+    }
+    function flushPending() {
+        if (pending) { pushTrack(pending.artist, pending.title, pending.duration_ms); pending = null; }
+    }
+
+    for (const raw of lines) {
+        const line = raw.trim();
+        if (!line) continue;
+        if (line.charAt(0) === '#') {
+            if (/^#EXTINF:/i.test(line)) {
+                flushPending();   // a prior #EXTINF whose path was missing still counts
+                const rest = line.slice(8);                 // after "#EXTINF:"
+                const comma = rest.indexOf(',');
+                const secs = parseFloat(comma === -1 ? rest : rest.slice(0, comma));
+                const meta = comma === -1 ? '' : rest.slice(comma + 1).trim();
+                const { artist, title } = splitArtistTitle(meta);
+                pending = { duration_ms: (!isNaN(secs) && secs > 0) ? Math.round(secs * 1000) : 0, artist, title };
+            } else if (/^#PLAYLIST:/i.test(line)) {
+                playlistName = line.slice(line.indexOf(':') + 1).trim();
+            }
+            // ignore #EXTM3U, #GENERATED, "# MISSING:", #EXTALB, and other directives
+            continue;
+        }
+        // A non-# line is a media path/URL — the entry for the pending #EXTINF, if any.
+        if (pending && (pending.title || pending.artist)) {
+            pushTrack(pending.artist, pending.title, pending.duration_ms);
+            pending = null;
+        } else {
+            // Simple M3U with no #EXTINF: derive artist/title from the file name.
+            pending = null;
+            const base = (line.split(/[\\/]/).pop() || line).replace(/\.[^.]+$/, '');
+            const { artist, title } = splitArtistTitle(base);
+            pushTrack(artist, title, 0);
+        }
+    }
+    flushPending();   // trailing #EXTINF with no following path
+    return { tracks, playlistName };
+}
+
 function _importFileAutoMapColumns(headers) {
     const map = {};
     const lowerHeaders = headers.map(h => h.toLowerCase().trim());
@@ -139,7 +200,14 @@ function _importFileParseAndPreview() {
     const state = _importFileState;
     const text = state.rawText;
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // M3U/M3U8 is self-describing — no column mapping or order/separator needed.
+        const { tracks, playlistName } = _importFileParseM3u(text);
+        state.rows = tracks;            // already track objects
+        state.headers = [];
+        state.columnMap = {};
+        state.m3uPlaylistName = playlistName || '';
+    } else if (state.fileType === 'text') {
         // Plain text: one track per line
         const lines = text.split(/\r?\n/).filter(l => l.trim());
         state.rows = lines;
@@ -163,7 +231,15 @@ function _importFileBuildTracks() {
     const state = _importFileState;
     state.parsedTracks = [];
 
-    if (state.fileType === 'text') {
+    if (state.fileType === 'm3u') {
+        // Tracks were already parsed by _importFileParseM3u; just copy them through.
+        state.parsedTracks = state.rows.map(t => ({
+            track_name: t.track_name || '',
+            artist_name: t.artist_name || '',
+            album_name: t.album_name || '',
+            duration_ms: t.duration_ms || 0
+        }));
+    } else if (state.fileType === 'text') {
         const orderEl = document.getElementById('import-file-text-order');
         const sepEl = document.getElementById('import-file-text-separator');
         const order = orderEl ? orderEl.value : 'artist-title';
@@ -249,10 +325,12 @@ function _importFileRenderPreview() {
         _importFileRenderColumnMapping();
     }
 
-    // Pre-fill playlist name from filename (strip extension)
+    // Pre-fill playlist name: prefer the M3U's own #PLAYLIST: directive, else the filename.
     const nameInput = document.getElementById('import-file-playlist-name');
     if (nameInput && !nameInput.value) {
-        nameInput.value = state.fileName.replace(/\.[^.]+$/, '');
+        nameInput.value = (state.fileType === 'm3u' && state.m3uPlaylistName)
+            ? state.m3uPlaylistName
+            : state.fileName.replace(/\.[^.]+$/, '');
     }
     // Update button state
     const btn = document.getElementById('import-file-import-btn');
@@ -523,6 +601,7 @@ function renderMirroredCard(p, container) {
         <button class="mirrored-card-pipeline" onclick="event.stopPropagation(); runMirroredPlaylistPipeline(${p.id}, '${_escJs(p.name)}')" title="Refresh, discover, sync, and queue missing tracks">Auto-Sync</button>
         <button class="mirrored-card-rename" onclick="event.stopPropagation(); editMirroredCustomName(${p.id}, '${_escJs(p.name)}', '${_escJs(p.custom_name || '')}')" title="Rename (changes the name shown here and used when syncing)">✏️</button>
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
+        <button class="mirrored-card-export" onclick="event.stopPropagation(); exportMirroredPlaylist(${p.id}, '${_escJs(p.display_name || p.name)}')" title="Export to ListenBrainz / JSPF">📤</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
     `;
     card.addEventListener('click', () => {
@@ -564,6 +643,110 @@ function renderMirroredCard(p, container) {
     if (pipelineState && pipelineState.status === 'running' && !mirroredPipelinePollers[hash]) {
         pollMirroredPipelineStatus(p.id, p.name);
     }
+}
+
+// ── Playlist export to ListenBrainz / JSPF (#903) ───────────────────────────
+// Export button on the mirrored-playlist card -> pick a destination -> background job
+// resolves each track to a MusicBrainz recording MBID (cache/DB/file/MusicBrainz) and either
+// downloads the .jspf or pushes the playlist straight to ListenBrainz, with live status on the card.
+function exportMirroredPlaylist(playlistId, name) {
+    const existing = document.getElementById('pl-export-modal');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'pl-export-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);';
+    overlay.innerHTML = `
+        <div style="width:420px;max-width:92vw;background:linear-gradient(135deg,rgba(26,26,30,0.98),rgba(18,18,22,0.99));border:1px solid rgba(var(--accent-rgb),0.25);border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.55);">
+            <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">Export playlist</div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.55);margin-bottom:18px;">${_esc(name)} → ListenBrainz</div>
+            <button class="pl-export-choice" data-mode="push" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(var(--accent-rgb),0.35);background:rgba(var(--accent-rgb),0.12);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to ListenBrainz</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create the playlist directly on your ListenBrainz account (needs your LB token).</div>
+            </button>
+            <button class="pl-export-choice" data-mode="download" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Download .jspf file</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Save a JSPF playlist you can upload to ListenBrainz manually.</div>
+            </button>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Each track is matched to its MusicBrainz recording ID (cached → library → file tag → MusicBrainz). Tracks without an ID can't be included — you'll see how many matched.</div>
+            <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
+        </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.mode;
+            overlay.remove();
+            _startPlaylistExport(playlistId, mode, name);
+        });
+    });
+    document.body.appendChild(overlay);
+}
+
+async function _startPlaylistExport(playlistId, mode, name) {
+    _setExportStatus(playlistId, `<span style="color:#a78bfa;">Starting export…</span>`);
+    try {
+        const resp = await fetch(`/api/playlists/${playlistId}/export/listenbrainz`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode }),
+        });
+        const data = await resp.json();
+        if (!data.success || !data.job_id) {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">Export failed to start</span>`);
+            return;
+        }
+        _pollPlaylistExport(data.job_id, playlistId, mode, name);
+    } catch (e) {
+        _setExportStatus(playlistId, `<span style="color:#ef4444;">Export error</span>`);
+    }
+}
+
+async function _pollPlaylistExport(jobId, playlistId, mode, name) {
+    try {
+        const resp = await fetch(`/api/playlists/export/status/${jobId}`);
+        const data = await resp.json();
+        const job = data.job || {};
+        const st = job.stats || {};
+        if (job.phase === 'resolving') {
+            const pct = job.total ? Math.round(100 * (job.done || 0) / job.total) : 0;
+            _setExportStatus(playlistId, `<span style="color:#38bdf8;">Matching ${job.done || 0}/${job.total || 0} (${pct}%)${st.resolved != null ? ` · ${st.resolved} matched` : ''}</span>`);
+        } else if (job.phase === 'pushing') {
+            _setExportStatus(playlistId, `<span style="color:#a78bfa;">Pushing to ListenBrainz…</span>`);
+        } else if (job.phase === 'done') {
+            const sum = job.summary || {};
+            const cov = `${sum.included || 0}/${sum.total || 0} matched${sum.skipped ? ` · ${sum.skipped} unmatched` : ''}`;
+            if (mode === 'download') {
+                window.location = `/api/playlists/export/download/${jobId}`;
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Downloaded · ${cov}</span>`, 8000);
+            } else {
+                const url = (job.push && job.push.playlist_url) || '';
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Synced to ListenBrainz · ${cov}</span>` + (url ? ` <a href="${url}" target="_blank" style="color:#38bdf8;">view</a>` : ''), 12000);
+                if (typeof showToast === 'function') showToast(`Playlist synced to ListenBrainz (${cov})`, 'success');
+            }
+            return;
+        } else if (job.phase === 'error') {
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">${_esc(job.error || 'Export failed')}</span>`, 10000);
+            return;
+        }
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 1000);
+    } catch (e) {
+        setTimeout(() => _pollPlaylistExport(jobId, playlistId, mode, name), 2000);
+    }
+}
+
+function _setExportStatus(playlistId, html, autoHideMs) {
+    // Inject into the card's existing .card-meta line (same approach as the pipeline phase
+    // indicator) so the status sits inline and never disrupts the card's flex row.
+    const card = document.getElementById(`mirrored-card-${playlistId}`);
+    if (!card) return;
+    const meta = card.querySelector('.card-meta');
+    if (!meta) return;
+    let span = meta.querySelector('.export-status-span');
+    if (!span) {
+        span = document.createElement('span');
+        span.className = 'export-status-span';
+        meta.appendChild(span);
+    }
+    span.innerHTML = html;
+    if (autoHideMs) setTimeout(() => { if (span && span.parentNode) span.remove(); }, autoHideMs);
 }
 
 function updateMirroredCardPhase(urlHash, phase) {

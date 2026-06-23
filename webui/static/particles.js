@@ -101,6 +101,27 @@
     // Each preset: { count, init(p, i), update(p, time, i), draw(p, ctx, accent, time),
     //   optional: initExtras(), drawGlobal(ctx, particles, accent, time, extras) }
 
+    // Pre-rendered glow sprite. A dashboard particle's glow is a radial gradient
+    // (its accent colour -> transparent) of a SIZE that's fixed for the particle's
+    // life — the only thing changing each frame is the pulse ALPHA. Since canvas
+    // multiplies fillStyle/image alpha by ctx.globalAlpha, we can bake the gradient
+    // ONCE into an offscreen canvas at full alpha and drawImage it each frame with
+    // globalAlpha = pulse, instead of building a fresh createRadialGradient + arc-fill
+    // for all 50 particles every frame. Output is pixel-identical; just far cheaper.
+    function buildGlowSprite(col, glowSize) {
+        const s = Math.max(1, Math.ceil(glowSize));
+        const c = document.createElement('canvas');
+        c.width = s * 2;
+        c.height = s * 2;
+        const g = c.getContext('2d');
+        const grad = g.createRadialGradient(s, s, 0, s, s, s);
+        grad.addColorStop(0, `rgba(${col}, 1)`);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, s * 2, s * 2);
+        return c;
+    }
+
     const PRESETS = {
 
         // ── DASHBOARD — network nodes, connections, data packets, shooting stars ──
@@ -130,16 +151,20 @@
                 const pulse = 0.5 + 0.5 * Math.sin(time * 1.5 + p.phase);
                 const col = shiftAccent(accent, p.hueShift);
 
-                // Glow — hubs get bigger, brighter glow
+                // Glow — hubs get bigger, brighter glow. Cached sprite blit (alpha at
+                // blit time); pixel-identical to the old per-frame radial gradient.
                 const glowSize = p.isHub ? p.radius * 6 : p.radius * 4;
                 const glowAlpha = p.isHub ? (0.18 + pulse * 0.12) : (0.10 + pulse * 0.07);
-                const glow = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize);
-                glow.addColorStop(0, `rgba(${col}, ${glowAlpha})`);
-                glow.addColorStop(1, 'rgba(0,0,0,0)');
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, glowSize, 0, Math.PI * 2);
-                ctx.fillStyle = glow;
-                ctx.fill();
+                if (!p._glowCanvas || p._glowCol !== col || p._glowR !== glowSize) {
+                    p._glowCanvas = buildGlowSprite(col, glowSize);  // rebuilt only on accent change
+                    p._glowCol = col;
+                    p._glowR = glowSize;
+                }
+                // Multiply by the incoming globalAlpha so transition fades match exactly.
+                const _glowPrevAlpha = ctx.globalAlpha;
+                ctx.globalAlpha = _glowPrevAlpha * glowAlpha;
+                ctx.drawImage(p._glowCanvas, p.x - glowSize, p.y - glowSize, glowSize * 2, glowSize * 2);
+                ctx.globalAlpha = _glowPrevAlpha;
 
                 // Core
                 const coreAlpha = p.isHub ? (0.5 + pulse * 0.3) : (0.3 + pulse * 0.2);

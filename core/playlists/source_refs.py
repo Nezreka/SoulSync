@@ -19,6 +19,35 @@ from urllib.parse import parse_qs, urlparse
 
 _SPOTIFY_ID_RE = re.compile(r"^[A-Za-z0-9]{16,32}$")
 
+
+def stable_source_track_id(track: Mapping, existing: Optional[str] = None) -> str:
+    """A stable per-track id for a mirrored-playlist track.
+
+    Spotify / YouTube / Deezer tracks carry a native id. File-import (CSV / M3U /
+    TXT) and iTunes-only sources don't — they arrive with an empty
+    ``source_track_id``. The whole manual-match system (Find & Add ↔ sync) keys on
+    ``source_track_id``, and an empty key can neither be recorded (the persist is a
+    no-op) nor looked up — so a manual match on a file-import track is silently
+    dropped and the track re-appears as "extra" (#901).
+
+    When a native id is present it's used verbatim. Otherwise we derive a
+    DETERMINISTIC id from the track's identity (artist|title|album, normalized) so
+    the SAME song gets the SAME id across re-imports and discovery passes — which
+    is exactly what the match lookup needs. Prefixed ``file:`` so it's recognizable
+    and never collides with a real upstream id. Returns '' only when there's no
+    usable identity at all (no title)."""
+    native = (existing if existing is not None else track.get("source_track_id")) or ""
+    native = str(native).strip()
+    if native:
+        return native
+    title = str(track.get("track_name") or track.get("name") or "").strip().lower()
+    if not title:
+        return ""
+    artist = str(track.get("artist_name") or track.get("artist") or "").strip().lower()
+    album = str(track.get("album_name") or track.get("album") or "").strip().lower()
+    digest = hashlib.md5(f"{artist}|{title}|{album}".encode("utf-8")).hexdigest()[:16]
+    return f"file:{digest}"
+
 # Synthetic batch playlist_id prefixes that wrap a mirrored_playlists PK.
 # Download/discovery flows build a batch playlist_id as f"{prefix}{pk}" — e.g.
 # auto_mirror_<pk> (core/automation/handlers/sync_playlist.py), youtube_mirrored_<pk>

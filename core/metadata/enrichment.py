@@ -131,6 +131,14 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
             track_num_str = format_track_number_tag(
                 metadata.get('track_number'), metadata.get('total_tracks')
             )
+            # Disc number is written UNCONDITIONALLY (floored to >=1), like the
+            # track number above. The old code only wrote it when truthy, so a
+            # track whose disc came back 0/None/'' (e.g. matched to a different
+            # edition) lost its disc tag on the clear-then-rewrite and floated
+            # ungrouped above the disc sections in Jellyfin/Plex (Sokhi).
+            from core.imports.track_number import normalize_disc_number
+            _disc_num = normalize_disc_number(metadata.get('disc_number'))
+            disc_num_str = str(_disc_num)
             write_multi = cfg.get("metadata_enhancement.tags.write_multi_artist", False)
             artists_list = metadata.get("_artists_list", [])
 
@@ -162,8 +170,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("genre"):
                     audio_file.tags.add(symbols.TCON(encoding=3, text=[metadata["genre"]]))
                 audio_file.tags.add(symbols.TRCK(encoding=3, text=[track_num_str]))
-                if metadata.get("disc_number"):
-                    audio_file.tags.add(symbols.TPOS(encoding=3, text=[str(metadata["disc_number"])]))
+                audio_file.tags.add(symbols.TPOS(encoding=3, text=[disc_num_str]))
             elif is_vorbis_like(audio_file, symbols):
                 if metadata.get("title"):
                     audio_file["title"] = [metadata["title"]]
@@ -180,8 +187,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 if metadata.get("genre"):
                     audio_file["genre"] = [metadata["genre"]]
                 audio_file["tracknumber"] = [track_num_str]
-                if metadata.get("disc_number"):
-                    audio_file["discnumber"] = [str(metadata["disc_number"])]
+                audio_file["discnumber"] = [disc_num_str]
             elif isinstance(audio_file, symbols.MP4):
                 if metadata.get("title"):
                     audio_file["\xa9nam"] = [metadata["title"]]
@@ -198,8 +204,7 @@ def enhance_file_metadata(file_path: str, context: dict, artist: dict, album_inf
                 audio_file["trkn"] = [format_track_number_tuple(
                     metadata.get("track_number"), metadata.get("total_tracks")
                 )]
-                if metadata.get("disc_number"):
-                    audio_file["disk"] = [(metadata["disc_number"], 0)]
+                audio_file["disk"] = [(_disc_num, 0)]
 
             embed_source_ids(audio_file, metadata, context, runtime=runtime)
 

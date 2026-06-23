@@ -146,6 +146,26 @@ def test_gate_blocks_auto_readd_but_manual_bypasses_and_clears(db):
     assert db.is_track_ignored("t1") is False
 
 
+def test_user_initiated_add_bypasses_and_clears_keeping_source_type(db):
+    # #897 / carlosjfcasero: a user manually adds an album track they had
+    # previously cancelled. It must bypass the gate AND clear the ignore — but
+    # WITHOUT pretending to be source_type='manual' (the album modal sends
+    # source_type='album', which the Albums/Singles categorisation relies on,
+    # and which an automatic path like repair_worker also legitimately uses).
+    track = _track("t7")
+    db.add_to_wishlist_ignore("t7", "Owned Song", "Owned Artist", REASON_CANCELLED)
+    # An automatic 'album' add (e.g. repair_worker) is still correctly blocked.
+    assert db.add_to_wishlist(track, source_type="album") is False
+    assert db.is_track_ignored("t7") is True
+    # The explicit user click (user_initiated) goes through and clears the ignore,
+    # while the stored source_type stays 'album'.
+    assert db.add_to_wishlist(track, source_type="album", user_initiated=True) is True
+    assert db.is_track_ignored("t7") is False
+    # Provenance preserved: the stored row is still source_type='album', NOT 'manual'.
+    row = next(r for r in db.get_wishlist_tracks() if str(r.get("spotify_track_id")) == "t7")
+    assert row.get("source_type") == "album"
+
+
 def test_gate_failopen_when_ignore_table_errors(db, monkeypatch):
     # If the ignore check raises, the add must still succeed (never block).
     monkeypatch.setattr(db, "is_track_ignored", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))

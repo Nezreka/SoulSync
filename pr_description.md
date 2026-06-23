@@ -1,37 +1,41 @@
-# soulsync 2.7.4 — `dev` → `main`
+# soulsync 2.7.6 — `dev` → `main`
 
-patch release on top of 2.7.3. headline is **re-identify** — re-file an already-imported track under the right release without re-downloading it.
+patch release on top of 2.7.5. the headline is going the *other* way with playlists — exporting them TO listenbrainz — plus youtube liked-music sync, a deep-scan data-loss guard, and a round of dashboard performance work.
 
 ---
 
 ## what's new
 
-### re-identify a track (#889)
-filed a track under the wrong release (single vs ep vs album)? there's now a ⇄ button in the library Enhanced view that lets you fix it. search any configured source (tabs, defaults to your active one), see the same song across its single / ep / album with type badges, pick the right one, and soulsync re-files the file you already have under that release — correct year, in-album track number, and art. opt to replace the original entry or keep both.
+### export playlists to listenbrainz (#903)
+soulsync already pulls playlists IN from everywhere — now it can push one back OUT. every mirrored-playlist card gets a 📤 export button: pick **download .jspf** (a standard playlist file you can hand-upload anywhere) or **sync to listenbrainz** (creates the playlist straight on your LB account). each track is matched to its musicbrainz *recording* id via a cheapest-first waterfall — cache → your library (`musicbrainz_recording_id`) → the file's own tag → a live musicbrainz lookup — with the result cached so the same song never costs twice. live "matching N/M · X matched" status shows on the card, and re-syncing **updates the same LB playlist in place** instead of making duplicates. tracks that can't be resolved to an MBID are skipped (LB requires them) and counted so you see the coverage.
 
-built additively over 5 phases (hint store → import seam → multi-source search → modal → button), all riding the existing import pipeline so a no-hint import is byte-identical to before. and it can't lose your file: replace deletes the old entry only *after* the re-import lands, and never if you pick the release it's already in.
+### youtube liked-music sync (#902)
+you can now sync your youtube music **Liked Music** playlist (`music.youtube.com/playlist?list=LM`). it's a private playlist, so it needs auth — and the existing "read a browser's cookies" option only works when the browser is on the same machine. added a **"paste cookies.txt"** option in Settings → YouTube so server/docker installs (and anyone on a browser like Zen that yt-dlp can't read) can supply their login from anywhere.
 
-### cleaner libraries & imports
-- **#890** — track titles no longer keep the "01 - " prefix from the filename when there's no embedded title tag (which made the real track read as a false "missing"). stripped conservatively so "7 Rings" / "1-800-273-8255" / "1979" are left alone.
-- **#891** — a Library Reorganize now sweeps the leftover cover.jpg / .lrc / sidecars from the old folder so it actually empties, plus an opt-in "Remove Residual Files" toggle on the Empty Folder Cleaner for the image-only folders you already have.
-- **Sokhi's batch** — same-album songs group under one canonical release id (no more split discographies / mixed cover art); a single can match its parent album; a mid-enrichment crash on an art-less file no longer leaves it untagged; and a sequel digit glued to a CJK title no longer matches the wrong album.
+### deep scan won't relocate your library (#904)
+a standalone Deep Scan moves files it doesn't recognize into Staging for import. if the DB was empty/out of sync with disk (a volume swap, a DB reset, external tag edits), it treated your **entire** library as "unrecognized" and relocated all of it — one user lost ~1,500 tracks into Staging. now a guard refuses the move when the unrecognized share is implausibly large (the desync signature), leaves everything in place, and warns instead. plus a **"Transfer is my permanent library — never move files out"** toggle for people whose Transfer folder *is* their live library.
 
-### quality & sources
-- **#886** — AAC (.m4a) as an opt-in soulseek quality tier, ranked above mp3 / below flac. off by default; existing profiles unchanged until you enable it.
-- **#887** — enrichment on Spotify Free now reads "Running (Spotify Free)" instead of wrongly showing "Not Authenticated".
-- **#884** — NZBGet imports from the finished location, not the incomplete "….#NZBID" folder.
-- **#885** — setting the timezone to Australia/Sydney no longer makes the cache-maintenance job loop every 5 seconds.
+### dashboard performance
+a pass at the "soulsync makes my GPU work hard just sitting there" complaints. the sidebar sweep animates `transform` instead of `left` (no per-frame layout), particle glows are pre-rendered sprites instead of per-frame gradients, blur radii + redundant/invisible card shadows are trimmed, and low-power machines auto-drop to performance mode. all the visible effects stay; they're just cheaper to draw.
 
-### polish
-- the artist-detail header no longer bleeds the blurred artist photo behind it.
+### fixes
+- **file-import manual matches stick (#901)** — a manual match on a file-imported playlist track is no longer forgotten on re-sync (the tracks now carry a stable id; existing ones are backfilled once).
+- **manual match heals a stale Plex key** — a Find & Add match whose stored Plex ratingKey went stale is now re-resolved against a live Plex search instead of silently breaking.
+- **multi-disc albums** — a track now files into the Disc folder that matches its own disc tag (no more disc-2 tracks landing in Disc 1), and a track is never written disc-less.
+- **auto-download track numbers** — a track auto-grabbed from the playlist pipeline / wishlist / watchlist now gets its real in-album position instead of being tagged `1/1`.
+
+---
+
+## a brief recap of what came before
+2.7.5 was a fix-heavy cycle — matching & artwork accuracy, the HiFi preview mess (#895) — plus M3U import (#893), ignore-list management (#897), and per-playlist file naming. 2.7.4 was re-identify; 2.7.3 the Quality Upgrade Finder + ignore-list (#874); 2.7.2 playlist-folder mirroring + M3U export; 2.7.1 download verification + a review queue (#852); 2.7.0 made multi-user real.
 
 ---
 
 ## tests
-strictly additive across the board — every new behavior is opt-in or gated so default flows are unchanged. ~100 new tests this cycle (re-identify seam, title-strip danger cases, the shared residual-file classifier, aac tier, tz scheduler, spotify-free status). full imports / matching / reorganize / auto-import suites green, ruff clean.
+additive + fail-safe — new behavior is opt-in or guarded, nothing existing rewired. new seam/regression suites across the listenbrainz export (JSPF build, the MBID waterfall + dedup, the persistent cache, the LB create/update-in-place client), the youtube cookie precedence, and the #904 deep-scan guard (incl. the 1,500-file regression). the listenbrainz push + update-in-place were also validated live against a real account. relevant suites green; `ruff check` clean on touched modules.
 
 ## post-merge
-- [ ] tag `v2.7.4` on `main`
-- [ ] docker-publish with `version_tag: 2.7.4`
+- [ ] tag `v2.7.6` on `main`
+- [ ] docker-publish with `version_tag: 2.7.6`
 - [ ] discord announce (auto-fired by the workflow)
-- [ ] reply on #889 / #890 / #891
+- [ ] reply on #902 / #903 / #904

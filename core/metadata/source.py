@@ -1089,10 +1089,12 @@ def extract_source_metadata(context: dict, artist: dict, album_info: dict) -> di
             metadata["track_number"] = 1
             metadata["total_tracks"] = 1
 
-    disc_num = original_search.get("disc_number")
-    if disc_num is None and album_info:
-        disc_num = album_info.get("disc_number")
-    metadata["disc_number"] = disc_num if disc_num is not None else 1
+    # Resolve via the SHARED resolver so the embedded tag and the "Disc N" folder
+    # (computed in the import pipeline from album_info) can never disagree — same
+    # function, same inputs. Floors to >=1 (a 0/''/non-numeric disc must not read
+    # as disc-less and ungroup the track in Jellyfin/Plex).
+    from core.imports.track_number import resolve_disc_for_track
+    metadata["disc_number"] = resolve_disc_for_track(original_search, album_info)
 
     if album_ctx and album_ctx.get("release_date"):
         release_date = _normalize_release_date_tag(album_ctx.get("release_date"))
