@@ -503,7 +503,26 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     logger.info(f"AcoustID verification result: {verification_result.value} - {verification_msg}")
                     context['_acoustid_result'] = verification_result.value
 
-                    if verification_result == VerificationResult.FAIL:
+                    # Fail-closed mode: when the user requires a hard AcoustID
+                    # PASS, a SKIP (ran but couldn't confirm — no fingerprint
+                    # match / cross-script metadata) is treated like a FAIL:
+                    # quarantine + try the next candidate, instead of importing
+                    # an unverified file. ERROR (rate-limit / infra) is NOT
+                    # blocked — that would stall the whole pipeline during an
+                    # outage; those still import with their existing flag.
+                    require_verified = config_manager.get('acoustid.require_verified', False)
+                    _skip_as_fail = (
+                        require_verified
+                        and verification_result == VerificationResult.SKIP
+                    )
+                    if _skip_as_fail:
+                        verification_msg = (
+                            f"AcoustID could not confirm the track and 'require verified' "
+                            f"is on — rejecting unverified file ({verification_msg})"
+                        )
+                        logger.warning("[AcoustID] Require-verified: SKIP treated as FAIL — %s", verification_msg)
+
+                    if verification_result == VerificationResult.FAIL or _skip_as_fail:
                         try:
                             quarantine_path = move_to_quarantine(
                                 file_path,
