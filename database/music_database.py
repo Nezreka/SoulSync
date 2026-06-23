@@ -2085,6 +2085,18 @@ class MusicDatabase:
                 "ON mb_album_release_cache (release_mbid)"
             )
 
+            # Persistent (artist,title) -> recording MBID cache for playlist export (#903).
+            # The MusicBrainz tail of the export waterfall is rate-limited (~1 req/s), so a
+            # resolved recording MBID is remembered ONCE and reused for that song across every
+            # future export and playlist. Additive: empty until the export feature writes it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mb_recording_cache (
+                    track_key TEXT PRIMARY KEY,
+                    recording_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS discovery_artist_blacklist (
