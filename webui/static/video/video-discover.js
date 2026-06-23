@@ -402,6 +402,7 @@
                     '</section>';
                 }).join('');
                 host.insertAdjacentHTML('afterbegin', html);
+                staggerWithin(host);
                 hydrateGet(host);
             })
             .catch(function () { /* personalization is best-effort */ });
@@ -429,6 +430,7 @@
                     '</section>';
                 }).join('');
                 host.insertAdjacentHTML('afterbegin', html);
+                staggerWithin(host);
                 hydrateGet(host);
             })
             .catch(function () { /* gaps are best-effort */ });
@@ -453,6 +455,7 @@
                     '<div class="vdsc-rail" data-vdsc-rail>' + items.map(card).join('') + '</div>' +
                 '</section>';
                 host.insertAdjacentHTML('afterbegin', html);
+                staggerWithin(host);
                 hydrateGet(host);
             })
             .catch(function () { /* best-effort */ });
@@ -504,6 +507,22 @@
         var h = $('[data-vdsc-hideowned]');
         return !!(h && h.checked);
     }
+    // Tag each card with its index so the CSS cascade reveals them one-by-one (not all at once).
+    // Capped so a long rail's tail doesn't lag too far behind the head.
+    function stagger(rail) {
+        if (!rail) return;
+        var c = rail.children;
+        for (var i = 0; i < c.length; i++) c[i].style.setProperty('--i', i < 14 ? i : 14);
+    }
+    // Stagger every not-yet-tagged filled rail under a host (used by the prepended
+    // personalized rows, which render their cards inline rather than via fillShelf).
+    function staggerWithin(host) {
+        if (!host) return;
+        var rails = host.querySelectorAll('.vdsc-shelf--in .vdsc-rail');
+        for (var i = 0; i < rails.length; i++) {
+            if (!rails[i].getAttribute('data-stg')) { rails[i].setAttribute('data-stg', '1'); stagger(rails[i]); }
+        }
+    }
     function fillShelf(shelf) {
         if (!shelf || shelf.getAttribute('data-vdsc-loaded')) return;
         shelf.setAttribute('data-vdsc-loaded', '1');
@@ -515,8 +534,8 @@
             .then(function (d) {
                 var items = (d && d.items) || [];
                 if (!items.length) { shelf.remove(); return; }    // drop empty shelves
-                if (rail) { rail.innerHTML = items.map(card).join(''); hydrateGet(rail); }
-                shelf.classList.add('vdsc-shelf--in');            // reveal
+                if (rail) { rail.innerHTML = items.map(card).join(''); stagger(rail); hydrateGet(rail); }
+                shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
             })
             .catch(function () { shelf.remove(); });
     }
