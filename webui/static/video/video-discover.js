@@ -72,10 +72,19 @@
         'talk': '148, 163, 184', 'news': '148, 163, 184',
     };
     var DECADE_RAILS = [
-        { title: 'Best of the 2010s', q: 'kind=movie&decade=2010&sort=vote_average.desc' },
-        { title: '2000s Favorites', q: 'kind=movie&decade=2000&sort=vote_average.desc' },
-        { title: '’90s Classics', q: 'kind=movie&decade=1990&sort=vote_average.desc' },
-        { title: 'Retro ’80s', q: 'kind=movie&decade=1980&sort=vote_average.desc' },
+        { title: 'Best of the 2010s', q: 'kind=movie&decade=2010&sort=vote_average.desc&lang=en' },
+        { title: '2000s Favorites', q: 'kind=movie&decade=2000&sort=vote_average.desc&lang=en' },
+        { title: '’90s Classics', q: 'kind=movie&decade=1990&sort=vote_average.desc&lang=en' },
+        { title: 'Retro ’80s', q: 'kind=movie&decade=1980&sort=vote_average.desc&lang=en' },
+    ];
+    // Dedicated foreign-language rails so non-English titles live HERE rather than
+    // leaking into the general genre/decade rails (which are pinned to lang=en).
+    var FOREIGN_RAILS = [
+        { title: 'Korean Cinema', q: 'kind=movie&sort=popularity.desc&lang=ko' },
+        { title: 'Japanese Films', q: 'kind=movie&sort=popularity.desc&lang=ja' },
+        { title: 'Spanish-Language', q: 'kind=movie&sort=popularity.desc&lang=es' },
+        { title: 'French Cinema', q: 'kind=movie&sort=popularity.desc&lang=fr' },
+        { title: 'Hindi Cinema', q: 'kind=movie&sort=popularity.desc&lang=hi' },
     ];
 
     function buildShelfList() {
@@ -84,19 +93,19 @@
         // personalized first — seeded from what you actually own
         (state.taste.movie || []).slice(0, 3).forEach(function (name) {
             var id = gm[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' }); used['m:' + name.toLowerCase()] = 1; }
+            if (id != null) { out.push({ title: 'Because you like ' + name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc&lang=en' }); used['m:' + name.toLowerCase()] = 1; }
         });
         (state.taste.show || []).slice(0, 2).forEach(function (name) {
             var id = gs[name.toLowerCase()];
-            if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc' }); }
+            if (id != null) { out.push({ title: 'More ' + name + ' shows', q: 'kind=show&genre=' + id + '&sort=popularity.desc&lang=en' }); }
         });
         out = out.concat(CURATED);
         GENRE_RAILS.forEach(function (name) {
             var id = gm[name.toLowerCase()];
             if (id != null && !used['m:' + name.toLowerCase()])
-                out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
+                out.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc&lang=en' });
         });
-        return out.concat(DECADE_RAILS);
+        return out.concat(DECADE_RAILS).concat(FOREIGN_RAILS);
     }
 
     // ── card (mirrors the search title card: owned ribbon + get button) ───────
@@ -334,12 +343,18 @@
         }, { rootMargin: '400px 0px' });
         for (var j = 0; j < shelves.length; j++) state.io.observe(shelves[j]);
     }
+    function isHideOwned() {
+        var h = $('[data-vdsc-hideowned]');
+        return !!(h && h.checked);
+    }
     function fillShelf(shelf) {
         if (!shelf || shelf.getAttribute('data-vdsc-loaded')) return;
         shelf.setAttribute('data-vdsc-loaded', '1');
         var rail = $('[data-vdsc-rail]', shelf);
-        // 2 pages (~40 items) so a rail still looks full after 'Hide owned'.
-        cachedFetch(LIST_URL + '?' + shelf.getAttribute('data-vdsc-q') + '&pages=2')
+        // Normal: 2 pages (~40 items). Hiding owned: let the backend page DEEPER and drop
+        // owned server-side, so a huge library's rail still fills instead of CSS-hiding to ~nothing.
+        var q = shelf.getAttribute('data-vdsc-q') + (isHideOwned() ? '&hide_owned=1' : '&pages=2');
+        cachedFetch(LIST_URL + '?' + q)
             .then(function (d) {
                 var items = (d && d.items) || [];
                 if (!items.length) { shelf.remove(); return; }    // drop empty shelves
@@ -507,6 +522,11 @@
             hide.addEventListener('change', function () {
                 page.classList.toggle('vdsc-hide-owned', hide.checked);
                 try { localStorage.setItem('vdsc_hideowned', hide.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+                // The rails are now server-filtered for owned (and page deeper), so rebuild
+                // them with the new state instead of just CSS-hiding cards in place.
+                renderShelves();
+                loadMoreLike();
+                loadGaps();
             });
         }
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
