@@ -222,7 +222,7 @@ class YouTubeClient(DownloadSourcePlugin):
 
         # Cookie support — use browser cookies for YouTube auth
         from config.settings import config_manager
-        cookies_browser = config_manager.get('youtube.cookies_browser', '')
+        cookies_browser = ('' if (_cb := config_manager.get('youtube.cookies_browser', '')) == 'custom' else _cb)
         if cookies_browser:
             self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
 
@@ -309,7 +309,7 @@ class YouTubeClient(DownloadSourcePlugin):
         """Reload YouTube settings from config (called when settings are saved)."""
         from config.settings import config_manager
         self._download_delay = config_manager.get('youtube.download_delay', 3)
-        cookies_browser = config_manager.get('youtube.cookies_browser', '')
+        cookies_browser = ('' if (_cb := config_manager.get('youtube.cookies_browser', '')) == 'custom' else _cb)
         if cookies_browser:
             self.download_opts['cookiesfrombrowser'] = (cookies_browser,)
         elif 'cookiesfrombrowser' in self.download_opts:
@@ -736,7 +736,7 @@ class YouTubeClient(DownloadSourcePlugin):
                     'default_search': 'ytsearch',
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 }
-                cookies_browser = config_manager.get('youtube.cookies_browser', '')
+                cookies_browser = ('' if (_cb := config_manager.get('youtube.cookies_browser', '')) == 'custom' else _cb)
                 if cookies_browser:
                     ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
 
@@ -816,7 +816,7 @@ class YouTubeClient(DownloadSourcePlugin):
                 }
 
                 # Add cookie support for search (avoids bot detection)
-                cookies_browser = config_manager.get('youtube.cookies_browser', '')
+                cookies_browser = ('' if (_cb := config_manager.get('youtube.cookies_browser', '')) == 'custom' else _cb)
                 if cookies_browser:
                     ydl_opts['cookiesfrombrowser'] = (cookies_browser,)
 
@@ -1180,7 +1180,7 @@ class YouTubeClient(DownloadSourcePlugin):
                 'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             }
 
-            cookies_browser = config_manager.get('youtube.cookies_browser', '')
+            cookies_browser = ('' if (_cb := config_manager.get('youtube.cookies_browser', '')) == 'custom' else _cb)
             if cookies_browser:
                 download_opts['cookiesfrombrowser'] = (cookies_browser,)
 

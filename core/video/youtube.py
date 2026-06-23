@@ -168,9 +168,10 @@ def _cookie_opts():
     try:
         from config.settings import config_manager
         cb = config_manager.get("youtube.cookies_browser", "")
-        if cb:
+        # 'custom' = the paste-cookies.txt sentinel (not a yt-dlp browser); skip it here.
+        if cb and cb != "custom":
             return {"cookiesfrombrowser": (cb,)}
-    except Exception:
+    except Exception:  # noqa: S110 - cookie config is best-effort; extraction still works without it
         pass
     return {}
 

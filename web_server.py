@@ -14747,7 +14747,8 @@ def _youtube_cookie_opts():
     opts = {}
     try:
         cb = config_manager.get('youtube.cookies_browser', '')
-        if cb:
+        # 'custom' = the paste-cookies.txt sentinel (not a yt-dlp browser); skip it here.
+        if cb and cb != 'custom':
             opts['cookiesfrombrowser'] = (cb,)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
         pass
