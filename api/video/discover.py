@@ -14,6 +14,8 @@ video.db; isolated from the music API.
 
 from __future__ import annotations
 
+import concurrent.futures
+
 from flask import jsonify, request
 
 from utils.logging_config import get_logger
@@ -312,13 +314,12 @@ def register_routes(bp):
 
         try:
             items, seen = [], set()
-            # When filtering (hide-owned or language), page DEEPER and drop items server-side
-            # until the rail has ~enough to look full — instead of returning a half-empty rail.
-            need_fill = hide_owned or bool(prefer_langs)
-            target = 24 if need_fill else 0
-            max_pages = 8 if need_fill else pages
-            for offset in range(max_pages):
-                batch = fetch(page + offset) or []
+
+            def consume(batch):
+                """Filter a page into `items` (dedup + hide-owned + language). Returns False
+                once TMDB hands back an empty page (it ran out — stop paging)."""
+                if not batch:
+                    return False
                 for it in batch:
                     dk = (it.get("kind"), it.get("tmdb_id"))
                     if dk in seen:
@@ -331,12 +332,30 @@ def register_routes(bp):
                         if ol and ol not in prefer_langs:
                             continue   # known foreign language not in your preference
                     items.append(it)
-                if key == "trending" or not batch:
-                    break        # trending is a fixed list; empty batch = TMDB ran out
-                if target and len(items) >= target:
-                    break        # enough collected
-                if not target and offset + 1 >= pages:
-                    break        # no filtering: respect the requested page count
+                return True
+
+            # When filtering (hide-owned or language), page DEEPER and drop items server-side
+            # so a heavy library's rail still fills to ~target instead of showing 4 cards. We
+            # fetch the extra pages in concurrent WAVES (TTLCache + the TMDB client are
+            # thread-safe) so digging 20 pages deep costs ~4 page-latencies, not 20.
+            need_fill = hide_owned or bool(prefer_langs)
+            target = 20 if need_fill else 0
+            if key == "trending":
+                consume(fetch(page))
+            elif not need_fill:
+                for offset in range(pages):           # no filtering: respect requested page count
+                    if not consume(fetch(page + offset)):
+                        break
+            else:
+                MAX_PAGES, WAVE = 20, 5
+                offset, ran_out = 0, False
+                with concurrent.futures.ThreadPoolExecutor(max_workers=WAVE) as ex:
+                    while offset < MAX_PAGES and len(items) < target and not ran_out:
+                        batches = list(ex.map(fetch, [page + offset + i for i in range(WAVE)]))
+                        for batch in batches:
+                            if not consume(batch):
+                                ran_out = True       # an empty page = TMDB has no more
+                        offset += WAVE
             return jsonify({"items": items, "page": page})
         except Exception:
             logger.exception("discover list failed (key=%s)", key)
