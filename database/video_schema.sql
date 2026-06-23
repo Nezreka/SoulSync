@@ -231,6 +231,20 @@ CREATE INDEX IF NOT EXISTS idx_credits_movie  ON credits(movie_id);
 CREATE INDEX IF NOT EXISTS idx_credits_show   ON credits(show_id);
 CREATE INDEX IF NOT EXISTS idx_credits_person ON credits(person_id);
 
+-- ── Discover: "Not interested" / ignore list ────────────────────────────────
+-- Titles the user has hidden from Discover (movie/show level only — episodes can't be
+-- individually ignored). Keyed by (kind, tmdb_id); a denormalised title/poster snapshot so
+-- the manage-modal renders without a TMDB round-trip.
+CREATE TABLE IF NOT EXISTS video_ignored (
+    kind       TEXT    NOT NULL,           -- 'movie' | 'show'
+    tmdb_id    INTEGER NOT NULL,
+    title      TEXT,
+    year       INTEGER,
+    poster_url TEXT,
+    added_at   TEXT    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (kind, tmdb_id)
+);
+
 -- ── Content: YouTube (channels → videos) ────────────────────────────────────
 CREATE TABLE IF NOT EXISTS channels (
     id                 INTEGER PRIMARY KEY,

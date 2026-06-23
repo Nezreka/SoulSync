@@ -343,6 +343,15 @@ class VideoEnrichmentEngine:
                     r["library_id"] = maps.get(r["kind"], {}).get(int(r["tmdb_id"]))
                 except (TypeError, ValueError):
                     r["library_id"] = None
+        # Drop titles the user marked 'Not interested' — one tiny indexed query, always
+        # fresh, so every discover surface (rails, recs, collection gaps) hides them uniformly.
+        try:
+            ignored = self.db.ignored_keys()
+        except Exception:
+            ignored = None
+        if ignored:
+            items = [r for r in (items or [])
+                     if f"{r.get('kind')}:{r.get('tmdb_id')}" not in ignored]
         return items
 
     def discover_curated(self, key, page=1) -> list:
