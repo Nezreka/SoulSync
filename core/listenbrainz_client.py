@@ -158,6 +158,161 @@ class ListenBrainzClient:
 
         return True
 
+    _MAX_TRACKS_PER_ADD = 100  # ListenBrainz MAX_RECORDINGS_PER_ADD
+    _PLAYLIST_EXT = "https://musicbrainz.org/doc/jspf#playlist"
+
+    def _lb_headers(self) -> Dict:
+        return {"Authorization": f"Token {self.token}", "Content-Type": "application/json"}
+
+    def _add_tracks_in_batches(self, playlist_mbid: str, tracks: List[Dict]) -> int:
+        """Add JSPF tracks to a playlist in <=100-track batches; return how many were added."""
+        added = 0
+        headers = self._lb_headers()
+        for i in range(0, len(tracks or []), self._MAX_TRACKS_PER_ADD):
+            batch = tracks[i:i + self._MAX_TRACKS_PER_ADD]
+            try:
+                r = self._make_request_with_retry(
+                    "POST", f"{self.base_url}/playlist/{playlist_mbid}/item/add",
+                    json={"playlist": {"track": batch}}, headers=headers,
+                )
+                if r and r.status_code in (200, 201):
+                    added += len(batch)
+                else:
+                    logger.warning(f"ListenBrainz item/add batch failed: "
+                                   f"{r.status_code if r else 'no response'}")
+            except Exception as e:
+                logger.error(f"ListenBrainz item/add error: {e}")
+        return added
+
+    def get_playlist_track_count(self, playlist_mbid: str):
+        """Current track count of an LB playlist, or None if it can't be fetched (gone/404)."""
+        try:
+            r = self._make_request_with_retry(
+                "GET", f"{self.base_url}/playlist/{playlist_mbid}",
+                params={"fetch_metadata": "false"},
+                headers={"Authorization": f"Token {self.token}"},
+            )
+            if r and r.status_code == 200:
+                return len(((r.json() or {}).get("playlist") or {}).get("track", []))
+        except Exception as e:
+            logger.debug(f"ListenBrainz get playlist count failed: {e}")
+        return None
+
+    def delete_playlist(self, playlist_mbid: str) -> bool:
+        """Delete an LB playlist. True on success."""
+        try:
+            r = self._make_request_with_retry(
+                "POST", f"{self.base_url}/playlist/{playlist_mbid}/delete", headers=self._lb_headers()
+            )
+            return bool(r and r.status_code in (200, 201))
+        except Exception as e:
+            logger.error(f"ListenBrainz delete playlist error: {e}")
+            return False
+
+    def create_playlist(self, title: str, tracks: List[Dict], public: bool = False) -> Dict:
+        """Create a NEW playlist on ListenBrainz and add its tracks (#903).
+
+        ``tracks`` are JSPF track dicts — each MUST carry an ``identifier`` of the form
+        ``https://musicbrainz.org/recording/<mbid>`` (LB rejects text-only tracks). Creates
+        an empty playlist for the MBID, then adds tracks in <=100 batches. Returns
+        ``{success, playlist_mbid, playlist_url, added, requested, error, updated}``. Never raises.
+        """
+        result = {"success": False, "playlist_mbid": None, "playlist_url": None,
+                  "added": 0, "requested": len(tracks or []), "error": None, "updated": False}
+        if not self.is_authenticated():
+            result["error"] = "ListenBrainz not authenticated (no token/username)"
+            return result
+
+        create_body = {"playlist": {
+            "title": (title or "SoulSync Export").strip() or "SoulSync Export",
+            "extension": {self._PLAYLIST_EXT: {"public": bool(public)}},
+        }}
+        try:
+            resp = self._make_request_with_retry(
+                "POST", f"{self.base_url}/playlist/create", json=create_body, headers=self._lb_headers()
+            )
+        except Exception as e:
+            result["error"] = f"create request failed: {e}"
+            return result
+        if not resp or resp.status_code not in (200, 201):
+            result["error"] = f"create returned {resp.status_code if resp else 'no response'}"
+            return result
+        try:
+            playlist_mbid = (resp.json() or {}).get("playlist_mbid")
+        except Exception:
+            playlist_mbid = None
+        if not playlist_mbid:
+            result["error"] = "create succeeded but no playlist_mbid in response"
+            return result
+
+        result["playlist_mbid"] = playlist_mbid
+        result["playlist_url"] = f"https://listenbrainz.org/playlist/{playlist_mbid}"
+        result["added"] = self._add_tracks_in_batches(playlist_mbid, tracks)
+        result["success"] = True
+        return result
+
+    def update_playlist(self, playlist_mbid: str, title: str, tracks: List[Dict], public: bool = False) -> Dict:
+        """Replace an existing LB playlist's contents IN PLACE (stable URL/MBID) (#903).
+
+        Verifies the playlist still exists, clears its current items, re-adds the new tracks,
+        and updates the title. If the playlist is gone (deleted on LB), returns success=False
+        with ``gone=True`` so the caller can fall back to creating a fresh one.
+        Returns the same shape as ``create_playlist`` plus ``updated=True``.
+        """
+        result = {"success": False, "playlist_mbid": playlist_mbid,
+                  "playlist_url": f"https://listenbrainz.org/playlist/{playlist_mbid}",
+                  "added": 0, "requested": len(tracks or []), "error": None,
+                  "updated": True, "gone": False}
+        if not self.is_authenticated():
+            result["error"] = "ListenBrainz not authenticated (no token/username)"
+            return result
+
+        count = self.get_playlist_track_count(playlist_mbid)
+        if count is None:
+            result["error"] = "playlist not found on ListenBrainz"
+            result["gone"] = True
+            return result
+
+        headers = self._lb_headers()
+        # Clear existing items (one range delete from the top).
+        if count > 0:
+            try:
+                self._make_request_with_retry(
+                    "POST", f"{self.base_url}/playlist/{playlist_mbid}/item/delete",
+                    json={"index": 0, "count": count}, headers=headers,
+                )
+            except Exception as e:
+                logger.warning(f"ListenBrainz item/delete (clear) failed: {e}")
+
+        result["added"] = self._add_tracks_in_batches(playlist_mbid, tracks)
+
+        # Refresh the title (best-effort — content already replaced).
+        try:
+            self._make_request_with_retry(
+                "POST", f"{self.base_url}/playlist/edit/{playlist_mbid}",
+                json={"playlist": {"title": (title or "SoulSync Export").strip() or "SoulSync Export"}},
+                headers=headers,
+            )
+        except Exception as e:
+            logger.debug(f"ListenBrainz playlist title edit failed: {e}")
+
+        result["success"] = True
+        return result
+
+    def create_or_update_playlist(self, title: str, tracks: List[Dict],
+                                  existing_mbid: str = None, public: bool = False) -> Dict:
+        """Update the existing LB playlist in place when we've pushed this one before, else
+        create a fresh one — so re-exporting the same SoulSync playlist never duplicates it.
+        Falls back to create if the remembered playlist was deleted on LB."""
+        if existing_mbid:
+            res = self.update_playlist(existing_mbid, title, tracks, public)
+            if res.get("success"):
+                return res
+            # Remembered playlist gone/failed -> create a new one instead of erroring out.
+            logger.info(f"ListenBrainz playlist {existing_mbid} unavailable for update "
+                        f"({res.get('error')}); creating a new one.")
+        return self.create_playlist(title, tracks, public)
+
     def get_playlists_created_for_user(self, count: int = 25, offset: int = 0) -> List[Dict]:
         """
         Fetch playlists created FOR the user (recommendations, personalized playlists)

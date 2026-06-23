@@ -5038,10 +5038,24 @@
                                             <option value="brave">Brave</option>
                                             <option value="opera">Opera</option>
                                             <option value="safari">Safari</option>
+                                            <option value="custom">Paste cookies.txt (server / Docker)</option>
                                         </select>
                                         <div class="setting-help-text">
                                             If YouTube shows "Sign in to confirm you're not a bot", select your browser here.
-                                            SoulSync will use your browser's YouTube cookies to authenticate.
+                                            SoulSync will use your browser's YouTube cookies to authenticate. Reading a browser
+                                            only works when that browser is on the same machine as SoulSync &mdash; on a
+                                            server/Docker box, choose <strong>Paste cookies.txt</strong> instead.
+                                        </div>
+                                    </div>
+                                    <div class="form-group" id="youtube-cookies-paste-group" style="display:none;">
+                                        <label>Paste cookies.txt:</label>
+                                        <textarea id="youtube-cookies-paste" class="form-input" rows="6"
+                                                  placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
+                                        <div class="setting-help-text">
+                                            For server/Docker installs with no local browser. Export your YouTube cookies
+                                            with a "Get cookies.txt LOCALLY" browser extension and paste the whole file.
+                                            Required for private playlists like your <strong>Liked Music</strong>.
+                                            Stored on the server and they expire periodically &mdash; re-paste if YouTube stops working.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -6441,6 +6455,21 @@
                                     under one container folder: otherwise every file's artist gets overwritten with
                                     that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
                                     metadata-identified artist is always kept.
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-transfer-permanent">
+                                        Transfer is my permanent library — never move files out
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    Off by default. Turn this <strong>on</strong> if your Transfer folder is your
+                                    real, permanent library (served by Navidrome/Plex/etc.) rather than a scratch
+                                    drop area. A Deep Scan then never relocates files it doesn't recognize out to
+                                    Staging — it leaves them in place and just reports them. Even with this off, a
+                                    Deep Scan now refuses to move files when the database looks badly out of sync
+                                    with disk, as a safety guard against wiping a library (issue #904).
                                 </div>
                             </div>
 
