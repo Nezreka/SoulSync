@@ -1058,8 +1058,17 @@
                                 <button class="vdsc-lang" type="button" data-lang="de">DE</button>
                                 <button class="vdsc-lang" type="button" data-lang="it">IT</button>
                             </div>
-                            <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services" title="Your streaming services power the 'On your streaming services' rail">
-                                <span class="vdsc-langs-label">📺 My services</span>
+                        </div>
+
+                        <!-- NOT page-wide: this builds the optional "On your streaming services"
+                             rail only. Kept out of the "Across Discover" bar so it doesn't read as
+                             a global filter (it isn't one). -->
+                        <div class="vdsc-provrail">
+                            <div class="vdsc-provrail-text">
+                                <span class="vdsc-provrail-title">📺 Your streaming services</span>
+                                <span class="vdsc-provrail-sub">pick what you subscribe to — adds an “On your streaming services” rail to your feed</span>
+                            </div>
+                            <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services">
                                 <button class="vdsc-lang" type="button" data-prov="8">Netflix</button>
                                 <button class="vdsc-lang" type="button" data-prov="9">Prime</button>
                                 <button class="vdsc-lang" type="button" data-prov="337">Disney+</button>
