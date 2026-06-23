@@ -603,7 +603,6 @@ function renderMirroredCard(p, container) {
         <button class="mirrored-card-link" onclick="event.stopPropagation(); editMirroredSourceRef(${p.id}, '${_escJs(p.name)}', '${_escJs(p.source)}', '${_escJs(sourceRef)}')" title="Edit original playlist link">🔗</button>
         <button class="mirrored-card-export" onclick="event.stopPropagation(); exportMirroredPlaylist(${p.id}, '${_escJs(p.display_name || p.name)}')" title="Export to ListenBrainz / JSPF">📤</button>
         <button class="mirrored-card-delete" onclick="event.stopPropagation(); deleteMirroredPlaylist(${p.id}, '${_escJs(p.name)}')" title="Delete mirror">✕</button>
-        <div class="mirrored-card-export-status" id="export-status-${p.id}" style="display:none;"></div>
     `;
     card.addEventListener('click', () => {
         const st = youtubePlaylistStates[hash];
@@ -734,11 +733,20 @@ async function _pollPlaylistExport(jobId, playlistId, mode, name) {
 }
 
 function _setExportStatus(playlistId, html, autoHideMs) {
-    const el = document.getElementById(`export-status-${playlistId}`);
-    if (!el) return;
-    el.innerHTML = html;
-    el.style.display = '';
-    if (autoHideMs) setTimeout(() => { if (el) el.style.display = 'none'; }, autoHideMs);
+    // Inject into the card's existing .card-meta line (same approach as the pipeline phase
+    // indicator) so the status sits inline and never disrupts the card's flex row.
+    const card = document.getElementById(`mirrored-card-${playlistId}`);
+    if (!card) return;
+    const meta = card.querySelector('.card-meta');
+    if (!meta) return;
+    let span = meta.querySelector('.export-status-span');
+    if (!span) {
+        span = document.createElement('span');
+        span.className = 'export-status-span';
+        meta.appendChild(span);
+    }
+    span.innerHTML = html;
+    if (autoHideMs) setTimeout(() => { if (span && span.parentNode) span.remove(); }, autoHideMs);
 }
 
 function updateMirroredCardPhase(urlHash, phase) {
