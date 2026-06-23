@@ -14541,6 +14541,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-card-delete,
 .mirrored-card-clear,
 .mirrored-card-link,
+.mirrored-card-export,
 .mirrored-card-rename {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -14562,9 +14563,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
 .mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-export,
 .mirrored-playlist-card:hover .mirrored-card-rename,
 .mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
+}
+
+.mirrored-card-export:hover {
+    color: rgba(var(--accent-rgb), 1);
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    transform: scale(1.1);
+}
+
+/* Live export status line on the card (Matching N/M, Synced, etc.) */
+.mirrored-card-export-status {
+    flex-basis: 100%;
+    font-size: 11.5px;
+    margin-top: 6px;
+    padding-left: 2px;
 }
 
 .mirrored-card-delete:hover {
