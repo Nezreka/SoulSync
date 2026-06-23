@@ -1249,6 +1249,7 @@ async function loadSettingsData() {
         document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
+        document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
@@ -3168,6 +3169,7 @@ async function saveSettings(quiet = false) {
         },
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
+            audio_completeness_check: document.getElementById('audio-completeness-check').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,

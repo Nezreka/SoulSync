@@ -217,12 +217,61 @@ def detect_incomplete_audio(
     return incomplete_audio_reason(measured_s, container_s, min_ratio=min_ratio)
 
 
-def detect_broken_audio(file_path: str) -> Optional[str]:
+def detect_broken_audio(
+    file_path: str,
+    *,
+    min_ratio: float = DEFAULT_MIN_DURATION_RATIO,
+    threshold: float = DEFAULT_THRESHOLD,
+    noise_db: int = DEFAULT_NOISE_DB,
+    min_silence_s: float = DEFAULT_MIN_SILENCE_S,
+) -> Optional[str]:
     """Combined post-download audio guard: reject a file that is truncated
     (real audio far shorter than the container) or mostly silence. Returns the
     first failure reason, or None when the audio looks complete.
+
+    Runs a SINGLE ffmpeg decode pass with both the ``astats`` (truncation) and
+    ``silencedetect`` (silence) filters chained — one decode of the file feeds
+    both checks instead of two full decodes. Halves the CPU cost versus running
+    ``detect_incomplete_audio`` and ``detect_mostly_silent`` back to back.
+
+    Fails open: returns None when ffmpeg/mutagen are unavailable or error, so a
+    tooling problem never quarantines a legitimate file.
     """
-    reason = detect_incomplete_audio(file_path)
+    if not _ffmpeg_available():
+        logger.debug("audio guard skipped — ffmpeg not available")
+        return None
+
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(file_path)
+        if not (audio and audio.info):
+            return None
+        container_s = float(getattr(audio.info, "length", 0) or 0)
+        sample_rate = int(getattr(audio.info, "sample_rate", 0) or 0)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.debug("container probe failed for %s: %s", file_path, exc)
+        return None
+
+    try:
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-nostats", "-i", file_path,
+                "-af", f"astats=metadata=1,silencedetect=noise={noise_db}dB:d={min_silence_s}",
+                "-f", "null", "-",
+            ],
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120,
+        )
+    except (subprocess.SubprocessError, OSError) as exc:
+        logger.debug("audio guard ffmpeg run failed for %s: %s", file_path, exc)
+        return None
+
+    stderr = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
+
+    # Truncation check first (real audio far shorter than the container).
+    measured_s = measured_duration_from_astats(stderr, sample_rate)
+    reason = incomplete_audio_reason(measured_s, container_s, min_ratio=min_ratio)
     if reason:
         return reason
-    return detect_mostly_silent(file_path)
+
+    # Then silence-padding (mostly-silent file).
+    return is_mostly_silent_reason(stderr, container_s, threshold=threshold)

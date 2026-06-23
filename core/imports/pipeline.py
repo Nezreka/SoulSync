@@ -362,7 +362,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         # Monochrome HLS assembly) or a mostly-silent file is caught regardless
         # of its quality verdict and gets the right reason. Same quarantine +
         # next-candidate retry pattern as the integrity check.
-        _skip_audio = _should_skip_quarantine_check(context, 'silence')
+        #
+        # Opt-in (default OFF): this is the one check that fully DECODES the file
+        # with ffmpeg, so it is the most CPU-expensive step in post-processing.
+        # Most preview/truncation cases are already caught at the source
+        # (HiFi/Qobuz have their own guards), so it stays off unless the user
+        # turns it on under Settings → Post-processing.
+        _audio_guard_enabled = config_manager.get('post_processing.audio_completeness_check', False)
+        _skip_audio = (not _audio_guard_enabled) or _should_skip_quarantine_check(context, 'silence')
         audio_reason = None if _skip_audio else detect_broken_audio(file_path)
         if audio_reason:
             logger.error(f"[AudioGuard] Rejected {_basename}: {audio_reason}")
