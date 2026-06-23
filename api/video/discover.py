@@ -85,6 +85,45 @@ def register_routes(bp):
             logger.exception("discover morelike failed")
             return jsonify({"rails": []})
 
+    @bp.route("/discover/gaps", methods=["GET"])
+    def video_discover_gaps():
+        """'What am I missing?' rails — franchises you've started but not finished, and
+        more from the directors/creators you own the most. Powered by the gap engine."""
+        from . import get_video_db
+        from core.video.enrichment.engine import get_video_enrichment_engine
+        from core.video.discovery_gaps import collection_gaps, filmography_gaps
+        try:
+            from core.video.sources import resolve_video_server
+            srv = resolve_video_server()
+        except Exception:
+            srv = None
+        db = get_video_db()
+        eng = get_video_enrichment_engine()
+        try:
+            owned = db.owned_movie_tmdb_ids(srv)
+            rails = []
+            # Complete your collections — top franchises you've started, missing entries.
+            for coll in db.owned_movie_collections(srv, limit=8):
+                missing = collection_gaps(owned, eng.collection(coll["collection_id"]))
+                if missing:
+                    name = (coll.get("name") or "Collection").strip()
+                    rails.append({"title": "Complete the " + name, "kind": "collection",
+                                  "items": missing[:30]})
+            # More from the people you own the most (directors / creators).
+            for person in db.top_owned_people(min_titles=2, limit=6, server_source=srv):
+                p = eng.person_detail(person["tmdb_id"])
+                if not p:
+                    continue
+                missing = filmography_gaps(owned, p.get("credits") or [],
+                                           kinds=("movie",), min_vote_count=50, limit=30)
+                if len(missing) >= 3:
+                    rails.append({"title": "More from " + person["name"], "kind": "person",
+                                  "items": missing})
+            return jsonify({"rails": rails})
+        except Exception:
+            logger.exception("discover gaps failed")
+            return jsonify({"rails": []})
+
     @bp.route("/discover/trailer", methods=["GET"])
     def video_discover_trailer():
         """Best YouTube trailer {key,name} for a tmdb title (hero 'Trailer' button)."""

@@ -419,6 +419,23 @@ class VideoEnrichmentEngine:
                 return []
         return self._stamp_owned(items)
 
+    def collection(self, collection_id) -> list:
+        """The films of a TMDB collection (franchise) — cached + owned-annotated.
+        Drives the 'complete your collections' gap rails."""
+        w = self.workers.get("tmdb")
+        if not w or not w.enabled or not collection_id:
+            return []
+        ck = ("collection", collection_id)
+        items = self._cache_get(ck)
+        if items is None:
+            try:
+                items = w.client.collection(collection_id) or []
+                self._cache_put(ck, items, ttl=86400)   # franchises rarely change
+            except Exception:
+                logger.exception("collection failed (%s)", collection_id)
+                return []
+        return self._stamp_owned(items)
+
     def trailer(self, kind, tmdb_id) -> dict | None:
         """Best YouTube trailer for a title (cached a day — trailers don't move)."""
         w = self.workers.get("tmdb")
