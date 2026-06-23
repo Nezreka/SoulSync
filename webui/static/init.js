@@ -213,6 +213,47 @@ function applyReduceEffects(enabled) {
 
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
 (function () {
+    // Auto performance mode on likely-weak hardware. Only acts when this device has
+    // NO stored preference yet (null) — so it runs at most once and never overrides
+    // a choice the user (or a prior auto-run) made. Device-scoped via localStorage on
+    // purpose: a weak laptop shouldn't flip the server setting for the user's other
+    // machines. Mobile already disables these effects elsewhere, so skip it here.
+    if (localStorage.getItem('soulsync-reduce-effects') === null) {
+        const ua = navigator.userAgent || '';
+        const isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+        const cores = navigator.hardwareConcurrency || 0;   // widely supported
+        const mem = navigator.deviceMemory || 0;            // Chromium only; 0 elsewhere
+        // Conservative — avoid flagging capable machines: <=2 cores, or <=2GB, or a
+        // low-mid box that's low on BOTH (<=4 cores AND <=4GB). A 4-core/8GB laptop
+        // (mem>4) is NOT flagged; Firefox/Safari (mem unknown) only trip on <=2 cores.
+        const weak = !isMobile && (
+            (cores > 0 && cores <= 2) ||
+            (mem > 0 && mem <= 2) ||
+            (cores > 0 && cores <= 4 && mem > 0 && mem <= 4)
+        );
+        if (weak) {
+            localStorage.setItem('soulsync-reduce-effects', '1');
+            window._autoPerfModeApplied = true;   // show the explainer toast once the UI is up
+        }
+    }
+
+    if (window._autoPerfModeApplied) {
+        // Toast lives in downloads.js (loaded separately) — retry until it's defined.
+        const fireToast = (tries) => {
+            if (typeof showToast === 'function') {
+                showToast('Performance mode is on — this looks like a lower-power device. ' +
+                          'Turn effects back on in Settings → Appearance.', 'info');
+            } else if (tries < 40) {
+                setTimeout(() => fireToast(tries + 1), 250);
+            }
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => fireToast(0));
+        } else {
+            fireToast(0);
+        }
+    }
+
     if (localStorage.getItem('soulsync-reduce-effects') === '1') {
         document.body.classList.add('reduce-effects');
         window._reduceEffectsActive = true;

@@ -82,11 +82,11 @@ body {
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     border-bottom-right-radius: 24px;
 
-    /* Soft floating shadow with inner glow */
+    /* Soft floating shadow with inner glow — dropped the 0 4px 16px duplicate and the
+       0 0 60px accent glow (60px blur at 6% opacity: nearly invisible but a costly
+       shadow pass). One outer + the two insets read the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
-        0 0 60px rgba(var(--accent-rgb), 0.06),
+        0 8px 30px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.1),
         inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 
@@ -108,7 +108,10 @@ body {
     position: fixed;
     pointer-events: none;
     border-radius: 50%;
-    filter: blur(40px);
+    /* The radial-gradient already fades to transparent at 70%, so a smaller blur
+       still reads as a soft aura — but shrinks the composited (orb + feather)
+       bounding box and the blur work. 40px -> 28px: ~imperceptible, cheaper fill. */
+    filter: blur(28px);
     will-change: transform, opacity;
 }
 
@@ -307,11 +310,9 @@ body.reduce-effects .sidebar::after {
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Above the nav (the sidebar gives its children z-index:1) so nav items
-       scrolling up sit BEHIND the header — i.e. in its backdrop, where the
-       blur below can actually act on them. Without this they paint in front
-       and backdrop-filter has nothing to blur. */
-    z-index: 2;
+    /* Same stacking level as the nav (z-index:1) — sits in the normal sidebar
+       flow rather than forced above everything. */
+    z-index: 1;
     overflow: hidden;
     flex-shrink: 0;
 
@@ -319,8 +320,11 @@ body.reduce-effects .sidebar::after {
        accent-gradient top now read as a soft blur instead of bleeding through
        sharply. (Only visible where the background is translucent — the opaque
        base toward the bottom still stops any bleed.) */
-    backdrop-filter: blur(28px) saturate(1.3);
-    -webkit-backdrop-filter: blur(28px) saturate(1.3);
+    /* Backdrop blur is re-evaluated whenever content drifts behind it (the
+       ambient orbs do). Cost scales with radius — 28px -> 18px keeps the frosted
+       read while cutting the per-frame blur work by ~a third. */
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
 
     /* Subtle inner glow */
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -342,14 +346,20 @@ body.reduce-effects .sidebar::after {
         rgba(var(--accent-rgb), 0.06) 60%,
         transparent 100%
     );
+    /* Animate transform (compositor-only) instead of `left` (which forced a
+       layout recalc every frame). The element width is 60% of the header, so
+       translateX(400%) = 240% of header width — the same travel `left:-100%`
+       → `left:140%` produced. Pixel-identical path, no per-frame layout. */
+    transform: translateX(0);
+    will-change: transform, opacity;
     animation: sidebar-header-sweep 8s ease-in-out infinite;
     pointer-events: none;
 }
 
 @keyframes sidebar-header-sweep {
-    0%, 100% { left: -100%; opacity: 0; }
+    0%, 100% { transform: translateX(0); opacity: 0; }
     10% { opacity: 1; }
-    50% { left: 140%; opacity: 1; }
+    50% { transform: translateX(400%); opacity: 1; }
     60% { opacity: 0; }
 }
 
@@ -8390,10 +8400,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
     margin: 20px;
-    /* Soft floating shadow */
+    /* Soft floating shadow — one outer layer instead of two stacked (this is a
+       near-fullscreen element, so each shadow pass is expensive); the single
+       slightly-stronger blur reads the same. */
     box-shadow:
-        0 8px 32px rgba(0, 0, 0, 0.3),
-        0 4px 16px rgba(0, 0, 0, 0.2),
+        0 8px 28px rgba(0, 0, 0, 0.34),
         inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
@@ -9049,8 +9060,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .service-card {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: the 90% opaque bg made blur(12px) invisible (x3 cards,
+       pure GPU waste). Bumped to 0.97 so the now-unblurred sliver is imperceptible. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px 22px;
@@ -9821,8 +9833,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 .stat-card-dashboard {
-    background: rgba(18, 18, 22, 0.9);
-    backdrop-filter: blur(12px);
+    /* backdrop-filter dropped: 90% opaque bg made blur(12px) invisible (x3, GPU waste);
+       0.97 keeps it looking solid. */
+    background: rgba(18, 18, 22, 0.97);
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     padding: 20px;
@@ -10228,9 +10241,9 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .activity-feed-container {
     /* Premium glassmorphic foundation */
     background: linear-gradient(135deg,
-            rgba(26, 26, 26, 0.95) 0%,
-            rgba(18, 18, 18, 0.98) 100%);
-    backdrop-filter: blur(12px) saturate(1.1);
+            rgba(26, 26, 26, 0.97) 0%,
+            rgba(18, 18, 18, 0.99) 100%);
+    /* backdrop-filter dropped: 95-99% opaque bg already hid the blur (GPU waste). */
     border-radius: 16px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-top: 1px solid rgba(255, 255, 255, 0.12);
@@ -14672,6 +14685,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-card-delete,
 .mirrored-card-clear,
 .mirrored-card-link,
+.mirrored-card-export,
 .mirrored-card-rename {
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -14693,9 +14707,23 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .mirrored-playlist-card:hover .mirrored-card-delete,
 .mirrored-playlist-card:hover .mirrored-card-clear,
 .mirrored-playlist-card:hover .mirrored-card-link,
+.mirrored-playlist-card:hover .mirrored-card-export,
 .mirrored-playlist-card:hover .mirrored-card-rename,
 .mirrored-playlist-card:hover .mirrored-card-pipeline {
     opacity: 1;
+}
+
+.mirrored-card-export:hover {
+    color: rgba(var(--accent-rgb), 1);
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    transform: scale(1.1);
+}
+
+/* Live export status, injected inline into the card's .card-meta line. */
+.export-status-span {
+    font-size: inherit;
+    white-space: nowrap;
 }
 
 .mirrored-card-delete:hover {

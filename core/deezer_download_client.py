@@ -418,6 +418,12 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                 if aid:
                     album_ids.add(str(aid))
             album_release_dates = {}
+            # Deezer PLAYLIST tracks do NOT carry `track_position` (only `/track/<id>`
+            # and `/album/<id>/tracks` do), so numbering them by their playlist index
+            # poisons the real album track number — which then rides into the wishlist
+            # and onto the downloaded file's tag (e.g. 'Apologize' tagged track 1 instead
+            # of 16). Resolve the REAL position from each album's track list (cache-first).
+            track_positions: Dict[str, int] = {}   # str(track_id) -> album track_position
             try:
                 from core.metadata.cache import get_metadata_cache
                 cache = get_metadata_cache()
@@ -430,24 +436,32 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         cached = cache.get_entity('deezer', 'album', aid)
                         if cached and cached.get('release_date'):
                             album_release_dates[aid] = cached['release_date']
-                            continue
                     except Exception as e:
                         logger.debug("cache get_entity album release_date: %s", e)
                 # Cache miss — fetch from API
-                try:
-                    time.sleep(0.3)  # Respect rate limits
-                    a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
-                    if a_resp.ok:
-                        a_data = a_resp.json()
-                        album_release_dates[aid] = a_data.get('release_date', '')
-                        # Store in metadata cache for future use
-                        if cache:
-                            try:
-                                cache.store_entity('deezer', 'album', aid, a_data)
-                            except Exception as e:
-                                logger.debug("cache store_entity album release_date: %s", e)
-                except Exception as e:
-                    logger.debug("fetch deezer album release_date %s: %s", aid, e)
+                if aid not in album_release_dates:
+                    try:
+                        time.sleep(0.3)  # Respect rate limits
+                        a_resp = self._session.get(f'https://api.deezer.com/album/{aid}', timeout=10)
+                        if a_resp.ok:
+                            a_data = a_resp.json()
+                            album_release_dates[aid] = a_data.get('release_date', '')
+                            # Store in metadata cache for future use
+                            if cache:
+                                try:
+                                    cache.store_entity('deezer', 'album', aid, a_data)
+                                except Exception as e:
+                                    logger.debug("cache store_entity album release_date: %s", e)
+                    except Exception as e:
+                        logger.debug("fetch deezer album release_date %s: %s", aid, e)
+            # Real album track positions (separate endpoint — playlist tracks AND the
+            # album object's embedded tracks both omit track_position). Cache-first.
+            try:
+                from core.deezer_client import resolve_album_track_positions
+                track_positions = resolve_album_track_positions(
+                    self._session, 'https://api.deezer.com', album_ids, cache)
+            except Exception as e:
+                logger.debug("resolve deezer album track positions: %s", e)
 
             tracks = []
             for i, t in enumerate(raw_tracks, start=1):
@@ -468,7 +482,9 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                         'id': album_id,
                     },
                     'duration_ms': t.get('duration', 0) * 1000,
-                    'track_number': i,
+                    # REAL album position (resolved above); the playlist index is a last
+                    # resort only when the album lookup failed, never the default.
+                    'track_number': track_positions.get(str(t.get('id'))) or t.get('track_position') or i,
                 })
 
             return {

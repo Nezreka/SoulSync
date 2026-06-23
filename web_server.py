@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.4"
+_SOULSYNC_BASE_VERSION = "2.7.6"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -3125,6 +3125,22 @@ def handle_settings():
                                              f"couldn't sign in: {_names}. Set their passwords "
                                              f"in Manage Profiles first.",
                                     "members_without_password": _stranded}), 400
+
+            # YouTube pasted cookies.txt (server/Docker path): pull it out BEFORE the
+            # generic persist so the raw cookie blob never lands in config.json — it's
+            # secret + bulky. We validate up front and store only a file path.
+            _yt_in = new_settings.get('youtube')
+            _yt_paste = _yt_in.pop('cookies_paste', None) if isinstance(_yt_in, dict) else None
+            if _yt_paste is not None and str(_yt_paste).strip():
+                from core.youtube_cookies import looks_like_cookiefile, write_pasted_cookiefile
+                if not looks_like_cookiefile(_yt_paste):
+                    return jsonify({"success": False,
+                                    "error": "That doesn't look like a cookies.txt file. Export it "
+                                             "with a 'Get cookies.txt LOCALLY' browser extension and "
+                                             "paste the whole file."}), 400
+                _cookie_path = str(config_manager.config_path.parent / "youtube_cookies.txt")
+                if write_pasted_cookiefile(_yt_paste, _cookie_path):
+                    config_manager.set('youtube.cookies_file', _cookie_path)
 
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
@@ -14980,15 +14996,20 @@ def clean_youtube_artist(artist_string):
 
 def _youtube_cookie_opts():
     """yt-dlp cookie options matching the rest of the app (Settings → YouTube).
-    Per-video extraction needs these to get past YouTube's bot checks."""
-    opts = {}
+
+    Per-video extraction needs these to get past YouTube's bot checks, and private
+    playlists (a user's "Liked Music", list=LM) need them to be visible at all. The
+    dropdown is either a browser name (cookiesfrombrowser, local installs) or the
+    PASTE_MODE sentinel, in which case we point yt-dlp at the pasted cookies.txt that
+    server/Docker users supply. Precedence + emptiness live in core.youtube_cookies."""
+    from core.youtube_cookies import build_youtube_cookie_opts
     try:
-        cb = config_manager.get('youtube.cookies_browser', '')
-        if cb:
-            opts['cookiesfrombrowser'] = (cb,)
+        mode = config_manager.get('youtube.cookies_browser', '')
+        path = config_manager.get('youtube.cookies_file', '')
+        exists = bool(path) and os.path.exists(path)
+        return build_youtube_cookie_opts(mode, path, cookiefile_exists=exists)
     except Exception:  # noqa: S110 - cookie config is best-effort; resolve still works without it
-        pass
-    return opts
+        return {}
 
 
 def _fetch_youtube_video_artist(video_id, cookie_opts):
@@ -16431,16 +16452,40 @@ def _run_soulsync_deep_scan():
 
         logger.info(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
 
-        # Phase 3: Find untracked files (in Transfer but not in DB)
-        untracked = transfer_files - db_paths
-        # Also check with normalized paths (Windows vs Unix separators)
-        if untracked:
-            db_paths_normalized = {p.replace('\\', '/') for p in db_paths}
-            untracked = {f for f in untracked if f.replace('\\', '/') not in db_paths_normalized}
+        # Phase 3: Plan the untracked → Staging move, with the data-loss guard (#904).
+        # A path-only diff treats EVERY file the DB doesn't know about as "a new arrival
+        # to relocate". When the DB is empty/out of sync with disk (volume swap, DB reset,
+        # external tag edits) but Transfer holds the real library, that flags the whole
+        # library as untracked and relocates all of it. The planner refuses the move when
+        # the untracked share is implausibly large (the desync signature) or when the user
+        # marked Transfer as their permanent library — leaving files in place and warning.
+        from core.library.standalone_scan import (
+            plan_standalone_deep_scan, BLOCK_TRANSFER_PERMANENT, BLOCK_DESYNC,
+        )
+        never_move = bool(config_manager.get('import.transfer_is_permanent', False))
+        plan = plan_standalone_deep_scan(transfer_files, db_paths, never_move=never_move)
+        untracked = plan['untracked']
+        move_blocked = plan['move_blocked']
+        block_reason = plan['block_reason']
 
-        # Phase 4: Move untracked files to Staging for auto-import
+        # Phase 4: Move untracked files to Staging for auto-import — unless guarded.
         moved_count = 0
-        if untracked and os.path.isdir(staging_path):
+        blocked_count = 0
+        if untracked and move_blocked:
+            blocked_count = len(untracked)
+            if block_reason == BLOCK_TRANSFER_PERMANENT:
+                warn = (f"Deep scan: {blocked_count} file(s) in Transfer aren't in the database, "
+                        f"but Transfer is marked your permanent library — nothing was moved.")
+            else:  # BLOCK_DESYNC
+                pct = round(100 * blocked_count / max(1, len(transfer_files)))
+                warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
+                        f"{len(transfer_files)} files in Transfer ({pct}%) aren't in the database. "
+                        f"That usually means the database is out of sync with disk, not that you "
+                        f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
+                        f"before scanning, or enable 'Transfer is my permanent library'.")
+            logger.warning(f"[SoulSync Deep Scan] {warn}")
+            add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
+        elif untracked and os.path.isdir(staging_path):
             _db_update_phase_callback('moving_untracked')
             for file_path in untracked:
                 try:
@@ -16471,6 +16516,23 @@ def _run_soulsync_deep_scan():
             if not os.path.exists(db_path):
                 stale_track_ids.append(db_path)
                 stale_count += 1
+
+        # Guard the deletes the same way as the move (#904): if a desync blocked the
+        # move, the DB<->disk mapping is unreliable, so os.path.exists may be lying for
+        # every file — don't delete rows. Also independently skip when the stale share
+        # is implausibly large (storage unreachable / remount), mirroring the orphan guard.
+        from core.library.stale_guard import is_implausible_stale_removal
+        if move_blocked and block_reason == BLOCK_DESYNC:
+            if stale_track_ids:
+                logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count} 'stale' "
+                               f"records — move was blocked for desync, mapping is unreliable.")
+            stale_track_ids = []
+            stale_count = 0
+        elif is_implausible_stale_removal(stale_count, len(db_paths)):
+            logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count}/{len(db_paths)} "
+                           f"'stale' records — implausibly large share, storage likely unreachable.")
+            stale_track_ids = []
+            stale_count = 0
 
         # Remove stale records
         if stale_track_ids:
@@ -16504,9 +16566,11 @@ def _run_soulsync_deep_scan():
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
         if moved_count > 0:
             summary += f", {moved_count} untracked files moved to Staging"
+        if blocked_count > 0:
+            summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
             summary += f", {stale_count} stale records removed"
-        if moved_count == 0 and stale_count == 0:
+        if moved_count == 0 and blocked_count == 0 and stale_count == 0:
             summary += " — library is clean"
 
         logger.info(f"[SoulSync Deep Scan] {summary}")
@@ -27176,6 +27240,117 @@ def export_watchlist():
     except Exception as e:
         logger.error(f"Watchlist export failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Playlist export to ListenBrainz / JSPF (#903) ────────────────────────────
+# Resolve each mirrored-playlist track to a MusicBrainz recording MBID (cache -> DB ->
+# file tag -> live MB), build a JSPF, and either hand it back as a download or create the
+# playlist directly on ListenBrainz. Runs in a background thread with live status the
+# mirrored-playlist card polls. Entirely additive — new routes + an in-memory job registry.
+_playlist_export_jobs = {}
+_playlist_export_jobs_lock = threading.Lock()
+
+
+def _run_playlist_export(job_id, playlist_id, title, mode):
+    job = _playlist_export_jobs[job_id]
+    try:
+        from core.exports.export_sources import build_resolve_fn
+        from core.exports.playlist_export import resolve_playlist_tracks
+        from core.exports.jspf_export import build_jspf
+
+        db = get_database()
+        tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+        job['total'] = len(tracks)
+        job['phase'] = 'resolving'
+
+        resolve_fn = build_resolve_fn()
+
+        def on_progress(done, total, stats):
+            job['done'] = done
+            job['stats'] = dict(stats)
+
+        out = resolve_playlist_tracks(tracks, resolve_fn, on_progress=on_progress)
+        jspf, summary = build_jspf(title, out['resolved'], creator='SoulSync')
+        job['summary'] = summary
+        job['jspf'] = jspf
+        job['stats'] = out['stats']
+
+        if mode == 'push':
+            job['phase'] = 'pushing'
+            from core.listenbrainz_client import ListenBrainzClient
+            client = ListenBrainzClient()
+            # Re-export updates the same LB playlist in place instead of duplicating it (#903).
+            existing = db.get_playlist_export_target(int(playlist_id), 'listenbrainz')
+            res = client.create_or_update_playlist(title, jspf['playlist']['track'], existing_mbid=existing)
+            job['push'] = res
+            if res.get('success'):
+                if res.get('playlist_mbid'):
+                    db.set_playlist_export_target(int(playlist_id), 'listenbrainz', res['playlist_mbid'])
+                job['phase'] = 'done'
+            else:
+                job['phase'] = 'error'
+                job['error'] = res.get('error') or 'ListenBrainz push failed'
+        else:
+            job['phase'] = 'done'
+    except Exception as e:
+        logger.error(f"[Playlist Export] job {job_id} failed: {e}")
+        job['phase'] = 'error'
+        job['error'] = str(e)
+
+
+@app.route('/api/playlists/<playlist_id>/export/listenbrainz', methods=['POST'])
+def start_playlist_export_listenbrainz(playlist_id):
+    """Start a background export of a mirrored playlist to ListenBrainz/JSPF.
+
+    Body: {"mode": "download"|"push"} (default "download"). Returns {job_id} to poll."""
+    try:
+        body = request.get_json(silent=True) or {}
+        mode = 'push' if body.get('mode') == 'push' else 'download'
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': mode, 'phase': 'starting', 'done': 0, 'total': 0,
+                'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export, args=(job_id, playlist_id, title, mode), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Playlist export start failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/export/status/<job_id>', methods=['GET'])
+def playlist_export_status(job_id):
+    """Live status for an export job (polled by the mirrored-playlist card)."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job:
+        return jsonify({"success": False, "error": "unknown job"}), 404
+    # Don't ship the full JSPF on every poll — just status + coverage.
+    out = {k: v for k, v in job.items() if k != 'jspf'}
+    out['has_download'] = bool(job.get('jspf'))
+    return jsonify({"success": True, "job": out})
+
+
+@app.route('/api/playlists/export/download/<job_id>', methods=['GET'])
+def playlist_export_download(job_id):
+    """Download a completed export's JSPF file."""
+    job = _playlist_export_jobs.get(job_id)
+    if not job or not job.get('jspf'):
+        return jsonify({"success": False, "error": "no export available"}), 404
+    import json as _json
+    safe = re.sub(r'[^\w\-]+', '_', (job.get('title') or 'playlist')).strip('_') or 'playlist'
+    return Response(
+        _json.dumps(job['jspf'], indent=2, ensure_ascii=False),
+        mimetype='application/jspf+json',
+        headers={'Content-Disposition': f'attachment; filename="{safe}.jspf"'},
+    )
 
 
 @app.route('/api/library/artists/export', methods=['GET'])

@@ -72,16 +72,25 @@ def playlist_dir_for(playlists_root: str, playlist_name: str) -> str:
     return candidate
 
 
-def _desired_entries(playlist_dir: str, real_paths: Sequence[str]) -> "list[tuple[str, str]]":
-    """Map each real file to a flat destination inside ``playlist_dir``, preserving
-    the source filename. On a basename collision between two *different* sources,
-    disambiguate with a numeric suffix rather than silently overwriting."""
+def _desired_entries(
+    playlist_dir: str,
+    real_paths: Sequence[str],
+    dest_names: Optional[Sequence[Optional[str]]] = None,
+) -> "list[tuple[str, str]]":
+    """Map each real file to a flat destination inside ``playlist_dir``.
+
+    By default the source filename is preserved. ``dest_names`` (parallel to
+    ``real_paths``) lets a caller override the name per entry — e.g. a custom
+    playlist file-naming template; a falsy override falls back to the source
+    basename. On a name collision between two *different* sources, disambiguate
+    with a numeric suffix rather than silently overwriting."""
     entries: list[tuple[str, str]] = []
     used: dict[str, str] = {}  # dest basename -> source real path
-    for real in real_paths:
+    for i, real in enumerate(real_paths):
         if not real:
             continue
-        base = os.path.basename(real)
+        override = dest_names[i] if (dest_names is not None and i < len(dest_names)) else None
+        base = override or os.path.basename(real)
         name = base
         stem, ext = os.path.splitext(base)
         counter = 1
@@ -156,6 +165,7 @@ def rebuild_playlist_folder(
     real_paths: Sequence[str],
     mode: str = DEFAULT_MODE,
     *,
+    dest_names: Optional[Sequence[Optional[str]]] = None,
     prune_stale: bool = True,
     symlink_fn: Callable[[str, str], None] = os.symlink,
     copy_fn: Callable[[str, str], object] = shutil.copy2,
@@ -163,13 +173,15 @@ def rebuild_playlist_folder(
     """(Re)build ``playlists_root/<playlist_name>/`` so it contains exactly one
     entry per real file in ``real_paths`` — adding missing entries, leaving correct
     ones untouched, and (when ``prune_stale``) removing entries no longer present.
+    ``dest_names`` (parallel to ``real_paths``) optionally overrides each entry's
+    filename (custom playlist naming); falsy entries keep the source basename.
     Idempotent and safe to re-run any time. Filesystem ops are injectable."""
     mode = normalize_mode(mode)
     pdir = playlist_dir_for(playlists_root, playlist_name)
     summary = RebuildSummary(playlist_dir=pdir, mode_requested=mode)
     os.makedirs(pdir, exist_ok=True)
 
-    entries = _desired_entries(pdir, real_paths)
+    entries = _desired_entries(pdir, real_paths, dest_names)
     keep = {dest for _real, dest in entries}
 
     for real, dest in entries:

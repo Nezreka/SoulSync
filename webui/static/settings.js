@@ -1215,6 +1215,25 @@ async function loadSettingsData() {
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        // Show the cookies.txt paste box only in "custom" mode. We never echo the
+        // stored cookie back to the UI (it's secret + lives in a file, not config);
+        // if one is already saved, say so via placeholder so a blank save won't wipe it.
+        const _ytCookieSel = document.getElementById('youtube-cookies-browser');
+        const _ytPasteBox = document.getElementById('youtube-cookies-paste');
+        const _ytPasteGroup = document.getElementById('youtube-cookies-paste-group');
+        if (_ytCookieSel && _ytPasteGroup) {
+            const _toggleYtPaste = () => {
+                _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
+            };
+            if (_ytPasteBox && settings.youtube?.cookies_file) {
+                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
+            }
+            _toggleYtPaste();
+            if (!_ytCookieSel.dataset.pasteToggleBound) {
+                _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.dataset.pasteToggleBound = '1';
+            }
+        }
 
         // Update UI based on download source mode
         updateDownloadSourceUI();
@@ -1266,6 +1285,7 @@ async function loadSettingsData() {
         document.getElementById('template-album-path').value = settings.file_organization?.templates?.album_path || '$albumartist/$albumartist - $album/$track - $title';
         document.getElementById('template-single-path').value = settings.file_organization?.templates?.single_path || '$artist/$artist - $title/$title';
         document.getElementById('template-playlist-path').value = settings.file_organization?.templates?.playlist_path || '$playlist/$artist - $title';
+        document.getElementById('template-playlist-item').value = settings.file_organization?.templates?.playlist_item || '';
         document.getElementById('template-video-path').value = settings.file_organization?.templates?.video_path || '$artist/$title-video';
         document.getElementById('disc-label').value = settings.file_organization?.disc_label || 'Disc';
         document.getElementById('collab-artist-mode').value = settings.file_organization?.collab_artist_mode || 'first';
@@ -1315,6 +1335,8 @@ async function loadSettingsData() {
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        const _transferPermEl = document.getElementById('import-transfer-permanent');
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -1362,8 +1384,14 @@ async function loadSettingsData() {
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);
 
-        // Reduce effects toggle
-        const reduceEffects = settings.ui_appearance?.reduce_effects === true; // default false
+        // Reduce effects toggle. This flag is device-scoped: localStorage (set by the
+        // live toggle and by weak-hardware auto-detect) is the source of truth for THIS
+        // machine; the server value is only the cross-device default used when this
+        // device has never chosen. Prefer localStorage when present so opening Settings
+        // doesn't clobber an auto-enabled (or manually-set) per-device choice.
+        const serverReduce = settings.ui_appearance?.reduce_effects === true; // default false
+        const localReduce = localStorage.getItem('soulsync-reduce-effects'); // '1' | '0' | null
+        const reduceEffects = localReduce !== null ? (localReduce === '1') : serverReduce;
         const reduceCheckbox = document.getElementById('reduce-effects-enabled');
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
@@ -2907,6 +2935,21 @@ async function saveSettings(quiet = false) {
         }
     }
 
+    // Validate the optional "Playlist File Naming" template before saving: it's a
+    // filename (no path separator) and must include $title — mirrors the server-side
+    // rule so a broken value can't be stored. Empty = feature off (allowed).
+    const _plItemTpl = (document.getElementById('template-playlist-item')?.value || '').trim();
+    if (_plItemTpl) {
+        if (_plItemTpl.includes('/') || _plItemTpl.includes('\\')) {
+            showToast('Playlist File Naming can\'t contain a folder separator ( / or \\ ) — it names the file, not a path.', 'error');
+            return;
+        }
+        if (!_plItemTpl.includes('$title')) {
+            showToast('Playlist File Naming must include $title so every file has a name.', 'error');
+            return;
+        }
+    }
+
     const settings = {
         active_media_server: activeServer,
         spotify: {
@@ -3105,6 +3148,7 @@ async function saveSettings(quiet = false) {
                 album_path: document.getElementById('template-album-path').value,
                 single_path: document.getElementById('template-single-path').value,
                 playlist_path: document.getElementById('template-playlist-path').value,
+                playlist_item: document.getElementById('template-playlist-item').value,
                 video_path: document.getElementById('template-video-path').value
             }
         },
@@ -3139,6 +3183,7 @@ async function saveSettings(quiet = false) {
             quality_filter_enabled: document.getElementById('import-quality-filter-enabled')?.checked !== false,
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
@@ -3171,6 +3216,9 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+            // Raw cookies.txt blob — backend validates, writes it to a file, and stores
+            // only the path (never echoed back). Blank = keep any already-saved file.
+            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,

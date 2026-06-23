@@ -12,6 +12,7 @@ __pycache__/
 
 # User-specific files (auto-created by the app if missing)
 config/config.json
+config/youtube_cookies.txt
 database/music_library.db
 database/music_library.db-shm
 database/music_library.db-wal

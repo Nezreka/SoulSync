@@ -1917,8 +1917,8 @@
                                     <div class="import-file-zone-icon">📄</div>
                                     <div class="import-file-zone-title">Drop your file here</div>
                                     <div class="import-file-zone-subtitle">or click to browse</div>
-                                    <div class="import-file-zone-formats">Supported: CSV, TSV, TXT</div>
-                                    <input type="file" id="import-file-input" accept=".csv,.tsv,.txt" style="display:none">
+                                    <div class="import-file-zone-formats">Supported: CSV, TSV, TXT, M3U, M3U8</div>
+                                    <input type="file" id="import-file-input" accept=".csv,.tsv,.txt,.m3u,.m3u8" style="display:none">
                                 </div>
                                 <div class="import-file-format-hints">
                                     <div class="import-file-hint">
@@ -1928,6 +1928,10 @@
                                     <div class="import-file-hint">
                                         <span class="import-file-hint-label">TXT</span>
                                         <span class="import-file-hint-text">One track per line (e.g. Artist - Title). Format and separator can be adjusted after upload.</span>
+                                    </div>
+                                    <div class="import-file-hint">
+                                        <span class="import-file-hint-label">M3U / M3U8</span>
+                                        <span class="import-file-hint-text">Standard playlist files. Artist, title and duration are read automatically from #EXTINF lines (or the file name for simple playlists).</span>
                                     </div>
                                 </div>
                             </div>
@@ -4969,10 +4973,24 @@
                                             <option value="brave">Brave</option>
                                             <option value="opera">Opera</option>
                                             <option value="safari">Safari</option>
+                                            <option value="custom">Paste cookies.txt (server / Docker)</option>
                                         </select>
                                         <div class="setting-help-text">
                                             If YouTube shows "Sign in to confirm you're not a bot", select your browser here.
-                                            SoulSync will use your browser's YouTube cookies to authenticate.
+                                            SoulSync will use your browser's YouTube cookies to authenticate. Reading a browser
+                                            only works when that browser is on the same machine as SoulSync &mdash; on a
+                                            server/Docker box, choose <strong>Paste cookies.txt</strong> instead.
+                                        </div>
+                                    </div>
+                                    <div class="form-group" id="youtube-cookies-paste-group" style="display:none;">
+                                        <label>Paste cookies.txt:</label>
+                                        <textarea id="youtube-cookies-paste" class="form-input" rows="6"
+                                                  placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;TRUE&#9;...&#9;NAME&#9;VALUE"></textarea>
+                                        <div class="setting-help-text">
+                                            For server/Docker installs with no local browser. Export your YouTube cookies
+                                            with a "Get cookies.txt LOCALLY" browser extension and paste the whole file.
+                                            Required for private playlists like your <strong>Liked Music</strong>.
+                                            Stored on the server and they expire periodically &mdash; re-paste if YouTube stops working.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -5456,6 +5474,13 @@
                                     <input type="text" id="template-playlist-path"
                                         placeholder="$playlist/$artist - $title">
                                     <small class="settings-hint">Variables: $playlist, $albumartist, $artist, $artistletter, $title, $year, $quality (filename only). Use ${var} to append text</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlist File Naming:</label>
+                                    <input type="text" id="template-playlist-item"
+                                        placeholder="Leave empty to keep the library filename">
+                                    <small class="settings-hint">Renames the files inside each "Organize by Playlist" folder (your real library files are never touched). <strong>Filename only — no folders.</strong> Variables: $position (playlist order), $artist, $album, $track, $title. Must include $title and cannot contain "/". Example: <code>$position - $artist - $title</code> → <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library filename.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -6291,6 +6316,21 @@
                                     under one container folder: otherwise every file's artist gets overwritten with
                                     that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
                                     metadata-identified artist is always kept.
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-transfer-permanent">
+                                        Transfer is my permanent library — never move files out
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    Off by default. Turn this <strong>on</strong> if your Transfer folder is your
+                                    real, permanent library (served by Navidrome/Plex/etc.) rather than a scratch
+                                    drop area. A Deep Scan then never relocates files it doesn't recognize out to
+                                    Staging — it leaves them in place and just reports them. Even with this off, a
+                                    Deep Scan now refuses to move files when the database looks badly out of sync
+                                    with disk, as a safety guard against wiping a library (issue #904).
                                 </div>
                             </div>
 
@@ -7179,6 +7219,10 @@
                             </div>
                         </div>
                         <div class="wishlist-page-header-right">
+                            <button class="btn btn--secondary" onclick="openWishlistIgnoreModal()" title="Tracks you removed or cancelled — auto-skipped until they expire. Un-ignore to allow auto-download again.">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+                                Ignored
+                            </button>
                             <button class="btn btn--secondary" onclick="cleanupWishlistOverview()">
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/></svg>
                                 Cleanup

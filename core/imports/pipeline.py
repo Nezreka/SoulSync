@@ -719,6 +719,16 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
         album_info['clean_track_name'] = clean_track_name
         logger.info(f"[FIX] Updated album_info track_number to {track_number} for consistent metadata")
 
+        # Sync the disc number the SAME way (and via the SAME resolver) the embedded
+        # tag will use — otherwise the "Disc N" folder is built from album_info's
+        # original disc while the tag takes the per-track disc, so a disc-2/3 track
+        # lands in the Disc 1 folder and every disc's tracks collapse together (Sokhi).
+        from core.imports.track_number import resolve_disc_for_track
+        _resolved_disc = resolve_disc_for_track(get_import_original_search(context), album_info)
+        if album_info.get('disc_number') != _resolved_disc:
+            logger.info(f"[FIX] Updated album_info disc_number to {_resolved_disc} for consistent metadata")
+        album_info['disc_number'] = _resolved_disc
+
         final_path, _ = build_final_path_for_track(context, artist_context, album_info, file_ext)
         logger.info(f"Resolved path: '{final_path}'")
         context['_final_processed_path'] = final_path
