@@ -302,6 +302,9 @@ class VideoDatabase:
         "ON video_wishlist(source_id) WHERE kind = 'video'",
         "CREATE INDEX IF NOT EXISTS idx_video_wishlist_channel "
         "ON video_wishlist(parent_source_id) WHERE kind = 'video'",
+        # Index on movies.tmdb_collection_id — a migration-added column, so it must be
+        # created AFTER _ensure_columns (the schema executescript runs before the ALTERs).
+        "CREATE INDEX IF NOT EXISTS idx_movies_collection ON movies(tmdb_collection_id)",
     )
 
     @classmethod
