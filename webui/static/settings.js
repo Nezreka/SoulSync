@@ -1223,6 +1223,25 @@ async function loadSettingsData() {
         // Populate YouTube settings
         document.getElementById('youtube-cookies-browser').value = settings.youtube?.cookies_browser || '';
         document.getElementById('youtube-download-delay').value = settings.youtube?.download_delay ?? 3;
+        // Show the cookies.txt paste box only in "custom" mode. We never echo the
+        // stored cookie back to the UI (it's secret + lives in a file, not config);
+        // if one is already saved, say so via placeholder so a blank save won't wipe it.
+        const _ytCookieSel = document.getElementById('youtube-cookies-browser');
+        const _ytPasteBox = document.getElementById('youtube-cookies-paste');
+        const _ytPasteGroup = document.getElementById('youtube-cookies-paste-group');
+        if (_ytCookieSel && _ytPasteGroup) {
+            const _toggleYtPaste = () => {
+                _ytPasteGroup.style.display = _ytCookieSel.value === 'custom' ? '' : 'none';
+            };
+            if (_ytPasteBox && settings.youtube?.cookies_file) {
+                _ytPasteBox.placeholder = 'A cookies.txt is saved. Paste again to replace it, or leave blank to keep it.';
+            }
+            _toggleYtPaste();
+            if (!_ytCookieSel.dataset.pasteToggleBound) {
+                _ytCookieSel.addEventListener('change', _toggleYtPaste);
+                _ytCookieSel.dataset.pasteToggleBound = '1';
+            }
+        }
 
         // Update UI based on download source mode
         updateDownloadSourceUI();
@@ -1322,6 +1341,8 @@ async function loadSettingsData() {
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        const _transferPermEl = document.getElementById('import-transfer-permanent');
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -1369,8 +1390,14 @@ async function loadSettingsData() {
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);
 
-        // Reduce effects toggle
-        const reduceEffects = settings.ui_appearance?.reduce_effects === true; // default false
+        // Reduce effects toggle. This flag is device-scoped: localStorage (set by the
+        // live toggle and by weak-hardware auto-detect) is the source of truth for THIS
+        // machine; the server value is only the cross-device default used when this
+        // device has never chosen. Prefer localStorage when present so opening Settings
+        // doesn't clobber an auto-enabled (or manually-set) per-device choice.
+        const serverReduce = settings.ui_appearance?.reduce_effects === true; // default false
+        const localReduce = localStorage.getItem('soulsync-reduce-effects'); // '1' | '0' | null
+        const reduceEffects = localReduce !== null ? (localReduce === '1') : serverReduce;
         const reduceCheckbox = document.getElementById('reduce-effects-enabled');
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
@@ -3191,6 +3218,7 @@ async function saveSettings(quiet = false) {
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
@@ -3223,6 +3251,9 @@ async function saveSettings(quiet = false) {
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,
             download_delay: parseInt(document.getElementById('youtube-download-delay').value) || 3,
+            // Raw cookies.txt blob — backend validates, writes it to a file, and stores
+            // only the path (never echoed back). Blank = keep any already-saved file.
+            cookies_paste: document.getElementById('youtube-cookies-paste')?.value || '',
         },
         security: {
             require_pin_on_launch: document.getElementById('security-require-pin')?.checked || false,

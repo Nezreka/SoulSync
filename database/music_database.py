@@ -992,6 +992,39 @@ class MusicDatabase:
             raise
 
         self._init_manual_library_match_table()
+        self._backfill_mirrored_track_source_ids()
+
+    def _backfill_mirrored_track_source_ids(self) -> int:
+        """One-time, idempotent: assign a stable source_track_id to mirrored tracks
+        that have none (file-import / iTunes-only playlists imported before #901), so
+        their existing Find & Add matches start sticking without a manual re-import.
+        Only touches empty-id rows, so it's a no-op once they're filled."""
+        from core.playlists.source_refs import stable_source_track_id
+        updated = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, track_name, artist_name, album_name
+                    FROM mirrored_playlist_tracks
+                    WHERE source_track_id IS NULL OR source_track_id = ''
+                """)
+                rows = cursor.fetchall()
+                for r in rows:
+                    sid = stable_source_track_id({
+                        'track_name': r['track_name'], 'artist_name': r['artist_name'],
+                        'album_name': r['album_name']})
+                    if sid:
+                        cursor.execute(
+                            "UPDATE mirrored_playlist_tracks SET source_track_id = ? WHERE id = ?",
+                            (sid, r['id']))
+                        updated += 1
+                conn.commit()
+            if updated:
+                logger.info("Backfilled stable source_track_id on %d mirrored tracks (#901)", updated)
+        except Exception as e:
+            logger.error("mirrored track source_id backfill failed: %s", e)
+        return updated
 
     # Bump when the schema's generation meaningfully changes. Stamped into
     # PRAGMA user_version as a backstop indicator; nothing GATES on it yet.
@@ -2051,6 +2084,31 @@ class MusicDatabase:
                 "CREATE INDEX IF NOT EXISTS idx_mb_album_release_mbid "
                 "ON mb_album_release_cache (release_mbid)"
             )
+
+            # Persistent (artist,title) -> recording MBID cache for playlist export (#903).
+            # The MusicBrainz tail of the export waterfall is rate-limited (~1 req/s), so a
+            # resolved recording MBID is remembered ONCE and reused for that song across every
+            # future export and playlist. Additive: empty until the export feature writes it.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS mb_recording_cache (
+                    track_key TEXT PRIMARY KEY,
+                    recording_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Remember which external playlist a mirrored playlist was exported to, so a
+            # re-export UPDATES it in place instead of creating a duplicate (#903). Keyed by
+            # (mirrored playlist, target service) -> the target's playlist id (LB recording MBID).
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS playlist_export_targets (
+                    mirrored_playlist_id INTEGER NOT NULL,
+                    target TEXT NOT NULL,
+                    target_playlist_mbid TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (mirrored_playlist_id, target)
+                )
+            """)
 
             # Discovery artist blacklist — artists users never want to see in discovery
             cursor.execute("""
@@ -13933,16 +13991,20 @@ class MusicDatabase:
                     logger.debug("Failed to preserve mirrored playlist extra_data: %s", e)
 
                 # Replace all tracks
+                from core.playlists.source_refs import stable_source_track_id
                 cursor.execute("DELETE FROM mirrored_playlist_tracks WHERE playlist_id=?", (playlist_id,))
                 for i, t in enumerate(tracks):
+                    # File-import / iTunes-only tracks arrive with no native id; give
+                    # them a DETERMINISTIC one so a Find & Add manual match can be
+                    # recorded and found (it keys on source_track_id) instead of being
+                    # silently dropped and re-appearing as "extra" (#901).
+                    sid = stable_source_track_id(t)
                     extra = t.get('extra_data')
                     if extra and not isinstance(extra, str):
                         extra = json.dumps(extra)
                     # Restore preserved discovery data if the incoming track doesn't have its own
-                    if not extra:
-                        sid = t.get('source_track_id')
-                        if sid and sid in old_extra_map:
-                            extra = old_extra_map[sid]
+                    if not extra and sid and sid in old_extra_map:
+                        extra = old_extra_map[sid]
                     cursor.execute("""
                         INSERT INTO mirrored_playlist_tracks
                             (playlist_id, position, track_name, artist_name, album_name, duration_ms, image_url, source_track_id, extra_data)
@@ -13951,7 +14013,7 @@ class MusicDatabase:
                         playlist_id, i + 1,
                         t.get('track_name', ''), t.get('artist_name', ''),
                         t.get('album_name', ''), t.get('duration_ms', 0),
-                        t.get('image_url'), t.get('source_track_id'), extra
+                        t.get('image_url'), sid or None, extra
                     ))
                 conn.commit()
                 logger.info(f"Mirrored playlist '{name}' ({source}) with {len(tracks)} tracks")
@@ -14116,6 +14178,42 @@ class MusicDatabase:
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Error updating custom_name for playlist {playlist_id}: {e}")
+            return False
+
+    def get_playlist_export_target(self, mirrored_playlist_id: int, target: str) -> Optional[str]:
+        """The external playlist id this mirror was last exported to (or None). #903."""
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT target_playlist_mbid FROM playlist_export_targets "
+                    "WHERE mirrored_playlist_id = ? AND target = ? LIMIT 1",
+                    (int(mirrored_playlist_id), target),
+                )
+                row = cur.fetchone()
+                if row:
+                    return (row[0] if not hasattr(row, "keys") else row["target_playlist_mbid"]) or None
+        except Exception as e:
+            logger.debug(f"get_playlist_export_target failed: {e}")
+        return None
+
+    def set_playlist_export_target(self, mirrored_playlist_id: int, target: str, target_mbid: str) -> bool:
+        """Remember the external playlist id for this mirror (idempotent). #903."""
+        if not target_mbid:
+            return False
+        try:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO playlist_export_targets "
+                    "(mirrored_playlist_id, target, target_playlist_mbid, updated_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+                    (int(mirrored_playlist_id), target, target_mbid),
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.debug(f"set_playlist_export_target failed: {e}")
             return False
 
     def get_mirrored_playlist_tracks(self, playlist_id: int) -> List[Dict]:

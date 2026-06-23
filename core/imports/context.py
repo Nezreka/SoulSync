@@ -433,16 +433,24 @@ def detect_album_info_web(context, artist_context=None):
         track_name.strip().lower(),
         artist_name.strip().lower(),
     }:
+        _tn = track_info.get("track_number")
+        _dn = track_info.get("disc_number")
+        # The album is identified but discovery often doesn't carry the per-track
+        # POSITION — Deezer's search/track and MusicBrainz's recording lookups omit
+        # it (only their album endpoint has it). Without a position the pipeline
+        # falls through to the default-1 floor and files an album track as 01/1
+        # (e.g. Deezer says "Obelisk" is track 9 of The Grand Mirage). Resolve the
+        # REAL position from the album's own track list when we have its id.
+        # Fail-safe: leaves the numbers untouched on any miss, so behaviour is
+        # never worse than the old preserve-None-and-fall-through.
+        if _tn is None:
+            _tn, _dn = _resolve_album_position_from_source(context, artist_context, _dn)
         return build_import_album_info(
             context,
             album_info={
                 "album_name": album_name,
-                # Preserve missing numbers as None so the import pipeline
-                # can fall through to ``extract_track_number_from_filename``
-                # at ``core/imports/pipeline.py:652`` instead of locking
-                # to track/disc 01 for every wishlist re-attempt.
-                "track_number": track_info.get("track_number"),
-                "disc_number": track_info.get("disc_number"),
+                "track_number": _tn,
+                "disc_number": _dn,
                 "album_image_url": album_ctx.get("image_url", ""),
                 "confidence": 0.5,
             },
@@ -452,6 +460,48 @@ def detect_album_info_web(context, artist_context=None):
     # Last resort: the track matched a SINGLE with no usable album context —
     # look up the parent ALBUM that actually contains it (gated, fail-safe).
     return _resolve_single_to_parent_album(context, artist_context)
+
+
+def _resolve_album_position_from_source(context, artist_context, current_disc):
+    """Look up a track's real ``(track_number, disc_number)`` from its album's track
+    list, for the case where the album is known but discovery didn't carry a
+    position (Deezer/MusicBrainz search omit it).
+
+    Uses the SAME album id discovery already resolved (``get_import_source_ids`` →
+    ``album_id``), so it re-homes the track onto its own album with no re-search and
+    no edition guessing. Matches by ISRC → source track id → title via the pure
+    ``core.imports.album_position`` seam. Returns ``(None, current_disc)`` on any
+    miss/error so the caller falls back exactly as before — never worse than today.
+    """
+    try:
+        source = get_import_source(context)
+        ids = get_import_source_ids(context)
+        album_id = str(ids.get("album_id") or "")
+        if not source or not album_id:
+            return None, current_disc
+
+        from core.metadata.album_tracks import get_album_tracks_for_source
+        payload = get_album_tracks_for_source(source, album_id) or {}
+        tracks = payload.get("tracks") or []
+        if not tracks:
+            return None, current_disc
+
+        track_info = get_import_track_info(context)
+        original_search = get_import_original_search(context)
+        title = (track_info.get("name") or original_search.get("title") or "").strip()
+        isrc = str(track_info.get("isrc") or original_search.get("isrc") or "")
+
+        from core.imports.album_position import resolve_track_position_in_album
+        tn, dn = resolve_track_position_in_album(
+            tracks, title=title, track_id=str(ids.get("track_id") or ""), isrc=isrc)
+        if tn is not None:
+            logger.info("album-position: resolved '%s' to track %s/disc %s from album %s (%s)",
+                        title, tn, dn, album_id, source)
+            return tn, (dn if dn is not None else current_disc)
+        return None, current_disc
+    except Exception as e:
+        logger.debug("album-position resolution failed: %s", e)
+        return None, current_disc
 
 
 def _resolve_single_to_parent_album(context, artist_context):
