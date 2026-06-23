@@ -158,6 +158,81 @@ class ListenBrainzClient:
 
         return True
 
+    def create_playlist(self, title: str, tracks: List[Dict], public: bool = False) -> Dict:
+        """Create a playlist on ListenBrainz and add its tracks (#903).
+
+        ``tracks`` are JSPF track dicts — each MUST carry an ``identifier`` of the form
+        ``https://musicbrainz.org/recording/<mbid>`` (LB rejects text-only tracks; the
+        caller drops un-resolved tracks via ``core.exports.jspf_export``).
+
+        Robust for large playlists: create an empty playlist (title only) to get the
+        playlist MBID, then add tracks in batches of ``MAX_TRACKS_PER_ADD`` (LB's
+        ``MAX_RECORDINGS_PER_ADD`` cap) via the ``item/add`` endpoint — so a 1k-track
+        playlist doesn't blow a single-request limit.
+
+        Returns ``{success, playlist_mbid, playlist_url, added, requested, error}``.
+        Never raises — failures are reported in the dict so the export job can surface them.
+        """
+        MAX_TRACKS_PER_ADD = 100
+        PLAYLIST_EXT = "https://musicbrainz.org/doc/jspf#playlist"
+        result = {"success": False, "playlist_mbid": None, "playlist_url": None,
+                  "added": 0, "requested": len(tracks or []), "error": None}
+
+        if not self.is_authenticated():
+            result["error"] = "ListenBrainz not authenticated (no token/username)"
+            return result
+
+        headers = {"Authorization": f"Token {self.token}", "Content-Type": "application/json"}
+
+        # 1) Create the (empty) playlist — title + visibility only.
+        create_body = {"playlist": {
+            "title": (title or "SoulSync Export").strip() or "SoulSync Export",
+            "extension": {PLAYLIST_EXT: {"public": bool(public)}},
+        }}
+        try:
+            resp = self._make_request_with_retry(
+                "POST", f"{self.base_url}/playlist/create", json=create_body, headers=headers
+            )
+        except Exception as e:
+            result["error"] = f"create request failed: {e}"
+            return result
+        if not resp or resp.status_code not in (200, 201):
+            result["error"] = f"create returned {resp.status_code if resp else 'no response'}"
+            return result
+        try:
+            playlist_mbid = (resp.json() or {}).get("playlist_mbid")
+        except Exception:
+            playlist_mbid = None
+        if not playlist_mbid:
+            result["error"] = "create succeeded but no playlist_mbid in response"
+            return result
+
+        result["playlist_mbid"] = playlist_mbid
+        result["playlist_url"] = f"https://listenbrainz.org/playlist/{playlist_mbid}"
+
+        # 2) Add tracks in capped batches.
+        added = 0
+        for i in range(0, len(tracks or []), MAX_TRACKS_PER_ADD):
+            batch = tracks[i:i + MAX_TRACKS_PER_ADD]
+            add_body = {"playlist": {"track": batch}}
+            try:
+                r = self._make_request_with_retry(
+                    "POST", f"{self.base_url}/playlist/{playlist_mbid}/item/add",
+                    json=add_body, headers=headers,
+                )
+                if r and r.status_code in (200, 201):
+                    added += len(batch)
+                else:
+                    logger.warning(f"ListenBrainz item/add batch failed: "
+                                   f"{r.status_code if r else 'no response'}")
+            except Exception as e:
+                logger.error(f"ListenBrainz item/add error: {e}")
+
+        result["added"] = added
+        # Playlist was created even if some adds failed — report partial success honestly.
+        result["success"] = True
+        return result
+
     def get_playlists_created_for_user(self, count: int = 25, offset: int = 0) -> List[Dict]:
         """
         Fetch playlists created FOR the user (recommendations, personalized playlists)
