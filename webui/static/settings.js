@@ -40,6 +40,15 @@ async function copyAddress(address, cryptoName) {
 
 let settingsAutoSaveTimer = null;
 
+// The "Only import AcoustID-verified tracks" toggle (under Quality Profile) is
+// meaningless when AcoustID itself is off — only show it when verification is on.
+function syncAcoustidRequireVerifiedVisibility() {
+    const group = document.getElementById('acoustid-require-verified-group');
+    const enabled = document.getElementById('acoustid-enabled');
+    if (group) group.style.display = (enabled && enabled.checked) ? '' : 'none';
+}
+window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
+
 function debouncedAutoSaveSettings() {
     // Ignore changes made while the page is programmatically populating its
     // fields on load — those aren't user edits and must not trigger a full
@@ -1078,6 +1087,10 @@ async function loadSettingsData() {
         // Populate AcoustID settings
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
         document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
+        const _acoustidRequireVerified = document.getElementById('acoustid-require-verified');
+        if (_acoustidRequireVerified) _acoustidRequireVerified.checked = settings.acoustid?.require_verified === true;
+        // Show the "require verified" toggle (under Quality Profile) only when AcoustID is on.
+        if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();
 
         // Populate Last.fm settings
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
@@ -3001,7 +3014,8 @@ async function saveSettings(quiet = false) {
         },
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
-            enabled: document.getElementById('acoustid-enabled').checked
+            enabled: document.getElementById('acoustid-enabled').checked,
+            require_verified: document.getElementById('acoustid-require-verified')?.checked === true
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,

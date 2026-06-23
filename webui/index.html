@@ -4224,7 +4224,8 @@
                                             <label class="checkbox-label"
                                                 style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                                 <input type="checkbox" id="acoustid-enabled"
-                                                    style="width: 16px; height: 16px;">
+                                                    style="width: 16px; height: 16px;"
+                                                    onchange="if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();">
                                                 <span>Enable Download Verification</span>
                                             </label>
                                             <div style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
@@ -5115,6 +5116,22 @@
                                         24-bit) is <strong>accepted anyway</strong> as a last resort. Turn it
                                         <strong>off</strong> to strictly enforce your list — anything off-list is then
                                         quarantined instead of completed.
+                                    </div>
+                                </div>
+
+                                <!-- Require hard AcoustID verification — only shown when AcoustID is enabled -->
+                                <div class="form-group" id="acoustid-require-verified-group" style="display:none;">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="acoustid-require-verified">
+                                        Only import AcoustID-verified tracks (reject "could not confirm")
+                                    </label>
+                                    <div class="help-text" style="margin-top:4px">
+                                        When <strong>on</strong>, a download that AcoustID runs but <em>cannot confirm</em>
+                                        (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
+                                        <strong>quarantined and the next candidate is tried</strong>, instead of being
+                                        imported as unverified. Only a clean AcoustID <strong>pass</strong> is kept.
+                                        Transient lookup errors (rate-limit / outage) still import, so an AcoustID outage
+                                        never stalls your downloads. Requires AcoustID to be enabled.
                                     </div>
                                 </div>
 
