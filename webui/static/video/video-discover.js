@@ -383,9 +383,11 @@
 
     // ── "More like <owned title>" rails (pre-filled, prepended above the stack) ─
     function loadMoreLike() {
+        var gen = state.railGen || 0;
         fetch('/api/video/discover/morelike', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
+                if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
                 var host = $('[data-vdsc-shelves]');
                 if (!rails.length || !host) return;
@@ -411,9 +413,11 @@
     // ── "What am I missing?" gap rails — franchises you've started but not finished,
     //    and more from the directors/creators you own the most (prepended on top). ──
     function loadGaps() {
+        var gen = state.railGen || 0;
         fetch('/api/video/discover/gaps', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
+                if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var rails = (d && d.rails) || [];
                 var host = $('[data-vdsc-shelves]');
                 if (!rails.length || !host) return;
@@ -438,9 +442,11 @@
 
     // ── "Recommended for you" — one wall blended from across your library, prepended on top ─
     function loadForYou() {
+        var gen = state.railGen || 0;
         fetch('/api/video/discover/foryou', { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
+                if (gen !== (state.railGen || 0)) return;   // a newer rebuild superseded this
                 var items = (d && d.items) || [];
                 var host = $('[data-vdsc-shelves]');
                 if (items.length < 6 || !host) return;
@@ -462,11 +468,20 @@
     }
 
     // Rebuild the whole rail stack (genre/curated shelves + the prepended personalized rows).
+    // Each rebuild bumps railGen; in-flight personalized loaders from a superseded rebuild check
+    // it before prepending, so rapid re-toggles can't stack duplicate "Recommended for you" rows.
     function reloadRails() {
+        state.railGen = (state.railGen || 0) + 1;
         renderShelves();
         loadMoreLike();
         loadGaps();
         loadForYou();
+    }
+    // Coalesce rapid chip toggles (e.g. picking 3 services) into a single rebuild.
+    var _reloadTimer;
+    function reloadRailsSoon() {
+        clearTimeout(_reloadTimer);
+        _reloadTimer = setTimeout(reloadRails, 350);
     }
 
     // ── shelves (lazy rails) ──────────────────────────────────────────────────
@@ -727,7 +742,7 @@
                 fetch('/api/video/discover/languages', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ languages: langs }),
-                }).then(function () { reloadRails(); }).catch(function () { /* ignore */ });
+                }).then(function () { reloadRailsSoon(); }).catch(function () { /* ignore */ });
             });
         }
         // 'My streaming services' preference — multi-select; drives the 'On your services' rail.
@@ -752,7 +767,7 @@
                 fetch('/api/video/discover/providers-pref', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ providers: provs }),
-                }).then(function () { reloadRails(); }).catch(function () { /* ignore */ });
+                }).then(function () { reloadRailsSoon(); }).catch(function () { /* ignore */ });
             });
         }
         // Infinite scroll: a sentinel near the grid bottom pulls the next page.
