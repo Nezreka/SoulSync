@@ -2372,6 +2372,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     color: rgba(255, 255, 255, 0.32); margin-right: 2px; }
 .vdsc-global .vdsc-toggle { margin-left: 0; }
 .vdsc-global .vdsc-langs { margin-left: 0; }
+.vdsc-browse-label { font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.32); margin: 0 0 10px 2px; }
 
 /* ── 'Not interested' card button ──────────────────────────────────────────── */
 .vsr-card { position: relative; }

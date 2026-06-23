@@ -23,7 +23,7 @@
         io: null,
         hero: { items: [], idx: 0, timer: null },
         cat: { title: '', q: '', page: 1, paginates: true, busy: false, hasMore: false },
-        sel: { kind: 'movie', genre: '', decade: '', providers: '', sort: 'popularity.desc' },   // Browse panel
+        sel: { kind: 'movie', genre: '', decade: '', providers: '', lang: '', sort: 'popularity.desc' },   // Browse panel
     };
     var AUTO = (typeof IntersectionObserver !== 'undefined');   // infinite-scroll capable
     var sentinelVisible = false;
@@ -587,6 +587,10 @@
         if (s.genre) { q.push('genre=' + s.genre); var gn = genreName(s.kind, s.genre); if (gn) bits.push(gn); }
         if (s.providers) { q.push('providers=' + s.providers); var pn = activeChipText('providers'); if (pn) bits.push('on ' + pn); }
         if (s.decade) { q.push('decade=' + s.decade); bits.push(s.decade + 's'); }
+        // Browse-all is a self-contained search: always send a language so it never silently
+        // inherits the rail language preference. 'any' = show every language; a code filters.
+        q.push('lang=' + (s.lang || 'any'));
+        if (s.lang) { var ln = activeChipText('lang'); if (ln) bits.push(ln); }
         openCategory(bits.join(' · '), q.join('&'));
     }
     function genreName(kind, id) {
