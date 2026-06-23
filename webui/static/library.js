@@ -3964,23 +3964,54 @@ async function ensureEnhancedAlbumCanonicalTracks(album) {
     }
 }
 
+// Loose title key for owned<->canonical matching. Lowercase, drop bracketed
+// annotations ((feat. X), [Explicit]) and punctuation so editions line up.
+function _normTitleForMatch(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
 function _deriveEnhancedMissingTracks(album, canonicalTracks) {
-    const occupiedSlots = new Set();
-    (album.tracks || []).forEach(track => {
+    // #916: multi-disc albums store disc_number = 1 for EVERY track in the library
+    // (the scanner doesn't split discs), so a strict disc:track slot match flags every
+    // canonical disc-2+ track as missing. Match each canonical track to an owned track
+    // by slot FIRST, then fall back to title — consuming each owned track once so genuine
+    // missings and duplicate titles still count correctly.
+    const owned = (album.tracks || []).map(t => ({
+        slot: _trackSlotKey(t),
+        title: _normTitleForMatch(t.title || t.name),
+        used: false,
+    }));
+    const slotIndex = new Map();
+    owned.forEach((o, i) => { if (o.slot !== '1:0' && !slotIndex.has(o.slot)) slotIndex.set(o.slot, i); });
+
+    const missing = [];
+    (canonicalTracks || []).forEach(track => {
         const key = _trackSlotKey(track);
-        if (key !== '1:0') occupiedSlots.add(key);
-    });
-    return (canonicalTracks || [])
-        .map(track => ({
+        const normalized = _normalizeExpectedMissingTrack(track, album);
+        if (key === '1:0' || !normalized._hasActionableContext) return;
+
+        // 1) exact disc:track slot
+        const si = slotIndex.get(key);
+        if (si != null && !owned[si].used) { owned[si].used = true; return; }
+
+        // 2) fallback: title vs any UNUSED owned track (handles the disc_number=1 collapse)
+        const nt = _normTitleForMatch(track.name || track.title);
+        if (nt) {
+            const m = owned.find(o => !o.used && o.title === nt);
+            if (m) { m.used = true; return; }
+        }
+
+        missing.push({
             ...track,
             name: track.name || track.title,
             duration_ms: track.duration_ms || track.duration || 0,
-        }))
-        .filter(track => {
-            const key = _trackSlotKey(track);
-            const normalized = _normalizeExpectedMissingTrack(track, album);
-            return key !== '1:0' && normalized._hasActionableContext && !occupiedSlots.has(key);
         });
+    });
+    return missing;
 }
 
 function _getEnhancedAlbumTrackRows(album) {
