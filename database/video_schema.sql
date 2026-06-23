@@ -98,8 +98,9 @@ CREATE TABLE IF NOT EXISTS movies (
     updated_at           TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_movies_tmdb       ON movies(tmdb_id);
-CREATE INDEX IF NOT EXISTS idx_movies_collection ON movies(tmdb_collection_id);
 CREATE INDEX IF NOT EXISTS idx_movies_monitored  ON movies(monitored, has_file);
+-- NOTE: idx on tmdb_collection_id (a migration-added column) lives in _POST_INDEXES,
+-- not here — this schema runs BEFORE the ALTER that adds the column on upgraded DBs.
 CREATE INDEX IF NOT EXISTS idx_movies_release    ON movies(release_date);
 -- Upsert/stale-removal key: the server's native id. Multiple NULLs are allowed
 -- (wishlist items not yet on a server), so this never blocks non-server rows.
