@@ -1037,6 +1037,40 @@
                         <div class="vdsc-amb" data-vdsc-amb aria-hidden="true"></div>
                         <button class="vdsc-ignore-btn" type="button" data-vdsc-ignore-open title="Manage your Not-interested list"><span aria-hidden="true">🚫</span> Ignore List</button>
                         <div class="vdsc-hero hidden" data-vdsc-hero></div>
+
+                        <!-- Page-wide controls — these affect the WHOLE Discover page (every rail),
+                             not just the "Browse all" grid below. Kept out of the browse panel so
+                             that's clear. -->
+                        <div class="vdsc-global">
+                            <span class="vdsc-global-label">Across Discover</span>
+                            <label class="vdsc-toggle">
+                                <input type="checkbox" data-vdsc-hideowned>
+                                <span>Hide owned</span>
+                            </label>
+                            <div class="vdsc-langs" data-vdsc-langs aria-label="Rail languages" title="Which original languages show in the rails">
+                                <span class="vdsc-langs-label">🌐</span>
+                                <button class="vdsc-lang vdsc-lang--on" type="button" data-lang="en">EN</button>
+                                <button class="vdsc-lang" type="button" data-lang="ko">KO</button>
+                                <button class="vdsc-lang" type="button" data-lang="ja">JA</button>
+                                <button class="vdsc-lang" type="button" data-lang="es">ES</button>
+                                <button class="vdsc-lang" type="button" data-lang="fr">FR</button>
+                                <button class="vdsc-lang" type="button" data-lang="hi">HI</button>
+                                <button class="vdsc-lang" type="button" data-lang="de">DE</button>
+                                <button class="vdsc-lang" type="button" data-lang="it">IT</button>
+                            </div>
+                            <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services" title="Your streaming services power the 'On your streaming services' rail">
+                                <span class="vdsc-langs-label">📺 My services</span>
+                                <button class="vdsc-lang" type="button" data-prov="8">Netflix</button>
+                                <button class="vdsc-lang" type="button" data-prov="9">Prime</button>
+                                <button class="vdsc-lang" type="button" data-prov="337">Disney+</button>
+                                <button class="vdsc-lang" type="button" data-prov="1899">Max</button>
+                                <button class="vdsc-lang" type="button" data-prov="350">Apple TV+</button>
+                                <button class="vdsc-lang" type="button" data-prov="15">Hulu</button>
+                                <button class="vdsc-lang" type="button" data-prov="531">Paramount+</button>
+                                <button class="vdsc-lang" type="button" data-prov="386">Peacock</button>
+                            </div>
+                        </div>
+
                         <div class="vdsc-browse">
                             <div class="vdsc-browse-top">
                                 <div class="vdsc-seg" data-vdsc-seg="kind" role="group" aria-label="Type">
@@ -1047,32 +1081,6 @@
                                     <button class="vdsc-seg-btn vdsc-seg-btn--on" type="button" data-val="popularity.desc">Popular</button>
                                     <button class="vdsc-seg-btn" type="button" data-val="vote_average.desc">Top Rated</button>
                                     <button class="vdsc-seg-btn" type="button" data-val="vote_count.desc">Most Voted</button>
-                                </div>
-                                <label class="vdsc-toggle">
-                                    <input type="checkbox" data-vdsc-hideowned>
-                                    <span>Hide owned</span>
-                                </label>
-                                <div class="vdsc-langs" data-vdsc-langs aria-label="Rail languages" title="Which original languages show in the general rails">
-                                    <span class="vdsc-langs-label">🌐</span>
-                                    <button class="vdsc-lang vdsc-lang--on" type="button" data-lang="en">EN</button>
-                                    <button class="vdsc-lang" type="button" data-lang="ko">KO</button>
-                                    <button class="vdsc-lang" type="button" data-lang="ja">JA</button>
-                                    <button class="vdsc-lang" type="button" data-lang="es">ES</button>
-                                    <button class="vdsc-lang" type="button" data-lang="fr">FR</button>
-                                    <button class="vdsc-lang" type="button" data-lang="hi">HI</button>
-                                    <button class="vdsc-lang" type="button" data-lang="de">DE</button>
-                                    <button class="vdsc-lang" type="button" data-lang="it">IT</button>
-                                </div>
-                                <div class="vdsc-langs" data-vdsc-myprov aria-label="My streaming services" title="Your streaming services power the 'On your streaming services' rail">
-                                    <span class="vdsc-langs-label">📺</span>
-                                    <button class="vdsc-lang" type="button" data-prov="8">Netflix</button>
-                                    <button class="vdsc-lang" type="button" data-prov="9">Prime</button>
-                                    <button class="vdsc-lang" type="button" data-prov="337">Disney+</button>
-                                    <button class="vdsc-lang" type="button" data-prov="1899">Max</button>
-                                    <button class="vdsc-lang" type="button" data-prov="350">Apple TV+</button>
-                                    <button class="vdsc-lang" type="button" data-prov="15">Hulu</button>
-                                    <button class="vdsc-lang" type="button" data-prov="531">Paramount+</button>
-                                    <button class="vdsc-lang" type="button" data-prov="386">Peacock</button>
                                 </div>
                             </div>
                             <div class="vdsc-chips" data-vdsc-chipset="genre" aria-label="Genre">
