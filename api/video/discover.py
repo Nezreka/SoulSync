@@ -100,6 +100,17 @@ def register_routes(bp):
         db = get_video_db()
         eng = get_video_enrichment_engine()
         try:
+            # Lazy collection-id backfill: movies matched before the collection column
+            # exists have no franchise id. Fill a small batch each load (self-healing);
+            # isolated so a backfill hiccup never breaks the gap rails.
+            try:
+                for mv in db.movies_missing_collection(srv, limit=20):
+                    coll = eng.movie_collection(mv["tmdb_id"])
+                    if coll is not None:
+                        db.set_movie_collection(mv["id"], coll.get("id"), coll.get("name"))
+            except Exception:
+                logger.exception("collection-id backfill batch failed")
+
             owned = db.owned_movie_tmdb_ids(srv)
             rails = []
             # Complete your collections — top franchises you've started, missing entries.
