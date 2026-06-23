@@ -16374,16 +16374,40 @@ def _run_soulsync_deep_scan():
 
         logger.info(f"[SoulSync Deep Scan] {len(db_paths)} tracks in soulsync DB")
 
-        # Phase 3: Find untracked files (in Transfer but not in DB)
-        untracked = transfer_files - db_paths
-        # Also check with normalized paths (Windows vs Unix separators)
-        if untracked:
-            db_paths_normalized = {p.replace('\\', '/') for p in db_paths}
-            untracked = {f for f in untracked if f.replace('\\', '/') not in db_paths_normalized}
+        # Phase 3: Plan the untracked → Staging move, with the data-loss guard (#904).
+        # A path-only diff treats EVERY file the DB doesn't know about as "a new arrival
+        # to relocate". When the DB is empty/out of sync with disk (volume swap, DB reset,
+        # external tag edits) but Transfer holds the real library, that flags the whole
+        # library as untracked and relocates all of it. The planner refuses the move when
+        # the untracked share is implausibly large (the desync signature) or when the user
+        # marked Transfer as their permanent library — leaving files in place and warning.
+        from core.library.standalone_scan import (
+            plan_standalone_deep_scan, BLOCK_TRANSFER_PERMANENT, BLOCK_DESYNC,
+        )
+        never_move = bool(config_manager.get('import.transfer_is_permanent', False))
+        plan = plan_standalone_deep_scan(transfer_files, db_paths, never_move=never_move)
+        untracked = plan['untracked']
+        move_blocked = plan['move_blocked']
+        block_reason = plan['block_reason']
 
-        # Phase 4: Move untracked files to Staging for auto-import
+        # Phase 4: Move untracked files to Staging for auto-import — unless guarded.
         moved_count = 0
-        if untracked and os.path.isdir(staging_path):
+        blocked_count = 0
+        if untracked and move_blocked:
+            blocked_count = len(untracked)
+            if block_reason == BLOCK_TRANSFER_PERMANENT:
+                warn = (f"Deep scan: {blocked_count} file(s) in Transfer aren't in the database, "
+                        f"but Transfer is marked your permanent library — nothing was moved.")
+            else:  # BLOCK_DESYNC
+                pct = round(100 * blocked_count / max(1, len(transfer_files)))
+                warn = (f"Deep scan STOPPED to protect your library: {blocked_count} of "
+                        f"{len(transfer_files)} files in Transfer ({pct}%) aren't in the database. "
+                        f"That usually means the database is out of sync with disk, not that you "
+                        f"have {blocked_count} new files — so NOTHING was moved. Re-sync/import "
+                        f"before scanning, or enable 'Transfer is my permanent library'.")
+            logger.warning(f"[SoulSync Deep Scan] {warn}")
+            add_activity_item("", "SoulSync Deep Scan — move blocked", warn, "Now")
+        elif untracked and os.path.isdir(staging_path):
             _db_update_phase_callback('moving_untracked')
             for file_path in untracked:
                 try:
@@ -16414,6 +16438,23 @@ def _run_soulsync_deep_scan():
             if not os.path.exists(db_path):
                 stale_track_ids.append(db_path)
                 stale_count += 1
+
+        # Guard the deletes the same way as the move (#904): if a desync blocked the
+        # move, the DB<->disk mapping is unreliable, so os.path.exists may be lying for
+        # every file — don't delete rows. Also independently skip when the stale share
+        # is implausibly large (storage unreachable / remount), mirroring the orphan guard.
+        from core.library.stale_guard import is_implausible_stale_removal
+        if move_blocked and block_reason == BLOCK_DESYNC:
+            if stale_track_ids:
+                logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count} 'stale' "
+                               f"records — move was blocked for desync, mapping is unreliable.")
+            stale_track_ids = []
+            stale_count = 0
+        elif is_implausible_stale_removal(stale_count, len(db_paths)):
+            logger.warning(f"[SoulSync Deep Scan] Skipping removal of {stale_count}/{len(db_paths)} "
+                           f"'stale' records — implausibly large share, storage likely unreachable.")
+            stale_track_ids = []
+            stale_count = 0
 
         # Remove stale records
         if stale_track_ids:
@@ -16447,9 +16488,11 @@ def _run_soulsync_deep_scan():
         summary = f"Deep scan complete: {len(transfer_files)} files scanned"
         if moved_count > 0:
             summary += f", {moved_count} untracked files moved to Staging"
+        if blocked_count > 0:
+            summary += f", {blocked_count} untracked files LEFT IN PLACE (move blocked — see warning)"
         if stale_count > 0:
             summary += f", {stale_count} stale records removed"
-        if moved_count == 0 and stale_count == 0:
+        if moved_count == 0 and blocked_count == 0 and stale_count == 0:
             summary += " — library is clean"
 
         logger.info(f"[SoulSync Deep Scan] {summary}")

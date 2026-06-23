@@ -6456,6 +6456,21 @@
                                     that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
                                     metadata-identified artist is always kept.
                                 </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-transfer-permanent">
+                                        Transfer is my permanent library — never move files out
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    Off by default. Turn this <strong>on</strong> if your Transfer folder is your
+                                    real, permanent library (served by Navidrome/Plex/etc.) rather than a scratch
+                                    drop area. A Deep Scan then never relocates files it doesn't recognize out to
+                                    Staging — it leaves them in place and just reports them. Even with this off, a
+                                    Deep Scan now refuses to move files when the database looks badly out of sync
+                                    with disk, as a safety guard against wiping a library (issue #904).
+                                </div>
                             </div>
 
 

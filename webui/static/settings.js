@@ -1341,6 +1341,8 @@ async function loadSettingsData() {
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        const _transferPermEl = document.getElementById('import-transfer-permanent');
+        if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
         // Populate M3U Export settings
         document.getElementById('m3u-export-enabled').checked = settings.m3u_export?.enabled === true;
@@ -3216,6 +3218,7 @@ async function saveSettings(quiet = false) {
         import: {
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
         playlists: {
