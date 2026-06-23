@@ -2364,6 +2364,80 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-lang:hover { color: rgba(255, 255, 255, 0.85); }
 .vdsc-lang--on { color: #fff; background: rgba(var(--accent-rgb, 88 101 242), 0.85); border-color: transparent; }
 
+/* ── 'Not interested' card button ──────────────────────────────────────────── */
+.vsr-card { position: relative; }
+.vsr-notint { position: absolute; top: 6px; left: 6px; z-index: 6; width: 24px; height: 24px;
+    border-radius: 50%; border: none; cursor: pointer; font-size: 12px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; opacity: 0;
+    background: rgba(10, 10, 14, 0.78); color: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(4px); transition: opacity .15s ease, background .15s ease, transform .15s ease; }
+.vsr-card:hover .vsr-notint { opacity: 1; }
+.vsr-notint:hover { background: rgba(220, 38, 38, 0.92); color: #fff; transform: scale(1.12); }
+
+/* ── Ignore-list button (top-right of the hero) ────────────────────────────── */
+.vdsc-ignore-btn { position: absolute; top: 16px; right: 18px; z-index: 8;
+    display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; color: rgba(255, 255, 255, 0.82);
+    background: rgba(12, 12, 16, 0.55); border: 1px solid rgba(255, 255, 255, 0.14);
+    backdrop-filter: blur(10px); transition: all .18s ease; }
+.vdsc-ignore-btn:hover { color: #fff; background: rgba(220, 38, 38, 0.5); border-color: rgba(220, 38, 38, 0.6);
+    transform: translateY(-1px); }
+
+/* ── Ignore-list modal ─────────────────────────────────────────────────────── */
+.vdsc-ig-overlay { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center;
+    justify-content: center; background: rgba(0, 0, 0, 0.62); backdrop-filter: blur(6px);
+    opacity: 0; transition: opacity .18s ease; padding: 20px; }
+.vdsc-ig-overlay.vdsc-ig-in { opacity: 1; }
+.vdsc-ig-modal { width: 720px; max-width: 96vw; max-height: 86vh; display: flex; flex-direction: column;
+    border-radius: 22px; overflow: hidden; transform: translateY(10px) scale(.98); transition: transform .2s ease;
+    background: linear-gradient(160deg, rgba(24, 24, 30, 0.98), rgba(15, 15, 20, 0.99));
+    border: 1px solid rgba(var(--accent-rgb, 88 101 242), 0.28);
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); }
+.vdsc-ig-in .vdsc-ig-modal { transform: translateY(0) scale(1); }
+.vdsc-ig-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+    padding: 22px 24px 14px; }
+.vdsc-ig-title { font-size: 19px; font-weight: 800; color: #fff; letter-spacing: -0.3px; }
+.vdsc-ig-sub { font-size: 12.5px; color: rgba(255, 255, 255, 0.5); margin-top: 3px; max-width: 480px; line-height: 1.5; }
+.vdsc-ig-close { width: 32px; height: 32px; flex-shrink: 0; border-radius: 50%; border: none; cursor: pointer;
+    background: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.6); font-size: 14px; transition: all .15s ease; }
+.vdsc-ig-close:hover { background: rgba(255, 255, 255, 0.12); color: #fff; transform: rotate(90deg); }
+.vdsc-ig-search { padding: 0 24px 12px; position: relative; }
+.vdsc-ig-input { width: 100%; box-sizing: border-box; padding: 11px 15px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff; font-size: 14px; outline: none; transition: border-color .15s ease; }
+.vdsc-ig-input:focus { border-color: rgba(var(--accent-rgb, 88 101 242), 0.6); }
+.vdsc-ig-results { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; max-height: 240px; overflow-y: auto; }
+.vdsc-ig-res { display: flex; align-items: center; gap: 11px; padding: 7px 9px; border-radius: 10px; cursor: pointer;
+    border: 1px solid transparent; background: rgba(255, 255, 255, 0.03); color: rgba(255, 255, 255, 0.85);
+    text-align: left; width: 100%; transition: background .12s ease, border-color .12s ease; }
+.vdsc-ig-res:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.1); }
+.vdsc-ig-res img { width: 32px; height: 48px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.vdsc-ig-res .vdsc-ig-ph { width: 32px; height: 48px; display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.06); border-radius: 4px; flex-shrink: 0; }
+.vdsc-ig-rn { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vdsc-ig-add { font-size: 11px; font-weight: 700; color: rgba(var(--accent-rgb, 88 101 242), 1);
+    padding: 3px 9px; border-radius: 999px; background: rgba(var(--accent-rgb, 88 101 242), 0.14); flex-shrink: 0; }
+.vdsc-ig-nores { font-size: 12.5px; color: rgba(255, 255, 255, 0.4); padding: 8px 4px; }
+.vdsc-ig-list { padding: 6px 24px 24px; overflow-y: auto; }
+.vdsc-ig-count { font-size: 11px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35); margin: 6px 2px 12px; }
+.vdsc-ig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 14px; }
+.vdsc-ig-card { position: relative; display: flex; flex-direction: column; gap: 6px; transition: opacity .15s ease, transform .15s ease; }
+.vdsc-ig-poster { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08); }
+.vdsc-ig-card .vdsc-ig-ph { display: flex; align-items: center; justify-content: center; font-size: 28px;
+    background: rgba(255, 255, 255, 0.05); }
+.vdsc-ig-meta { display: flex; flex-direction: column; }
+.vdsc-ig-name { font-size: 12px; color: rgba(255, 255, 255, 0.85); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vdsc-ig-yr { font-size: 10.5px; color: rgba(255, 255, 255, 0.4); }
+.vdsc-ig-remove { margin-top: 2px; padding: 4px 0; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.04); color: rgba(255, 255, 255, 0.65); font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: all .14s ease; }
+.vdsc-ig-remove:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.85); color: #fff; border-color: transparent; }
+.vdsc-ig-empty { text-align: center; padding: 44px 20px; color: rgba(255, 255, 255, 0.55); }
+.vdsc-ig-empty-ic { font-size: 40px; margin-bottom: 10px; }
+.vdsc-ig-empty-sub { font-size: 12.5px; color: rgba(255, 255, 255, 0.38); margin-top: 6px; }
+
 /* rails: a gentle fade-in when filled + per-title hue on hover */
 .vdsc-shelf--in .vdsc-rail { animation: vdscFade 0.45s ease both; }
 @keyframes vdscFade { from { opacity: 0.35; } to { opacity: 1; } }
