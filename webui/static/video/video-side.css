@@ -2375,6 +2375,13 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-browse-label { font-size: 10.5px; font-weight: 800; letter-spacing: 0.6px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.32); margin: 0 0 10px 2px; }
 
+/* 'Your streaming services' — a rail builder, NOT a page-wide filter (its own row, self-described) */
+.vdsc-provrail { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin: 2px 0 18px; }
+.vdsc-provrail-text { display: flex; flex-direction: column; gap: 1px; }
+.vdsc-provrail-title { font-size: 12.5px; font-weight: 800; color: rgba(255, 255, 255, 0.74); }
+.vdsc-provrail-sub { font-size: 11px; color: rgba(255, 255, 255, 0.34); }
+.vdsc-provrail .vdsc-langs { margin-left: 0; }
+
 /* ── 'Not interested' card button ──────────────────────────────────────────── */
 .vsr-card { position: relative; }
 .vsr-notint { position: absolute; top: 6px; left: 6px; z-index: 6; width: 24px; height: 24px;
