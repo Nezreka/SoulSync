@@ -4226,8 +4226,25 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
     color: rgba(255, 255, 255, 0.9);
-    font-size: 11px;
-    padding: 4px 6px;
+    font-size: 13px;
+    padding: 7px 9px;
+    min-height: 34px;
+}
+
+.ranked-target-add select { min-width: 130px; cursor: pointer; }
+
+/* Kill the default light optgroup/option bars in the dark dropdown. */
+.ranked-target-add select optgroup {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.55);
+    font-style: normal;
+    font-weight: 600;
+}
+
+.ranked-target-add select option {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 400;
 }
 
 .ranked-target-add .rt-inline-label {

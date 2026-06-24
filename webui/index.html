@@ -5085,10 +5085,14 @@
                                             </select>
                                         </span>
                                         <span class="rt-lossy-fields" style="display:none;">
-                                            <label class="rt-inline-label">≥
-                                                <input type="number" id="rt-add-bitrate" min="0" max="2000" step="1" value="320" style="width:70px;"
-                                                    autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true"> kbps
-                                            </label>
+                                            <select id="rt-add-bitrate" title="Minimum bitrate">
+                                                <option value="">Any bitrate</option>
+                                                <option value="96">≥ 96 kbps</option>
+                                                <option value="128">≥ 128 kbps</option>
+                                                <option value="192">≥ 192 kbps</option>
+                                                <option value="256">≥ 256 kbps</option>
+                                                <option value="320" selected>≥ 320 kbps</option>
+                                            </select>
                                         </span>
                                         <button type="button" class="rt-add-btn" onclick="addRankedTarget()">+ Add target</button>
                                     </div>
