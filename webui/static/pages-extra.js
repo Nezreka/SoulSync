@@ -1524,19 +1524,26 @@ function _showServerOrder() {
     const serverLabel = serverType.charAt(0).toUpperCase() + serverType.slice(1);
 
     document.getElementById('server-order-modal')?.remove();
-    const rows = order.map((t, i) => `
+    const rows = order.map((t, i) => {
+        const art = t.thumb
+            ? `<img class="server-order-art" src="${esc(t.thumb)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;server-order-art server-order-art-ph&quot;>&#9835;</div>'">`
+            : `<div class="server-order-art server-order-art-ph">&#9835;</div>`;
+        return `
         <div class="server-order-row">
             <span class="server-order-num">${i + 1}</span>
+            ${art}
             <div class="server-order-meta">
                 <span class="server-order-title">${esc(t.title || 'Unknown')}</span>
                 <span class="server-order-artist">${esc(t.artist || '')}</span>
             </div>
-        </div>`).join('');
+        </div>`;
+    }).join('');
 
-    // Align actions (Navidrome only for now) — reorder the server playlist to the
-    // source order. Two choices for server-only "extra" tracks. Order-only: it never
-    // adds the missing tracks (that's the normal sync's job).
-    const alignFoot = serverType === 'navidrome' ? `
+    // Align actions — reorder the server playlist to the source order. Two choices
+    // for server-only "extra" tracks. Order-only: never adds the missing tracks
+    // (that's the normal sync's job). Supported where reorder is implemented.
+    const canAlign = serverType === 'navidrome' || serverType === 'plex';
+    const alignFoot = canAlign ? `
             <div class="server-order-foot">
                 <div class="server-order-foot-label">Align this playlist to the source order</div>
                 <div class="server-order-actions">

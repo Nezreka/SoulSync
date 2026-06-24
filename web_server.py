@@ -19780,13 +19780,17 @@ def server_playlist_align(playlist_id):
             return jsonify({"success": False, "error": "no matched tracks to align"}), 400
 
         active_server = config_manager.get_active_media_server()
-        if active_server != 'navidrome' or not media_server_engine.client('navidrome'):
+        client = media_server_engine.client(active_server) if active_server else None
+        if active_server not in ('navidrome', 'plex') or not client:
             return jsonify({"success": False,
-                            "error": "Align is only supported on Navidrome right now"}), 400
+                            "error": "Align isn't supported on this server yet"}), 400
 
-        client = media_server_engine.client('navidrome')
-        current_tracks = client.get_playlist_tracks(playlist_id) or []
-        current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
+        # Current playlist track ids (in current server order) — per server.
+        if active_server == 'navidrome':
+            current_tracks = client.get_playlist_tracks(playlist_id) or []
+            current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
+        else:  # plex
+            current_ids = client.get_playlist_track_ids(playlist_id, playlist_name)
 
         from core.sync.playlist_edit import plan_align_rewrite
         ordered = plan_align_rewrite(current_ids, matched_ids, keep_extras=keep_extras)
@@ -19794,9 +19798,12 @@ def server_playlist_align(playlist_id):
             return jsonify({"success": False,
                             "error": "Playlist changed on the server — reload and try again"}), 409
 
-        ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
+        if active_server == 'navidrome':
+            ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
+        else:  # plex — in-place moveItem/removeItems reorder
+            ok = client.reorder_playlist(playlist_id, playlist_name, ordered)
         if not ok:
-            return jsonify({"success": False, "error": "Failed to rewrite playlist order"}), 500
+            return jsonify({"success": False, "error": "Failed to reorder playlist"}), 500
         return jsonify({"success": True, "track_count": len(ordered),
                         "kept_extras": keep_extras})
     except Exception as e:
