@@ -68216,6 +68216,7 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
 
 .verif-quar-alt-wrapper { display: contents; }
+.verif-quar-alt-slot { min-width: 68px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
 .verif-quar-alt-btn { border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; line-height: 18px; }
 .verif-quar-alt-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
 .verif-quar-alt-btn.open { color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.25); }
