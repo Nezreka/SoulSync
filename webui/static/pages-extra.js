@@ -2274,6 +2274,7 @@ let _adlBatchHistory = [];
 let _adlExpandedBatches = new Set();
 let _adlBatchHistoryPoller = null;
 let _adlFilterBatchId = null; // When set, main list shows only this batch
+let _adlFetchCount = 0; // used to rate-limit periodic quarantine refresh
 const _batchColorMap = {};
 const _batchCompletedAt = {}; // batch_id -> timestamp when first seen as complete
 let _batchColorNext = 0;
@@ -2407,6 +2408,10 @@ async function _adlFetch() {
     } catch (e) {
         console.error('Downloads page fetch error:', e);
     }
+    // Refresh the quarantine panel every ~15 s (every 7 polls × 2 s) so new
+    // quarantine entries created during a batch appear without a manual click.
+    _adlFetchCount++;
+    if (_adlFetchCount % 7 === 0) _verifLoadQuarantine(true);
 }
 
 function _adlUpdateBadge() {
@@ -3152,7 +3157,7 @@ function _adlRender() {
                 </div>
                 <div class="adl-row-status ${statusClass}">
                     <span class="adl-status-dot ${statusClass}"></span>
-                    ${statusLabel}${_adlVerifBadge(dl)}${_adlQualityBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ', triggered by ' + _adlEsc(dl.retry_trigger) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}</span>` : ''}
+                    ${statusLabel}${_adlVerifBadge(dl)}${_adlQualityBadge(dl)}${dl.retry_info && (statusClass === 'active' || statusClass === 'queued') ? ` <span class="adl-retry-info" title="Retry engine: trying the next-best candidate (attempt ${_adlEsc(String(dl.retry_info))}${dl.retry_trigger ? ' — previous candidate ' + (['acoustid','acoustid_unverified'].includes(dl.retry_trigger) ? 'quarantined (AcoustID)' : 'triggered by ' + _adlEsc(dl.retry_trigger)) : ''})">🔁 ${_adlEsc(String(dl.retry_info))}${['acoustid','acoustid_unverified'].includes(dl.retry_trigger) ? ' 🛡' : ''}</span>` : ''}
                 </div>
                 ${_adlReviewActions(dl)}
                 ${cancelBtnHtml}
