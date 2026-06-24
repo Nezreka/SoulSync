@@ -68215,13 +68215,12 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-banner-spacer { flex: 1; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
 
-.verif-quar-group { margin-bottom: 4px; }
-.verif-quar-group-hdr { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; cursor: pointer; user-select: none; }
-.verif-quar-group-hdr:hover { background: rgba(255,255,255,0.07); }
-.verif-quar-group-lbl { flex: 1; font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.verif-quar-group-cnt { font-size: 12px; color: rgba(255,255,255,0.45); white-space: nowrap; }
-.verif-quar-group-members { display: none; padding-left: 12px; padding-top: 2px; }
-.verif-quar-group-members.vqg-open { display: block; }
+.verif-quar-alt-wrapper { display: contents; }
+.verif-quar-alt-btn { border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; line-height: 18px; }
+.verif-quar-alt-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
+.verif-quar-alt-btn.open { color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.25); }
+.verif-quar-alt-members { display: none; padding-left: 20px; border-left: 2px solid rgba(255,255,255,0.07); margin-left: 8px; margin-bottom: 2px; }
+.verif-quar-alt-members.vqg-open { display: block; }
 
 /* ── Security settings: grouped sub-sections + dependency visuals ── */
 .security-subgroup {

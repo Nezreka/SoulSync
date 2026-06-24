@@ -2611,6 +2611,7 @@ let _verifQuarLoading = false;
 // Expanded 🔍 detail panels, keyed by quarantine entry id — survives the
 // polling re-render (which rebuilds the rows every few seconds).
 const _verifQuarOpenDetails = new Set();
+const _verifQuarOpenGroups = new Set(); // group keys whose alt-members are expanded
 // null = not fetched yet (assume enabled). Without an AcoustID API key
 // nothing ever gets a verification status, so the review queue collapses
 // to quarantine-only.
@@ -2668,7 +2669,7 @@ const _VERIF_QUAR_TRIGGERS = {
     bit_depth: ['BIT DEPTH FILTER', 'verif-rb-int'],
 };
 
-function _verifQuarRowHtml(q, idx) {
+function _verifQuarRowHtml(q, idx, extraAction = '') {
     const title = _adlEsc(q.expected_track || q.original_filename || q.filename || 'Unknown file');
     const meta = [_adlEsc(q.expected_artist || ''), _adlEsc(q.original_filename || '')].filter(Boolean).join(' — ');
     const [trigLabel, trigClass] = _VERIF_QUAR_TRIGGERS[q.trigger] || ['QUARANTINED', 'verif-rb-unv'];
@@ -2702,8 +2703,19 @@ function _verifQuarRowHtml(q, idx) {
             <button class="verif-act" onclick="verifQuarAudit(${idx})" title="Open the audit trail for this quarantined file (details, embedded tags, lyrics)">🔍</button>
             ${approveBtn}
             <button class="verif-act verif-act-del" onclick="verifQuarDelete(${idx}, this)" title="Delete the quarantined file permanently">🗑</button>
+            ${extraAction}
         </div>
     </div>`;
+}
+
+function _verifQuarToggleGroup(btn) {
+    const key = btn.dataset.groupKey;
+    const open = !_verifQuarOpenGroups.has(key);
+    if (open) _verifQuarOpenGroups.add(key); else _verifQuarOpenGroups.delete(key);
+    const wrapper = btn.closest('.verif-quar-alt-wrapper');
+    if (wrapper) wrapper.querySelector('.verif-quar-alt-members')?.classList.toggle('vqg-open', open);
+    btn.classList.toggle('open', open);
+    btn.textContent = open ? `▴ ${btn.dataset.altCount} more` : `▾ ${btn.dataset.altCount} more`;
 }
 
 function _verifQuarRows() {
@@ -2718,20 +2730,20 @@ function _verifQuarRows() {
         if (group.members.length === 1) {
             html += _verifQuarRowHtml(group.members[0], idxById.get(group.members[0].id));
         } else {
+            // First member shown as normal row; rest hidden under a toggle button.
             const first = group.members[0];
-            const title = _adlEsc(first.expected_track || first.original_filename || 'Unknown');
-            const artist = first.expected_artist ? ` — ${_adlEsc(first.expected_artist)}` : '';
-            const n = group.members.length;
-            const groupId = `vqg-${_adlEsc(first.id)}`;
-            html += `<div class="verif-quar-group">
-                <div class="verif-quar-group-hdr" onclick="document.getElementById('${groupId}').classList.toggle('vqg-open')" title="${n} alternative candidates quarantined for this track">
-                    <span class="verif-quar-group-lbl">${title}${artist}</span>
-                    <span class="verif-quar-group-cnt">${n} alternatives &#x25BE;</span>
-                </div>
-                <div class="verif-quar-group-members" id="${groupId}">
-                    ${group.members.map(m => _verifQuarRowHtml(m, idxById.get(m.id))).join('')}
-                </div>
-            </div>`;
+            const firstIdx = idxById.get(first.id);
+            const altCount = group.members.length - 1;
+            const groupKey = group.key || first.id;
+            const isOpen = _verifQuarOpenGroups.has(groupKey);
+            const altBtn = `<button class="verif-quar-alt-btn${isOpen ? ' open' : ''}" data-group-key="${_adlEsc(groupKey)}" data-alt-count="${altCount}" onclick="_verifQuarToggleGroup(this)" title="Show ${altCount} more alternative candidate${altCount === 1 ? '' : 's'} for this track">${isOpen ? '▴' : '▾'} ${altCount} more</button>`;
+            html += `<div class="verif-quar-alt-wrapper">`;
+            html += _verifQuarRowHtml(first, firstIdx, altBtn);
+            html += `<div class="verif-quar-alt-members${isOpen ? ' vqg-open' : ''}">`;
+            for (let i = 1; i < group.members.length; i++) {
+                html += _verifQuarRowHtml(group.members[i], idxById.get(group.members[i].id));
+            }
+            html += `</div></div>`;
         }
     }
     return html;
