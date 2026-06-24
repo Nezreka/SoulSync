@@ -58023,6 +58023,21 @@ tr.tag-diff-same {
     font-weight: 600;
     white-space: nowrap;
 }
+/* clickable variant — re-add to wishlist */
+.sync-dl-wishlist-btn {
+    border: 1px solid rgba(255, 183, 77, 0.35);
+    background: rgba(255, 183, 77, 0.1);
+    border-radius: 999px;
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sync-dl-wishlist-btn:hover { background: rgba(255, 183, 77, 0.22); border-color: rgba(255, 183, 77, 0.6); color: #ffce8a; }
+.sync-dl-wishlist-btn.is-busy { opacity: 0.6; cursor: default; }
+.sync-dl-wishlist-btn.is-done {
+    color: rgba(76, 175, 80, 0.95); border-color: rgba(76, 175, 80, 0.4);
+    background: rgba(76, 175, 80, 0.12); cursor: default;
+}
 
 .sync-detail-track {
     font-weight: 500;
