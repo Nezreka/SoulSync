@@ -368,6 +368,24 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     return source
 
 
+def get_primary_source_label() -> str:
+    """Configured primary source for UI that *names* "your primary source" (the
+    import-search fallback banner, etc.).
+
+    Identical to ``get_primary_source()`` except it does NOT downgrade a no-auth
+    Spotify Free user to the working fallback: Spotify Free (fallback_source=
+    'spotify' + metadata.spotify_free) is reported as 'spotify', because that IS
+    their configured source — even though free-text album search itself has no
+    free-path implementation and legitimately falls back to another provider.
+    ``get_primary_source()`` keeps the downgrade so client routing always yields a
+    usable client; labels want the user's actual intent, not the fallback."""
+    _default = METADATA_SOURCE_PRIORITY[0]
+    source = _get_config_value("metadata.fallback_source", _default) or _default
+    if source == "spotify" and _get_config_value("metadata.spotify_free", False):
+        return "spotify"
+    return get_primary_source()
+
+
 def get_spotify_disconnect_source(configured_source: Optional[str] = None) -> str:
     """Return the active metadata source after Spotify is disconnected."""
     _default = METADATA_SOURCE_PRIORITY[0]
