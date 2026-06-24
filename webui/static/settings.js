@@ -2085,6 +2085,15 @@ function onRtAddFormatChange() {
     const lyFields = document.querySelector('.rt-lossy-fields');
     if (llFields) llFields.style.display = lossless ? '' : 'none';
     if (lyFields) lyFields.style.display = lossless ? 'none' : '';
+    onRtBitrateChange();   // keep the custom-bitrate field in sync
+}
+
+// Reveal the manual bitrate input only when the dropdown is on "Custom…".
+function onRtBitrateChange() {
+    const wrap = document.getElementById('rt-add-bitrate-custom-wrap');
+    if (!wrap) return;
+    const isCustom = document.getElementById('rt-add-bitrate')?.value === 'custom';
+    wrap.style.display = isCustom ? '' : 'none';
 }
 
 function addRankedTarget() {
@@ -2098,7 +2107,8 @@ function addRankedTarget() {
         if (bd) constraints.bit_depth = parseInt(bd, 10);
         if (sr) constraints.min_sample_rate = parseInt(sr, 10);
     } else {
-        const br = document.getElementById('rt-add-bitrate')?.value;
+        let br = document.getElementById('rt-add-bitrate')?.value;
+        if (br === 'custom') br = document.getElementById('rt-add-bitrate-custom')?.value;
         if (br) constraints.min_bitrate = parseInt(br, 10);
     }
 
