@@ -38,6 +38,7 @@ from core.imports.guards import check_flac_bit_depth, check_quality_target, move
 from core.imports.silence import detect_broken_audio
 from core.imports.quarantine import (
     approve_quarantine_entry,
+    delete_quarantine_entry,
     entry_id_from_quarantined_filename,
     list_quarantine_entries,
 )
@@ -1106,6 +1107,33 @@ def post_process_matched_download_with_verification(context_key, context, file_p
             return
 
         if context.get('_acoustid_quarantined'):
+            # Race-condition guard: if the user approved an alternative quarantine
+            # entry for this track while this download was already in flight, the
+            # pipeline will have created a new quarantine entry for the just-finished
+            # file. Delete that entry and exit — the user's choice already won.
+            _approved_alt = False
+            if task_id:
+                with tasks_lock:
+                    _ct = download_tasks.get(task_id)
+                    if isinstance(_ct, dict) and _ct.get('_quarantine_approved_alternative'):
+                        _approved_alt = True
+            if _approved_alt:
+                _eid = context.get('_quarantine_entry_id')
+                if _eid:
+                    try:
+                        from core.imports.guards import _get_config_manager
+                        _dl_dir = _get_config_manager().get('soulseek.download_path', './downloads')
+                        _qdir = os.path.join(docker_resolve_path(_dl_dir), 'ss_quarantine')
+                        delete_quarantine_entry(_qdir, _eid)
+                        logger.info(
+                            f"[Quarantine] Discarded late entry {_eid} — task {task_id} "
+                            f"was cancelled by prior quarantine approval"
+                        )
+                    except Exception as _dqe:
+                        logger.debug(f"[Quarantine] Could not clean up late entry {_eid}: {_dqe}")
+                _notify_download_completed(batch_id, task_id, success=False)
+                return
+
             failure_msg = context.get('_acoustid_failure_msg', 'AcoustID verification failed')
             # Before failing outright, try the next-best candidate. The wrong
             # file was just quarantined; re-running the worker (with the bad

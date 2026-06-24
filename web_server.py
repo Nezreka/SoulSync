@@ -7685,6 +7685,7 @@ def approve_quarantine_item(entry_id):
                         _tti = _t.get('track_info') if isinstance(_t.get('track_info'), dict) else {}
                         if (_tti.get('name') or '').strip().lower() == _approved_name:
                             _t['status'] = 'cancelled'
+                            _t['_quarantine_approved_alternative'] = True
                             cancelled_retry_task = _tid
                             logger.info(f"[Quarantine] Cancelled in-flight retry task {_tid} for '{_approved_name}' (user approved alternative)")
                             break
