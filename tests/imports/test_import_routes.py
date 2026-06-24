@@ -207,7 +207,7 @@ def test_staging_suggestions_returns_cache_payload(monkeypatch):
         "get_import_suggestions_cache",
         lambda: {"suggestions": [{"album": "Album"}], "built": True},
     )
-    monkeypatch.setattr(import_routes, "_get_primary_source", lambda: "deezer")
+    monkeypatch.setattr(import_routes, "_get_primary_source_label", lambda: "deezer")
 
     payload, status = staging_suggestions()
 
@@ -296,6 +296,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
     calls = []
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "hydrabase",
+        get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
         search_import_albums=lambda query, limit: calls.append((query, limit)) or [{"id": "album-1"}],
@@ -327,10 +328,15 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
     # serves results from a different source, the response must carry both
     # `primary_source` (what the user configured) and per-album `source`
     # (what actually served the result) so the UI can warn the user.
+    #
+    # The configured source for the BANNER is the label, NOT the functional
+    # source (issue #922): a Spotify Free user's functional source downgrades to
+    # the deezer fallback, but the banner must still name what they configured.
     runtime = ImportRouteRuntime(
-        get_primary_source=lambda: "musicbrainz",
+        get_primary_source=lambda: "deezer",          # functional (downgraded fallback)
+        get_primary_source_label=lambda: "spotify",   # configured intent (Spotify Free)
         search_import_albums=lambda query, limit: [
-            {"id": "deezer-1", "name": "Album", "source": "deezer"},
+            {"id": "discogs-1", "name": "Album", "source": "discogs"},
         ],
         logger=_FakeLogger(),
     )
@@ -339,8 +345,8 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
 
     assert status == 200
     assert payload["success"] is True
-    assert payload["primary_source"] == "musicbrainz"
-    assert payload["albums"][0]["source"] == "deezer"
+    assert payload["primary_source"] == "spotify"          # label, not the deezer fallback
+    assert payload["albums"][0]["source"] == "discogs"
 
 
 def test_search_tracks_enqueues_hydrabase_and_caps_limit():
@@ -348,6 +354,7 @@ def test_search_tracks_enqueues_hydrabase_and_caps_limit():
     calls = []
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "hydrabase",
+        get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
         search_import_tracks=lambda query, limit: calls.append((query, limit)) or [{"id": "track-1"}],

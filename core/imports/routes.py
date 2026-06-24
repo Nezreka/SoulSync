@@ -16,6 +16,7 @@ from core.imports.staging import (
     AUDIO_EXTENSIONS,
     get_import_suggestions_cache,
     get_primary_source as _get_primary_source,
+    get_primary_source_label as _get_primary_source_label,
     get_staging_path as _get_staging_path,
     read_staging_file_metadata as _read_staging_file_metadata,
     refresh_import_suggestions_cache as _refresh_import_suggestions_cache,
@@ -48,6 +49,7 @@ class ImportRouteRuntime:
     read_staging_file_metadata: Callable[[str, str], Dict[str, Any]] = _read_staging_file_metadata
     read_tags: Callable[[str], Any] = _default_read_tags
     get_primary_source: Callable[[], str] = _get_primary_source
+    get_primary_source_label: Callable[[], str] = _get_primary_source_label
     search_import_albums: Callable[..., list] = _search_import_albums
     search_import_tracks: Callable[..., list] = _search_import_tracks
     build_album_import_match_payload: Callable[..., Dict[str, Any]] = build_album_import_match_payload
@@ -222,7 +224,7 @@ def staging_suggestions() -> tuple[Dict[str, Any], int]:
         "success": True,
         "suggestions": cache["suggestions"],
         "ready": cache["built"],
-        "primary_source": _get_primary_source(),
+        "primary_source": _get_primary_source_label(),
     }, 200
 
 
@@ -239,7 +241,10 @@ def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12) -> t
             runtime.hydrabase_worker.enqueue(query, "albums")
 
         albums = runtime.search_import_albums(query, limit=limit)
-        return {"success": True, "albums": albums, "primary_source": primary_source}, 200
+        # The label names the user's CONFIGURED source (Spotify Free reads as
+        # 'spotify', not the deezer fallback the functional source downgrades to).
+        return {"success": True, "albums": albums,
+                "primary_source": runtime.get_primary_source_label()}, 200
     except Exception as exc:
         runtime.logger.error("Error searching albums for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
@@ -385,7 +390,8 @@ def search_tracks(runtime: ImportRouteRuntime, query: str, limit: int = 10) -> t
             runtime.hydrabase_worker.enqueue(query, "tracks")
 
         tracks = runtime.search_import_tracks(query, limit=limit)
-        return {"success": True, "tracks": tracks, "primary_source": primary_source}, 200
+        return {"success": True, "tracks": tracks,
+                "primary_source": runtime.get_primary_source_label()}, 200
     except Exception as exc:
         runtime.logger.error("Error searching tracks for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
