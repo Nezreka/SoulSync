@@ -714,6 +714,88 @@ class PlexClient(MediaServerClient):
             logger.error(f"Error reconciling Plex playlist '{playlist_name}': {e}")
             return False
 
+    def get_playlist_track_ids(self, playlist_id, playlist_name: str = "") -> List[str]:
+        """The playlist's current track ratingKeys, in current order. [] if missing."""
+        if not self.ensure_connection():
+            return []
+        try:
+            playlist = None
+            try:
+                playlist = self.server.fetchItem(int(playlist_id))
+            except Exception:
+                playlist = None
+            if playlist is None and playlist_name:
+                try:
+                    playlist = self.server.playlist(playlist_name)
+                except Exception:
+                    playlist = None
+            if playlist is None:
+                return []
+            return [str(i.ratingKey) for i in playlist.items() if hasattr(i, 'ratingKey')]
+        except Exception as e:
+            logger.error(f"Error getting Plex playlist track ids '{playlist_name}': {e}")
+            return []
+
+    def reorder_playlist(self, playlist_id, playlist_name: str, ordered_ids) -> bool:
+        """In-place reorder a playlist to an exact ordered ratingKey list ('Align
+        playlists'). Moves items into sequence and removes any current item NOT in
+        ``ordered_ids`` (so 'Mirror source' drops extras; 'Keep extras' includes
+        them in the list). Uses moveItem/removeItems so the playlist's poster,
+        summary and ratingKey survive — never deletes/recreates. Order-only: every
+        id in ``ordered_ids`` is already in the playlist (the caller validated)."""
+        if not self.ensure_connection():
+            return False
+        try:
+            playlist = None
+            try:
+                playlist = self.server.fetchItem(int(playlist_id))
+            except Exception as e:
+                logger.debug("Plex reorder fetchItem failed: %s", e)
+            if playlist is None and playlist_name:
+                try:
+                    playlist = self.server.playlist(playlist_name)
+                except Exception as e:
+                    logger.debug("Plex reorder by-name failed: %s", e)
+            if playlist is None:
+                logger.error(f"Plex reorder: playlist not found (id={playlist_id}, name='{playlist_name}')")
+                return False
+
+            ordered = [str(i) for i in (ordered_ids or []) if str(i)]
+            ordered_set = set(ordered)
+            items = [i for i in playlist.items() if hasattr(i, 'ratingKey')]
+            by_rk = {str(i.ratingKey): i for i in items}
+
+            # Drop items not in the desired list (extras, for Mirror source).
+            to_remove = [i for i in items if str(i.ratingKey) not in ordered_set]
+            if to_remove:
+                try:
+                    playlist.removeItems(to_remove)
+                except (AttributeError, TypeError):
+                    for it in to_remove:
+                        try:
+                            playlist.removeItem(it)
+                        except Exception as one_err:
+                            logger.debug("Plex reorder: removeItem failed: %s", one_err)
+
+            # Move each desired item into place: first to the front (after=None),
+            # then each subsequent one after its predecessor.
+            prev = None
+            for sid in ordered:
+                it = by_rk.get(sid)
+                if it is None:
+                    continue
+                try:
+                    playlist.moveItem(it, after=prev)
+                except Exception as mv_err:
+                    logger.warning(f"Plex reorder moveItem failed for {sid}: {mv_err}")
+                    return False
+                prev = it
+            logger.info(f"Aligned Plex playlist '{playlist_name}' order ({len(ordered)} tracks)")
+            return True
+        except Exception as e:
+            logger.error(f"Error reordering Plex playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks: List[TrackInfo]) -> bool:
         if not self.ensure_connection():
             return False
