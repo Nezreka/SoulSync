@@ -19697,7 +19697,7 @@ def get_server_playlist_tracks(playlist_id):
         # core.sync.playlist_reconcile (pure + tested) — fixes #768 (YouTube
         # "Artist - Title" sources now match, and source_track_id is echoed
         # back so manual "Find & add" overrides persist).
-        from core.sync.playlist_reconcile import reconcile_playlist
+        from core.sync.playlist_reconcile import compute_order_status, reconcile_playlist
 
         # Pass 0: User-confirmed match overrides from sync_match_cache.
         # When a user previously picked a local file via "Find & Add",
@@ -19729,6 +19729,21 @@ def get_server_playlist_tracks(playlist_id):
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
+        # Order status: the editor renders the server column in SOURCE order, so a
+        # reordered-but-same-membership playlist reads "in sync" when Navidrome's real
+        # order differs. Surface that (one-way: source order is truth). `server_order`
+        # is the server's ACTUAL sequence, for the read-only "view server order" view.
+        order_status = compute_order_status(combined)
+        server_order = [
+            {
+                "title": t.get("title"),
+                "artist": t.get("artist"),
+                "thumb": t.get("thumb"),
+                "id": t.get("id"),
+            }
+            for t in server_tracks if isinstance(t, dict)
+        ]
+
         return jsonify({
             "success": True,
             "server_type": active_server,
@@ -19736,6 +19751,8 @@ def get_server_playlist_tracks(playlist_id):
             "tracks": combined,
             "server_track_count": len(server_tracks),
             "source_track_count": len(source_tracks),
+            "order_status": order_status,
+            "server_order": server_order,
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")

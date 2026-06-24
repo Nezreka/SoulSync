@@ -1424,6 +1424,11 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
 
         _serverEditorState.tracks = data.tracks || [];
         _serverEditorState.serverType = data.server_type;
+        // Order status: the columns render in SOURCE order, so a same-tracks-but-
+        // reordered server playlist looks in-sync. order_status flags that drift;
+        // server_order is the server's ACTUAL sequence for the read-only view.
+        _serverEditorState.orderStatus = data.order_status || null;
+        _serverEditorState.serverOrder = data.server_order || [];
 
         const tracks = _serverEditorState.tracks;
         const serverLabel = data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : 'Server';
@@ -1456,7 +1461,19 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
         if (srcCountEl) srcCountEl.textContent = `${data.source_track_count || 0} tracks`;
         if (svrIconEl) svrIconEl.textContent = serverIconMap[data.server_type] || '💻';
         if (svrLabelEl) svrLabelEl.textContent = serverLabel;
-        if (svrCountEl) svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+        if (svrCountEl) {
+            const os = _serverEditorState.orderStatus;
+            if (os && os.out_of_order) {
+                // Accurate membership but different order than the source. Read-only:
+                // source order is the source of truth; the badge opens the real order.
+                svrCountEl.innerHTML = `${data.server_track_count || 0} tracks ` +
+                    `<button type="button" class="server-order-badge" onclick="_showServerOrder()" ` +
+                    `title="These tracks match the source, but the playlist is in a different order on ${serverLabel}. Click to view the actual server order.">` +
+                    `&#9888; out of order</button>`;
+            } else {
+                svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+            }
+        }
 
         // Render columns
         _renderCompareColumns(tracks);
@@ -1496,6 +1513,42 @@ function _updateCompareStats(tracks) {
 
     const footer = document.getElementById('server-editor-footer');
     if (footer) footer.textContent = `${matched}/${matched + missing} matched${extra > 0 ? ` · ${extra} extra on server` : ''}`;
+}
+
+// Read-only view of the server playlist's ACTUAL order. Source order is the source
+// of truth; this just lets the user SEE how the server currently differs (no editing).
+function _showServerOrder() {
+    const esc = typeof _esc === 'function' ? _esc : s => s;
+    const order = (_serverEditorState && _serverEditorState.serverOrder) || [];
+    const serverType = (_serverEditorState && _serverEditorState.serverType) || 'server';
+    const serverLabel = serverType.charAt(0).toUpperCase() + serverType.slice(1);
+
+    document.getElementById('server-order-modal')?.remove();
+    const rows = order.map((t, i) => `
+        <div class="server-order-row">
+            <span class="server-order-num">${i + 1}</span>
+            <div class="server-order-meta">
+                <span class="server-order-title">${esc(t.title || 'Unknown')}</span>
+                <span class="server-order-artist">${esc(t.artist || '')}</span>
+            </div>
+        </div>`).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'server-order-modal';
+    overlay.className = 'server-order-overlay';
+    overlay.innerHTML = `
+        <div class="server-order-dialog" onclick="event.stopPropagation()">
+            <div class="server-order-head">
+                <div>
+                    <div class="server-order-h1">${esc(serverLabel)} playlist order</div>
+                    <div class="server-order-sub">the actual order on your server · source order stays the source of truth</div>
+                </div>
+                <button type="button" class="server-order-close" onclick="document.getElementById('server-order-modal').remove()">&times;</button>
+            </div>
+            <div class="server-order-list">${rows || '<div class="server-order-empty">No server tracks.</div>'}</div>
+        </div>`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
 }
 
 function _formatDurationMs(ms) {
