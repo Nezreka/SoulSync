@@ -2703,8 +2703,8 @@ function _verifQuarRowHtml(q, idx, extraAction = '') {
             <button class="verif-act" onclick="verifQuarAudit(${idx})" title="Open the audit trail for this quarantined file (details, embedded tags, lyrics)">🔍</button>
             ${approveBtn}
             <button class="verif-act verif-act-del" onclick="verifQuarDelete(${idx}, this)" title="Delete the quarantined file permanently">🗑</button>
-            ${extraAction}
         </div>
+        <div class="verif-quar-alt-slot" onclick="event.stopPropagation()">${extraAction}</div>
     </div>`;
 }
 
