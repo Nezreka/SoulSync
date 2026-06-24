@@ -310,16 +310,20 @@ class VideoEnrichmentEngine:
                 return []
         return self._stamp_owned(results)
 
-    def trending(self) -> list:
-        """Trending titles for the idle search page, annotated owned/not."""
+    def trending(self, window="week") -> list:
+        """Trending titles, annotated owned/not. ``window='day'`` is the real-time
+        daily chart (the iconic 'Top 10 today' row); 'week' is the steadier hero/idle
+        feed. Order is preserved, so the caller can render rank numbers."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
-        cached = self._cache_get(("trending",))
+        window = "day" if window == "day" else "week"
+        ck = ("trending", window)
+        cached = self._cache_get(ck)
         if cached is None:
             try:
-                cached = w.client.trending() or []
-                self._cache_put(("trending",), cached, ttl=3600)
+                cached = w.client.trending(window=window) or []
+                self._cache_put(ck, cached, ttl=3600)
             except Exception:
                 logger.exception("video trending failed")
                 return []
@@ -372,21 +376,32 @@ class VideoEnrichmentEngine:
         return self._stamp_owned(items)
 
     def discover_filter(self, kind, *, genre=None, year=None, decade=None, providers=None,
-                        sort_by="popularity.desc", page=1, language=None) -> list:
+                        sort_by="popularity.desc", page=1, language=None,
+                        keywords=None, companies=None, networks=None, cast=None, crew=None,
+                        min_runtime=None, max_runtime=None, certification=None,
+                        vote_count_min=None, release_window=None) -> list:
         """Browse /discover filtered by genre / year / decade / streaming provider /
-        original language, cached + owned-annotated."""
+        original language — plus the Netflix-class extensions (keywords/mood,
+        companies/studio, networks, cast/crew, runtime, certification, release window).
+        Cached + owned-annotated; all extension params are optional/additive."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
         if kind not in ("movie", "show"):
             kind = "movie"
-        ck = ("disc-flt", kind, genre, year, decade, providers, sort_by, page, language)
+        ck = ("disc-flt", kind, genre, year, decade, providers, sort_by, page, language,
+              keywords, companies, networks, cast, crew, min_runtime, max_runtime,
+              certification, vote_count_min, release_window)
         items = self._cache_get(ck)
         if items is None:
             try:
-                items = w.client.discover(kind, genre=genre, year=year, decade=decade,
-                                          providers=providers, sort_by=sort_by, page=page,
-                                          region=self._region(), language=language) or []
+                items = w.client.discover(
+                    kind, genre=genre, year=year, decade=decade, providers=providers,
+                    sort_by=sort_by, page=page, region=self._region(), language=language,
+                    keywords=keywords, companies=companies, networks=networks, cast=cast,
+                    crew=crew, min_runtime=min_runtime, max_runtime=max_runtime,
+                    certification=certification, vote_count_min=vote_count_min,
+                    release_window=release_window) or []
                 self._cache_put(ck, items, ttl=3600)
             except Exception:
                 logger.exception("discover filter failed (%s g=%s y=%s d=%s p=%s)",

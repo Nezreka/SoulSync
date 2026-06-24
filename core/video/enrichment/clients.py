@@ -514,18 +514,32 @@ class TMDBClient:
         return self._disc_map((r.json() or {}).get("results"), kind)
 
     def discover(self, kind, *, genre=None, year=None, decade=None, providers=None,
-                 sort_by="popularity.desc", page=1, region="US", language=None):
-        """Browse /discover/{movie,tv} filtered by genre / year / decade / streaming
-        provider (``providers`` is a TMDB provider id; needs ``region``). ``language``
-        restricts to an original-language (ISO-639-1, e.g. 'en') so general rails aren't
-        flooded with foreign-language titles; pass a non-English code for a foreign rail."""
+                 sort_by="popularity.desc", page=1, region="US", language=None,
+                 keywords=None, companies=None, networks=None, cast=None, crew=None,
+                 min_runtime=None, max_runtime=None, certification=None,
+                 cert_country="US", vote_count_min=None, release_window=None):
+        """Browse /discover/{movie,tv}. The original filters (genre / year / decade /
+        streaming ``providers`` + ``region`` / original ``language``) plus the
+        Netflix-class extensions, all optional + additive:
+
+        - ``keywords``  — TMDB keyword id(s), pipe-joined for OR ('818|9715'). Powers
+          mood/theme rails (feel-good, heist, time-travel …).
+        - ``companies`` — TMDB company id(s) — studio rails (Pixar, A24, Ghibli …).
+        - ``networks``  — TMDB network id(s), TV only — network rails (HBO, AMC …).
+        - ``cast`` / ``crew`` — person id(s), movies — "starring …" / "directed by …".
+        - ``min_runtime`` / ``max_runtime`` — minutes — quick-watches / epics.
+        - ``certification`` (+ ``cert_country``) — e.g. 'PG-13', movies — family-friendly.
+        - ``vote_count_min`` — override the default popularity floor (40).
+        - ``release_window`` — 'last_30' | 'last_90' | 'last_365' — date-windowed "new"
+          rails (computed relative to today)."""
         if not self.api_key:
             return []
         import requests
         is_movie = kind == "movie"
         path = "/discover/movie" if is_movie else "/discover/tv"
         params = {"api_key": self.api_key, "sort_by": sort_by, "page": page,
-                  "include_adult": "false", "vote_count.gte": 40}
+                  "include_adult": "false",
+                  "vote_count.gte": vote_count_min if vote_count_min is not None else 40}
         if language:
             params["with_original_language"] = language
         if genre:
@@ -534,6 +548,23 @@ class TMDBClient:
             params["with_watch_providers"] = providers
             params["watch_region"] = region or "US"
             params["with_watch_monetization_types"] = "flatrate"   # streaming, not rent/buy
+        if keywords:
+            params["with_keywords"] = keywords
+        if companies:
+            params["with_companies"] = companies
+        if networks and not is_movie:
+            params["with_networks"] = networks
+        if cast and is_movie:
+            params["with_cast"] = cast
+        if crew and is_movie:
+            params["with_crew"] = crew
+        if min_runtime:
+            params["with_runtime.gte"] = min_runtime
+        if max_runtime:
+            params["with_runtime.lte"] = max_runtime
+        if certification and is_movie:
+            params["certification.lte"] = certification
+            params["certification_country"] = cert_country or "US"
         if year:
             params["primary_release_year" if is_movie else "first_air_date_year"] = year
         if decade:
@@ -546,6 +577,17 @@ class TMDBClient:
                     params["first_air_date.gte"], params["first_air_date.lte"] = gte, lte
             except (TypeError, ValueError):
                 pass
+        if release_window:
+            days = {"last_30": 30, "last_90": 90, "last_365": 365}.get(release_window)
+            if days:
+                import datetime as _dt
+                today = _dt.date.today()
+                start = (today - _dt.timedelta(days=days)).isoformat()
+                end = today.isoformat()
+                if is_movie:
+                    params["primary_release_date.gte"], params["primary_release_date.lte"] = start, end
+                else:
+                    params["first_air_date.gte"], params["first_air_date.lte"] = start, end
         r = requests.get(self.BASE + path, params=params, timeout=15)
         r.raise_for_status()
         return self._disc_map((r.json() or {}).get("results"), kind)
