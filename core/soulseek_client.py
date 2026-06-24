@@ -2048,6 +2048,16 @@ class SoulseekClient(DownloadSourcePlugin):
         targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
         fallback_enabled = profile.get('fallback_enabled', True)
 
+        # AAC (#886) is an opt-in tier: keep AAC/.m4a candidates ONLY when the
+        # active profile explicitly targets AAC. Otherwise drop them BEFORE
+        # ranking — without this, fallback_enabled would hand back AAC files the
+        # user never asked for (pre-#886 such files landed in the dropped
+        # 'other' bucket and were never returned).
+        if not any((t.format or '').lower() == 'aac' for t in targets):
+            results = [r for r in results if (r.audio_quality.format or '').lower() != 'aac']
+            if not results:
+                return []
+
         logger.debug(
             "Quality Filter: profile='%s', %d targets, %d candidates",
             profile.get('preset', 'custom'), len(targets), len(results),

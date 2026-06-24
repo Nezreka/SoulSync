@@ -233,6 +233,11 @@ def v2_qualities_to_ranked_targets(qualities: dict) -> List[dict]:
         'mp3_320': {'format': 'mp3',  'min_bitrate': 320},
         'mp3_256': {'format': 'mp3',  'min_bitrate': 256},
         'mp3_192': {'format': 'mp3',  'min_bitrate': 192},
+        # AAC (#886): opt-in tier. Match on format alone — Soulseek AAC/.m4a
+        # rarely carries a bitrate attribute, so a min_bitrate gate would
+        # reject every bitrate-less AAC. Priority order (above MP3, below FLAC)
+        # is preserved by the caller's priority sort, not by min_bitrate.
+        'aac':     {'format': 'aac'},
     }
     enabled = [
         (cfg.get('priority', 999), name, cfg)
