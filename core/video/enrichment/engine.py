@@ -310,19 +310,21 @@ class VideoEnrichmentEngine:
                 return []
         return self._stamp_owned(results)
 
-    def trending(self, window="week") -> list:
+    def trending(self, window="week", kind=None) -> list:
         """Trending titles, annotated owned/not. ``window='day'`` is the real-time
-        daily chart (the iconic 'Top 10 today' row); 'week' is the steadier hero/idle
-        feed. Order is preserved, so the caller can render rank numbers."""
+        daily chart (the iconic 'Top 10 today' rows); 'week' is the steadier hero/idle
+        feed. ``kind`` None = mixed; 'movie'/'show' = the dedicated single-type charts
+        (split 'Top 10 Movies / TV Shows Today'). Order is preserved for rank numbers."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return []
         window = "day" if window == "day" else "week"
-        ck = ("trending", window)
+        kind = kind if kind in ("movie", "show") else None
+        ck = ("trending", window, kind)
         cached = self._cache_get(ck)
         if cached is None:
             try:
-                cached = w.client.trending(window=window) or []
+                cached = w.client.trending(window=window, kind=kind) or []
                 self._cache_put(ck, cached, ttl=3600)
             except Exception:
                 logger.exception("video trending failed")

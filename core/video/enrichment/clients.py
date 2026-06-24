@@ -447,16 +447,22 @@ class TMDBClient:
                             "poster": (self.PROFILE + it["profile_path"]) if it.get("profile_path") else None})
         return out
 
-    def trending(self, window="week"):
-        """Trending movies + shows this week — fills the search page when idle and
-        the Discover hero slideshow (hence backdrops via _disc_map)."""
+    def trending(self, window="week", kind=None):
+        """Trending titles. ``kind`` None = mixed movies + shows (/trending/all — the
+        search-idle filler + Discover hero slideshow, hence backdrops via _disc_map).
+        ``kind`` 'movie' / 'show' hit the dedicated single-type charts (/trending/movie,
+        /trending/tv) that power the split 'Top 10 Movies / TV Shows Today' rails.
+        Single-type endpoints omit media_type, so the kind is forced into _disc_map."""
         if not self.api_key:
             return []
         import requests
-        r = requests.get(self.BASE + "/trending/all/" + window,
-                         params={"api_key": self.api_key}, timeout=15)
+        path = ("/trending/movie/" if kind == "movie"
+                else "/trending/tv/" if kind == "show"
+                else "/trending/all/") + window
+        r = requests.get(self.BASE + path, params={"api_key": self.api_key}, timeout=15)
         r.raise_for_status()
-        return self._disc_map((r.json() or {}).get("results"), None)[:20]
+        forced = kind if kind in ("movie", "show") else None
+        return self._disc_map((r.json() or {}).get("results"), forced)[:20]
 
     # ── discover (browse TMDB by curated list / genre / year / decade) ────────
     def _disc_map(self, results, kind):

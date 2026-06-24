@@ -49,8 +49,11 @@
     }
 
     // ── the rail stack (personalized + curated + genre + decade) ──────────────
-    // The iconic ranked "Top 10 today" row — daily TMDB trending, rendered with rank numbers.
-    var TOP10 = { title: 'Top 10 Today', q: 'key=trending_today&lang=any', ranked: true };
+    // The iconic ranked "Top 10 today" rows — split Movies / TV like Netflix, so TV
+    // isn't drowned out by the movie-heavy mixed chart. Daily TMDB trending, rank numbers.
+    // (Titles are terse because the group header already says "Top 10 today".)
+    var TOP10_MOVIES = { title: 'Movies', q: 'key=trending_movies_today&lang=any', ranked: true };
+    var TOP10_TV = { title: 'TV Shows', q: 'key=trending_tv_today&lang=any', ranked: true };
     var CURATED = [
         { title: 'Trending This Week', q: 'key=trending' },
         { title: 'Popular Movies', q: 'key=popular_movies' },
@@ -155,7 +158,7 @@
         // keep those group ids. Order of this array IS the on-screen order.
         return [
             { id: 'foryou', label: 'For you', rails: foryou },
-            { id: 'topten', label: 'Top 10 today', rails: [TOP10] },
+            { id: 'topten', label: 'Top 10 today', rails: [TOP10_MOVIES, TOP10_TV] },
             { id: 'new', label: 'New & noteworthy', rails: NEW_RAILS },
             { id: 'collection', label: 'Finish your collection', rails: [] },
             { id: 'taste', label: 'More of what you like', rails: taste },
