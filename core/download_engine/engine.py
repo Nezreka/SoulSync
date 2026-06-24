@@ -29,7 +29,6 @@ import asyncio
 import threading
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from core.quality.selection import load_profile_targets, rank_with_targets
 from utils.logging_config import get_logger
 
 logger = get_logger("download_engine")
@@ -393,21 +392,19 @@ class DownloadEngine:
         (tracks, albums) tuple, or ``([], [])`` when every source
         in the chain is exhausted.
 
-        Quality-aware: a source is only accepted when it can deliver a
-        candidate that meets a real target in the user's quality profile.
-        A source that meets no target is skipped in favour of the next one
-        (source priority still wins among satisfying sources). RAW tracks are
-        returned — the per-source ``satisfied`` check is a coarse gate;
-        match-filtering and final quality ranking happen in the orchestrator.
-        When no source satisfies a target, the first source's results are
-        returned as a fallback (unless the profile disables fallback).
+        Priority mode is deliberately quality-AGNOSTIC at search time — source
+        order is king and the first source that returns any tracks wins, exactly
+        matching pre-quality-system behaviour byte-for-byte (#896 review #3).
+        Quality-gating the priority path would deprioritise e.g. a soulseek
+        mp3 whose bitrate slskd omitted (``bitrate=None`` → "unsatisfied"),
+        changing which source wins and adding latency for users who never opted
+        in. Cross-source quality pooling is the job of best_quality mode
+        (``search_all_sources``); final per-result ranking still happens in the
+        orchestrator's match/quality filter. RAW tracks are returned.
 
         Replaces orchestrator's hand-rolled hybrid search loop. The
         chain is ordered (most-preferred first).
         """
-        targets, fallback_enabled = load_profile_targets()
-        first_fallback = None  # (tracks, albums) of the first source with hits
-
         for i, source_name in enumerate(source_chain):
             plugin = self._plugins.get(source_name)
             if plugin is None:
@@ -422,41 +419,13 @@ class DownloadEngine:
                 tracks, albums = await plugin.search(query, timeout, progress_callback)
                 if not tracks:
                     continue
-                try:
-                    _, satisfied = rank_with_targets(
-                        tracks, targets, fallback_enabled=fallback_enabled,
-                    )
-                except Exception as rank_err:
-                    # Fail open: a ranking bug must never drop a source's real
-                    # download results. Accept them as-is.
-                    logger.warning(
-                        f"Quality ranking failed for {source_name} — accepting "
-                        f"its results unranked: {rank_err}"
-                    )
-                    satisfied = True
-                if satisfied:
-                    logger.info(
-                        f"{source_name} found {len(tracks)} tracks (meets quality target)"
-                    )
-                    return (tracks, albums)
-                logger.info(
-                    f"{source_name} found {len(tracks)} tracks but none meet a "
-                    f"quality target — trying next source"
-                )
-                if first_fallback is None:
-                    first_fallback = (tracks, albums)
+                logger.info(f"{source_name} found {len(tracks)} tracks")
+                return (tracks, albums)
             except Exception as e:
                 logger.warning(f"{source_name} search failed: {e}")
 
-        if fallback_enabled and first_fallback is not None:
-            logger.info(
-                "Hybrid search: no source met a quality target — falling back to "
-                "first source's results"
-            )
-            return first_fallback
-
         logger.warning(
-            "Hybrid search: all sources (%s) found nothing acceptable for: %s",
+            "Hybrid search: all sources (%s) found nothing for: %s",
             ', '.join(source_chain), query,
         )
         return ([], [])
