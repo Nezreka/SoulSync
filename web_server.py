@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.6"
+_SOULSYNC_BASE_VERSION = "2.7.7"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -14993,7 +14993,12 @@ def parse_youtube_playlist(url):
             'no_warnings': True,
             'extract_flat': 'in_playlist',  # Only extract basic info, no individual video metadata
             'skip_download': True,  # Don't download, just extract IDs and basic info
-            'lazy_playlist': False,  # Force full playlist resolution (prevents ~100 entry cap)
+            'lazy_playlist': False,  # Force full playlist resolution
+            # #908 / yt-dlp #16943: a YouTube-side regression caps the webpage-based playlist
+            # path at the first ~100-item page (Liked Music came back as only 104). Skipping the
+            # webpage and paging via the InnerTube API directly gets far more — verified live
+            # 100 -> 200+ on a large playlist. Remove once the upstream fix (PR #16948) ships.
+            'extractor_args': {'youtubetab': {'skip': ['webpage']}},
         }
         ydl_opts.update(_youtube_cookie_opts())
         

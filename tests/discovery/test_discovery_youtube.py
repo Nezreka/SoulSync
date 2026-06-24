@@ -406,3 +406,31 @@ def test_results_sorted_by_index():
 
     indices = [r['index'] for r in states['h11']['discovery_results']]
     assert indices == sorted(indices)
+
+
+# ---------------------------------------------------------------------------
+# resolve_display_artist (#909) — YT-artist column backfill
+# ---------------------------------------------------------------------------
+
+def test_display_artist_keeps_recovered_name():
+    # Recovery already produced a real artist → never overwritten by the match.
+    assert dy.resolve_display_artist('Goo Goo Dolls', 'Spotify Goo') == 'Goo Goo Dolls'
+
+
+def test_display_artist_backfills_from_match_when_unknown():
+    # YouTube/recovery gave nothing, but we matched → show the matched artist.
+    assert dy.resolve_display_artist('Unknown Artist', 'Don McLean') == 'Don McLean'
+    assert dy.resolve_display_artist('', 'Don McLean') == 'Don McLean'
+    assert dy.resolve_display_artist(None, 'Don McLean') == 'Don McLean'
+
+
+def test_display_artist_stays_unknown_with_no_match():
+    # No recovery AND no match → honest "Unknown Artist" (an unmatched/error row).
+    assert dy.resolve_display_artist('Unknown Artist', '') == 'Unknown Artist'
+    assert dy.resolve_display_artist('Unknown Artist', None) == 'Unknown Artist'
+    assert dy.resolve_display_artist('', '') == 'Unknown Artist'
+
+
+def test_display_artist_trims_whitespace():
+    assert dy.resolve_display_artist('  ', 'Matched') == 'Matched'
+    assert dy.resolve_display_artist('Real Artist  ', '') == 'Real Artist'

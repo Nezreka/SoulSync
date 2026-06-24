@@ -27,6 +27,7 @@ entirely.
 """
 
 import os
+import re
 import shutil
 import threading
 import time
@@ -407,6 +408,18 @@ def _differentiators_in(norm_title: str) -> frozenset:
     return frozenset(t for t in norm_title.split() if t in _VERSION_DIFFERENTIATORS)
 
 
+# Featured-artist credit: "(feat. X)" / "[ft X]" / a trailing "feat. X". The
+# parenthesised form is stripped wherever it appears; the bare form only when
+# something follows it (so a song literally named "The Feat" is left alone, and
+# "Defeat"/"Lift" never trip the word-boundary). Case-insensitive.
+_FEAT_RE = re.compile(
+    r"""\s*[\(\[]\s*(?:feat|ft|featuring)\b\.?[^)\]]*[\)\]]   # (feat. X) / [ft. X]
+        | \s+(?:feat|ft|featuring)\b\.?\s+\S.*$               # trailing  feat. X ...
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
+
+
 def _normalize_title(value) -> str:
     """Lowercase + strip cosmetic punctuation and treat brackets / dashes
     / slashes as word separators so the same track named slightly
@@ -418,10 +431,17 @@ def _normalize_title(value) -> str:
     - ``Don't Stop Believin'``               ↔  ``Don’t Stop Believin’``
     - ``Swimming Pools (Drank) - Extended Version``
                                               ↔  ``Swimming Pools (Drank) (Extended Version)``
+    - ``The Chase (feat. Big Artist)``       ↔  ``The Chase``  (#914)
     """
     if value is None:
         return ''
-    out = str(value).strip().lower()
+    out = str(value).strip()
+    # #914: drop featured-artist credits FIRST (while the parens are still here to
+    # bound the group). iTunes appends "(feat. X)" to track titles while a user's
+    # file is often just "The Chase" — the credit is metadata, not the song's
+    # identity, and leaving it in dropped the match ratio below the threshold so
+    # correctly-identified tracks reported as "not in the tracklist".
+    out = _FEAT_RE.sub('', out).lower()
     # Strip characters that don't carry meaning across providers.
     for ch in ('"', "'", '‘', '’', '“', '”', '.', ',', '!', '?',
                '(', ')', '[', ']', '{', '}'):
