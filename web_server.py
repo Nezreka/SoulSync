@@ -7668,11 +7668,34 @@ def approve_quarantine_item(entry_id):
                     logger.info(f"[Quarantine] Auto-removed {len(removed_siblings)} sibling alternative(s) of {entry_id}: {removed_siblings}")
             except Exception as sib_exc:
                 logger.warning(f"[Quarantine] Sibling cleanup for {entry_id} failed: {sib_exc}")
+        # Cancel any still-running quarantine-retry task for the same track so
+        # the engine doesn't keep fetching new candidates after the user has
+        # already accepted one. Match by track title from the restored context.
+        cancelled_retry_task = None
+        try:
+            ti = context.get('track_info') if isinstance(context.get('track_info'), dict) else {}
+            _approved_name = (ti.get('name') or '').strip().lower()
+            if _approved_name:
+                with tasks_lock:
+                    for _tid, _t in download_tasks.items():
+                        if not _t.get('_quarantine_retry'):
+                            continue
+                        if _t.get('status') in ('completed', 'cancelled', 'failed'):
+                            continue
+                        _tti = _t.get('track_info') if isinstance(_t.get('track_info'), dict) else {}
+                        if (_tti.get('name') or '').strip().lower() == _approved_name:
+                            _t['status'] = 'cancelled'
+                            cancelled_retry_task = _tid
+                            logger.info(f"[Quarantine] Cancelled in-flight retry task {_tid} for '{_approved_name}' (user approved alternative)")
+                            break
+        except Exception as _crt_exc:
+            logger.debug(f"[Quarantine] Retry-cancel scan failed: {_crt_exc}")
         return jsonify({
             "success": True,
             "trigger_bypassed": "all",
             "original_trigger": trigger,
             "removed_siblings": removed_siblings,
+            "cancelled_retry_task": cancelled_retry_task,
         })
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")

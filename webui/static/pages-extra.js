@@ -2786,10 +2786,17 @@ async function verifQuarApprove(idx, btn) {
     const q = _verifQuarEntries[idx]; if (!q) return;
     if (btn) btn.disabled = true;
     try {
-        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+        const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remove_siblings: true }),
+        });
         const d = await r.json();
         if (d.success) {
-            showToast && showToast('Approved — re-importing, will be marked human-verified 🛡✔', 'success');
+            const extra = d.removed_siblings && d.removed_siblings.length
+                ? ` (${d.removed_siblings.length} duplicate candidate${d.removed_siblings.length > 1 ? 's' : ''} removed)`
+                : '';
+            showToast && showToast(`Approved — re-importing, will be marked human-verified 🛡✔${extra}`, 'success');
             _verifLoadQuarantine(true);
         } else {
             showToast && showToast(d.error || 'Approve failed', 'error');
@@ -2905,7 +2912,11 @@ async function verifQuarApproveAll(btn) {
     let ok = 0;
     for (const q of entries) {
         try {
-            const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, { method: 'POST' });
+            const r = await fetch(`/api/quarantine/${encodeURIComponent(q.id)}/approve`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ remove_siblings: true }),
+            });
             const d = await r.json();
             if (d.success) ok++;
         } catch (e) {}
