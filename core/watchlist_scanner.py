@@ -3971,6 +3971,14 @@ class WatchlistScanner:
                     except Exception as e:
                         logger.debug(f"Error building BYLT for {played_artist.get('name', '?')}: {e}")
 
+                # #913: listening-driven recommendations — consensus-ranked artists you'd love but
+                # don't own + candidate playlist tracks. Self-contained + double-guarded so it can
+                # never affect the scan.
+                try:
+                    self._build_listening_recommendations(profile_id, sources_to_process)
+                except Exception as _lr_err:  # noqa: BLE001 — never let recs break the scan
+                    logger.debug("[Listening Recs] skipped: %s", _lr_err)
+
             # Also save without suffix for backward compatibility (use first active source).
             active_source = sources_to_process[0]
             release_radar_key = f'release_radar_{active_source}'
@@ -3988,6 +3996,80 @@ class WatchlistScanner:
             logger.error(f"Error curating discovery playlists: {e}")
             import traceback
             traceback.print_exc()
+
+    def _build_listening_recommendations(self, profile_id, sources_to_process):
+        """#913: consensus-ranked artists you'd love but don't own, plus candidate playlist
+        tracks, derived from your most-played artists + the similar_artists graph.
+
+        The ranking lives in core.discovery.listening_recommendations (pure + tested); this only
+        gathers inputs — all already in the DB, NO new network — and stores the result under NEW
+        metadata/curated keys. Fully self-contained and guarded: any failure logs and returns, so
+        it can never disturb the scan. Phase-1 candidate tracks come from the discovery pool (like
+        BYLT); a later phase swaps in a direct top-tracks fetch for richer coverage.
+        """
+        try:
+            import json as _json
+            from core.discovery.listening_recommendations import (
+                aggregate_candidate_tracks,
+                group_similars_by_seed,
+                rank_recommended_artists,
+            )
+
+            seeds = [{'name': s['name'], 'weight': s.get('play_count', 1)}
+                     for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
+            if not seeds:
+                return
+
+            # id -> name + owned-artist set for the WHOLE library (similar_artists rows key the
+            # similar artist by the seed artist's id).
+            id_to_name, owned = {}, set()
+            with self.database._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT id, name FROM artists WHERE name IS NOT NULL AND name != ''")
+                for row in cur.fetchall():
+                    id_to_name[str(row[0])] = row[1]
+                    owned.add((row[1] or '').lower())
+
+            similar_rows = self.database.get_top_similar_artists(limit=1000, profile_id=profile_id)
+            similars_by_seed = group_similars_by_seed(seeds, similar_rows, id_to_name)
+            recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=40)
+            if not recs:
+                logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
+                return
+
+            self.database.set_metadata('listening_recs_artists', _json.dumps([
+                {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5], 'score': r.score}
+                for r in recs
+            ]))
+
+            # Candidate tracks from the discovery pool grouped by artist (phase 1: no new network).
+            pool, active_source = [], None
+            for src in (sources_to_process or []):
+                pool = self.database.get_discovery_pool_tracks(
+                    limit=5000, new_releases_only=False, source=src, profile_id=profile_id)
+                if pool:
+                    active_source = src
+                    break
+
+            track_ids = []
+            if pool:
+                by_artist = {}
+                for t in pool:
+                    an = (getattr(t, 'artist_name', '') or '').lower()
+                    tid = (getattr(t, 'spotify_track_id', None) if active_source == 'spotify'
+                           else getattr(t, 'itunes_track_id', None) if active_source == 'itunes'
+                           else getattr(t, 'deezer_track_id', None))
+                    if an and tid:
+                        by_artist.setdefault(an, []).append({'name': getattr(t, 'track_name', ''), 'id': tid})
+                candidates = aggregate_candidate_tracks(recs, by_artist, per_artist=3, limit=50)
+                track_ids = [c['id'] for c in candidates if c.get('id')]
+                if track_ids:
+                    self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
+
+            logger.info("[Listening Recs] %d recommended artists, %d candidate tracks",
+                        len(recs), len(track_ids))
+        except Exception as e:
+            logger.debug("[Listening Recs] generation skipped: %s", e)
 
     def sync_spotify_library_cache(self, profile_id=1):
         """Sync user's saved Spotify albums into the local cache.
