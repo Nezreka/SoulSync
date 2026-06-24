@@ -2271,11 +2271,18 @@ async function openSyncDetailModal(entryId) {
 
                 let dlDisplay = dlIcon;
                 if (!dlDisplay && t.download_status === 'wishlist') {
-                    // Clickable: re-add this exact track to the wishlist with the
-                    // same context the sync originally used.
-                    dlDisplay = `<button type="button" class="sync-dl-wishlist sync-dl-wishlist-btn" `
-                        + `onclick="_readdSyncWishlist(${entryId}, ${i}, this)" `
-                        + `title="Re-add to wishlist with the original sync context">&rarr; Wishlist</button>`;
+                    // Wing-it fallback stubs (no real metadata) were never actually
+                    // wishlisted by the sync — show them as plain, non-clickable.
+                    const isWingIt = String(t.source_track_id || '').startsWith('wing_it_');
+                    if (isWingIt) {
+                        dlDisplay = `<span class="sync-dl-wishlist" title="No metadata — this track couldn't be resolved, so it can't be added to the wishlist">&rarr; Wishlist</span>`;
+                    } else {
+                        // Clickable: re-add this exact track to the wishlist with the
+                        // same context the sync originally used.
+                        dlDisplay = `<button type="button" class="sync-dl-wishlist sync-dl-wishlist-btn" `
+                            + `onclick="_readdSyncWishlist(${entryId}, ${i}, this)" `
+                            + `title="Re-add to wishlist with the original sync context">&rarr; Wishlist</button>`;
+                    }
                 }
 
                 return `
