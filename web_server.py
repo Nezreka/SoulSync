@@ -19420,6 +19420,44 @@ def get_sync_history_entry(entry_id):
         logger.error(f"Error getting sync history entry: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
+def readd_sync_track_to_wishlist(entry_id, track_index):
+    """Re-add a synced unmatched track to the wishlist with the SAME context the
+    sync originally used (source_type='playlist' + the playlist's name/id), so it
+    behaves identically to the auto-add. Only 'wishlist'-status rows are eligible."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Sync entry not found"}), 404
+
+        tracks = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+        track_results = json.loads(entry['track_results']) if entry.get('track_results') else []
+
+        from core.sync.wishlist_readd import reconstruct_sync_track_data
+        spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
+        if not spotify_track_data:
+            return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
+
+        from core.wishlist_service import get_wishlist_service
+        added = get_wishlist_service().add_spotify_track_to_wishlist(
+            spotify_track_data=spotify_track_data,
+            failure_reason='Missing from media server after sync',
+            source_type='playlist',
+            source_context={
+                'playlist_name': entry.get('playlist_name'),
+                'playlist_id': entry.get('playlist_id'),
+                'sync_type': 'automatic_sync',
+                'timestamp': datetime.now().isoformat(),
+            },
+        )
+        return jsonify({"success": True, "added": bool(added),
+                        "name": spotify_track_data.get('name', '')})
+    except Exception as e:
+        logger.error(f"Error re-adding synced track to wishlist (entry {entry_id}, track {track_index}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/sync/history/<int:entry_id>', methods=['DELETE'])
 def delete_sync_history_entry_api(entry_id):
     """Delete a sync history entry."""

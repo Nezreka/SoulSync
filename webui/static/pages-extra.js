@@ -2198,6 +2198,37 @@ function _relativeTime(dateStr) {
     } catch (e) { return ''; }
 }
 
+// Re-add a synced unmatched track to the wishlist from the sync-detail modal, with
+// the same context the original sync used (resolved server-side from the entry).
+async function _readdSyncWishlist(entryId, index, el) {
+    if (el && el.dataset.busy) return;
+    if (el) { el.dataset.busy = '1'; el.classList.add('is-busy'); }
+    try {
+        const resp = await fetch(`/api/sync/history/${entryId}/track/${index}/wishlist`, { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (el) {
+                el.classList.remove('is-busy');
+                el.classList.add('is-done');
+                el.disabled = true;
+                el.innerHTML = data.added ? '&#10003; Re-added' : '&#10003; On wishlist';
+            }
+            if (typeof showToast === 'function') {
+                showToast(
+                    data.added ? `Re-added "${data.name}" to wishlist` : `"${data.name}" is already on the wishlist`,
+                    data.added ? 'success' : 'info',
+                );
+            }
+        } else {
+            if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Could not re-add to wishlist', 'error');
+        }
+    } catch (e) {
+        if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+        if (typeof showToast === 'function') showToast('Could not re-add to wishlist: ' + e.message, 'error');
+    }
+}
+
 async function openSyncDetailModal(entryId) {
     try {
         showLoadingOverlay('Loading sync details...');
@@ -2239,7 +2270,13 @@ async function openSyncDetailModal(entryId) {
                 else if (t.download_status === 'cancelled') dlIcon = '🚫';
 
                 let dlDisplay = dlIcon;
-                if (!dlDisplay && t.download_status === 'wishlist') dlDisplay = '<span class="sync-dl-wishlist">→ Wishlist</span>';
+                if (!dlDisplay && t.download_status === 'wishlist') {
+                    // Clickable: re-add this exact track to the wishlist with the
+                    // same context the sync originally used.
+                    dlDisplay = `<button type="button" class="sync-dl-wishlist sync-dl-wishlist-btn" `
+                        + `onclick="_readdSyncWishlist(${entryId}, ${i}, this)" `
+                        + `title="Re-add to wishlist with the original sync context">&rarr; Wishlist</button>`;
+                }
 
                 return `
                     <tr class="sync-detail-row ${statusClass}">
