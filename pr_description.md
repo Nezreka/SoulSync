@@ -1,41 +1,44 @@
-# soulsync 2.7.6 — `dev` → `main`
+# soulsync 2.7.7 — `dev` → `main`
 
-patch release on top of 2.7.5. the headline is going the *other* way with playlists — exporting them TO listenbrainz — plus youtube liked-music sync, a deep-scan data-loss guard, and a round of dashboard performance work.
+a fix-heavy patch on top of 2.7.6 — a big sweep of reported issues, the start of listening-driven recommendations, and a metadata-parity fix that stops downloads from needing a manual reorganize afterward.
 
 ---
 
 ## what's new
 
-### export playlists to listenbrainz (#903)
-soulsync already pulls playlists IN from everywhere — now it can push one back OUT. every mirrored-playlist card gets a 📤 export button: pick **download .jspf** (a standard playlist file you can hand-upload anywhere) or **sync to listenbrainz** (creates the playlist straight on your LB account). each track is matched to its musicbrainz *recording* id via a cheapest-first waterfall — cache → your library (`musicbrainz_recording_id`) → the file's own tag → a live musicbrainz lookup — with the result cached so the same song never costs twice. live "matching N/M · X matched" status shows on the card, and re-syncing **updates the same LB playlist in place** instead of making duplicates. tracks that can't be resolved to an MBID are skipped (LB requires them) and counted so you see the coverage.
+### downloads now tag + path like reorganize does (#915)
+the headline fix. when you add or redownload music, post-processing used to backfill missing album data from **spotify only** — so an iTunes/deezer-primary user kept a "lean" context and the path **dropped the `$year`** while the release date defaulted to `YYYY-01-01`. you'd then run a reorganize to fix it every time. now post-processing (and redownload) pull the full album from your **primary metadata source** — the exact same place reorganize/enrich read — so the year, real release date, and album type are right the first time. covers the add/download flow and single-track redownload (iTunes + deezer).
 
-### youtube liked-music sync (#902)
-you can now sync your youtube music **Liked Music** playlist (`music.youtube.com/playlist?list=LM`). it's a private playlist, so it needs auth — and the existing "read a browser's cookies" option only works when the browser is on the same machine. added a **"paste cookies.txt"** option in Settings → YouTube so server/docker installs (and anyone on a browser like Zen that yt-dlp can't read) can supply their login from anywhere.
+### listening-driven recommendations — foundation (#913)
+the start of "discover based on what you actually listen to." during the watchlist scan, soulsync now ranks artists you'd love but don't own — seeded from your top-played artists, scored by **consensus** (who's similar to *many* of your favorites), play weight, and similarity strength — and builds a candidate track list from them. generated and stored now; the discover row + synced playlist come next.
 
-### deep scan won't relocate your library (#904)
-a standalone Deep Scan moves files it doesn't recognize into Staging for import. if the DB was empty/out of sync with disk (a volume swap, a DB reset, external tag edits), it treated your **entire** library as "unrecognized" and relocated all of it — one user lost ~1,500 tracks into Staging. now a guard refuses the move when the unrecognized share is implausibly large (the desync signature), leaves everything in place, and warns instead. plus a **"Transfer is my permanent library — never move files out"** toggle for people whose Transfer folder *is* their live library.
-
-### dashboard performance
-a pass at the "soulsync makes my GPU work hard just sitting there" complaints. the sidebar sweep animates `transform` instead of `left` (no per-frame layout), particle glows are pre-rendered sprites instead of per-frame gradients, blur radii + redundant/invisible card shadows are trimmed, and low-power machines auto-drop to performance mode. all the visible effects stay; they're just cheaper to draw.
+### jellyfin stops indexing half-written tracks
+multi-disc tracks landing with "no disc" in jellyfin turned out to be a write race: a cross-filesystem move (downloads volume → library volume) wrote the file to its final path **incrementally**, and jellyfin's real-time watcher could catch it mid-write and cache incomplete metadata. now the final placement is **atomic** — copy to a hidden temp sibling, then an atomic rename — so a watcher only ever sees the complete file.
 
 ### fixes
-- **file-import manual matches stick (#901)** — a manual match on a file-imported playlist track is no longer forgotten on re-sync (the tracks now carry a stable id; existing ones are backfilled once).
-- **manual match heals a stale Plex key** — a Find & Add match whose stored Plex ratingKey went stale is now re-resolved against a live Plex search instead of silently breaking.
-- **multi-disc albums** — a track now files into the Disc folder that matches its own disc tag (no more disc-2 tracks landing in Disc 1), and a track is never written disc-less.
-- **auto-download track numbers** — a track auto-grabbed from the playlist pipeline / wishlist / watchlist now gets its real in-album position instead of being tagged `1/1`.
+- **navidrome playlists doubling (#905)** — every resync re-added the whole playlist (a 4-song list grew to 12). reconcile read the server's current tracks via a missing attribute, so it always thought the playlist was empty. fixed; also pushes a deduped list.
+- **youtube playlists capped at ~100 (#908)** — a yt-dlp/youtube regression truncated big playlists (Liked Music came back as 104). worked around to page past it (~200) until the upstream fix lands.
+- **album redownload grabbed the wrong edition (#911)** — it did a fresh search instead of using the album's matched source id, so a 66-track OST could redownload as a 19-track single. now uses the canonical matched source.
+- **iTunes albums over 50 tracks truncated (#918)** — the iTunes lookup defaulted to 50 entities; now requests the full album.
+- **enhanced view showed multi-disc tracks as missing (#916)** — owned disc-2+ tracks (stored as disc 1) no longer flag as "missing"; matched by title like reorganize.
+- **reorganize vs "(feat. X)" (#914)** — a bare local title now matches an iTunes track titled "Song (feat. Artist)" instead of reporting it not-in-tracklist.
+- **"I have this" dropped the year (#917)** — it rebuilt a yearless path and copied into a new folder; now reuses the album's existing folder.
+- **full refresh imported 0 tracks (#910)** — every track insert failed on a missing `year` column; added it + a migration so older DBs self-heal.
+- **youtube discovery "Unknown Artist" (#909)** — when youtube hands back only a title, the matched artist now backfills the column instead of leaving "Unknown Artist".
+- **empty folder cleaner toggle did nothing (#912)** — the "also remove image/sidecar-only folders" option read the wrong config key; now honored.
 
 ---
 
 ## a brief recap of what came before
-2.7.5 was a fix-heavy cycle — matching & artwork accuracy, the HiFi preview mess (#895) — plus M3U import (#893), ignore-list management (#897), and per-playlist file naming. 2.7.4 was re-identify; 2.7.3 the Quality Upgrade Finder + ignore-list (#874); 2.7.2 playlist-folder mirroring + M3U export; 2.7.1 download verification + a review queue (#852); 2.7.0 made multi-user real.
+2.7.6 went the *other* way with playlists — exporting them TO listenbrainz — plus youtube liked-music sync, a deep-scan data-loss guard (#904), and dashboard performance work. 2.7.5 was matching & artwork accuracy + M3U import; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.
 
 ---
 
 ## tests
-additive + fail-safe — new behavior is opt-in or guarded, nothing existing rewired. new seam/regression suites across the listenbrainz export (JSPF build, the MBID waterfall + dedup, the persistent cache, the LB create/update-in-place client), the youtube cookie precedence, and the #904 deep-scan guard (incl. the 1,500-file regression). the listenbrainz push + update-in-place were also validated live against a real account. relevant suites green; `ruff check` clean on touched modules.
+additive + fail-safe — new behavior is guarded or scoped, nothing existing rewired. new seam/regression suites across the `year`-column migration (#910), the navidrome reconcile fix (#905 — reverting the one-char change flips the tests red), feat-matching (#914), the multi-disc not-missing logic (#916), the iTunes full-album limit (#918, proven live against the real API), the "I have this" year recovery (#917), the primary-source backfill (#915), the listening-recs core (#913), and atomic file placement. relevant suites green; `ruff check` clean repo-wide.
 
 ## post-merge
-- [ ] tag `v2.7.6` on `main`
-- [ ] docker-publish with `version_tag: 2.7.6`
+- [ ] tag `v2.7.7` on `main`
+- [ ] docker-publish with `version_tag: 2.7.7`
 - [ ] discord announce (auto-fired by the workflow)
-- [ ] reply on #902 / #903 / #904
+- [ ] reply on the issue batch (#905 / #908 / #909 / #910 / #911 / #912 / #913 / #914 / #915 / #916 / #917 / #918)

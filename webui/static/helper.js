@@ -3404,17 +3404,22 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.6': [
-        { date: 'June 2026 — 2.7.6 release' },
-        { title: 'Export playlists to ListenBrainz (#903)', desc: 'soulsync already pulls playlists IN — now it can push one OUT. every mirrored-playlist card gets a 📤 export button: download a standard .jspf file, or sync the playlist straight to your ListenBrainz account. each track is matched to its musicbrainz recording id (cache → your library → file tag → live musicbrainz), with live "matching N/M" status on the card. re-syncing updates the SAME LB playlist in place instead of duplicating it.', page: 'sync' },
-        { title: 'YouTube Liked Music sync (#902)', desc: 'you can now sync your youtube music "Liked Music" playlist (music.youtube.com/playlist?list=LM). it\'s private, so it needs auth — added a "paste cookies.txt" option in Settings → YouTube so server/docker installs (or browsers yt-dlp can\'t read, like Zen) can supply their login from anywhere.', page: 'settings' },
-        { title: 'Deep Scan won\'t relocate your library (#904)', desc: 'a standalone Deep Scan moves unrecognized files into Staging. if the DB was empty/out of sync with disk, it treated your ENTIRE library as unrecognized and relocated all of it. now a guard refuses the move when the unrecognized share is implausibly large, leaves files in place, and warns — plus a "Transfer is my permanent library — never move files out" toggle.', page: 'settings' },
-        { title: 'Dashboard performance', desc: 'a pass at "soulsync works my GPU hard just sitting there". the sidebar sweep animates transform not left, particle glows are cached sprites, blur radii + redundant/invisible card shadows are trimmed, and low-power machines auto-drop to performance mode. the effects all stay — they\'re just cheaper to draw.', page: 'dashboard' },
-        { title: 'File-import manual matches stick (#901)', desc: 'a manual match on a file-imported playlist track is no longer forgotten on re-sync — the tracks now carry a stable id (existing ones backfilled once), so your pick survives.', page: 'sync' },
-        { title: 'Manual match heals a stale Plex key', desc: 'a Find & Add match whose stored Plex ratingKey went stale is now re-resolved against a live Plex search instead of silently breaking on the next sync.', page: 'sync' },
-        { title: 'Multi-disc albums', desc: 'a track now files into the Disc folder that matches its own disc tag (no more disc-2 tracks landing in Disc 1), and a track is never written disc-less.', page: 'downloads' },
-        { title: 'Auto-download track numbers', desc: 'a track auto-grabbed from the playlist pipeline / wishlist / watchlist now gets its real in-album position instead of being tagged 1/1.', page: 'downloads' },
-        { title: 'Earlier versions', desc: '2.7.5 was a fix-heavy cycle — matching & artwork accuracy, the HiFi preview mess (#895), M3U import (#893), ignore-list management (#897), per-playlist file naming. 2.7.4 added re-identify; 2.7.3 the Quality Upgrade Finder + ignore-list (#874); 2.7.2 playlist-folder mirroring + M3U export; 2.7.1 download verification + a review queue (#852); 2.7.0 made multi-user real.' },
+    '2.7.7': [
+        { date: 'June 2026 — 2.7.7 release' },
+        { title: 'Downloads tag + path like Reorganize (#915)', desc: 'adding/redownloading music used to backfill missing album data from Spotify ONLY — so an iTunes/Deezer-primary user kept a "lean" context, the path dropped the $year and the date defaulted to YYYY-01-01 until you ran a reorganize. now post-processing AND redownload pull the full album from your PRIMARY metadata source (the same place reorganize/enrich read), so the year, real release date and album type are right the first time.', page: 'downloads' },
+        { title: 'Listening-driven recommendations — foundation (#913)', desc: 'the start of "discover based on what you actually listen to". during the watchlist scan, soulsync now ranks artists you\'d love but don\'t own — seeded from your top-played artists, scored by consensus (similar to MANY of your favorites), play weight and similarity — and builds a candidate track list. generated + stored now; the discover row + synced playlist come next.', page: 'discover' },
+        { title: 'Jellyfin stops indexing half-written tracks', desc: 'multi-disc tracks landing with "no disc" in jellyfin was a write race — a cross-filesystem move wrote the file to its final path incrementally and jellyfin caught it mid-write. final placement is now atomic (temp sibling + atomic rename), so a watcher only ever sees the COMPLETE file.', page: 'downloads' },
+        { title: 'Navidrome playlists doubling (#905)', desc: 'every resync re-added the whole playlist (a 4-song list grew to 12) — reconcile read the server\'s current tracks via a missing attribute, so it always thought the playlist was empty. fixed, plus a deduped push.', page: 'sync' },
+        { title: 'YouTube playlists capped at ~100 (#908)', desc: 'a yt-dlp/youtube regression truncated big playlists (Liked Music came back as 104). worked around to page past it (~200) until the upstream fix lands.', page: 'sync' },
+        { title: 'Album redownload grabbed the wrong edition (#911)', desc: 'redownload did a fresh search instead of using the album\'s matched source id, so a 66-track OST could come back as a 19-track single. now uses the canonical matched source.', page: 'library' },
+        { title: 'iTunes albums over 50 tracks truncated (#918)', desc: 'the iTunes lookup defaulted to 50 entities, cutting big albums off in the download window. now requests the full album.', page: 'library' },
+        { title: 'Enhanced view showed multi-disc tracks as missing (#916)', desc: 'owned disc-2+ tracks (stored as disc 1) no longer flag as "missing" — matched by title like reorganize.', page: 'library' },
+        { title: 'Reorganize vs "(feat. X)" (#914)', desc: 'a bare local title now matches an iTunes track titled "Song (feat. Artist)" instead of being reported not-in-tracklist.', page: 'library' },
+        { title: '"I have this" dropped the year (#917)', desc: 'it rebuilt a yearless path and copied into a NEW folder; now reuses the album\'s existing folder.', page: 'library' },
+        { title: 'Full Refresh imported 0 tracks (#910)', desc: 'every track insert failed on a missing year column; added it + a migration so older DBs self-heal.', page: 'settings' },
+        { title: 'YouTube discovery "Unknown Artist" (#909)', desc: 'when youtube hands back only a title, the matched artist now backfills the column instead of leaving "Unknown Artist".', page: 'sync' },
+        { title: 'Empty Folder Cleaner toggle did nothing (#912)', desc: 'the "also remove image/sidecar-only folders" option read the wrong config key; now honored.', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.7.6 went the OTHER way with playlists — exporting them TO listenbrainz (#903) — plus youtube liked-music sync (#902), a deep-scan data-loss guard (#904), and dashboard perf. 2.7.5 was matching & artwork accuracy + M3U import; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3445,45 +3450,39 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Export playlists to ListenBrainz (#903)",
-        description: "soulsync already pulls playlists IN from everywhere — now it can push one back OUT.",
+        title: "Downloads tag + path like Reorganize (#915)",
+        description: "the headline fix — adding or redownloading music now gets the year, release date and album type right the FIRST time, instead of needing a manual reorganize after.",
         features: [
-            "📤 export button on every mirrored-playlist card — download a standard .jspf file, or sync the playlist straight onto your ListenBrainz account",
-            "each track is matched to its musicbrainz recording id via a cheapest-first waterfall — cache → your library → the file's own tag → a live musicbrainz lookup — and the result is cached so the same song never costs twice",
-            "live \"matching N/M · X matched\" status on the card, and re-syncing updates the SAME LB playlist in place instead of making duplicates",
-        ],
-        usage_note: "find it on the 📤 button when you hover a mirrored playlist card. tracks that can't be resolved to a musicbrainz id are skipped (LB requires them) and counted, so you see the coverage.",
-    },
-    {
-        title: "YouTube Liked Music sync (#902)",
-        description: "sync your youtube music \"Liked Music\" playlist (music.youtube.com/playlist?list=LM).",
-        features: [
-            "it's a private playlist, so it needs auth — the existing browser-cookie option only works when the browser is on the same machine as soulsync",
-            "added a \"paste cookies.txt\" option in Settings → YouTube so server/docker installs (or browsers yt-dlp can't read, like Zen) can supply their login from anywhere",
+            "post-processing used to backfill missing album data from Spotify ONLY — so an iTunes/Deezer-primary user kept a \"lean\" context, the path dropped the $year, and the release date defaulted to YYYY-01-01",
+            "now post-processing AND single-track redownload pull the full album from your PRIMARY metadata source — the exact same place reorganize / manual enrich read",
+            "so the $year folder, real release date and album type land correctly on the first pass (iTunes + Deezer)",
         ],
     },
     {
-        title: "Deep Scan won't relocate your library (#904)",
-        description: "a standalone Deep Scan moves unrecognized files into Staging — which went very wrong when the DB was out of sync with disk.",
+        title: "Listening-driven recommendations — foundation (#913)",
+        description: "the start of \"discover based on what you actually listen to.\"",
         features: [
-            "if the DB was empty/desynced, a scan treated your ENTIRE library as unrecognized and relocated all of it (one user lost ~1,500 tracks into Staging)",
-            "now a guard refuses the move when the unrecognized share is implausibly large (the desync signature), leaves everything in place, and warns instead",
-            "new \"Transfer is my permanent library — never move files out\" toggle for people whose Transfer folder IS their live library",
+            "during the watchlist scan, soulsync ranks artists you'd love but don't own — seeded from your top-played artists",
+            "scored by consensus (similar to MANY of your favorites), play weight, and similarity strength — not just \"appears in a list\"",
+            "generated + stored now; the discover row + a synced playlist come next",
         ],
     },
     {
-        title: "Dashboard performance + fixes",
-        description: "lighter dashboard, and a handful of matching/import fixes.",
+        title: "A big batch of fixes",
+        description: "a fix-heavy cycle — playlists, downloads, multi-disc and the enhanced view.",
         features: [
-            "dashboard — the sidebar sweep animates transform not left, particle glows are cached sprites, blur/shadow excess is trimmed, and low-power machines auto-drop to performance mode (the effects all stay, just cheaper to draw)",
-            "#901 — a manual match on a file-imported playlist track now survives re-sync (stable ids, existing ones backfilled)",
-            "a Find & Add match whose stored Plex key went stale is re-resolved against a live Plex search instead of breaking",
-            "multi-disc albums file each track in the Disc folder matching its tag (no disc-less / wrong-disc tracks); auto-grabbed tracks get their real in-album number instead of 1/1",
+            "jellyfin \"no disc\" tracks — a cross-filesystem move wrote the file to its final path incrementally and jellyfin caught it mid-write; final placement is now atomic, so a watcher only ever sees the complete file",
+            "#905 — navidrome playlists doubling every resync (reconcile thought the playlist was empty); fixed + a deduped push",
+            "#908 — youtube playlists capped at ~100 (a yt-dlp/youtube regression); worked around to ~200 until upstream lands",
+            "#911 — album redownload grabbed the wrong edition (fresh search vs the matched source id); now uses the canonical source",
+            "#918 — iTunes albums over 50 tracks were truncated in the download window; now requests the full album",
+            "#916 — the enhanced view flagged multi-disc tracks as missing; now matched by title like reorganize",
+            "#914 #917 #910 #909 #912 — reorganize vs \"(feat. X)\", \"I have this\" dropping the year, Full Refresh importing 0 tracks, youtube \"Unknown Artist\", and the Empty Folder Cleaner toggle that did nothing",
         ],
     },
     {
-        title: "Earlier in 2.7.5",
-        description: "a fix-heavy cycle — matching & artwork accuracy plus a few quality-of-life features.",
+        title: "Earlier in 2.7.6 / 2.7.5",
+        description: "2.7.6 went the OTHER way with playlists — exporting them TO listenbrainz (#903) — plus youtube liked-music sync (#902), a deep-scan data-loss guard (#904), and dashboard perf. before that, 2.7.5 was a fix-heavy cycle — matching & artwork accuracy plus a few quality-of-life features.",
         features: [
             "special-edition cover art (a \"Gustave Edition\" uses its OWN cover), deezer track numbers, and the \"The\" duplicate fix",
             "HiFi 30-second previews disguised as full songs are caught and rejected (#895)",
