@@ -43,6 +43,7 @@ from core.library.path_resolver import resolve_library_file_path
 # the SAME definition the download import guard uses. Module-level so they're
 # monkeypatchable in tests.
 from core.imports.file_ops import probe_audio_quality
+from core.quality.model import rank_candidate
 from core.quality.selection import targets_from_profile, quality_meets_profile
 from utils.logging_config import get_logger
 
@@ -566,11 +567,11 @@ class QualityUpgradeJob(RepairJob):
             logger.info("[Quality Upgrade] No quality targets in profile — nothing to flag")
             return result
 
-        # require_top_target: only the highest-priority target (targets[0]) counts
-        # as "good enough". A 16-bit FLAC is flagged even when 16-bit is an accepted
-        # fallback, because the user's preferred quality is 24-bit. Default off so
-        # existing behaviour (any target satisfied = skip) is unchanged.
-        check_targets = targets[:1] if require_top and len(targets) > 1 else targets
+        logger.info(
+            "[Quality Upgrade] scope=%s require_top=%s · all targets: %s",
+            scope, require_top,
+            [t.label for t in targets] if targets else '(none — all pass)',
+        )
 
         try:
             tracks = self._load_tracks(db, scope)
@@ -648,11 +649,21 @@ class QualityUpgradeJob(RepairJob):
                     context.update_progress(i + 1, total)
                 continue
 
-            if not broken_reason and measured_aq is not None and quality_meets_profile(measured_aq, check_targets):
-                result.skipped += 1
-                if context.update_progress and (i + 1) % 25 == 0:
-                    context.update_progress(i + 1, total)
-                continue
+            if not broken_reason and measured_aq is not None:
+                if require_top:
+                    # ranking-based: skip only if the file already sits at rank 0
+                    # (the top configured target). Any lower rank → flag for upgrade.
+                    idx, _ = rank_candidate(measured_aq, targets)
+                    already_best = (idx == 0)
+                else:
+                    # default: skip if the file meets ANY configured target (i.e.
+                    # it's not below the acceptable floor).
+                    already_best = quality_meets_profile(measured_aq, targets)
+                if already_best:
+                    result.skipped += 1
+                    if context.update_progress and (i + 1) % 25 == 0:
+                        context.update_progress(i + 1, total)
+                    continue
 
             # Below profile (or broken) — find a better version to propose.
             if engine is None:
@@ -754,7 +765,7 @@ class QualityUpgradeJob(RepairJob):
                         title=f'Upgrade: {artist_name} - {title} ({current_label})',
                         description=(
                             f'"{title}" by {artist_name} is {current_label}'
-                            + (f', below your preferred quality ({targets[0].label})' if require_top and len(targets) > 1 else ', below your preferred quality')
+                            + (f', below your preferred quality ({targets[0].label})' if require_top and targets else ', below your preferred quality')
                             + f'. Best match: "{_track_name(best)}" via {source} '
                             f'({_MATCH_NOTE.get(matched_via, "matched") if matched_via != "search" else f"confidence {conf:.0%}"}). '
                             'Apply to add it to the wishlist.'),
@@ -784,6 +795,13 @@ class QualityUpgradeJob(RepairJob):
 
         if context.update_progress:
             context.update_progress(total, total)
-        logger.info("[Quality Upgrade] %d scanned, %d upgrades found, %d met/skip",
+        logger.info("[Quality Upgrade] %d scanned, %d upgrades found, %d already met profile / skipped",
                     result.scanned, result.findings_created, result.skipped)
+        if result.scanned > 0 and result.findings_created == 0 and result.errors == 0:
+            logger.info(
+                "[Quality Upgrade] All tracks already satisfy the configured targets. "
+                "If you expected upgrades, check your quality profile — the current "
+                "top target is: %s",
+                targets[0].label if targets else '(none)',
+            )
         return result
