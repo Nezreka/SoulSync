@@ -168,16 +168,15 @@ def quarantine_group_key(
     fetch — NOT the downloaded file's own tags. That matters: the file's
     metadata is frequently *wrong* (that's why it failed acoustid /
     integrity), whereas the target is fixed and identical across every
-    alternative for one song (they're all Soulseek uploads of the *same*
-    source track), so grouping by it is an exact relationship, not a fuzzy
-    metadata guess.
+    alternative for one song.
 
-    Prefers a stable target-track id from the sidecar `context.track_info`
-    when present — isrc, then source id, then uri — since those are exact
-    and constant across siblings. Falls back to the normalized
-    artist|track name only for legacy/thin sidecars that carry no context.
-    Keys are kind-prefixed so an id-based key never collides with a
-    name-based one.
+    Uses ISRC when available (truly universal across sources and batches).
+    Falls back to normalized artist|track name, which is stable across
+    different batches and sources.
+
+    Source-specific IDs (Spotify track id, Qobuz id, uri) are intentionally
+    NOT used: the same song imported from different playlists or sources gets
+    different source IDs, so id-based keys break cross-batch sibling matching.
 
     Returns ``None`` when nothing identifies the target (no usable id and
     both name fields empty). Callers treat a ``None`` key as "its own
@@ -191,12 +190,6 @@ def quarantine_group_key(
     isrc = str(ti.get("isrc") or "").strip().lower()
     if isrc:
         return f"isrc:{isrc}"
-    tid = str(ti.get("id") or "").strip()
-    if tid:
-        return f"id:{tid}"
-    uri = str(ti.get("uri") or "").strip()
-    if uri:
-        return f"uri:{uri}"
     artist = " ".join(str(expected_artist or "").split()).lower()
     track = " ".join(str(expected_track or "").split()).lower()
     if not artist and not track:
