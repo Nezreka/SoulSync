@@ -2669,9 +2669,21 @@ const _VERIF_QUAR_TRIGGERS = {
     bit_depth: ['BIT DEPTH FILTER', 'verif-rb-int'],
 };
 
+// Streaming sources carry their service name in source_username; a Soulseek
+// download carries the uploader's peer name instead — collapse that to
+// 'soulseek' so the label matches the Completed view's download-source line.
+const _VERIF_QUAR_STREAMING_SOURCES = ['youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon', 'torrent', 'usenet'];
+
+function _verifQuarSourceLabel(q) {
+    const u = String(q.source_username || '').toLowerCase();
+    if (_VERIF_QUAR_STREAMING_SOURCES.includes(u)) return _adlSourceLabel(u);
+    return q.source_username ? _adlSourceLabel('soulseek') : '';
+}
+
 function _verifQuarRowHtml(q, idx, extraAction = '') {
     const title = _adlEsc(q.expected_track || q.original_filename || q.filename || 'Unknown file');
     const meta = [_adlEsc(q.expected_artist || ''), _adlEsc(q.original_filename || '')].filter(Boolean).join(' — ');
+    const sourceLabel = _verifQuarSourceLabel(q);
     const [trigLabel, trigClass] = _VERIF_QUAR_TRIGGERS[q.trigger] || ['QUARANTINED', 'verif-rb-unv'];
     const timeAgo = _verifTimeAgo(q.timestamp);
     const approveBtn = q.has_full_context
@@ -2692,6 +2704,7 @@ function _verifQuarRowHtml(q, idx, extraAction = '') {
         <div class="adl-row-info">
             <div class="adl-row-title">${title}</div>
             ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+            ${sourceLabel ? `<div class="adl-row-batch">${sourceLabel}</div>` : ''}
             <div class="verif-quar-details" id="verif-quar-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${details || 'No further details in the sidecar.'}</div>
         </div>
         <div class="verif-actions" onclick="event.stopPropagation()">
