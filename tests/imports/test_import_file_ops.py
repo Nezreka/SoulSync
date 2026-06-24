@@ -169,3 +169,78 @@ def test_read_staging_file_metadata_uses_filename_fallbacks_when_tags_are_invali
         "track_number": 2,
         "disc_number": 1,
     }
+
+
+# ── atomic cross-filesystem move (Jellyfin null-disc mitigation) ──────────────
+import errno  # noqa: E402
+import os  # noqa: E402
+
+import pytest  # noqa: E402
+
+from core.imports import file_ops as _fo  # noqa: E402
+from core.imports.file_ops import _atomic_cross_device_move  # noqa: E402
+
+
+def test_same_fs_move_moves_and_removes_source(tmp_path):
+    src = tmp_path / "s.flac"
+    src.write_text("hello")
+    dst = tmp_path / "lib" / "t.flac"          # parent created by safe_move_file
+    safe_move_file(src, dst)
+    assert dst.read_text() == "hello"
+    assert not src.exists()
+
+
+def test_cross_device_move_routes_to_atomic_and_completes(tmp_path, monkeypatch):
+    # Simulate a cross-filesystem move: the same-fs os.replace raises EXDEV, and the
+    # atomic helper's temp->dst replace (same fs) succeeds. The file must complete and
+    # no partial temp file may be left at the final name's directory.
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "lib"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    real_replace = os.replace
+
+    def fake_replace(a, b):
+        if str(a) == str(src):                  # the cross-fs move attempt
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real_replace(a, b)               # the temp -> dst rename (same fs)
+
+    monkeypatch.setattr(_fo.os, "replace", fake_replace)
+    safe_move_file(src, dst)
+
+    assert dst.read_text() == "payload"
+    assert not src.exists()
+    assert not list(dstdir.glob(".*ssync-tmp"))   # complete file only, no leftover temp
+
+
+def test_atomic_helper_completes_and_cleans_temp(tmp_path):
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+    _atomic_cross_device_move(src, dst)
+    assert dst.read_text() == "payload"
+    assert not src.exists()
+    assert not list(dstdir.glob(".*ssync-tmp"))
+
+
+def test_atomic_helper_cleans_temp_and_keeps_source_on_failure(tmp_path, monkeypatch):
+    src = tmp_path / "s.flac"
+    src.write_text("payload")
+    dstdir = tmp_path / "d"
+    dstdir.mkdir()
+    dst = dstdir / "t.flac"
+
+    def boom(_a, _b):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(_fo.os, "replace", boom)
+    with pytest.raises(OSError):
+        _atomic_cross_device_move(src, dst)
+
+    assert src.exists()                           # source preserved on failure
+    assert not dst.exists()                       # no partial final file
+    assert not list(dstdir.glob(".*ssync-tmp"))   # temp cleaned up
