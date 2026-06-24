@@ -360,8 +360,8 @@ def register_routes(bp):
             # thread-safe) so digging 20 pages deep costs ~4 page-latencies, not 20.
             need_fill = hide_owned or bool(prefer_langs)
             target = 20 if need_fill else 0
-            if key == "trending":
-                consume(fetch(page))
+            if key in ("trending", "trending_today"):
+                consume(fetch(page))   # a single fixed chart; never paged
             elif not need_fill:
                 for offset in range(pages):           # no filtering: respect requested page count
                     if not consume(fetch(page + offset)):

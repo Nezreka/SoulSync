@@ -922,6 +922,15 @@ a.vd-prov:hover img, a.vd-prov:hover .vd-prov-ph { border-color: rgba(var(--vd-a
     padding: 3px 8px; border-radius: 7px; background: rgba(0, 0, 0, 0.62); backdrop-filter: blur(6px);
 }
 
+/* 'NEW' flag — un-owned current-year releases (bottom-left, clear of ribbon + rating) */
+.vsr-new {
+    position: absolute; bottom: 10px; left: 10px; z-index: 2;
+    font-size: 9.5px; font-weight: 900; letter-spacing: 0.6px;
+    padding: 3px 7px; border-radius: 6px; color: #07110a;
+    background: linear-gradient(135deg, #34d399, #10b981);
+    box-shadow: 0 3px 10px rgba(16, 185, 129, 0.45);
+}
+
 .vsr-info { padding: 11px 4px 0; min-width: 0; }
 .vsr-info--center { text-align: center; }
 .vsr-name {
@@ -2313,6 +2322,19 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdsc-rail::-webkit-scrollbar-track { background: transparent; }
 .vdsc-rail .vsr-card { flex: 0 0 162px; width: 162px; scroll-snap-align: start; }
 
+/* ── Top 10 ranked rail — giant outlined numeral hugging each poster ──────────── */
+.vdsc-shelf--ranked .vdsc-rail { gap: 4px; align-items: flex-end; }
+.vsr-ranked { display: flex; align-items: flex-end; flex: 0 0 auto; scroll-snap-align: start; }
+.vsr-rank {
+    font-family: "Arial Black", "Helvetica Neue", system-ui, sans-serif;
+    font-size: 150px; font-weight: 900; line-height: 0.66; letter-spacing: -0.07em;
+    color: #0a0c14; -webkit-text-stroke: 3px rgba(255, 255, 255, 0.5);
+    text-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+    margin: 0 -22px 0 0; user-select: none; flex: 0 0 auto; align-self: flex-end;
+}
+.vsr-ranked .vsr-card { flex: 0 0 150px; width: 150px; }
+.vsr-ranked .vsr-card .vsr-info { padding-left: 0; }
+
 /* skeleton shimmer while a rail loads */
 .vdsc-skel { display: flex; gap: 16px; }
 .vdsc-skel-card { flex: 0 0 162px; height: 280px; border-radius: 12px;
@@ -2331,6 +2353,8 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     .vdsc-hero-body { left: 22px; bottom: 22px; right: 22px; }
     .vdsc-hero-title { font-size: 27px; }
     .vdsc-rail .vsr-card, .vdsc-skel-card { flex-basis: 132px; width: 132px; }
+    .vsr-ranked .vsr-card { flex-basis: 120px; width: 120px; }
+    .vsr-rank { font-size: 104px; margin-right: -16px; }
 }
 @media (prefers-reduced-motion: reduce) {
     .vdsc-slide, .vdsc-slide--on { animation: none; transition: opacity 0.4s ease; transform: none; }
