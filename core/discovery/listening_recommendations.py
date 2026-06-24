@@ -39,6 +39,44 @@ def _positive_float(value: object, default: float = 1.0) -> float:
     return f if f > 0 else default
 
 
+def _get(row: object, attr: str):
+    """Read a field from a dataclass row or a dict row."""
+    if isinstance(row, dict):
+        return row.get(attr)
+    return getattr(row, attr, None)
+
+
+def group_similars_by_seed(
+    seeds: Sequence[dict],
+    similar_rows: Sequence,
+    id_to_name: Dict[str, str],
+    *,
+    source_id_attr: str = "source_artist_id",
+    similar_name_attr: str = "similar_artist_name",
+) -> Dict[str, List[dict]]:
+    """Reshape flat ``similar_artists`` rows into ``{seed_name_lower: [{'name': similar}]}``.
+
+    The stored rows key the similar artist by the SEED's source id (``source_artist_id``),
+    not its name, so :func:`rank_recommended_artists` can't consume them directly. This
+    resolves each row's source id to a name via ``id_to_name`` (``{source_artist_id:
+    artist_name}`` for the library, built by the caller) and keeps only rows that resolve
+    to one of the ``seeds``. Rows may be dataclass objects or dicts. Pure — no I/O.
+    """
+    seed_names = {_norm(s.get("name")) for s in seeds}
+    seed_names.discard("")
+    id_to_norm = {str(k): _norm(v) for k, v in (id_to_name or {}).items()}
+
+    out: Dict[str, List[dict]] = {}
+    for row in similar_rows or ():
+        seed_name = id_to_norm.get(str(_get(row, source_id_attr) or ""), "")
+        if not seed_name or seed_name not in seed_names:
+            continue
+        sim_name = str(_get(row, similar_name_attr) or "").strip()
+        if sim_name:
+            out.setdefault(seed_name, []).append({"name": sim_name})
+    return out
+
+
 @dataclass
 class RecommendedArtist:
     """One artist recommended from your listening, with the why."""
@@ -161,6 +199,7 @@ def aggregate_candidate_tracks(
 
 __all__ = [
     "RecommendedArtist",
+    "group_similars_by_seed",
     "rank_recommended_artists",
     "aggregate_candidate_tracks",
 ]

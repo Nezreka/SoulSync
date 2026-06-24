@@ -115,3 +115,55 @@ def test_aggregate_skips_artist_with_no_tracks():
     recs = _recs("A", "B")
     out = aggregate_candidate_tracks(recs, {"sim-a": [{"name": "only"}]}, per_artist=5)
     assert [t["name"] for t in out] == ["only"]   # sim-b had no tracks -> skipped
+
+
+# ── group_similars_by_seed (id->name join) ───────────────────────────────────
+from dataclasses import dataclass as _dc  # noqa: E402
+
+from core.discovery.listening_recommendations import group_similars_by_seed  # noqa: E402
+
+
+@_dc
+class _Row:
+    source_artist_id: str
+    similar_artist_name: str
+
+
+def test_group_resolves_source_id_to_seed_name():
+    seeds = [_seed("Radiohead"), _seed("Bjork")]
+    rows = [
+        _Row("id-rh", "Muse"),
+        _Row("id-rh", "Coldplay"),
+        _Row("id-bj", "Portishead"),
+        _Row("id-unknown", "Nobody"),   # id not in map -> dropped
+    ]
+    id_to_name = {"id-rh": "Radiohead", "id-bj": "Bjork"}
+    out = group_similars_by_seed(seeds, rows, id_to_name)
+    assert {n["name"] for n in out["radiohead"]} == {"Muse", "Coldplay"}
+    assert [n["name"] for n in out["bjork"]] == ["Portishead"]
+    assert "id-unknown" not in out and "Nobody" not in str(out)
+
+
+def test_group_keeps_only_rows_for_actual_seeds():
+    # id resolves to a name, but that name isn't a seed -> dropped.
+    seeds = [_seed("A")]
+    rows = [_Row("id-a", "SimA"), _Row("id-x", "SimX")]
+    out = group_similars_by_seed(seeds, rows, {"id-a": "A", "id-x": "X"})
+    assert list(out.keys()) == ["a"]
+
+
+def test_group_accepts_dict_rows():
+    seeds = [_seed("A")]
+    rows = [{"source_artist_id": "id-a", "similar_artist_name": "SimA"}]
+    out = group_similars_by_seed(seeds, rows, {"id-a": "A"})
+    assert out["a"] == [{"name": "SimA"}]
+
+
+def test_group_then_rank_end_to_end():
+    # The two-step the scanner will run: group rows, then rank.
+    seeds = [_seed("A", weight=2), _seed("B", weight=1)]
+    rows = [_Row("ia", "Common"), _Row("ia", "Solo"), _Row("ib", "Common")]
+    grouped = group_similars_by_seed(seeds, rows, {"ia": "A", "ib": "B"})
+    ranked = rank_recommended_artists(seeds, grouped, owned_artist_names={"solo"})
+    assert ranked[0].name == "Common" and ranked[0].seed_count == 2
+    assert all(r.name != "Solo" for r in ranked)   # owned excluded
