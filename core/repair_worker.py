@@ -997,7 +997,6 @@ class RepairWorker:
             'quality_upgrade': self._fix_quality_upgrade,
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
-            'quality_upgrade': self._fix_quality_upgrade,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1025,9 +1024,43 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Add the matched higher-quality version to the wishlist (with album
-        context). Applying a Quality Upgrade finding is the user-approved step
-        that the old auto-acting Quality Scanner did without review."""
+        """Apply a Quality Upgrade finding (user-approved; the old Quality
+        Scanner did this without review). Action via ``details['_fix_action']``:
+
+           'redownload' (default): add the matched higher-quality version to the
+               wishlist (with album context) for a profile-gated re-download.
+               The low-quality file stays in place — it's replaced only after the
+               better version actually imports (safe pattern; auto-delete-on-
+               import is handled separately).
+           'delete': remove the low-quality file + its DB row outright.
+           'ignore' is handled in the UI by dismissing the finding — never here.
+        """
+        fix_action = details.get('_fix_action', 'redownload')
+
+        if fix_action == 'delete':
+            if file_path:
+                resolved = _resolve_file_path(
+                    file_path, self.transfer_folder,
+                    config_manager=self._config_manager)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                        self._cleanup_empty_parents(resolved)
+                    except Exception as e:
+                        logger.warning("Could not delete low-quality file %s: %s",
+                                       resolved, e)
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    return {'success': False, 'error': f'DB delete failed: {e}'}
+            return {'success': True, 'action': 'deleted_file',
+                    'message': f'Deleted low-quality file: '
+                               f'{os.path.basename(file_path or "")}'}
+
         track_data = details.get('matched_track_data')
         if not track_data:
             return {'success': False, 'error': 'No matched track in finding'}
@@ -2200,83 +2233,6 @@ class RepairWorker:
 
         return {'success': True, 'action': 'retagged',
                 'message': f'Updated to: "{aid_title}" by {aid_artist}'}
-
-    def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Fix a below-quality library track. Actions (via details['_fix_action']):
-           'redownload' (default): add the track to the wishlist for a better-
-               quality re-download, then delete the low-quality file + DB row.
-           'delete': just remove the low-quality file and its DB record.
-           'ignore' is handled in the UI by dismissing the finding — it never
-               reaches here.
-        """
-        fix_action = details.get('_fix_action', 'redownload')
-        track_id = entity_id
-
-        def _delete_file_and_row():
-            if file_path:
-                resolved = _resolve_file_path(
-                    file_path, self.transfer_folder,
-                    config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    try:
-                        os.remove(resolved)
-                        self._cleanup_empty_parents(resolved)
-                    except Exception as e:
-                        logger.warning("Could not delete low-quality file %s: %s",
-                                       resolved, e)
-            if track_id:
-                try:
-                    conn = self.db._get_connection()
-                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (track_id,))
-                    conn.commit()
-                    conn.close()
-                except Exception as e:
-                    return f'DB delete failed: {e}'
-            return None
-
-        if fix_action == 'delete':
-            err = _delete_file_and_row()
-            if err:
-                return {'success': False, 'error': err}
-            return {'success': True, 'action': 'deleted_file',
-                    'message': f'Deleted low-quality file: '
-                               f'{os.path.basename(file_path or "")}'}
-
-        if fix_action == 'redownload':
-            # Add the (correct) track to the wishlist for a higher-quality
-            # re-download, then remove the low-quality copy — mirrors the
-            # acoustid 'redownload' path so it flows through the same wishlist
-            # → download pipeline (which applies the quality gate on the way in).
-            expected_title = details.get('expected_title', '')
-            expected_artist = details.get('expected_artist', '')
-            album_title = details.get('album_title', '')
-            if expected_title and expected_artist:
-                try:
-                    track_data = {
-                        'id': f'quality_upgrade_{uuid.uuid4().hex[:8]}',
-                        'name': expected_title,
-                        'artists': [{'name': expected_artist}],
-                        'album': {'name': album_title} if album_title else {'name': expected_title},
-                    }
-                    self.db.add_to_wishlist(
-                        spotify_track_data=track_data,
-                        failure_reason='Quality upgrade — re-downloading at higher quality',
-                        source_type='repair',
-                    )
-                    logger.info("Added '%s' by '%s' to wishlist for quality upgrade",
-                                expected_title, expected_artist)
-                except Exception as e:
-                    logger.warning("Could not add to wishlist: %s", e)
-            else:
-                return {'success': False,
-                        'error': 'No title/artist available to re-download'}
-            err = _delete_file_and_row()
-            if err:
-                logger.debug("quality_upgrade redownload: %s", err)
-            return {'success': True, 'action': 'redownload',
-                    'message': f'Added "{expected_title}" to wishlist, removed low-quality file'}
-
-        return {'success': False, 'error': f'Unknown fix action: {fix_action}'}
 
     def _fix_mbid_mismatch(self, entity_type, entity_id, file_path, details):
         """Remove the mismatched MusicBrainz recording ID from the audio file."""

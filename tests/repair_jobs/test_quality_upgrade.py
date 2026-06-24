@@ -38,6 +38,25 @@ NOTHING_ENABLED = {'qualities': {'flac': {'enabled': False}, 'mp3_320': {'enable
 
 
 # --- pure quality decision -------------------------------------------------
+#
+# The old extension-only classifier (meets_preferred_quality / classify_track_
+# quality / preferred_quality_floor / RANK_*) was deleted in favour of the
+# shared v3 path: probe → AudioQuality → quality_meets_profile against the
+# profile's ranked targets. These pin the same behavioural contract through the
+# new API. (Bps→kbps normalisation now lives in probe_audio_quality and is
+# covered by its own tests; the deleted-internals tests for it were removed.)
+
+def meets(path, bitrate, profile):
+    """Does a file of this format+bitrate satisfy the profile? Mirrors the
+    scanner's decision: build the measured AudioQuality and check it against the
+    v3 ranked targets derived from the profile (empty targets → nothing flagged)."""
+    from core.quality.model import AudioQuality
+    from core.quality.selection import quality_meets_profile, targets_from_profile
+
+    ext = path.rsplit('.', 1)[-1].lower()
+    targets, _ = targets_from_profile(profile)
+    return quality_meets_profile(AudioQuality(format=ext, bitrate=bitrate), targets)
+
 
 def test_balanced_profile_accepts_320_mp3_REGRESSION():
     """The headline bug: with FLAC+320+256 enabled, a 320 kbps MP3 is acceptable.
@@ -67,30 +86,6 @@ def test_lossless_only_flags_every_lossy_regardless_of_bitrate():
 def test_nothing_enabled_flags_nothing():
     """Empty/disabled profile must NOT flag the whole library."""
     assert meets('song.mp3', 64, NOTHING_ENABLED) is True
-
-
-def test_bitrate_in_bps_is_normalized():
-    """Library bitrate stored as bps (320000) classifies the same as 320 kbps."""
-    assert qu.classify_track_quality('song.mp3', 320000) == qu.RANK_320
-    assert meets('song.mp3', 320000, BALANCED) is True
-
-
-def test_unknown_lossy_bitrate_not_flagged_under_lossy_floor():
-    """A lossy file with no bitrate can't be judged against a lossy floor → don't
-    flag (avoid false positives); but under a lossless floor it's clearly below."""
-    assert meets('song.mp3', None, BALANCED) is True
-    assert meets('song.mp3', None, LOSSLESS_ONLY) is False
-
-
-def test_floor_is_worst_enabled_not_best():
-    # FLAC+320+256 enabled → floor is MP3-256 (rank 2), not FLAC.
-    assert qu.preferred_quality_floor(BALANCED) == qu.RANK_256
-    assert qu.preferred_quality_floor(LOSSLESS_ONLY) == qu.RANK_LOSSLESS
-    assert qu.preferred_quality_floor(NOTHING_ENABLED) is None
-
-
-def meets(path, bitrate, profile):
-    return qu.meets_preferred_quality(path, bitrate, profile)
 
 
 # --- scan produces a finding (seam) ----------------------------------------
@@ -156,9 +151,10 @@ def _stub_quality(monkeypatch, *, meets: bool):
     ranked targets. Tests use fake paths, so we resolve the path to itself,
     return a dummy measured quality, and force the meets/below verdict.
     """
-    from core.quality.model import AudioQuality
-    monkeypatch.setattr(qu, 'targets_from_profile', lambda profile: (['target'], False))
-    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p: p)
+    from core.quality.model import AudioQuality, QualityTarget
+    monkeypatch.setattr(qu, 'targets_from_profile',
+                        lambda profile: ([QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)], False))
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
     monkeypatch.setattr(qu, 'probe_audio_quality',
                         lambda p: AudioQuality(format='mp3', bitrate=128))
     monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, targets: meets)
@@ -185,7 +181,7 @@ def test_scan_creates_finding_for_low_quality_track(monkeypatch):
     fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
                   'album': {'name': 'Album X', 'images': []}}
     # No track-id / ISRC / album hit → exercise the search tier.
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_find_best_match',
@@ -229,7 +225,7 @@ def test_scan_prefers_track_id_tier(monkeypatch):
     """The source's own track ID (from file tags) wins over every other tier."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'spotify_track_id': 'sp9', 'isrc': 'X'})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {'spotify_track_id': 'sp9', 'isrc': 'X'})
     fake = {'id': 'sp9', 'name': 'Song One', 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_track_id', lambda ids, sp: (fake, 'spotify'))
     monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake))
@@ -292,7 +288,7 @@ def test_scan_prefers_isrc_exact_match_over_fuzzy(monkeypatch):
     and do NOT run the album/search tiers."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {'isrc': 'USRC17607839'})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {'isrc': 'USRC17607839'})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_isrc', lambda isrc, sp: (fake, 'spotify'))
@@ -314,7 +310,7 @@ def test_scan_falls_back_to_search_without_ids(monkeypatch):
     """No track-ID / ISRC / album hit → fall back to fuzzy search."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})  # un-enriched
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})  # un-enriched
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
@@ -333,7 +329,7 @@ def test_scan_uses_album_tier_when_no_ids(monkeypatch):
     'album', and the fuzzy search is never reached."""
     db = _FakeDB([_row()], BALANCED)
     _stub_engine(monkeypatch)
-    monkeypatch.setattr(qu, '_read_file_ids', lambda fp: {})
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
     monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
     fake = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
     monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (fake, 'spotify'))
