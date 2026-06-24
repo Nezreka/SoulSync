@@ -85,10 +85,13 @@ def _bare_client(tmp_path):
 
 def test_download_sync_skips_preview_manifests_and_never_downloads(tmp_path, monkeypatch):
     monkeypatch.setattr(hc, 'config_manager', _Cfg())
+    # Pin the starting tier so the chain is deterministic and independent of the
+    # global quality profile (which now drives quality_tier_for_source).
+    monkeypatch.setattr(hc, 'quality_tier_for_source', lambda *a, **k: 'lossless')
     c = _bare_client(tmp_path)
     c.get_track_info = lambda tid: {'duration_s': 215}          # real track length
     tiers = []
-    c._get_hls_manifest = lambda tid, quality='lossless': (
+    c._get_hls_manifest = lambda tid, quality='lossless', **kw: (
         tiers.append(quality) or
         {'segment_uris': ['seg'], 'init_uri': None, 'extension': 'flac',
          'manifest_duration': 30.0})                            # preview at EVERY tier
@@ -105,7 +108,7 @@ def test_download_sync_proceeds_past_the_gate_for_a_full_manifest(tmp_path, monk
     monkeypatch.setattr(hc, 'config_manager', _Cfg())
     c = _bare_client(tmp_path)
     c.get_track_info = lambda tid: {'duration_s': 215}
-    c._get_hls_manifest = lambda tid, quality='lossless': {
+    c._get_hls_manifest = lambda tid, quality='lossless', **kw: {
         'segment_uris': ['seg'], 'init_uri': None, 'extension': 'flac',
         'manifest_duration': 215.0}                            # full length → must NOT skip
     seg_calls = []
@@ -124,10 +127,11 @@ def test_download_sync_aborts_on_a_faked_full_length_file_no_tier_cascade(tmp_pa
     # decodes to 30s. It must abort HiFi (return None) on the first tier — NOT drop to the
     # lossy 'high' tier (the same 30s preview, which dodges the bitrate check).
     monkeypatch.setattr(hc, 'config_manager', _Cfg())
+    monkeypatch.setattr(hc, 'quality_tier_for_source', lambda *a, **k: 'lossless')
     c = _bare_client(tmp_path)
     c.get_track_info = lambda tid: {'duration_s': 215}
     tiers = []
-    c._get_hls_manifest = lambda tid, quality='lossless': (
+    c._get_hls_manifest = lambda tid, quality='lossless', **kw: (
         tiers.append(quality) or
         {'segment_uris': ['seg'], 'init_uri': None, 'extension': 'flac', 'manifest_duration': 215.0})
     c._download_segment_with_retry = lambda url: b'\x00' * 200_000      # > MIN_AUDIO_SIZE
@@ -144,7 +148,7 @@ def test_download_sync_does_not_reject_when_track_length_unknown(tmp_path, monke
     monkeypatch.setattr(hc, 'config_manager', _Cfg())
     c = _bare_client(tmp_path)
     c.get_track_info = lambda tid: {'duration_s': 0}           # expected unknown
-    c._get_hls_manifest = lambda tid, quality='lossless': {
+    c._get_hls_manifest = lambda tid, quality='lossless', **kw: {
         'segment_uris': ['seg'], 'init_uri': None, 'extension': 'flac',
         'manifest_duration': 30.0}                            # short, but expected is unknown
     seg_calls = []

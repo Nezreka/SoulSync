@@ -286,8 +286,15 @@ def probe_audio_quality(file_path: str):
             )
 
         if ext in ('wav', 'aiff', 'aif'):
-            from mutagen.wave import WAVE
-            audio = WAVE(file_path)
+            # AIFF must use mutagen.aiff.AIFF — WAVE() can't parse it and would
+            # raise, making the file fail open and silently bypass the quality
+            # filter. Both are uncompressed PCM, so they share the 'wav' tier.
+            if ext == 'wav':
+                from mutagen.wave import WAVE
+                audio = WAVE(file_path)
+            else:
+                from mutagen.aiff import AIFF
+                audio = AIFF(file_path)
             return AudioQuality(
                 format='wav',
                 bitrate=audio.info.bitrate // 1000 if audio.info.bitrate else None,
