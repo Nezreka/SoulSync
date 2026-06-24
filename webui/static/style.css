@@ -58607,6 +58607,20 @@ tr.tag-diff-same {
 .server-order-title { font-size: 13px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .server-order-artist { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .server-order-empty { padding: 20px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 13px; }
+.server-order-foot { padding: 14px 16px 16px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.server-order-foot-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.5); margin-bottom: 10px; }
+.server-order-actions { display: flex; gap: 10px; }
+.server-align-btn {
+    flex: 1; display: flex; flex-direction: column; gap: 3px; text-align: left;
+    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.server-align-btn:hover { background: rgba(76, 175, 80, 0.14); border-color: rgba(76, 175, 80, 0.5); }
+.server-align-btn-t { font-size: 13px; font-weight: 700; color: #fff; }
+.server-align-btn-d { font-size: 11px; color: rgba(255, 255, 255, 0.5); line-height: 1.35; }
+.server-order-foot-note { font-size: 11px; color: rgba(255, 255, 255, 0.4); margin-top: 9px; }
 
 .server-editor-stat-label {
     font-size: 9px;
