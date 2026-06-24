@@ -1533,6 +1533,25 @@ function _showServerOrder() {
             </div>
         </div>`).join('');
 
+    // Align actions (Navidrome only for now) — reorder the server playlist to the
+    // source order. Two choices for server-only "extra" tracks. Order-only: it never
+    // adds the missing tracks (that's the normal sync's job).
+    const alignFoot = serverType === 'navidrome' ? `
+            <div class="server-order-foot">
+                <div class="server-order-foot-label">Align this playlist to the source order</div>
+                <div class="server-order-actions">
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(false)">
+                        <span class="server-align-btn-t">Mirror source</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; remove server-only tracks</span>
+                    </button>
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(true)">
+                        <span class="server-align-btn-t">Keep extras</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; keep server-only tracks at the end</span>
+                    </button>
+                </div>
+                <div class="server-order-foot-note">Missing tracks aren't added here &mdash; run a normal sync for those.</div>
+            </div>` : '';
+
     const overlay = document.createElement('div');
     overlay.id = 'server-order-modal';
     overlay.className = 'server-order-overlay';
@@ -1546,9 +1565,46 @@ function _showServerOrder() {
                 <button type="button" class="server-order-close" onclick="document.getElementById('server-order-modal').remove()">&times;</button>
             </div>
             <div class="server-order-list">${rows || '<div class="server-order-empty">No server tracks.</div>'}</div>
+            ${alignFoot}
         </div>`;
     overlay.onclick = () => overlay.remove();
     document.body.appendChild(overlay);
+}
+
+// Align the server playlist's ORDER to the source (the "Align playlists" action).
+// Sends the matched server-track ids in SOURCE order + the extras choice; the
+// backend validates they're all in the playlist and rewrites. Order-only.
+async function _alignPlaylist(keepExtras) {
+    const st = _serverEditorState;
+    if (!st || !st.playlistId) return;
+    const matchedIds = (Array.isArray(st.tracks) ? st.tracks : [])
+        .filter(t => t.match_status === 'matched' && t.server_track && t.server_track.id != null)
+        .map(t => String(t.server_track.id));
+    if (!matchedIds.length) {
+        if (typeof showToast === 'function') showToast('Nothing to align', 'warning');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/server/playlist/${st.playlistId}/align`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: st.playlistName || '',
+                matched_ids: matchedIds,
+                keep_extras: !!keepExtras,
+            }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (typeof showToast === 'function') showToast(`Playlist order aligned (${data.track_count} tracks)`, 'success');
+            document.getElementById('server-order-modal')?.remove();
+            _serverEditorRefresh();
+        } else {
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Align failed', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Align failed: ' + e.message, 'error');
+    }
 }
 
 function _formatDurationMs(ms) {

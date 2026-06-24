@@ -19759,6 +19759,51 @@ def get_server_playlist_tracks(playlist_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
+def server_playlist_align(playlist_id):
+    """Align a server playlist's ORDER to the source ('Align playlists').
+
+    Order-only and metadata-free: the client sends the matched server-track ids in
+    SOURCE order (`matched_ids`) plus the extras choice (`keep_extras`); the server
+    validates every id is currently in the playlist (so this can only reorder/drop
+    tracks already there — never inject one) and rewrites the playlist in that order
+    via the overwrite primitive. Does NOT touch membership-completeness — missing
+    tracks are the normal sync's job. Navidrome only for now."""
+    try:
+        data = request.get_json() or {}
+        playlist_name = (data.get('playlist_name') or '').strip()
+        matched_ids = data.get('matched_ids') or []
+        keep_extras = bool(data.get('keep_extras', False))
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+        if not matched_ids:
+            return jsonify({"success": False, "error": "no matched tracks to align"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        if active_server != 'navidrome' or not media_server_engine.client('navidrome'):
+            return jsonify({"success": False,
+                            "error": "Align is only supported on Navidrome right now"}), 400
+
+        client = media_server_engine.client('navidrome')
+        current_tracks = client.get_playlist_tracks(playlist_id) or []
+        current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
+
+        from core.sync.playlist_edit import plan_align_rewrite
+        ordered = plan_align_rewrite(current_ids, matched_ids, keep_extras=keep_extras)
+        if ordered is None:
+            return jsonify({"success": False,
+                            "error": "Playlist changed on the server — reload and try again"}), 409
+
+        ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
+        if not ok:
+            return jsonify({"success": False, "error": "Failed to rewrite playlist order"}), 500
+        return jsonify({"success": True, "track_count": len(ordered),
+                        "kept_extras": keep_extras})
+    except Exception as e:
+        logger.error(f"Error aligning server playlist '{playlist_id}': {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/server/playlist/<playlist_id>/replace-track', methods=['POST'])
 def server_playlist_replace_track(playlist_id):
     """Replace a track in a server playlist. Rebuilds the playlist with the swap."""
