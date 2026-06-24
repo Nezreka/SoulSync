@@ -2069,9 +2069,18 @@ function deleteRankedTarget(i) {
 // Lossless formats take bit-depth + sample-rate constraints; lossy take a
 // minimum bitrate. Single source of truth for the add-target field toggle.
 const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav'];
+const RT_LOSSY_FORMATS = ['mp3', 'aac', 'ogg', 'opus', 'wma'];
+// "group:" selections are a UI convenience: picking one + constraints expands
+// into individual per-format targets at that slot (the backend still works
+// purely on concrete per-format targets). The user reorders/prunes after.
+const RT_GROUPS = { 'group:lossless': RT_LOSSLESS_FORMATS, 'group:lossy': RT_LOSSY_FORMATS };
+
+function rtSelectionIsLossless(val) {
+    return val === 'group:lossless' || RT_LOSSLESS_FORMATS.includes(val);
+}
 
 function onRtAddFormatChange() {
-    const lossless = RT_LOSSLESS_FORMATS.includes(document.getElementById('rt-add-format')?.value);
+    const lossless = rtSelectionIsLossless(document.getElementById('rt-add-format')?.value);
     const llFields = document.querySelector('.rt-lossless-fields');
     const lyFields = document.querySelector('.rt-lossy-fields');
     if (llFields) llFields.style.display = lossless ? '' : 'none';
@@ -2079,19 +2088,33 @@ function onRtAddFormatChange() {
 }
 
 function addRankedTarget() {
-    const fmt = document.getElementById('rt-add-format')?.value || 'flac';
-    const t = { format: fmt };
-    if (RT_LOSSLESS_FORMATS.includes(fmt)) {
+    const val = document.getElementById('rt-add-format')?.value || 'flac';
+
+    // Collect the constraints once; they apply to every format we add.
+    const constraints = {};
+    if (rtSelectionIsLossless(val)) {
         const bd = document.getElementById('rt-add-bitdepth')?.value;
         const sr = document.getElementById('rt-add-samplerate')?.value;
-        if (bd) t.bit_depth = parseInt(bd, 10);
-        if (sr) t.min_sample_rate = parseInt(sr, 10);
+        if (bd) constraints.bit_depth = parseInt(bd, 10);
+        if (sr) constraints.min_sample_rate = parseInt(sr, 10);
     } else {
         const br = document.getElementById('rt-add-bitrate')?.value;
-        if (br) t.min_bitrate = parseInt(br, 10);
+        if (br) constraints.min_bitrate = parseInt(br, 10);
     }
-    t.label = rtLabel(t);
-    currentRankedTargets.push(t);
+
+    // A group expands into one concrete target per format; a single format is
+    // just a one-element list. Skip a format that already has an identical
+    // target so re-adding a group doesn't pile up duplicates.
+    const formats = RT_GROUPS[val] || [val];
+    const sig = (t) => `${t.format}|${t.bit_depth || ''}|${t.min_sample_rate || ''}|${t.min_bitrate || ''}`;
+    const existing = new Set(currentRankedTargets.map(sig));
+    formats.forEach(fmt => {
+        const t = { format: fmt, ...constraints };
+        if (existing.has(sig(t))) return;
+        t.label = rtLabel(t);
+        currentRankedTargets.push(t);
+        existing.add(sig(t));
+    });
     renderRankedTargets();
     debouncedSaveQualityProfile();
 }
