@@ -1,13 +1,17 @@
-"""Re-add a synced unmatched track to the wishlist with the original context.
+"""Re-add a synced unmatched track to the wishlist with the EXACT auto-add payload.
 
-reconstruct_sync_track_data rebuilds the spotify_track_data the sync used. It must
-prefer the full cached track (with album images), fall back to the track_result
-fields, and refuse anything that wasn't a 'wishlist' row.
+The live sync and the sync-detail re-add must build the identical wishlist payload
+(via build_original_tracks_map), so a re-added track is indistinguishable from the
+original auto-add — including its album cover, album_type, and artist shape.
 """
 
 from __future__ import annotations
 
-from core.sync.wishlist_readd import reconstruct_sync_track_data
+from core.sync.wishlist_readd import (
+    build_original_tracks_map,
+    normalize_wishlist_track,
+    reconstruct_sync_track_data,
+)
 
 
 def _tr(index, sid, status='wishlist', **kw):
@@ -18,75 +22,69 @@ def _tr(index, sid, status='wishlist', **kw):
 
 
 def _full(sid, name="Song", with_images=True):
-    album = {"name": "Album"}
+    album = {"name": "Album", "album_type": "album", "total_tracks": 12}
     if with_images:
-        album["images"] = [{"url": "http://cdn/cover.jpg"}]
+        album["images"] = [{"url": "http://cdn/cover.jpg", "height": 640, "width": 640}]
     return {"id": sid, "name": name, "artists": [{"name": "Artist"}], "album": album,
             "duration_ms": 200000, "popularity": 50}
 
 
-def test_prefers_full_original_track_by_index():
+# ── normalize_wishlist_track ──────────────────────────────────────────────────
+
+def test_normalize_string_album_to_dict():
+    out = normalize_wishlist_track({"id": "a", "name": "T", "album": "My Single", "artists": ["X"]})
+    assert out["album"] == {"name": "My Single", "images": [], "album_type": "single",
+                            "total_tracks": 1, "release_date": ""}
+    assert out["artists"] == [{"name": "X"}]               # strings -> dicts
+
+
+def test_normalize_dict_album_preserves_images_and_type():
+    out = normalize_wishlist_track(_full("a"))
+    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"
+    assert out["album"]["album_type"] == "album"
+    assert out["album"]["total_tracks"] == 12
+
+
+def test_normalize_is_copy_safe():
+    src = {"id": "a", "album": {"name": "A"}, "artists": ["X"]}
+    normalize_wishlist_track(src)
+    assert "images" not in src["album"]                    # source untouched
+    assert src["artists"] == ["X"]
+
+
+# ── reconstruct: parity with the live auto-add ────────────────────────────────
+
+def test_payload_is_identical_to_live_sync_map():
+    # THE PARITY GUARANTEE: re-add payload == what build_original_tracks_map (used by
+    # the live sync) produces for the same track.
     trs = [_tr(0, "sp_a"), _tr(1, "sp_b")]
     tracks = [_full("sp_a"), _full("sp_b", name="Other")]
     out = reconstruct_sync_track_data(trs, tracks, 1)
-    assert out["id"] == "sp_b"                            # the full original track
-    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"   # its own art kept
-    assert out is not tracks[1]                          # a copy, not the source entry
+    assert out == build_original_tracks_map(tracks)["sp_b"]
+    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"   # cover carries through
 
 
-def test_backfills_album_image_when_full_track_has_none():
-    # THE BUG: tracks_json stored without album.images, but the track_result has the
-    # cover. The re-add must carry the image through (parity with the auto-add).
-    trs = [_tr(0, "sp_a", image_url="http://img/cover250.jpg")]
-    tracks = [_full("sp_a", with_images=False)]           # full data but NO images
-    out = reconstruct_sync_track_data(trs, tracks, 0)
-    assert out["id"] == "sp_a"
-    assert out["album"]["images"] == [{"url": "http://img/cover250.jpg"}]
-
-
-def test_full_track_with_images_is_not_overwritten():
-    # When the cached track already has real album art, keep it (don't downgrade to
-    # the 250px track_result thumb).
-    trs = [_tr(0, "sp_a", image_url="http://img/thumb.jpg")]
-    tracks = [_full("sp_a", with_images=True)]
-    out = reconstruct_sync_track_data(trs, tracks, 0)
-    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"   # original kept
-
-
-def test_does_not_mutate_source_tracks_list():
-    trs = [_tr(0, "sp_a", image_url="http://img/x.jpg")]
-    tracks = [_full("sp_a", with_images=False)]
-    reconstruct_sync_track_data(trs, tracks, 0)
-    assert "images" not in tracks[0]["album"]            # source untouched
-
-
-def test_matches_by_id_when_index_misaligns():
-    # tracks_json in a different order than track_results -> match by source_track_id.
+def test_resolves_by_source_track_id_not_position():
     trs = [_tr(0, "sp_a"), _tr(1, "sp_b")]
-    tracks = [_full("sp_b"), _full("sp_a")]       # reversed
-    out = reconstruct_sync_track_data(trs, tracks, 0)
-    assert out["id"] == "sp_a"                    # found by id, not by position
+    tracks = [_full("sp_b"), _full("sp_a")]               # tracks_json reversed
+    out = reconstruct_sync_track_data(trs, tracks, 0)     # row 0 -> sp_a
+    assert out["id"] == "sp_a"
 
 
-def test_falls_back_to_track_result_fields_when_no_full_track():
+def test_fallback_rebuilds_with_cover_when_track_missing():
+    # Track not in tracks_json -> rebuild from the row, seed cover from image_url,
+    # run through the same normalizer (album dict + artists dicts).
     trs = [_tr(0, "sp_x", name="Real Love Baby", artist="Father John Misty",
                album="Real Love Baby", image_url="http://img/x.jpg", duration_ms=188000)]
-    out = reconstruct_sync_track_data(trs, [], 0)   # no tracks_json
+    out = reconstruct_sync_track_data(trs, [], 0)
     assert out["id"] == "sp_x"
     assert out["name"] == "Real Love Baby"
     assert out["artists"] == [{"name": "Father John Misty"}]
-    assert out["album"]["name"] == "Real Love Baby"
     assert out["album"]["images"] == [{"url": "http://img/x.jpg"}]
-    assert out["duration_ms"] == 188000
-
-
-def test_fallback_without_image_omits_images():
-    out = reconstruct_sync_track_data([_tr(0, "sp_x", album="A")], [], 0)
-    assert "images" not in out["album"]
+    assert out["album"]["name"] == "Real Love Baby"
 
 
 def test_refuses_non_wishlist_row():
-    # A matched/downloaded track must not be re-wishlistable.
     trs = [_tr(0, "sp_a", status="completed")]
     assert reconstruct_sync_track_data(trs, [_full("sp_a")], 0) is None
 
@@ -99,5 +97,9 @@ def test_refuses_out_of_range_or_empty():
 
 
 def test_refuses_when_no_id_and_no_full_track():
-    # A wishlist row with no source_track_id and no cached track is unidentifiable.
     assert reconstruct_sync_track_data([_tr(0, "")], [], 0) is None
+
+
+def test_build_map_skips_idless_and_non_dicts():
+    m = build_original_tracks_map([_full("a"), {"name": "no id"}, "garbage", None])
+    assert set(m.keys()) == {"a"}
