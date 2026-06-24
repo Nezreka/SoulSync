@@ -205,6 +205,21 @@ def attempt_download_with_candidates(task_id, candidates, track, batch_id=None, 
                     'artists': _fallback_album_artists
                 }
 
+            # #915: parity with Reorganize / manual Enrich. If the album context is lean
+            # (no release_date) and the user's PRIMARY metadata source isn't Spotify, hydrate
+            # it from that source — the same place a reorganize reads — so the download's
+            # $year folder, release_date and album_type match instead of dropping the year /
+            # defaulting to YYYY-01-01 and forcing a manual reorganize afterwards.
+            try:
+                from core.downloads.track_metadata_backfill import backfill_album_context_from_source
+                from core.metadata import registry as _meta_registry
+                from core.metadata.album_tracks import get_album_for_source as _get_album_for_source
+                backfill_album_context_from_source(
+                    spotify_album_context, _meta_registry.get_primary_source(), _get_album_for_source,
+                )
+            except Exception as _bf_err:  # noqa: BLE001 — never let backfill break a download
+                logger.debug("[Context] primary-source album backfill skipped: %s", _bf_err)
+
             download_payload = candidate.__dict__
 
             username = download_payload.get('username')
