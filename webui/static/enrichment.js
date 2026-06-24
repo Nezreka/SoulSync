@@ -1988,7 +1988,10 @@ async function saveRepairJobSettings(jobId) {
             } else {
                 if (input.type === 'checkbox') settings[key] = input.checked;
                 else if (input.type === 'number') settings[key] = parseFloat(input.value);
-                else settings[key] = input.value;
+                else {
+                    const v = input.value;
+                    settings[key] = v === 'true' ? true : v === 'false' ? false : v;
+                }
             }
         });
 
