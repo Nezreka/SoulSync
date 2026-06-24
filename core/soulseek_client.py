@@ -2029,6 +2029,13 @@ class SoulseekClient(DownloadSourcePlugin):
         if not results:
             return []
 
+        # Issue #652: drop candidates on the quarantine record BEFORE ranking,
+        # so a previously-quarantined source can't win the quality picker by
+        # superior bitrate and re-trigger the same failed download in a loop.
+        results = self._drop_quarantined_sources(results)
+        if not results:
+            return []
+
         db = MusicDatabase()
         profile = db.get_quality_profile()
 
