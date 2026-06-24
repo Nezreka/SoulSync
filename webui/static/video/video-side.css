@@ -2303,6 +2303,26 @@ body[data-side="video"] #soulsync-toggle { display: none; }
    A group with no rails (async-only, not yet filled, or all rails dropped) is hidden entirely. */
 .vdsc-group { margin: 0; }
 .vdsc-group--empty { display: none; }
+
+/* ── sticky 'jump to section' bar — quick nav across the deep rail stack ──────── */
+.vdsc-jumpnav {
+    position: sticky; top: 0; z-index: 6;
+    display: flex; gap: 8px; flex-wrap: nowrap; overflow-x: auto;
+    margin: 0 0 6px; padding: 11px 2px;
+    background: linear-gradient(180deg, rgba(10, 11, 16, 0.94) 35%, rgba(10, 11, 16, 0.55) 80%, transparent);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    scrollbar-width: none;
+}
+.vdsc-jumpnav::-webkit-scrollbar { display: none; }
+.vdsc-jump {
+    flex: 0 0 auto; padding: 7px 15px; border-radius: 999px; cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.12); background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.78); font-size: 12.5px; font-weight: 700; white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.vdsc-jump:hover { background: rgba(var(--accent-rgb, 88 101 242), 0.85); border-color: transparent; color: #fff; }
+.vdsc-jump.hidden { display: none; }
+
 .vdsc-group-head { font-size: 12.5px; font-weight: 800; letter-spacing: 0.5px; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5); margin: 30px 0 16px; padding-bottom: 9px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.07); }

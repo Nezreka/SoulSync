@@ -543,7 +543,18 @@
     }
     function renderShelves() {
         var host = $('[data-vdsc-shelves]'); if (!host) return;
-        host.innerHTML = buildSections().map(function (sec) {
+        var sections = buildSections();
+        // A sticky "jump to section" bar (Netflix/Disney pattern) — the page is a deep
+        // stack of rails, so quick navigation makes it far easier to browse. Chips for
+        // async-only groups (foryou/collection/taste) start hidden, revealed when filled;
+        // chips for groups that prune away hide in lockstep (see reveal/pruneGroup).
+        var nav = '<nav class="vdsc-jumpnav" data-vdsc-jumpnav aria-label="Jump to section">' +
+            sections.map(function (sec) {
+                var hideCls = sec.rails.length ? '' : ' hidden';
+                return '<button class="vdsc-jump' + hideCls + '" type="button" data-jump="' +
+                    sec.id + '">' + esc(sec.label) + '</button>';
+            }).join('') + '</nav>';
+        host.innerHTML = nav + sections.map(function (sec) {
             var rails = sec.rails.map(lazyShelfHtml).join('');
             // Groups with no static rails (async-only, e.g. gaps) start hidden — revealed when filled.
             var emptyCls = sec.rails.length ? '' : ' vdsc-group--empty';
@@ -552,16 +563,35 @@
                 '<div class="vdsc-group-body" data-group-body="' + sec.id + '">' + rails + '</div>' +
             '</section>';
         }).join('');
+        wireJumpNav(host);
         observeShelves();
     }
-    // Reveal a group's header once an async loader has put rails in it.
+    // Smooth-scroll to a group when its jump chip is clicked (delegated, wired once).
+    function wireJumpNav(host) {
+        var nav = $('[data-vdsc-jumpnav]', host);
+        if (!nav || nav.getAttribute('data-wired')) return;
+        nav.setAttribute('data-wired', '1');
+        nav.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-jump]'); if (!btn) return;
+            var g = $('[data-group="' + btn.getAttribute('data-jump') + '"]');
+            if (g) { try { g.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (x) { g.scrollIntoView(); } }
+        });
+    }
+    // Reveal a group's header once an async loader has put rails in it (+ its jump chip).
     function revealGroup(id) {
         var g = $('[data-group="' + id + '"]');
         if (g) g.classList.remove('vdsc-group--empty');
+        var chip = $('[data-jump="' + id + '"]');
+        if (chip) chip.classList.remove('hidden');
     }
-    // Hide a group whose body has no shelves left (every rail failed / returned nothing).
+    // Hide a group whose body has no shelves left (every rail failed / returned nothing) + its chip.
     function pruneGroup(g) {
-        if (g && !g.querySelector('.vdsc-shelf')) g.classList.add('vdsc-group--empty');
+        if (g && !g.querySelector('.vdsc-shelf')) {
+            g.classList.add('vdsc-group--empty');
+            var id = g.getAttribute('data-group');
+            var chip = id && $('[data-jump="' + id + '"]');
+            if (chip) chip.classList.add('hidden');
+        }
     }
     function observeShelves() {
         if (state.io) state.io.disconnect();
