@@ -739,7 +739,23 @@ class iTunesClient:
         cache = get_metadata_cache()
         cached = cache.get_entity('itunes', 'album', f"{album_id}_tracks")
         if cached and cached.get('items'):
-            return cached
+            # #918 follow-up: a tracks entry cached BEFORE the limit=200 fix is truncated
+            # to 50 and survives in the persistent cache (30-day TTL), so every window that
+            # loads this album from cache still shows 50 — not just the one path that was
+            # re-fetched fresh. Self-heal: entries written by the fixed fetch carry
+            # `_complete`; a legacy entry without it is re-validated against the album's
+            # known trackCount and re-fetched if it's short. (trackCount comes from the
+            # collection metadata and is unaffected by the tracks-limit bug.)
+            if cached.get('_complete'):
+                return cached
+            album_meta = cache.get_entity('itunes', 'album', str(album_id))
+            expected = (album_meta or {}).get('trackCount')
+            if not (isinstance(expected, int) and expected > len(cached['items'])):
+                return cached
+            logger.info(
+                "iTunes album %s tracks cache looks truncated (%d cached < %d trackCount) — refetching",
+                album_id, len(cached['items']), expected,
+            )
 
         # #918: the iTunes Lookup API returns only 50 related entities unless `limit` is
         # passed (max 200), so albums >50 tracks were truncated in the download window.
@@ -851,7 +867,11 @@ class iTunesClient:
             'items': tracks,
             'total': len(tracks),
             'limit': len(tracks),
-            'next': None
+            'next': None,
+            # Marks this entry as fetched with the limit=200 query (#918) so the
+            # stale-cache self-heal above trusts it and never re-fetches in a loop —
+            # important for region-restricted albums where len(tracks) < trackCount.
+            '_complete': True,
         }
 
         # Cache the album tracks listing
