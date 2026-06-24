@@ -156,9 +156,9 @@
         return [
             { id: 'foryou', label: 'For you', rails: foryou },
             { id: 'topten', label: 'Top 10 today', rails: [TOP10] },
+            { id: 'new', label: 'New & noteworthy', rails: NEW_RAILS },
             { id: 'collection', label: 'Finish your collection', rails: [] },
             { id: 'taste', label: 'More of what you like', rails: taste },
-            { id: 'new', label: 'New & noteworthy', rails: NEW_RAILS },
             { id: 'popular', label: 'Trending & popular', rails: CURATED },
             { id: 'mood', label: 'By mood', rails: MOOD_RAILS },
             { id: 'studios', label: 'From the studios', rails: STUDIO_RAILS },
@@ -633,10 +633,15 @@
         var rail = $('[data-vdsc-rail]', shelf);
         var grp = shelf.closest('.vdsc-group');
         var ranked = shelf.getAttribute('data-vdsc-ranked') === '1';
+        var hideOwned = isHideOwned();
         // Normal: 2 pages (~40 items). Hiding owned: let the backend page DEEPER and drop
         // owned server-side, so a huge library's rail still fills instead of CSS-hiding to ~nothing.
-        // Ranked (Top 10): a single fixed chart — never paged, capped at 10.
-        var q = shelf.getAttribute('data-vdsc-q') + (ranked ? '' : (isHideOwned() ? '&hide_owned=1' : '&pages=2'));
+        // Ranked (Top 10): a single fixed chart — never paged, capped at 10. It must ALSO honour
+        // hide-owned at fetch time: the global `.vdsc-hide-owned .vsr-card--owned{display:none}`
+        // rule would otherwise hide an owned card while its rank numeral stayed, leaving a gap.
+        var q = shelf.getAttribute('data-vdsc-q') +
+            (ranked ? (hideOwned ? '&hide_owned=1' : '')
+                    : (hideOwned ? '&hide_owned=1' : '&pages=2'));
         cachedFetch(LIST_URL + '?' + q)
             .then(function (d) {
                 var items = (d && d.items) || [];

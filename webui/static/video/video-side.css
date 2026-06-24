@@ -2405,6 +2405,10 @@ body[data-side="video"] #soulsync-toggle { display: none; }
     font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.7); cursor: pointer; user-select: none; }
 .vdsc-toggle input { accent-color: rgb(var(--accent-rgb, 88 101 242)); width: 16px; height: 16px; cursor: pointer; }
 .vdsc-hide-owned .vsr-card--owned { display: none; }
+/* …except in the ranked Top 10 — hiding an owned card there would strand its big
+   rank numeral as a gap. The rail also drops owned server-side, so this only matters
+   if one ever slips through: show it (with its 'In Library' ribbon) instead. */
+.vdsc-hide-owned .vdsc-shelf--ranked .vsr-card--owned { display: flex; }
 
 /* rail-language preference chips — which original languages show in the general rails */
 .vdsc-langs { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-left: 14px; }
