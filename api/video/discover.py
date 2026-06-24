@@ -322,7 +322,11 @@ def register_routes(bp):
             if key == "trending":
                 return eng.trending()
             if key == "trending_today":
-                return eng.trending(window="day")   # the ranked 'Top 10 today' chart
+                return eng.trending(window="day")   # the ranked 'Top 10 today' chart (mixed)
+            if key == "trending_movies_today":
+                return eng.trending(window="day", kind="movie")   # split 'Top 10 Movies Today'
+            if key == "trending_tv_today":
+                return eng.trending(window="day", kind="show")    # split 'Top 10 TV Shows Today'
             if key:
                 return eng.discover_curated(key, page=p)
             return eng.discover_filter(
@@ -360,7 +364,7 @@ def register_routes(bp):
             # thread-safe) so digging 20 pages deep costs ~4 page-latencies, not 20.
             need_fill = hide_owned or bool(prefer_langs)
             target = 20 if need_fill else 0
-            if key in ("trending", "trending_today"):
+            if key in ("trending", "trending_today", "trending_movies_today", "trending_tv_today"):
                 consume(fetch(page))   # a single fixed chart; never paged
             elif not need_fill:
                 for offset in range(pages):           # no filtering: respect requested page count
