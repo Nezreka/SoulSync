@@ -171,6 +171,21 @@ def run_post_processing_worker(task_id: str, batch_id: str, deps: PostProcessDep
             logger.info(f"[Post-Processing] Task {task_id} already completed by stream processor, skipping verification")
             return
 
+        # RACE GUARD: the monitor sets status -> 'post_processing' immediately
+        # before submitting this worker. If the status is now anything else, the
+        # browser-poll post-processor already took ownership of this task — e.g.
+        # it quarantined the file and requeued the next-best candidate (status
+        # -> 'searching', source identity cleared). Bail WITHOUT marking failed
+        # or notifying batch completion: otherwise we clobber that in-flight
+        # retry with a bogus "missing file or source information" failure while a
+        # parallel attempt is importing the song.
+        if task['status'] != 'post_processing':
+            logger.info(
+                f"[Post-Processing] Task {task_id} no longer in 'post_processing' "
+                f"(now '{task['status']}') — another path took over, skipping"
+            )
+            return
+
         # Extract file information for verification
         track_info = task.get('track_info', {})
         task_filename = task.get('filename') or track_info.get('filename')
