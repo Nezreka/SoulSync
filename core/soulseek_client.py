@@ -25,6 +25,7 @@ from core.download_plugins.album_bundle import (
 )
 from core.download_plugins.base import DownloadSourcePlugin
 from core.quality.model import QualityTarget, filter_and_rank, v2_qualities_to_ranked_targets
+from core.quality.source_map import AUDIO_EXTENSIONS, format_from_extension
 from utils.async_helpers import run_async
 
 logger = get_logger("soulseek_client")
@@ -410,7 +411,7 @@ class SoulseekClient(DownloadSourcePlugin):
         
         
         # Audio file extensions to filter for
-        audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+        audio_extensions = AUDIO_EXTENSIONS
         
         for response_data in responses_data:
             username = response_data.get('username', '')
@@ -427,10 +428,9 @@ class SoulseekClient(DownloadSourcePlugin):
                 if f'.{file_ext}' not in audio_extensions:
                     continue
                 
-                # .m4a is the usual AAC container — bucket it as 'aac' (the
-                # quality filter treats AAC as an opt-in tier; off by default).
-                quality = 'aac' if file_ext == 'm4a' else (
-                    file_ext if file_ext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
+                # Source-agnostic extension → format (shared with every other
+                # extension-based source). Ranked targets do the rest.
+                quality = format_from_extension(file_ext)
 
                 # Create TrackResult
                 # Convert duration from seconds to milliseconds (slskd returns seconds, Spotify uses ms)
@@ -1140,7 +1140,7 @@ class SoulseekClient(DownloadSourcePlugin):
         Returns:
             List of TrackResult objects for audio files
         """
-        audio_extensions = {'.mp3', '.flac', '.ogg', '.aac', '.wma', '.wav', '.m4a'}
+        audio_extensions = AUDIO_EXTENSIONS
         results = []
         if files:
             logger.debug(f"Browse raw file sample: {files[0]}")
@@ -1154,9 +1154,7 @@ class SoulseekClient(DownloadSourcePlugin):
             ext = Path(filename).suffix.lower()
             if ext not in audio_extensions:
                 continue
-            _qext = ext.lstrip('.')
-            quality = 'aac' if _qext == 'm4a' else (
-                _qext if _qext in ['flac', 'mp3', 'ogg', 'aac', 'wma'] else 'unknown')
+            quality = format_from_extension(ext)
             raw_duration = file_data.get('length')
             duration_ms = raw_duration * 1000 if raw_duration else None
             slskd_attrs = {a['type']: a['value'] for a in file_data.get('attributes', [])}
@@ -2048,15 +2046,9 @@ class SoulseekClient(DownloadSourcePlugin):
         targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
         fallback_enabled = profile.get('fallback_enabled', True)
 
-        # AAC (#886) is an opt-in tier: keep AAC/.m4a candidates ONLY when the
-        # active profile explicitly targets AAC. Otherwise drop them BEFORE
-        # ranking — without this, fallback_enabled would hand back AAC files the
-        # user never asked for (pre-#886 such files landed in the dropped
-        # 'other' bucket and were never returned).
-        if not any((t.format or '').lower() == 'aac' for t in targets):
-            results = [r for r in results if (r.audio_quality.format or '').lower() != 'aac']
-            if not results:
-                return []
+        # Every format (AAC included) follows the SAME universal rule: a
+        # candidate passes only if it matches a ranked target; if nothing
+        # matches, the fallback toggle decides. No per-format special-casing.
 
         logger.debug(
             "Quality Filter: profile='%s', %d targets, %d candidates",

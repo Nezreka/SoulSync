@@ -34,13 +34,19 @@ class AudioQuality:
         """Continuous score for ranking within a matched target bucket.
         Higher = better.  Used as a tiebreaker after target-list matching.
         """
+        # NOTE: this only orders the *fallback* path (nothing matched a ranked
+        # target) and tie-breaks candidates of the SAME format within one
+        # matched target. Cross-format PRIORITY is decided solely by the user's
+        # ranked-target list (target index), never by these numbers.
         format_base: dict[str, float] = {
-            'flac': 100.0,
-            'wav':   95.0,
-            'ogg':   70.0,
-            'aac':   60.0,
-            'mp3':   50.0,
-            'wma':   30.0,
+            'flac':  100.0,
+            'alac':   98.0,   # lossless (Apple)
+            'wav':    95.0,
+            'ogg':    70.0,
+            'opus':   65.0,
+            'aac':    60.0,
+            'mp3':    50.0,
+            'wma':    30.0,
         }
         base = format_base.get(self.format.lower(), 10.0)
 

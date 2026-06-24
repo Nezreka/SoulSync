@@ -84,6 +84,37 @@ def test_metadata_less_flac_matches_16bit_baseline_target():
     assert AudioQuality('flac').matches_target(QualityTarget(format='flac', bit_depth=16)) is True
 
 
+# ── ranked targets work for EVERY format, not just flac/mp3 (universal) ────
+
+def test_opus_target_matches_opus_candidate():
+    t = QualityTarget(format='opus', min_bitrate=128)
+    assert AudioQuality('opus', bitrate=160).matches_target(t) is True
+    assert AudioQuality('opus', bitrate=96).matches_target(t) is False
+    assert AudioQuality('mp3', bitrate=320).matches_target(t) is False  # wrong format
+
+
+def test_wav_target_matches_on_bit_depth_and_sample_rate():
+    t = QualityTarget(format='wav', bit_depth=24, min_sample_rate=96000)
+    assert AudioQuality('wav', sample_rate=96000, bit_depth=24).matches_target(t) is True
+    assert AudioQuality('wav', sample_rate=44100, bit_depth=16).matches_target(t) is False
+
+
+def test_wma_and_alac_targets_match_their_formats():
+    assert AudioQuality('wma', bitrate=192).matches_target(QualityTarget(format='wma', min_bitrate=128)) is True
+    assert AudioQuality('alac', sample_rate=96000, bit_depth=24).matches_target(
+        QualityTarget(format='alac', bit_depth=24)) is True
+
+
+def test_only_listed_format_passes_others_rank_last():
+    """An Opus-only target list: only opus matches; everything else ranks last
+    (index == len(targets)), so with fallback off the caller drops them."""
+    from core.quality.model import rank_candidate
+    targets = [QualityTarget(format='opus')]
+    assert rank_candidate(AudioQuality('opus', bitrate=160), targets)[0] == 0
+    assert rank_candidate(AudioQuality('flac', sample_rate=96000, bit_depth=24), targets)[0] == 1
+    assert rank_candidate(AudioQuality('mp3', bitrate=320), targets)[0] == 1
+
+
 # ── v2 -> v3 migration preserves the user's priority order ─────────────────
 
 def test_v2_to_v3_preserves_order_and_maps_fields():

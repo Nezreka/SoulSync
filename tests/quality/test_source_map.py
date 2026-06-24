@@ -13,7 +13,32 @@ from core.quality.source_map import (
     quality_from_qobuz,
     quality_from_deezer,
     quality_from_amazon,
+    format_from_extension,
+    AUDIO_EXTENSIONS,
 )
+
+
+# ── Shared extension → format (used by every extension-based source) ────────
+
+@pytest.mark.parametrize("ext,fmt", [
+    ("flac", "flac"), (".flac", "flac"),
+    ("mp3", "mp3"),
+    ("m4a", "aac"), ("aac", "aac"), ("mp4", "aac"),
+    ("ogg", "ogg"), ("oga", "ogg"),
+    ("opus", "opus"),
+    ("wav", "wav"), ("wave", "wav"),
+    ("aiff", "wav"), ("aif", "wav"),   # PCM → wav tier
+    ("wma", "wma"),
+    ("alac", "alac"),
+    ("xyz", "unknown"), ("", "unknown"), (None, "unknown"),
+])
+def test_format_from_extension(ext, fmt):
+    assert format_from_extension(ext) == fmt
+
+
+def test_audio_extensions_cover_all_known_formats():
+    for e in (".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aiff", ".wma"):
+        assert e in AUDIO_EXTENSIONS
 
 
 # ── Tidal / HiFi (Tidal-backed) ────────────────────────────────────────────

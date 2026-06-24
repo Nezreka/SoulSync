@@ -1975,7 +1975,7 @@ let currentRankedTargets = [];
 
 function rtLabel(t) {
     const fmt = (t.format || 'any').toUpperCase();
-    if (t.format === 'flac' || t.format === 'wav') {
+    if (RT_LOSSLESS_FORMATS.includes(t.format)) {
         const bd = t.bit_depth ? `${t.bit_depth}-bit` : '';
         const sr = t.min_sample_rate ? `≥${t.min_sample_rate / 1000}kHz` : '';
         const detail = [bd, sr].filter(Boolean).join('/');
@@ -2066,8 +2066,12 @@ function deleteRankedTarget(i) {
     debouncedSaveQualityProfile();
 }
 
+// Lossless formats take bit-depth + sample-rate constraints; lossy take a
+// minimum bitrate. Single source of truth for the add-target field toggle.
+const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav'];
+
 function onRtAddFormatChange() {
-    const lossless = document.getElementById('rt-add-format')?.value === 'flac';
+    const lossless = RT_LOSSLESS_FORMATS.includes(document.getElementById('rt-add-format')?.value);
     const llFields = document.querySelector('.rt-lossless-fields');
     const lyFields = document.querySelector('.rt-lossy-fields');
     if (llFields) llFields.style.display = lossless ? '' : 'none';
@@ -2077,7 +2081,7 @@ function onRtAddFormatChange() {
 function addRankedTarget() {
     const fmt = document.getElementById('rt-add-format')?.value || 'flac';
     const t = { format: fmt };
-    if (fmt === 'flac') {
+    if (RT_LOSSLESS_FORMATS.includes(fmt)) {
         const bd = document.getElementById('rt-add-bitdepth')?.value;
         const sr = document.getElementById('rt-add-samplerate')?.value;
         if (bd) t.bit_depth = parseInt(bd, 10);
