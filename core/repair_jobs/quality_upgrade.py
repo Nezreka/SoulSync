@@ -14,9 +14,10 @@ is queued until you review and Apply the finding — at which point the matched
 track (carrying its album context) is added to the wishlist, exactly like every
 other acquisition path.
 
-The quality decision (``meets_preferred_quality``) is a pure function so it can be
-unit-tested without a database or network. Transcode/"fake lossless" detection is
-intentionally NOT done here — that's the separate Fake Lossless Detector job.
+Quality is judged using the real file (mutagen-measured bit depth / sample rate /
+bitrate) checked against the user's v3 ranked profile targets — fully profile-driven,
+no hardcoded thresholds. Transcode/"fake lossless" detection is the separate Fake
+Lossless Detector job.
 """
 
 from __future__ import annotations
@@ -59,26 +60,6 @@ def _to_bool(val) -> bool:
     return bool(val) if val is not None else False
 
 
-# Quality ranks — higher is better. Lossless tops everything; lossy tiers fall out
-# of bitrate. 0 means "below the lowest tracked tier / unknown".
-RANK_LOSSLESS = 4
-RANK_320 = 3
-RANK_256 = 2
-RANK_192 = 1
-RANK_BELOW = 0
-
-LOSSLESS_EXTENSIONS = {'.flac', '.alac', '.ape', '.wav', '.aiff', '.aif', '.dsf', '.dff', '.m4a'}
-# NB: .m4a is ambiguous (ALAC vs AAC); we treat the *format* as lossy-capable and
-# rely on bitrate below — a true ALAC .m4a reports a lossless-scale bitrate.
-
-# Quality-profile bucket key -> rank.
-_PROFILE_KEY_RANK = {
-    'flac': RANK_LOSSLESS,
-    'mp3_320': RANK_320,
-    'mp3_256': RANK_256,
-    'mp3_192': RANK_192,
-}
-
 # Per-source file-tag key holding that source's own track ID (written by enrichment).
 _SOURCE_TRACK_ID_TAG = {
     'spotify': 'spotify_track_id',
@@ -92,93 +73,6 @@ _SOURCE_TRACK_ID_TAG = {
 # Reject a fuzzy candidate whose length differs from ours by more than this (ms) —
 # catches wrong versions (live/edit/remix) that share a title. Exact tiers skip it.
 _DURATION_TOLERANCE_MS = 5000
-
-
-def _normalize_kbps(bitrate: Optional[int]) -> Optional[int]:
-    """Library bitrate may be stored in bps (e.g. 320000) or kbps (320).
-    Normalize to kbps. Returns None when unknown/zero."""
-    if not bitrate:
-        return None
-    try:
-        b = int(bitrate)
-    except (TypeError, ValueError):
-        return None
-    if b <= 0:
-        return None
-    return b // 1000 if b > 4000 else b
-
-
-def classify_track_quality(file_path: str, bitrate: Optional[int]) -> Optional[int]:
-    """Rank a file by format + bitrate. Returns a RANK_* value, or None when it
-    can't be judged (a lossy file with no known bitrate)."""
-    ext = os.path.splitext(file_path or '')[1].lower()
-    kbps = _normalize_kbps(bitrate)
-
-    # Lossless containers: a real lossless file has a high bitrate; a low one is a
-    # lossy stream in a lossless container — but flagging that is the Fake Lossless
-    # Detector's job, so here we treat the lossless *format* as top rank.
-    if ext in {'.flac', '.alac', '.ape', '.wav', '.aiff', '.aif', '.dsf', '.dff'}:
-        return RANK_LOSSLESS
-    # .m4a / lossy: judge purely by bitrate. A lossless-scale bitrate (ALAC in m4a,
-    # or a mislabeled lossless) ranks as lossless.
-    if kbps is None:
-        return None
-    if kbps >= 800:
-        return RANK_LOSSLESS
-    if kbps >= 280:
-        return RANK_320
-    if kbps >= 200:
-        return RANK_256
-    if kbps >= 150:
-        return RANK_192
-    return RANK_BELOW
-
-
-def preferred_quality_floor(quality_profile: Dict[str, Any]) -> Optional[int]:
-    """The lowest acceptable quality rank from the profile's ENABLED buckets — the
-    floor a track must meet. Returns None when nothing is enabled (caller should
-    then flag nothing, rather than flagging everything)."""
-    qualities = (quality_profile or {}).get('qualities', {}) or {}
-    enabled_ranks = [
-        _PROFILE_KEY_RANK[key]
-        for key, cfg in qualities.items()
-        if isinstance(cfg, dict) and cfg.get('enabled') and key in _PROFILE_KEY_RANK
-    ]
-    if not enabled_ranks:
-        return None
-    return min(enabled_ranks)
-
-
-def meets_preferred_quality(file_path: str, bitrate: Optional[int],
-                            quality_profile: Dict[str, Any]) -> bool:
-    """Pure decision: does this track already meet the user's preferred quality?
-
-    A track meets quality when its format+bitrate rank is at least the profile's
-    floor (the worst quality the user still accepts). This honors a profile that
-    enables, say, FLAC *and* MP3-320: a 320 kbps MP3 passes, a 128 kbps MP3 does
-    not. With nothing enabled, everything passes (we never flag the whole library
-    on an empty profile)."""
-    floor = preferred_quality_floor(quality_profile)
-    if floor is None:
-        return True
-
-    file_rank = classify_track_quality(file_path, bitrate)
-    if file_rank is None:
-        # Lossy file with unknown bitrate: only judgeable when the floor is
-        # lossless (then any lossy file is below it). Otherwise don't flag.
-        ext = os.path.splitext(file_path or '')[1].lower()
-        if floor == RANK_LOSSLESS and ext not in LOSSLESS_EXTENSIONS:
-            return False
-        return True
-
-    return file_rank >= floor
-
-
-def _rank_label(rank: Optional[int]) -> str:
-    return {
-        RANK_LOSSLESS: 'Lossless', RANK_320: 'MP3 320', RANK_256: 'MP3 256',
-        RANK_192: 'MP3 192', RANK_BELOW: 'low bitrate',
-    }.get(rank, 'unknown')
 
 
 def _norm_isrc(value: Any) -> str:
