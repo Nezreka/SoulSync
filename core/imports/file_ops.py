@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import re
@@ -102,6 +103,41 @@ def cleanup_slskd_dedup_siblings(source_path) -> List[str]:
     return deleted
 
 
+def _atomic_cross_device_move(src: Path, dst: Path) -> None:
+    """Move ``src`` to ``dst`` across filesystems WITHOUT ever exposing a partial file at
+    the final path.
+
+    Copies into a hidden temp sibling of ``dst`` (same filesystem), fsyncs, then does an
+    atomic ``os.replace`` into place, then deletes ``src``. A media-server file watcher
+    (Jellyfin/Plex real-time monitoring) therefore only ever indexes the COMPLETE file —
+    an incremental in-place copy was what Jellyfin could catch mid-write and cache with
+    null/incomplete metadata (tracks landing with no disc). Cleans up the temp on failure.
+    """
+    src, dst = Path(src), Path(dst)
+    tmp = dst.parent / f".{dst.name}.ssync-tmp"
+    try:
+        with open(src, "rb") as f_src, open(tmp, "wb") as f_dst:
+            shutil.copyfileobj(f_src, f_dst)
+            f_dst.flush()
+            os.fsync(f_dst.fileno())
+        try:
+            shutil.copystat(str(src), str(tmp))   # preserve mtime/permissions (copy2-like)
+        except OSError:
+            pass
+        os.replace(str(tmp), str(dst))            # atomic within dst's filesystem
+    except Exception:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+        raise
+    try:
+        src.unlink()
+    except OSError:
+        logger.info(f"Could not delete source after cross-device move (may be owned by another process): {src}")
+
+
 def safe_move_file(src, dst):
     """Move a file safely across filesystems."""
     src = Path(src)
@@ -129,7 +165,13 @@ def safe_move_file(src, dst):
                 break
 
     try:
-        shutil.move(str(src), str(dst))
+        # Same-filesystem move: an atomic rename that also overwrites dst. A media-server
+        # watcher (Jellyfin/Plex real-time monitoring) therefore never sees a partial file
+        # at the final name. Cross-filesystem raises EXDEV (some network mounts raise
+        # EPERM/EACCES) and we copy atomically below instead of letting the move write the
+        # destination incrementally — the partial-file-at-final-name is what caused tracks
+        # to land in Jellyfin with null/incomplete metadata (no disc).
+        os.replace(str(src), str(dst))
         return
     except FileNotFoundError:
         if dst.exists():
@@ -137,8 +179,6 @@ def safe_move_file(src, dst):
             return
         raise
     except (OSError, PermissionError) as e:
-        error_msg = str(e).lower()
-
         if dst.exists() and dst.stat().st_size > 0:
             logger.warning(f"Move raised {type(e).__name__} but destination exists, treating as success: {e}")
             try:
@@ -147,23 +187,21 @@ def safe_move_file(src, dst):
                 logger.info(f"Could not delete source file (may be owned by another process): {src}")
             return
 
-        if "cross-device" in error_msg or "operation not permitted" in error_msg or "permission denied" in error_msg:
-            logger.warning(f"Cross-device move detected, using fallback copy method: {e}")
+        error_msg = str(e).lower()
+        cross_device = (
+            getattr(e, "errno", None) in (errno.EXDEV, errno.EPERM, errno.EACCES)
+            or "cross-device" in error_msg
+            or "operation not permitted" in error_msg
+            or "permission denied" in error_msg
+        )
+        if cross_device:
+            logger.warning(f"Cross-device move, using atomic copy+rename: {e}")
             try:
-                with open(src, "rb") as f_src:
-                    with open(dst, "wb") as f_dst:
-                        shutil.copyfileobj(f_src, f_dst)
-                        f_dst.flush()
-                        os.fsync(f_dst.fileno())
-
-                try:
-                    src.unlink()
-                except PermissionError:
-                    logger.info(f"Could not delete source file (may be owned by another process): {src}")
-                logger.info(f"Successfully moved file using fallback method: {src} -> {dst}")
+                _atomic_cross_device_move(src, dst)
+                logger.info(f"Successfully moved file atomically across filesystems: {src} -> {dst}")
                 return
             except Exception as fallback_error:
-                logger.error(f"Fallback copy also failed: {fallback_error}")
+                logger.error(f"Atomic cross-device move failed: {fallback_error}")
                 raise
         raise
 

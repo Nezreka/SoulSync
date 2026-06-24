@@ -741,7 +741,9 @@ class iTunesClient:
         if cached and cached.get('items'):
             return cached
 
-        results = self._lookup(id=album_id, entity='song')
+        # #918: the iTunes Lookup API returns only 50 related entities unless `limit` is
+        # passed (max 200), so albums >50 tracks were truncated in the download window.
+        results = self._lookup(id=album_id, entity='song', limit=200)
 
         if not results:
             return None
@@ -763,7 +765,7 @@ class iTunesClient:
                 try:
                     fb_results = self.session.get(
                         self.LOOKUP_URL,
-                        params={'id': album_id, 'entity': 'song', 'country': fallback},
+                        params={'id': album_id, 'entity': 'song', 'country': fallback, 'limit': 200},  # #918
                         timeout=15
                     )
                     if fb_results.status_code == 200:

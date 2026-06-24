@@ -301,6 +301,7 @@ class MusicDatabase:
                     file_path TEXT,
                     bitrate INTEGER,
                     file_size INTEGER,  -- bytes; populated by deep scan from media-server API
+                    year INTEGER,  -- per-track release year from file tags (albums.year is canonical)
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (album_id) REFERENCES albums (id) ON DELETE CASCADE,
@@ -1156,6 +1157,14 @@ class MusicDatabase:
             if track_cols and 'file_size' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN file_size INTEGER")
                 logger.info("Repaired missing file_size column on tracks table")
+            # #910 — Full Refresh writes a per-track `year` (from file tags), but the column
+            # was only ever in the live INSERT, never in CREATE TABLE or a migration. On any
+            # DB that predates this fix, every Full Refresh track insert hard-fails with
+            # "table tracks has no column named year". Additive + nullable; nothing reads it
+            # except the writer, so this is safe to backfill on every existing DB.
+            if track_cols and 'year' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN year INTEGER")
+                logger.info("Repaired missing year column on tracks table (#910)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}

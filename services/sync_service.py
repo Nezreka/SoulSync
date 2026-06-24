@@ -37,6 +37,23 @@ def _plex_track_file(plex_track) -> str:
         return ''
 
 
+def _dedupe_by_rating_key(tracks: list) -> list:
+    """Drop repeated media-server tracks (same ratingKey), preserving first-seen
+    order. The same library track can match more than one source entry (or appear
+    twice in the source), and pushing the dupes made reconcile/replace re-add the
+    track every sync — part of the #905 doubling. The sync dispatch MUST send this
+    deduped list, not the raw matched list."""
+    seen = set()
+    out = []
+    for t in tracks:
+        key = getattr(t, 'ratingKey', None)
+        if key is None or key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out
+
+
 def reresolve_manual_match_live_plex(cache_db, media_client, m, *, profile_id,
                                      source_track_id, server_source):
     """Re-resolve a manual match whose stored Plex ratingKey went stale.
@@ -438,20 +455,15 @@ class PlaylistSyncService:
                     f"{server_type.title()} objects with ratingKeys"
                 )
 
-                # Deduplicate by ratingKey — media servers silently drop duplicates
-                seen_keys = set()
-                deduped_tracks = []
-                for t in valid_tracks:
-                    if t.ratingKey not in seen_keys:
-                        seen_keys.add(t.ratingKey)
-                        deduped_tracks.append(t)
-                if len(deduped_tracks) < len(valid_tracks):
+                # Deduplicate by ratingKey — media servers silently drop duplicates,
+                # and pushing dupes made every sync re-add the same track (#905). The
+                # dispatch below sends THIS deduped list, never the raw `valid_tracks`.
+                plex_tracks = _dedupe_by_rating_key(valid_tracks)
+                if len(plex_tracks) < len(valid_tracks):
                     logger.info(
-                        f"Deduplicated {len(valid_tracks) - len(deduped_tracks)} duplicate ratingKeys "
-                        f"({len(valid_tracks)} → {len(deduped_tracks)} tracks)"
+                        f"Deduplicated {len(valid_tracks) - len(plex_tracks)} duplicate ratingKeys "
+                        f"({len(valid_tracks)} → {len(plex_tracks)} tracks)"
                     )
-
-                plex_tracks = deduped_tracks
 
                 if not media_client:
                     logger.error("No active media client available for playlist sync")
@@ -462,11 +474,11 @@ class PlaylistSyncService:
                         f"(mode: {sync_mode})"
                     )
                     if sync_mode == 'append':
-                        sync_success = media_client.append_to_playlist(playlist.name, valid_tracks)
+                        sync_success = media_client.append_to_playlist(playlist.name, plex_tracks)
                     elif sync_mode == 'reconcile':
-                        sync_success = self._reconcile_or_replace(media_client, playlist.name, valid_tracks)
+                        sync_success = self._reconcile_or_replace(media_client, playlist.name, plex_tracks)
                     else:
-                        sync_success = media_client.update_playlist(playlist.name, valid_tracks)
+                        sync_success = media_client.update_playlist(playlist.name, plex_tracks)
 
                 synced_tracks = len(plex_tracks) if sync_success else 0
                 # Not in library (for wishlist), not "total minus playlist size".

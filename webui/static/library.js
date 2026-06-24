@@ -3964,23 +3964,60 @@ async function ensureEnhancedAlbumCanonicalTracks(album) {
     }
 }
 
+// Loose title key for owned<->canonical matching. Mirrors the Reorganize
+// matcher (core.library_reorganize._normalize_title), which already maps these
+// same multi-disc tracks correctly: drop only the featured-artist credit, then
+// treat every other separator (brackets, dashes, slashes, punctuation) as
+// whitespace — so "X (Main Theme)" and "X - Main Theme" collapse to the same key
+// while "(feat. Y)" is removed. Keeping bracket CONTENT (not deleting it) is what
+// makes editions line up.
+function _normTitleForMatch(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[([]\s*(?:feat|ft|featuring)\b[^)\]]*[)\]]/g, ' ')  // (feat. Y) / [ft Y]
+        .replace(/\s+(?:feat|ft|featuring)\b\.?\s.*$/g, ' ')          // trailing  feat. Y …
+        .replace(/[^a-z0-9]+/g, ' ')                                  // all other separators -> space (KEEP content)
+        .trim();
+}
+
 function _deriveEnhancedMissingTracks(album, canonicalTracks) {
-    const occupiedSlots = new Set();
-    (album.tracks || []).forEach(track => {
+    // #916: multi-disc albums store disc_number = 1 for EVERY track in the library
+    // (the scanner doesn't split discs), so a strict disc:track slot match flags every
+    // canonical disc-2+ track as missing. Match each canonical track to an owned track
+    // by slot FIRST, then fall back to title — consuming each owned track once so genuine
+    // missings and duplicate titles still count correctly.
+    const owned = (album.tracks || []).map(t => ({
+        slot: _trackSlotKey(t),
+        title: _normTitleForMatch(t.title || t.name),
+        used: false,
+    }));
+    const slotIndex = new Map();
+    owned.forEach((o, i) => { if (o.slot !== '1:0' && !slotIndex.has(o.slot)) slotIndex.set(o.slot, i); });
+
+    const missing = [];
+    (canonicalTracks || []).forEach(track => {
         const key = _trackSlotKey(track);
-        if (key !== '1:0') occupiedSlots.add(key);
-    });
-    return (canonicalTracks || [])
-        .map(track => ({
+        const normalized = _normalizeExpectedMissingTrack(track, album);
+        if (key === '1:0' || !normalized._hasActionableContext) return;
+
+        // 1) exact disc:track slot
+        const si = slotIndex.get(key);
+        if (si != null && !owned[si].used) { owned[si].used = true; return; }
+
+        // 2) fallback: title vs any UNUSED owned track (handles the disc_number=1 collapse)
+        const nt = _normTitleForMatch(track.name || track.title);
+        if (nt) {
+            const m = owned.find(o => !o.used && o.title === nt);
+            if (m) { m.used = true; return; }
+        }
+
+        missing.push({
             ...track,
             name: track.name || track.title,
             duration_ms: track.duration_ms || track.duration || 0,
-        }))
-        .filter(track => {
-            const key = _trackSlotKey(track);
-            const normalized = _normalizeExpectedMissingTrack(track, album);
-            return key !== '1:0' && normalized._hasActionableContext && !occupiedSlots.has(key);
         });
+    });
+    return missing;
 }
 
 function _getEnhancedAlbumTrackRows(album) {
@@ -5416,43 +5453,80 @@ function _pollRedownloadProgress(taskId, overlay) {
 async function redownloadLibraryAlbum(album, artistName, btn) {
     const albumName = album.title || '';
     const spotifyAlbumId = album.spotify_album_id || '';
+    const itunesAlbumId = album.itunes_album_id || '';
+    // #911 — the album's CANONICAL source (the same one the Enhanced view tags + displays it as)
+    // wins. Redownload must pull THAT exact edition, not a fresh search that can resolve to a
+    // different one (issue: matched the 66-track 'Original Soundtrack Collection', a search got
+    // the 19-track 'Volume 1'). _getEnhancedAlbumCanonicalSource is the single source of truth
+    // for which source identifies this album, across spotify/deezer/itunes/musicbrainz/…
+    const canonical = _getEnhancedAlbumCanonicalSource(album);
 
-    if (!spotifyAlbumId && !albumName) {
+    if (!canonical && !spotifyAlbumId && !itunesAlbumId && !albumName) {
         showToast('No album ID or name available for redownload', 'warning');
         return;
     }
+
+    // Fetch a specific album edition by its source id (the Spotify/iTunes endpoints both return
+    // a Spotify-shaped payload, so downstream handling is identical).
+    const fetchAlbumBySource = (source, id, name, artist) => {
+        const params = new URLSearchParams({ name: name || albumName, artist: artist || artistName || '' });
+        const base = source === 'itunes' ? '/api/itunes/album/' : '/api/spotify/album/';
+        return fetch(`${base}${encodeURIComponent(id)}?${params}`);
+    };
 
     const origText = btn ? btn.innerHTML : '';
     try {
         if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
 
-        let response;
-        if (spotifyAlbumId) {
-            const params = new URLSearchParams({ name: albumName, artist: artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(spotifyAlbumId)}?${params}`);
-        }
+        let albumData = null;
 
-        if (!response || !response.ok) {
-            const query = `${artistName || ''} ${albumName}`.trim();
-            const searchResp = await fetch('/api/enhanced-search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query })
-            });
-            if (!searchResp.ok) throw new Error('Album search failed');
-            const searchData = await searchResp.json();
-            const found = searchData.spotify_albums?.[0] || searchData.itunes_albums?.[0];
-            if (!found || !found.id) {
-                showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
-                return;
+        // 1) Primary: the canonical tagged source (any source), via the SAME
+        //    /api/album/<id>/tracks endpoint the Enhanced view uses for its canonical tracklist —
+        //    so a redownload is always the album the user is actually looking at.
+        if (canonical) {
+            const params = new URLSearchParams({ name: albumName, artist: artistName || '', source: canonical.source });
+            const r = await fetch(`/api/album/${encodeURIComponent(canonical.id)}/tracks?${params}`);
+            if (r.ok) {
+                const data = await r.json();
+                if (data && data.success && Array.isArray(data.tracks) && data.tracks.length) {
+                    albumData = { ...data.album, tracks: data.tracks };   // normalize to {…, tracks:[]}
+                }
             }
-            const params = new URLSearchParams({ name: found.name || albumName, artist: found.artist || artistName || '' });
-            response = await fetch(`/api/spotify/album/${encodeURIComponent(found.id)}?${params}`);
         }
 
-        if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+        // 2) Fallback: the stored spotify/iTunes id, then a last-resort search.
+        if (!albumData) {
+            let response;
+            if (spotifyAlbumId) {
+                response = await fetchAlbumBySource('spotify', spotifyAlbumId);
+            } else if (itunesAlbumId) {
+                response = await fetchAlbumBySource('itunes', itunesAlbumId);
+            }
 
-        const albumData = await response.json();
+            if (!response || !response.ok) {
+                const query = `${artistName || ''} ${albumName}`.trim();
+                const searchResp = await fetch('/api/enhanced-search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query })
+                });
+                if (!searchResp.ok) throw new Error('Album search failed');
+                const searchData = await searchResp.json();
+                const spotHit = searchData.spotify_albums?.[0];
+                const found = spotHit || searchData.itunes_albums?.[0];
+                if (!found || !found.id) {
+                    showToast(`Could not find "${albumName}" by ${artistName || 'unknown'}`, 'warning');
+                    return;
+                }
+                // Fetch from the MATCHING source endpoint — the old fallback always hit Spotify,
+                // which is wrong for an iTunes search hit.
+                response = await fetchAlbumBySource(spotHit ? 'spotify' : 'itunes', found.id, found.name, found.artist);
+            }
+
+            if (!response.ok) throw new Error(`Failed to load album: ${response.status}`);
+            albumData = await response.json();
+        }
+
         if (!albumData || !albumData.tracks || albumData.tracks.length === 0) {
             showToast(`No tracks found for "${albumName}"`, 'warning');
             return;

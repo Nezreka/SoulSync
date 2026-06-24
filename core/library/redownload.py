@@ -16,6 +16,7 @@ from core.runtime_state import (
     download_tasks,
     tasks_lock,
 )
+from core.metadata.album_tracks import get_album_for_source
 from core.metadata.registry import (
     get_deezer_client,
     get_itunes_client,
@@ -24,6 +25,27 @@ from core.metadata.registry import (
 from database.music_database import get_database
 
 logger = logging.getLogger(__name__)
+
+
+def _album_data_from_source(full: dict, album_id: str, fallback_name: str) -> dict:
+    """Build the redownload `album_data` from a primary-source get_album result (#915).
+
+    Mirrors the Spotify branch's album_data shape so iTunes/Deezer redownloads carry the
+    real release_date / album_type / total_tracks — instead of a lean {'name': ...} that
+    drops the $year and forces a manual reorganize afterwards."""
+    images = full.get('images') or []
+    image_url = full.get('image_url') or ''
+    if not image_url and images and isinstance(images[0], dict):
+        image_url = images[0].get('url', '')
+    return {
+        'id': str(full.get('id') or album_id),
+        'name': full.get('name') or fallback_name,
+        'release_date': full.get('release_date', ''),
+        'album_type': full.get('album_type', 'album'),
+        'total_tracks': full.get('total_tracks', 0),
+        'images': images,
+        'image_url': image_url,
+    }
 
 
 def _get_itunes_client():
@@ -141,12 +163,26 @@ def redownload_start(track_id):
                         'images': album_images,
                         'image_url': album_images[0]['url'] if album_images else '',
                     }
-            elif meta_source == 'itunes':
-                track_number = full_track_details.get('trackNumber')
-                disc_number = full_track_details.get('discNumber', 1)
-            elif meta_source == 'deezer':
-                track_number = full_track_details.get('track_position')
-                disc_number = full_track_details.get('disk_number', 1)
+            elif meta_source in ('itunes', 'deezer'):
+                # #915: parity with the Spotify branch + Reorganize — pull the full album from
+                # the primary source so album_data carries release_date/album_type/total_tracks
+                # (was lean {'name': ...}, which dropped the $year on iTunes/Deezer redownloads).
+                if meta_source == 'itunes':
+                    track_number = full_track_details.get('trackNumber')
+                    disc_number = full_track_details.get('discNumber', 1)
+                    _alb_id = full_track_details.get('collectionId')
+                else:
+                    track_number = full_track_details.get('track_position')
+                    disc_number = full_track_details.get('disk_number', 1)
+                    _alb_id = (full_track_details.get('album') or {}).get('id')
+                if _alb_id:
+                    try:
+                        _full_album = get_album_for_source(meta_source, str(_alb_id))
+                    except Exception as _alb_err:  # noqa: BLE001 — never let metadata break redownload
+                        logger.debug("[Redownload] %s album fetch failed: %s", meta_source, _alb_err)
+                        _full_album = None
+                    if isinstance(_full_album, dict):
+                        album_data = _album_data_from_source(_full_album, str(_alb_id), metadata.get('album', ''))
 
         track_data = {
             'id': meta_id,

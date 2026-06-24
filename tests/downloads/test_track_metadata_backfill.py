@@ -507,5 +507,73 @@ def test_api_called_at_most_once_per_invocation():
     assert client.get_track_details.call_count == 1
 
 
+# ── #915: source-aware album-context backfill (parity with Reorganize/Enrich) ──
+from core.downloads.track_metadata_backfill import backfill_album_context_from_source  # noqa: E402
+
+
+def _lean_ctx(album_id="itunes-123"):
+    return {"id": album_id, "name": "Big OST", "release_date": "", "total_tracks": 0, "album_type": "album"}
+
+
+def _itunes_album(**over):
+    base = {"id": "itunes-123", "name": "Big OST", "release_date": "2024-04-17",
+            "total_tracks": 70, "album_type": "album"}
+    base.update(over)
+    return base
+
+
+def test_backfill_hydrates_lean_context_from_primary_source():
+    ctx = _lean_ctx()
+    calls = []
+
+    def get_album(source, album_id):
+        calls.append((source, album_id))
+        return _itunes_album()
+
+    assert backfill_album_context_from_source(ctx, "itunes", get_album) is True
+    assert ctx["release_date"] == "2024-04-17"   # real date, not YYYY-01-01
+    assert ctx["total_tracks"] == 70
+    assert calls == [("itunes", "itunes-123")]   # queried the PRIMARY source with the album id
+
+
+def test_backfill_noop_when_context_already_complete():
+    ctx = {"id": "itunes-123", "release_date": "2024-04-17", "total_tracks": 70, "album_type": "album"}
+    called = []
+    backfill_album_context_from_source(ctx, "itunes", lambda *a: called.append(a))
+    assert called == []                          # complete -> no fetch
+    assert ctx["release_date"] == "2024-04-17"
+
+
+def test_backfill_noop_for_spotify_primary():
+    # Spotify is covered by hydrate_download_metadata's get_track_details path.
+    called = []
+    assert backfill_album_context_from_source(_lean_ctx(), "spotify", lambda *a: called.append(a)) is False
+    assert called == []
+
+
+def test_backfill_noop_for_sentinel_album_id():
+    called = []
+    for sentinel in ("explicit_album", "from_sync_modal", ""):
+        backfill_album_context_from_source(_lean_ctx(sentinel), "itunes", lambda *a: called.append(a))
+    assert called == []                          # no real id -> never queries
+
+
+def test_backfill_leaves_context_lean_when_source_returns_nothing():
+    ctx = _lean_ctx()
+    backfill_album_context_from_source(ctx, "itunes", lambda *a: None)
+    assert ctx["release_date"] == ""             # still lean, but no crash
+
+
+def test_backfill_swallows_source_errors():
+    ctx = _lean_ctx()
+
+    def boom(*_a):
+        raise RuntimeError("itunes down")
+
+    # Must not raise — a backfill failure cannot break a download.
+    assert backfill_album_context_from_source(ctx, "itunes", boom) is False
+    assert ctx["release_date"] == ""
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
