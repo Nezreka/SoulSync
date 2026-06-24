@@ -476,25 +476,26 @@ class QualityUpgradeJob(RepairJob):
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'scope': 'watchlist', 'min_confidence': 0.7, 'deep_audio_verify': False, 'require_top_target': False}
-    setting_options = {'scope': ['watchlist', 'all'], 'deep_audio_verify': [True, False], 'require_top_target': [True, False]}
+    default_settings = {'scope': 'all', 'min_confidence': 0.7, 'deep_audio_verify': False, 'require_top_target': False}
+    setting_options = {'scope': ['all', 'watchlist'], 'deep_audio_verify': [True, False], 'require_top_target': [True, False]}
     auto_fix = False
 
     def _get_settings(self, context: JobContext) -> Dict[str, Any]:
-        cfg = context.config_manager
-        scope = 'watchlist'
-        min_conf = 0.7
-        deep_verify = False
-        require_top = False
-        if cfg:
-            scope = cfg.get(self.get_config_key('settings.scope'), 'watchlist') or 'watchlist'
+        merged = dict(self.default_settings)
+        if context.config_manager:
             try:
-                min_conf = float(cfg.get(self.get_config_key('settings.min_confidence'), 0.7))
-            except (TypeError, ValueError):
-                min_conf = 0.7
-            deep_verify = cfg.get(self.get_config_key('settings.deep_audio_verify'), False) is True
-            require_top = cfg.get(self.get_config_key('settings.require_top_target'), False) is True
-        return {'scope': scope, 'min_confidence': min_conf, 'deep_audio_verify': deep_verify, 'require_top_target': require_top}
+                cfg = context.config_manager.get(f'repair.jobs.{self.job_id}.settings', {})
+                if isinstance(cfg, dict):
+                    merged.update(cfg)
+            except Exception as e:
+                logger.debug("settings read failed: %s", e)
+        try:
+            merged['min_confidence'] = float(merged.get('min_confidence', 0.7))
+        except (TypeError, ValueError):
+            merged['min_confidence'] = 0.7
+        merged['deep_audio_verify'] = merged.get('deep_audio_verify') is True
+        merged['require_top_target'] = merged.get('require_top_target') is True
+        return merged
 
     def _load_tracks(self, db: Any, scope: str) -> List[dict]:
         conn = db._get_connection()
