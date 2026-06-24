@@ -8907,18 +8907,36 @@ class MusicDatabase:
             {"label": "MP3 256kbps", "format": "mp3", "min_bitrate": 256},
             {"label": "MP3 192kbps", "format": "mp3", "min_bitrate": 192},
         ]
+        # Legacy v2 ``qualities`` dict carried alongside ranked_targets for
+        # backwards compat — read by the settings UI and the #886 AAC opt-in
+        # toggle. AAC ships OFF in every preset; its priority sits it above MP3
+        # but below FLAC (space_saver puts it at 0.5, still above its MP3 tiers).
+        def _quals(*, flac_en, flac_prio, mp3_320_en, mp3_256_en, mp3_192_en,
+                   mp3_320_prio=2, mp3_256_prio=3, mp3_192_prio=4, aac_prio=1.5):
+            return {
+                "flac":    {"enabled": flac_en, "min_kbps": 500, "max_kbps": 10000, "priority": flac_prio, "bit_depth": "any"},
+                "mp3_320": {"enabled": mp3_320_en, "min_kbps": 280, "max_kbps": 500, "priority": mp3_320_prio},
+                "mp3_256": {"enabled": mp3_256_en, "min_kbps": 200, "max_kbps": 400, "priority": mp3_256_prio},
+                "mp3_192": {"enabled": mp3_192_en, "min_kbps": 150, "max_kbps": 300, "priority": mp3_192_prio},
+                "aac":     {"enabled": False, "min_kbps": 128, "max_kbps": 400, "priority": aac_prio},
+            }
+
         presets = {
             "audiophile": {
                 "version": 3, "preset": "audiophile", "fallback_enabled": False,
                 "ranked_targets": _FLAC_24BIT_TARGETS,
+                "qualities": _quals(flac_en=True, flac_prio=1, mp3_320_en=False, mp3_256_en=False, mp3_192_en=False),
             },
             "balanced": {
                 "version": 3, "preset": "balanced", "fallback_enabled": True,
                 "ranked_targets": _FLAC_HI_RES_TARGETS + _MP3_TARGETS,
+                "qualities": _quals(flac_en=True, flac_prio=1, mp3_320_en=True, mp3_256_en=True, mp3_192_en=False),
             },
             "space_saver": {
                 "version": 3, "preset": "space_saver", "fallback_enabled": True,
                 "ranked_targets": _MP3_TARGETS,
+                "qualities": _quals(flac_en=False, flac_prio=4, mp3_320_en=True, mp3_256_en=True, mp3_192_en=True,
+                                    mp3_320_prio=1, mp3_256_prio=2, mp3_192_prio=3, aac_prio=0.5),
             },
         }
 
