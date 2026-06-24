@@ -178,14 +178,14 @@ def _norm_isrc(value: Any) -> str:
     return str(value).upper().replace('-', '').replace(' ', '').strip()
 
 
-def _read_file_ids(file_path: str) -> Dict[str, str]:
+def _read_file_ids(file_path: str, resolved_path: Optional[str] = None) -> Dict[str, str]:
     """Read the identifiers enrichment embedded in the file's tags.
 
     Enrichment matches every track to the metadata sources and writes the IDs
     (ISRC + per-source track IDs) into the file — so an already-enriched track
     carries its exact identity. Returns a dict with a normalized ``isrc`` plus any
     ``<source>_track_id`` tags present; empty dict when unreadable / not enriched."""
-    resolved = resolve_library_file_path(file_path) if file_path else None
+    resolved = resolved_path or (resolve_library_file_path(file_path) if file_path else None)
     if not resolved and file_path and os.path.isfile(file_path):
         resolved = file_path
     if not resolved:
@@ -618,8 +618,13 @@ class QualityUpgradeJob(RepairJob):
                 continue
 
             # v3 quality decision — probe the REAL file. Resolve the library path
-            # first (the DB stores a possibly-relative path).
-            resolved_path = resolve_library_file_path(file_path) if file_path else None
+            # first (the DB stores a possibly-relative path). Pass config_manager so
+            # the resolver can find the transfer/music folders and expand relative paths.
+            resolved_path = resolve_library_file_path(
+                file_path,
+                transfer_folder=context.transfer_folder,
+                config_manager=context.config_manager,
+            ) if file_path else None
             if not resolved_path and file_path and os.path.isfile(file_path):
                 resolved_path = file_path
 
@@ -673,7 +678,8 @@ class QualityUpgradeJob(RepairJob):
 
             # Read the identifiers enrichment embedded in the file once (ISRC +
             # per-source track IDs), used by the two most-exact tiers below.
-            file_ids = _read_file_ids(file_path)
+            # Pass resolved_path so the inner resolver doesn't redo the lookup.
+            file_ids = _read_file_ids(file_path, resolved_path=resolved_path)
 
             # Tiered match, best identity first, loosest last:
             #   0. The active source's OWN track ID, embedded in the file by
