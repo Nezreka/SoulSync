@@ -50,6 +50,15 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.quality_upgrade")
 
 
+def _to_bool(val) -> bool:
+    """Coerce a setting value to bool. Handles Python bool, string 'true'/'false', and int."""
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() == 'true'
+    return bool(val) if val is not None else False
+
+
 # Quality ranks — higher is better. Lossless tops everything; lossy tiers fall out
 # of bitrate. 0 means "below the lowest tracked tier / unknown".
 RANK_LOSSLESS = 4
@@ -494,8 +503,8 @@ class QualityUpgradeJob(RepairJob):
             merged['min_confidence'] = float(merged.get('min_confidence', 0.7))
         except (TypeError, ValueError):
             merged['min_confidence'] = 0.7
-        merged['deep_audio_verify'] = merged.get('deep_audio_verify') is True
-        merged['require_top_target'] = merged.get('require_top_target') is True
+        merged['deep_audio_verify'] = _to_bool(merged.get('deep_audio_verify'))
+        merged['require_top_target'] = _to_bool(merged.get('require_top_target'))
         return merged
 
     def _load_tracks(self, db: Any, scope: str) -> List[dict]:

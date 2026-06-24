@@ -297,6 +297,10 @@ class QualityUpgradeScannerJob(RepairJob):
                     merged.update(cfg)
             except Exception as e:
                 logger.debug("settings read failed: %s", e)
+        for key in ('library_tracks_only', 'deep_audio_verify', 'require_top_target'):
+            val = merged.get(key)
+            if not isinstance(val, bool):
+                merged[key] = str(val).lower() == 'true' if val is not None else False
         return merged
 
     def _collect_music_dirs(self, context: JobContext) -> list:
