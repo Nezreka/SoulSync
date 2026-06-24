@@ -1542,7 +1542,7 @@ function _showServerOrder() {
     // Align actions — reorder the server playlist to the source order. Two choices
     // for server-only "extra" tracks. Order-only: never adds the missing tracks
     // (that's the normal sync's job). Supported where reorder is implemented.
-    const canAlign = serverType === 'navidrome' || serverType === 'plex';
+    const canAlign = serverType === 'navidrome' || serverType === 'plex' || serverType === 'jellyfin';
     const alignFoot = canAlign ? `
             <div class="server-order-foot">
                 <div class="server-order-foot-label">Align this playlist to the source order</div>

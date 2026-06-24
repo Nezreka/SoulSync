@@ -19781,7 +19781,7 @@ def server_playlist_align(playlist_id):
 
         active_server = config_manager.get_active_media_server()
         client = media_server_engine.client(active_server) if active_server else None
-        if active_server not in ('navidrome', 'plex') or not client:
+        if active_server not in ('navidrome', 'plex', 'jellyfin') or not client:
             return jsonify({"success": False,
                             "error": "Align isn't supported on this server yet"}), 400
 
@@ -19789,8 +19789,10 @@ def server_playlist_align(playlist_id):
         if active_server == 'navidrome':
             current_tracks = client.get_playlist_tracks(playlist_id) or []
             current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
-        else:  # plex
+        elif active_server == 'plex':
             current_ids = client.get_playlist_track_ids(playlist_id, playlist_name)
+        else:  # jellyfin
+            current_ids = client.get_playlist_track_ids(playlist_id)
 
         from core.sync.playlist_edit import plan_align_rewrite
         ordered = plan_align_rewrite(current_ids, matched_ids, keep_extras=keep_extras)
@@ -19800,7 +19802,7 @@ def server_playlist_align(playlist_id):
 
         if active_server == 'navidrome':
             ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
-        else:  # plex — in-place moveItem/removeItems reorder
+        else:  # plex / jellyfin — in-place reorder
             ok = client.reorder_playlist(playlist_id, playlist_name, ordered)
         if not ok:
             return jsonify({"success": False, "error": "Failed to reorder playlist"}), 500
