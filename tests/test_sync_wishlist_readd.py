@@ -100,6 +100,15 @@ def test_refuses_when_no_id_and_no_full_track():
     assert reconstruct_sync_track_data([_tr(0, "")], [], 0) is None
 
 
+def test_refuses_wing_it_stub():
+    # Wing-it fallback stubs have no real metadata; the sync skips them, so must we —
+    # even if a full (stub) track happens to be in tracks_json.
+    trs = [_tr(0, "wing_it_abc123", name="Sami Matar", artist="X")]
+    assert reconstruct_sync_track_data(trs, [], 0) is None
+    stub = {"id": "wing_it_abc123", "name": "Sami Matar", "album": "Sami Matar", "artists": ["X"]}
+    assert reconstruct_sync_track_data(trs, [stub], 0) is None
+
+
 def test_build_map_skips_idless_and_non_dicts():
     m = build_original_tracks_map([_full("a"), {"name": "no id"}, "garbage", None])
     assert set(m.keys()) == {"a"}

@@ -71,6 +71,11 @@ def reconstruct_sync_track_data(
         return None
 
     sid = str(tr.get('source_track_id') or '')
+    # Wing-it fallback stubs have no real metadata (no album/cover) — the live sync
+    # SKIPS them for the wishlist (services/sync_service.py), so the re-add must too,
+    # rather than store a coverless, mis-classified placeholder.
+    if sid.startswith('wing_it_'):
+        return None
 
     # Primary: the exact normalized track the auto-add used.
     if sid:
