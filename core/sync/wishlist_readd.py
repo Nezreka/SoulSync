@@ -35,33 +35,49 @@ def reconstruct_sync_track_data(
     sid = str(tr.get('source_track_id') or '')
     tracks = tracks or []
 
-    # Prefer the full original track: same index if its id matches, else search by id.
-    full = None
+    # Base: the FULL original track (best fidelity — full album object, ids, source,
+    # artists) by index if its id matches, else by id search. Copied so we never
+    # mutate the caller's tracks list.
+    base: Optional[Dict[str, Any]] = None
     if 0 <= track_index < len(tracks):
         cand = tracks[track_index]
         if isinstance(cand, dict) and (not sid or str(cand.get('id') or '') == sid):
-            full = cand
-    if full is None and sid:
-        full = next(
+            base = dict(cand)
+    if base is None and sid:
+        match = next(
             (t for t in tracks if isinstance(t, dict) and str(t.get('id') or '') == sid),
             None,
         )
-    if isinstance(full, dict) and full.get('id'):
-        return full
+        if match is not None:
+            base = dict(match)
 
-    # Fallback: rebuild from the track_result fields (id required).
-    if not sid:
-        return None
-    album: Dict[str, Any] = {'name': tr.get('album') or ''}
-    if tr.get('image_url'):
-        album['images'] = [{'url': tr['image_url']}]
-    return {
-        'id': sid,
-        'name': tr.get('name') or '',
-        'artists': [{'name': tr.get('artist') or ''}],
-        'album': album,
-        'duration_ms': tr.get('duration_ms') or 0,
-    }
+    # No full track in the cache — rebuild a minimal dict from the track_result.
+    if not (isinstance(base, dict) and base.get('id')):
+        if not sid:
+            return None
+        base = {
+            'id': sid,
+            'name': tr.get('name') or '',
+            'artists': [{'name': tr.get('artist') or ''}],
+            'album': {'name': tr.get('album') or ''},
+            'duration_ms': tr.get('duration_ms') or 0,
+        }
+
+    # Ensure the cover carries through. The wishlist display reads
+    # spotify_data.album.images; tracks_json is sometimes stored WITHOUT images, so
+    # backfill from the track_result's image_url (the album art the sync extracted)
+    # whenever the album has none. This is what makes the re-add reach full parity
+    # with the original auto-add's appearance.
+    album = base.get('album')
+    if not isinstance(album, dict):
+        album = {'name': base.get('name', '')}
+    else:
+        album = dict(album)
+    img = tr.get('image_url')
+    if img and not album.get('images'):
+        album['images'] = [{'url': img}]
+    base['album'] = album
+    return base
 
 
 __all__ = ["reconstruct_sync_track_data"]
