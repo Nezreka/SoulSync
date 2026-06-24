@@ -7640,6 +7640,17 @@ def approve_quarantine_item(entry_id):
                 _t = download_tasks.get(_task_id)
                 if isinstance(_t, dict):
                     _batch_id = _t.get('batch_id')
+        else:
+            # Manager-tab approve: no task_id in the request. Find the task that
+            # owns this quarantine entry so the re-import marks it completed in
+            # the downloads list without waiting for the batch to finish.
+            with tasks_lock:
+                for _tid, _t in download_tasks.items():
+                    if isinstance(_t, dict) and _t.get('quarantine_entry_id') == entry_id:
+                        _task_id = _tid
+                        _batch_id = _t.get('batch_id')
+                        break
+        if _task_id:
             context['task_id'] = _task_id
             if _batch_id:
                 context['batch_id'] = _batch_id
