@@ -15,6 +15,7 @@
 
     var PAGE_ID = 'video-discover';
     var LIST_URL = '/api/video/discover/list';
+    var NOW_YEAR = new Date().getFullYear();   // for the 'NEW' (just-released) card flag
 
     var state = {
         loaded: false, wired: false, mode: 'shelves',
@@ -48,15 +49,45 @@
     }
 
     // ── the rail stack (personalized + curated + genre + decade) ──────────────
+    // The iconic ranked "Top 10 today" row — daily TMDB trending, rendered with rank numbers.
+    var TOP10 = { title: 'Top 10 Today', q: 'key=trending_today&lang=any', ranked: true };
     var CURATED = [
         { title: 'Trending This Week', q: 'key=trending' },
         { title: 'Popular Movies', q: 'key=popular_movies' },
         { title: 'Popular Shows', q: 'key=popular_shows' },
-        { title: 'In Theaters Now', q: 'key=now_playing' },
-        { title: 'Coming Soon', q: 'key=upcoming_movies' },
         { title: 'On The Air', q: 'key=on_the_air' },
         { title: 'Top Rated Movies', q: 'key=top_movies' },
         { title: 'Top Rated Shows', q: 'key=top_shows' },
+    ];
+    // New & noteworthy — date-windowed "new" + the theatrical pipeline.
+    var NEW_RAILS = [
+        { title: 'New Movies This Month', q: 'kind=movie&release_window=last_30&sort=popularity.desc' },
+        { title: 'Fresh on TV', q: 'kind=show&release_window=last_90&sort=popularity.desc' },
+        { title: 'In Theaters Now', q: 'key=now_playing' },
+        { title: 'Coming Soon', q: 'key=upcoming_movies' },
+    ];
+    // Mood rails — genre AND-combos + a vote floor so they read as a vibe, not a dump.
+    var MOOD_RAILS = [
+        { title: 'Feel-Good Favorites', q: 'kind=movie&genre=35,10751&sort=popularity.desc' },      // Comedy + Family
+        { title: 'Edge of Your Seat', q: 'kind=movie&genre=53&sort=popularity.desc&vote_count_min=300' }, // Thriller
+        { title: 'Mind-Bending', q: 'kind=movie&genre=878,9648&sort=vote_average.desc&vote_count_min=300' }, // Sci-Fi + Mystery
+        { title: 'Date Night', q: 'kind=movie&genre=10749,35&sort=popularity.desc' },                // Romance + Comedy
+        { title: 'Tearjerkers', q: 'kind=movie&genre=18&sort=vote_average.desc&vote_count_min=500' }, // Drama
+        { title: 'Laugh Out Loud', q: 'kind=movie&genre=35&sort=vote_average.desc&vote_count_min=400' }, // Comedy
+    ];
+    // From the studios — TMDB company ids (stable). A wrong/empty one just drops its rail.
+    var STUDIO_RAILS = [
+        { title: 'Pixar', q: 'kind=movie&companies=3&sort=primary_release_date.desc' },
+        { title: 'Studio Ghibli', q: 'kind=movie&companies=10342&sort=vote_average.desc' },
+        { title: 'A24', q: 'kind=movie&companies=41077&sort=primary_release_date.desc' },
+        { title: 'Marvel Studios', q: 'kind=movie&companies=420&sort=primary_release_date.desc' },
+        { title: 'DreamWorks Animation', q: 'kind=movie&companies=521&sort=popularity.desc' },
+    ];
+    // Something different — runtime + family slices.
+    var DIFFERENT_RAILS = [
+        { title: 'Quick Watches (under 90 min)', q: 'kind=movie&max_runtime=90&sort=popularity.desc&vote_count_min=200' },
+        { title: 'Epics (3 hrs+)', q: 'kind=movie&min_runtime=180&sort=vote_average.desc&vote_count_min=200' },
+        { title: 'Family Movie Night', q: 'kind=movie&genre=10751&sort=popularity.desc' },
     ];
     var GENRE_RAILS = ['Action', 'Adventure', 'Comedy', 'Drama', 'Science Fiction',
         'Thriller', 'Horror', 'Animation', 'Fantasy', 'Romance', 'Documentary', 'Crime'];
@@ -120,14 +151,19 @@
             if (id != null && !used['m:' + name.toLowerCase()])
                 genre.push({ title: name, q: 'kind=movie&genre=' + id + '&sort=popularity.desc' });
         });
-        // foryou/collection/taste are also fed by async loaders (loadForYou/loadGaps/loadMoreLike).
+        // foryou/collection/taste are also fed by async loaders (loadForYou/loadGaps/loadMoreLike) —
+        // keep those group ids. Order of this array IS the on-screen order.
         return [
             { id: 'foryou', label: 'For you', rails: foryou },
+            { id: 'topten', label: 'Top 10 today', rails: [TOP10] },
             { id: 'collection', label: 'Finish your collection', rails: [] },
             { id: 'taste', label: 'More of what you like', rails: taste },
+            { id: 'new', label: 'New & noteworthy', rails: NEW_RAILS },
             { id: 'popular', label: 'Trending & popular', rails: CURATED },
+            { id: 'mood', label: 'By mood', rails: MOOD_RAILS },
+            { id: 'studios', label: 'From the studios', rails: STUDIO_RAILS },
             { id: 'genre', label: 'Browse by genre', rails: genre },
-            { id: 'corners', label: 'Hidden gems & more', rails: GEM_RAILS.concat(DECADE_RAILS).concat(FOREIGN_RAILS) },
+            { id: 'different', label: 'Something different', rails: DIFFERENT_RAILS.concat(GEM_RAILS).concat(DECADE_RAILS).concat(FOREIGN_RAILS) },
         ];
     }
 
@@ -144,6 +180,9 @@
             : '<span class="vsr-ribbon vsr-ribbon--preview">Preview</span>';
         var rating = it.rating
             ? '<span class="vsr-rating">★ ' + (Math.round(it.rating * 10) / 10) + '</span>' : '';
+        // 'NEW' flag for un-owned current-year releases — a quick "just out" signal.
+        var fresh = (!owned && it.year && Number(it.year) >= NOW_YEAR)
+            ? '<span class="vsr-new">NEW</span>' : '';
         var source = owned ? 'library' : 'tmdb';
         var id = owned ? it.library_id : it.tmdb_id;
         var href = '/video-detail/' + source + '/' + it.kind + '/' + id;
@@ -158,10 +197,14 @@
         return '<a class="vsr-card' + (owned ? ' vsr-card--owned' : '') + '" href="' + href + '" ' +
             'data-vsr-open="' + it.kind + '" data-vsr-source="' + source + '" data-vsr-id="' + id +
             '" style="--vgm-h:' + hueOf(it.title) + '">' + cb + notInt +
-            '<div class="vsr-poster">' + img + ribbon + rating +
+            '<div class="vsr-poster">' + img + ribbon + rating + fresh +
             '<span class="vsr-peek" aria-hidden="true">i</span></div>' +
             '<div class="vsr-info"><span class="vsr-name" title="' + esc(it.title) + '">' + esc(it.title) +
             '</span><span class="vsr-sub">' + esc(sub) + '</span></div></a>';
+    }
+    // A ranked card (Top 10): a big outlined rank numeral beside the normal poster.
+    function rankedCard(it, rank) {
+        return '<div class="vsr-ranked"><span class="vsr-rank" aria-hidden="true">' + rank + '</span>' + card(it) + '</div>';
     }
     function hydrateGet(root) { if (window.VideoWatchlist) VideoWatchlist.hydrate(root); }
 
@@ -482,7 +525,9 @@
     }
     // A lazy rail (skeleton until scrolled into view, then filled by fillShelf).
     function lazyShelfHtml(sh) {
-        return '<section class="vdsc-shelf" data-vdsc-q="' + esc(sh.q) + '" data-vdsc-title="' + esc(sh.title) + '">' +
+        var rankCls = sh.ranked ? ' vdsc-shelf--ranked' : '';
+        var rankAttr = sh.ranked ? ' data-vdsc-ranked="1"' : '';
+        return '<section class="vdsc-shelf' + rankCls + '"' + rankAttr + ' data-vdsc-q="' + esc(sh.q) + '" data-vdsc-title="' + esc(sh.title) + '">' +
             '<div class="vdsc-shelf-head"><h3 class="vdsc-shelf-title">' + esc(sh.title) + '</h3>' + shelfNav(true) + '</div>' +
             '<div class="vdsc-rail" data-vdsc-rail>' +
                 '<div class="vdsc-skel">' + Array(8).join('<div class="vdsc-skel-card"></div>') + '</div>' +
@@ -557,14 +602,22 @@
         shelf.setAttribute('data-vdsc-loaded', '1');
         var rail = $('[data-vdsc-rail]', shelf);
         var grp = shelf.closest('.vdsc-group');
+        var ranked = shelf.getAttribute('data-vdsc-ranked') === '1';
         // Normal: 2 pages (~40 items). Hiding owned: let the backend page DEEPER and drop
         // owned server-side, so a huge library's rail still fills instead of CSS-hiding to ~nothing.
-        var q = shelf.getAttribute('data-vdsc-q') + (isHideOwned() ? '&hide_owned=1' : '&pages=2');
+        // Ranked (Top 10): a single fixed chart — never paged, capped at 10.
+        var q = shelf.getAttribute('data-vdsc-q') + (ranked ? '' : (isHideOwned() ? '&hide_owned=1' : '&pages=2'));
         cachedFetch(LIST_URL + '?' + q)
             .then(function (d) {
                 var items = (d && d.items) || [];
+                if (ranked) items = items.slice(0, 10);
                 if (!items.length) { shelf.remove(); pruneGroup(grp); return; }   // drop empty shelves
-                if (rail) { rail.innerHTML = items.map(card).join(''); stagger(rail); hydrateGet(rail); }
+                if (rail) {
+                    rail.innerHTML = ranked
+                        ? items.map(function (it, i) { return rankedCard(it, i + 1); }).join('')
+                        : items.map(card).join('');
+                    stagger(rail); hydrateGet(rail);
+                }
                 shelf.classList.add('vdsc-shelf--in');            // reveal (cards cascade via --i)
             })
             .catch(function () { shelf.remove(); pruneGroup(grp); });
