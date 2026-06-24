@@ -22,6 +22,41 @@ from core.quality.model import AudioQuality
 from core.quality.selection import load_profile_targets
 
 
+# ── Extension → format string (source-agnostic) ────────────────────────────
+#
+# The single source of truth for mapping a file extension to the unified
+# AudioQuality ``format``. Every extension-based download source (Soulseek,
+# torrent/usenet file lists, …) classifies through this, so the ranked-target
+# system behaves identically across sources and adding a format here lights it
+# up everywhere at once. Unknown extensions → 'unknown' (never matches a
+# target, so it only ever comes through via the fallback toggle).
+#
+# AIFF/AIF are uncompressed PCM like WAV → the same 'wav' tier. ``.m4a``
+# defaults to 'aac'; an ALAC-in-m4a file can't be told apart by extension
+# alone, so probe_audio_quality corrects it from the real codec post-download.
+_EXTENSION_FORMAT_MAP = {
+    'flac': 'flac',
+    'alac': 'alac',
+    'wav': 'wav', 'wave': 'wav',
+    'aiff': 'wav', 'aif': 'wav', 'aifc': 'wav',
+    'mp3': 'mp3',
+    'm4a': 'aac', 'mp4': 'aac', 'aac': 'aac',
+    'ogg': 'ogg', 'oga': 'ogg',
+    'opus': 'opus',
+    'wma': 'wma',
+}
+
+# Audio extensions worth probing/classifying at all — derived from the map so
+# the allow-list and the classifier never drift apart.
+AUDIO_EXTENSIONS = {f'.{e}' for e in _EXTENSION_FORMAT_MAP}
+
+
+def format_from_extension(ext: str) -> str:
+    """Map a file extension (with or without leading dot) to the unified
+    AudioQuality format string. Unknown → 'unknown'."""
+    return _EXTENSION_FORMAT_MAP.get(str(ext or '').lower().lstrip('.'), 'unknown')
+
+
 # ── Tidal / HiFi (Monochrome is Tidal-backed) ──────────────────────────────
 #
 # Tidal exposes UPPER_SNAKE tier strings (``HI_RES_LOSSLESS``); HiFi's config
