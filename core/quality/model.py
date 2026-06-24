@@ -67,21 +67,33 @@ class AudioQuality:
                 if self.sample_rate < target.min_sample_rate:
                     return False
             else:
-                # No sample-rate info — fall back to kbps heuristic for FLAC.
+                # No sample-rate metadata (common on slskd FLAC). Use the kbps
+                # heuristic when a bitrate is present; otherwise we CANNOT
+                # confirm the spec, so fail the strict target rather than
+                # over-claim it — an unknown-spec FLAC must not outrank a known
+                # 16/44 FLAC under a hi-res target (#896 review #4). It falls to
+                # the plain-flac bucket instead.
                 # 16-bit/44.1 kHz ≈ 1411 kbps; 24-bit/96 kHz ≈ 4608 kbps.
                 if self.format.lower() == 'flac' and self.bitrate:
                     required_kbps = _sample_rate_to_min_kbps(target.min_sample_rate, target.bit_depth or 24)
                     if self.bitrate < required_kbps:
                         return False
+                else:
+                    return False
         if target.bit_depth:
             if self.bit_depth is not None:
                 if self.bit_depth < target.bit_depth:
                     return False
             else:
-                # No bit-depth info — use kbps heuristic.
-                # 16-bit FLAC ≈ ≤1450 kbps; 24-bit starts ~1500 kbps.
-                if self.format.lower() == 'flac' and target.bit_depth == 24:
-                    if self.bitrate and self.bitrate < 1450:
+                # No bit-depth metadata. A hi-res (>=24-bit) target needs proof:
+                # use the kbps heuristic if a bitrate is present, else fail
+                # rather than over-claim. The 16-bit baseline still matches an
+                # unknown-spec FLAC (any FLAC is at least CD quality). #896 review #4.
+                if self.format.lower() == 'flac' and target.bit_depth >= 24:
+                    if self.bitrate:
+                        if self.bitrate < 1450:
+                            return False
+                    else:
                         return False
         return True
 

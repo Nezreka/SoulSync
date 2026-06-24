@@ -58,6 +58,32 @@ def test_format_mismatch_rejected():
     assert AudioQuality('mp3', bitrate=320).matches_target(t) is False
 
 
+# ── metadata-less FLAC must not over-claim a hi-res target (#896 review #4) ─
+
+def test_metadata_less_flac_does_not_overclaim_hires_target():
+    """A FLAC with no sample_rate/bit_depth metadata (common on slskd) must NOT
+    satisfy a strict hi-res target — otherwise it outranks and discards a real
+    16/44 FLAC. Unknown spec fails the high tier, falling to a plain flac bucket."""
+    hires = QualityTarget(format='flac', bit_depth=24, min_sample_rate=192000)
+    assert AudioQuality('flac').matches_target(hires) is False
+
+
+def test_metadata_less_flac_does_not_overclaim_bit_depth_only_hires():
+    """Same guard when the hi-res target constrains only bit depth."""
+    hires = QualityTarget(format='flac', bit_depth=24)
+    assert AudioQuality('flac').matches_target(hires) is False
+
+
+def test_metadata_less_flac_matches_plain_flac_target():
+    """A bare FLAC still matches a plain 'flac (any)' target (the baseline)."""
+    assert AudioQuality('flac').matches_target(QualityTarget(format='flac')) is True
+
+
+def test_metadata_less_flac_matches_16bit_baseline_target():
+    """A bare FLAC satisfies the 16-bit baseline (any FLAC is >= CD quality)."""
+    assert AudioQuality('flac').matches_target(QualityTarget(format='flac', bit_depth=16)) is True
+
+
 # ── v2 -> v3 migration preserves the user's priority order ─────────────────
 
 def test_v2_to_v3_preserves_order_and_maps_fields():
