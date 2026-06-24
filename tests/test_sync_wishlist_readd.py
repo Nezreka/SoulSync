@@ -29,8 +29,35 @@ def test_prefers_full_original_track_by_index():
     trs = [_tr(0, "sp_a"), _tr(1, "sp_b")]
     tracks = [_full("sp_a"), _full("sp_b", name="Other")]
     out = reconstruct_sync_track_data(trs, tracks, 1)
-    assert out is tracks[1]                       # exact original (full album+images)
-    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"
+    assert out["id"] == "sp_b"                            # the full original track
+    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"   # its own art kept
+    assert out is not tracks[1]                          # a copy, not the source entry
+
+
+def test_backfills_album_image_when_full_track_has_none():
+    # THE BUG: tracks_json stored without album.images, but the track_result has the
+    # cover. The re-add must carry the image through (parity with the auto-add).
+    trs = [_tr(0, "sp_a", image_url="http://img/cover250.jpg")]
+    tracks = [_full("sp_a", with_images=False)]           # full data but NO images
+    out = reconstruct_sync_track_data(trs, tracks, 0)
+    assert out["id"] == "sp_a"
+    assert out["album"]["images"] == [{"url": "http://img/cover250.jpg"}]
+
+
+def test_full_track_with_images_is_not_overwritten():
+    # When the cached track already has real album art, keep it (don't downgrade to
+    # the 250px track_result thumb).
+    trs = [_tr(0, "sp_a", image_url="http://img/thumb.jpg")]
+    tracks = [_full("sp_a", with_images=True)]
+    out = reconstruct_sync_track_data(trs, tracks, 0)
+    assert out["album"]["images"][0]["url"] == "http://cdn/cover.jpg"   # original kept
+
+
+def test_does_not_mutate_source_tracks_list():
+    trs = [_tr(0, "sp_a", image_url="http://img/x.jpg")]
+    tracks = [_full("sp_a", with_images=False)]
+    reconstruct_sync_track_data(trs, tracks, 0)
+    assert "images" not in tracks[0]["album"]            # source untouched
 
 
 def test_matches_by_id_when_index_misaligns():
