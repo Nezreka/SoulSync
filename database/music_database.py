@@ -8760,15 +8760,52 @@ class MusicDatabase:
 
         return self._get_default_quality_profile()
 
+    # 24-bit FLAC ladder seeded on migration for users who had a streaming
+    # source on Hi-Res under the old (now removed) per-source quality dropdowns.
+    _HIRES_24BIT_TARGETS = [
+        {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+        {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+        {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+        {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+    ]
+
+    def _had_hires_source_preference(self) -> bool:
+        """True if the user had any streaming source set to a Hi-Res tier under
+        the old per-source quality dropdowns (tidal_download/qobuz/hifi_download
+        .quality = 'hires'|'hires_max'), which #896 removed in favour of the
+        global profile. Used to preserve their intent on migration."""
+        try:
+            from config.settings import config_manager
+        except Exception:
+            return False
+        hires = {'hires', 'hires_max'}
+        for key in ('tidal_download.quality', 'qobuz.quality', 'hifi_download.quality'):
+            try:
+                if str(config_manager.get(key) or '').strip().lower() in hires:
+                    return True
+            except Exception:
+                continue
+        return False
+
     def _migrate_v2_to_v3(self, profile: dict) -> dict:
         """Add ranked_targets to a v2 profile without losing its qualities dict."""
         from core.quality.model import v2_qualities_to_ranked_targets
         profile = dict(profile)
         profile['version'] = 3
         if 'ranked_targets' not in profile:
-            profile['ranked_targets'] = v2_qualities_to_ranked_targets(
-                profile.get('qualities', {})
+            ranked = v2_qualities_to_ranked_targets(profile.get('qualities', {}))
+            # #896 review #5: the per-source quality dropdowns are gone — sources
+            # now derive their tier from this profile. If the user had a source on
+            # Hi-Res, seed 24-bit FLAC targets at the top so they keep Hi-Res
+            # instead of silently dropping to lossless. Skip when the profile
+            # already expresses 24-bit (don't duplicate the ladder).
+            already_24bit = any(
+                t.get('format') == 'flac' and (t.get('bit_depth') or 0) >= 24
+                for t in ranked
             )
+            if not already_24bit and self._had_hires_source_preference():
+                ranked = [dict(t) for t in self._HIRES_24BIT_TARGETS] + ranked
+            profile['ranked_targets'] = ranked
         return profile
 
     def _get_default_quality_profile(self) -> dict:
