@@ -284,6 +284,20 @@ def register_routes(bp):
         if providers and "," in providers:
             providers = providers.replace(",", "|")   # TMDB with_watch_providers OR-join
         sort = request.args.get("sort") or "popularity.desc"
+        # Netflix-class discover extensions (all optional). Comma -> pipe = TMDB OR-join.
+        keywords = (request.args.get("keywords") or "").replace(",", "|") or None
+        companies = (request.args.get("companies") or "").replace(",", "|") or None
+        networks = (request.args.get("networks") or "").replace(",", "|") or None
+        cast = request.args.get("cast") or None
+        crew = request.args.get("crew") or None
+        min_runtime = request.args.get("min_runtime") or None
+        max_runtime = request.args.get("max_runtime") or None
+        certification = request.args.get("certification") or None
+        release_window = request.args.get("release_window") or None
+        try:
+            vote_count_min = int(request.args["vote_count_min"]) if request.args.get("vote_count_min") else None
+        except (TypeError, ValueError):
+            vote_count_min = None
         lang = (request.args.get("lang") or "").strip().lower() or None  # explicit (foreign rail / browse)
         # The Browse-all grid sends `lang=any` to opt OUT of the rail language preference
         # entirely (ad-hoc search shows every language); a real code (en/ko/…) filters to it.
@@ -307,10 +321,16 @@ def register_routes(bp):
         def fetch(p):
             if key == "trending":
                 return eng.trending()
+            if key == "trending_today":
+                return eng.trending(window="day")   # the ranked 'Top 10 today' chart
             if key:
                 return eng.discover_curated(key, page=p)
-            return eng.discover_filter(kind, genre=genre, year=year, decade=decade,
-                                       providers=providers, sort_by=sort, page=p, language=lang)
+            return eng.discover_filter(
+                kind, genre=genre, year=year, decade=decade, providers=providers,
+                sort_by=sort, page=p, language=lang, keywords=keywords, companies=companies,
+                networks=networks, cast=cast, crew=crew, min_runtime=min_runtime,
+                max_runtime=max_runtime, certification=certification,
+                vote_count_min=vote_count_min, release_window=release_window)
 
         try:
             items, seen = [], set()
