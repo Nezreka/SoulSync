@@ -664,7 +664,6 @@ class MusicDatabase:
             """)
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_event_type ON library_history (event_type)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_created_at ON library_history (created_at DESC)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_verification_status ON library_history (verification_status)")
 
             # Migration: add download_source column
             cursor.execute("PRAGMA table_info(library_history)")
@@ -676,6 +675,12 @@ class MusicDatabase:
                 if _col not in lh_cols:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
+
+            # Index on verification_status — MUST come after the ALTER above:
+            # on a fresh DB the base CREATE TABLE has no verification_status
+            # column, so indexing it before the migration adds it raises
+            # "no such column: verification_status" and aborts DB init.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_verification_status ON library_history (verification_status)")
 
             # One-time backfill: derive verification_status for history rows
             # written before the column existed (or by pipeline exits that
