@@ -8824,6 +8824,7 @@ class MusicDatabase:
             "preset": "balanced",
             "fallback_enabled": True,
             "search_mode": "priority",
+            "rank_candidates_by_quality": False,
             "ranked_targets": [
                 {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
                 {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},

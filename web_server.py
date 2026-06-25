@@ -4550,9 +4550,12 @@ def apply_quality_preset(preset_name):
 
         current = db.get_quality_profile()
         preset = dict(db.get_quality_preset(preset_name))
-        # search_mode is a global search strategy, not a per-preset audio setting —
-        # carry the user's current choice across preset switches.
+        # search_mode + rank_candidates_by_quality are global search/ordering
+        # strategies, not per-preset audio settings — carry the user's current
+        # choices across preset switches.
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         success = db.set_quality_profile(preset)
 
         if success:
@@ -4580,6 +4583,8 @@ def reset_quality_preset(preset_name):
         current = db.get_quality_profile()
         preset = dict(db.reset_quality_preset(preset_name))
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         success = db.set_quality_profile(preset)
 
         if success:
