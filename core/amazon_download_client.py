@@ -78,7 +78,10 @@ class AmazonDownloadClient(DownloadSourcePlugin):
         if download_path is None:
             download_path = config_manager.get("soulseek.download_path", "./downloads")
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         self._quality = quality_tier_for_source("amazon", default="flac")
         self._allow_fallback = config_manager.get("amazon_download.allow_fallback", True)

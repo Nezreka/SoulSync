@@ -846,3 +846,19 @@ def test_live_download_a_known_public_track(tmp_dl: Path) -> None:
     assert final_path is not None
     assert os.path.exists(final_path)
     assert os.path.getsize(final_path) > 100 * 1024
+
+
+# ── construction robustness: an uncreatable download path must not crash init ──
+# Regression: the download path is read from config (often a Docker /app path). If
+# mkdir fails (unmounted/misconfigured volume, or running outside the container),
+# the client must warn and continue — NOT raise. An unguarded mkdir made the
+# registry null the whole client, dropping SoundCloud as a source entirely (and
+# failing every orchestrator-soundcloud test outside Docker).
+def test_init_survives_uncreatable_download_path(tmp_path):
+    from core.soundcloud_client import SoundcloudClient
+    blocker = tmp_path / "iam_a_file"
+    blocker.write_text("x")
+    bad_path = str(blocker / "subdir")  # mkdir under a file -> NotADirectoryError (OSError)
+    client = SoundcloudClient(download_path=bad_path)   # must not raise
+    assert client is not None
+    assert str(client.download_path) == bad_path

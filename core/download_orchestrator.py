@@ -143,7 +143,10 @@ class DownloadOrchestrator:
                 continue
             if hasattr(client, 'download_path') and client.download_path != new_path:
                 client.download_path = new_path
-                client.download_path.mkdir(parents=True, exist_ok=True)
+                try:
+                    client.download_path.mkdir(parents=True, exist_ok=True)
+                except OSError as e:
+                    logger.warning(f"Could not verify download path {new_path}: {e}")
                 # YouTube also caches path in yt-dlp opts
                 if hasattr(client, 'download_opts') and 'outtmpl' in client.download_opts:
                     client.download_opts['outtmpl'] = str(new_path / '%(title)s.%(ext)s')
