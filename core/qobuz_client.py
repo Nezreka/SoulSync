@@ -120,7 +120,10 @@ class QobuzClient(DownloadSourcePlugin):
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         logger.info(f"Qobuz client using download path: {self.download_path}")
 
