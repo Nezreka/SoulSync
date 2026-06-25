@@ -5067,7 +5067,6 @@
 
                             <!-- Quality Profile Settings (global — applies to all download sources) -->
                             <div class="settings-group" id="quality-profile-section" data-stg="downloads">
-                                <h3>🎵 Quality Profile</h3>
 
                                 <!-- Presets -->
                                 <div class="quality-presets">
@@ -5086,17 +5085,38 @@
                                             💾 Space Saver
                                         </button>
                                     </div>
-                                    <div class="help-text" style="margin-top:6px">
-                                        Edits you make below are saved <em>per preset</em> — switch away and back and
-                                        your changes are still there. Use
-                                        <a href="#" onclick="resetActiveQualityPreset(); return false;">Reset to defaults</a>
-                                        to restore the selected preset's factory settings.
+                                    <div class="quality-presets-footer">
+                                        <span class="help-text" style="padding:0;border:0;background:none;margin:0;flex:1;">
+                                            Edits below are saved <em>per preset</em> — switch away and back and your
+                                            changes are still there.
+                                        </span>
+                                        <button type="button" class="preset-reset-btn" onclick="resetActiveQualityPreset()"
+                                            title="Restore the selected preset's factory settings">
+                                            <span class="preset-reset-icon">↺</span> Reset to defaults
+                                        </button>
                                     </div>
                                 </div>
 
                                 <!-- Ranked target priority list (v3) -->
                                 <div class="ranked-targets-editor">
-                                    <label class="ranked-targets-label">Quality priority (drag to reorder — 1st = most preferred):</label>
+                                    <div class="setting-row">
+                                        <label class="ranked-targets-label" style="margin:0;">Quality priority (drag to reorder — 1st = most preferred):</label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        <strong>How it works:</strong> Each download source is checked against this list
+                                        top-down. The first target a source can satisfy wins; a source that meets no target
+                                        is skipped for the next one (source priority still decides between sources that can).
+                                        For lossless, bit depth + sample rate decide the match. For MP3/AAC the bitrate is a
+                                        <em>minimum</em> threshold (≥), so VBR and mono files aren't falsely rejected. After
+                                        download the real file is verified against the same list. With fallback off, a track
+                                        is left missing rather than accepting a quality below every target.
+                                        <br><br>
+                                        <strong>Note:</strong> the <em>Downsample hi-res</em> option (under Lossy Copy) also
+                                        bypasses this gate — if off-list files keep slipping through with fallback off, check
+                                        that setting too.
+                                    </div>
                                     <div id="ranked-targets-list" class="ranked-targets-list">
                                         <!-- rows injected by renderRankedTargets() -->
                                     </div>
@@ -5154,45 +5174,82 @@
 
                                 <!-- Search strategy -->
                                 <div class="form-group">
-                                    <label for="quality-search-mode" style="display:block;margin-bottom:4px;font-weight:600;">Search strategy</label>
-                                    <select id="quality-search-mode" style="width:100%;max-width:420px;">
-                                        <option value="priority">Source priority — fastest, stops at first good source</option>
-                                        <option value="best_quality">Best quality — search all sources, pick the highest</option>
+                                    <div class="setting-row" style="margin-bottom:4px;">
+                                        <label for="quality-search-mode" style="font-weight:600;">Search strategy</label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                    </div>
+                                    <select id="quality-search-mode" style="width:100%;max-width:420px;" onchange="onSearchModeChange()">
+                                        <option value="priority">Source priority — fast (use the first source that has it)</option>
+                                        <option value="best_quality">Best quality — thorough (check every source, take the best)</option>
                                     </select>
-                                    <div class="help-text" style="margin-top:4px">
-                                        <strong>Source priority</strong> takes the first source in your chain that meets
-                                        a target — fast, fewer lookups. <strong>Best quality</strong> searches
-                                        <em>every</em> source for each track, pools the results, and downloads them
-                                        best→worst by actual audio quality (source order only breaks ties). Slower and
-                                        more API calls, but it won't settle for a passable Soulseek file when HiFi/Qobuz
-                                        has a higher-resolution version. Retry budgets are unchanged: a source that spends
-                                        its budget is dropped from the whole pool.
+                                    <div class="help-text setting-help-body" hidden>
+                                        <strong>Source priority</strong> goes through your sources in order and
+                                        downloads from the <em>first one</em> that has the track. Fastest, fewest
+                                        lookups.<br><br>
+                                        <strong>Best quality</strong> asks <em>every</em> source, then downloads the
+                                        highest-quality copy it found — even if a faster source also had a lower-quality
+                                        one. Slower and more API calls, but you never settle for a worse file when a
+                                        better one exists.<br><br>
+                                        Either way, the per-source retry limits stay the same.
+                                    </div>
+                                </div>
+
+                                <!-- Rank candidates by quality (priority mode only) -->
+                                <div class="form-group" id="quality-rank-candidates-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label" style="margin:0;">
+                                            <input type="checkbox" id="quality-rank-candidates">
+                                            Rank-based download order
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        A single source often returns several copies of the same track.<br><br>
+                                        <strong>Off</strong> (default): the most likely-correct / fastest copy is
+                                        downloaded first — the original behaviour.<br><br>
+                                        <strong>On</strong>: the highest-quality copy (per your target list above) is
+                                        downloaded first instead; correctness and speed only break ties.<br><br>
+                                        Nothing is skipped and the source order doesn't change, so a track can't go
+                                        missing — it just prefers the better copy. (This is always how
+                                        <strong>Best quality</strong> works, which is why this option only appears for
+                                        <strong>Source priority</strong>.)
                                     </div>
                                 </div>
 
                                 <!-- Fallback Option -->
                                 <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="quality-fallback-enabled" checked>
-                                        Accept off-list quality when nothing in the list is available
-                                    </label>
-                                    <div class="help-text" style="margin-top:4px">
-                                        ⚠️ This does <strong>not</strong> mean "walk down my list" — the list already
-                                        does that on its own. When <strong>on</strong>, a file that matches
-                                        <em>none</em> of your targets (e.g. a 16-bit FLAC or MP3 when you only listed
-                                        24-bit) is <strong>accepted anyway</strong> as a last resort. Turn it
-                                        <strong>off</strong> to strictly enforce your list — anything off-list is then
-                                        quarantined instead of completed.
+                                    <div class="setting-row">
+                                        <label class="checkbox-label" style="margin:0;">
+                                            <input type="checkbox" id="quality-fallback-enabled" checked>
+                                            Accept off-list quality when nothing in the list is available
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        This does <strong>not</strong> mean "walk down my list" — the list already
+                                        does that on its own.<br><br>
+                                        When <strong>on</strong>, a file that matches <em>none</em> of your targets
+                                        (e.g. a 16-bit FLAC or an MP3 when you only listed 24-bit) is
+                                        <strong>accepted anyway</strong> as a last resort.<br><br>
+                                        Turn it <strong>off</strong> to strictly enforce your list — anything off-list
+                                        is then quarantined instead of completed.
                                     </div>
                                 </div>
 
                                 <!-- Require hard AcoustID verification — only shown when AcoustID is enabled -->
                                 <div class="form-group" id="acoustid-require-verified-group" style="display:none;">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="acoustid-require-verified">
-                                        Only import AcoustID-verified tracks (reject "could not confirm")
-                                    </label>
-                                    <div class="help-text" style="margin-top:4px">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label" style="margin:0;">
+                                            <input type="checkbox" id="acoustid-require-verified">
+                                            Only import AcoustID-verified tracks (reject "could not confirm")
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
                                         When <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
                                         (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
                                         <strong>quarantined</strong> instead of imported. Downloads then try the next
@@ -5209,20 +5266,6 @@
                                         review them without anything being blocked. Transient lookup errors (rate-limit /
                                         outage) always import, so an AcoustID outage never stalls you. Requires AcoustID enabled.
                                     </div>
-                                </div>
-
-                                <div class="help-text">
-                                    <strong>How it works:</strong> Each download source is checked against this list
-                                    top-down. The first target a source can satisfy wins; a source that meets no target
-                                    is skipped for the next one (source priority still decides between sources that can).
-                                    For lossless, bit depth + sample rate decide the match. For MP3/AAC the bitrate is a
-                                    <em>minimum</em> threshold (≥), so VBR and mono files aren't falsely rejected. After
-                                    download the real file is verified against the same list. With fallback off, a track
-                                    is left missing rather than accepting a quality below every target.
-                                    <br><br>
-                                    <strong>Note:</strong> the <em>Downsample hi-res</em> option (under Lossy Copy) also
-                                    bypasses this gate — if off-list files keep slipping through with fallback off, check
-                                    that setting too.
                                 </div>
                             </div>
 
