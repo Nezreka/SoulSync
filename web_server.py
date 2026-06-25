@@ -4542,19 +4542,23 @@ def get_quality_presets():
 
 @app.route('/api/quality-profile/preset/<preset_name>', methods=['POST'])
 def apply_quality_preset(preset_name):
-    """Apply a predefined quality preset"""
+    """Switch to a quality preset, restoring its saved edits if it has any."""
     try:
         from database.music_database import MusicDatabase
         db = MusicDatabase()
 
-        preset = db.get_quality_preset(preset_name)
+        current = db.get_quality_profile()
+        preset = dict(db.get_quality_preset(preset_name))
+        # search_mode is a global search strategy, not a per-preset audio setting —
+        # carry the user's current choice across preset switches.
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
         success = db.set_quality_profile(preset)
 
         if success:
-            add_activity_item("", "Quality Preset Applied", f"Applied '{preset_name}' preset", "Now")
+            add_activity_item("", "Quality Preset Applied", f"Switched to '{preset_name}' preset", "Now")
             return jsonify({
                 "success": True,
-                "message": f"Applied '{preset_name}' preset",
+                "message": f"Switched to '{preset_name}' preset",
                 "profile": preset
             })
         else:
@@ -4562,6 +4566,33 @@ def apply_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error applying quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/preset/<preset_name>/reset', methods=['POST'])
+def reset_quality_preset(preset_name):
+    """Discard a preset's saved edits and restore its factory defaults."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        current = db.get_quality_profile()
+        preset = dict(db.reset_quality_preset(preset_name))
+        preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        success = db.set_quality_profile(preset)
+
+        if success:
+            add_activity_item("", "Quality Preset Reset", f"Reset '{preset_name}' to defaults", "Now")
+            return jsonify({
+                "success": True,
+                "message": f"Reset '{preset_name}' to defaults",
+                "profile": preset
+            })
+        else:
+            return jsonify({"success": False, "error": "Failed to reset preset"}), 500
+
+    except Exception as e:
+        logger.error(f"Error resetting quality preset: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -7609,6 +7640,17 @@ def approve_quarantine_item(entry_id):
                 _t = download_tasks.get(_task_id)
                 if isinstance(_t, dict):
                     _batch_id = _t.get('batch_id')
+        else:
+            # Manager-tab approve: no task_id in the request. Find the task that
+            # owns this quarantine entry so the re-import marks it completed in
+            # the downloads list without waiting for the batch to finish.
+            with tasks_lock:
+                for _tid, _t in download_tasks.items():
+                    if isinstance(_t, dict) and _t.get('quarantine_entry_id') == entry_id:
+                        _task_id = _tid
+                        _batch_id = _t.get('batch_id')
+                        break
+        if _task_id:
             context['task_id'] = _task_id
             if _batch_id:
                 context['batch_id'] = _batch_id
@@ -7637,11 +7679,35 @@ def approve_quarantine_item(entry_id):
                     logger.info(f"[Quarantine] Auto-removed {len(removed_siblings)} sibling alternative(s) of {entry_id}: {removed_siblings}")
             except Exception as sib_exc:
                 logger.warning(f"[Quarantine] Sibling cleanup for {entry_id} failed: {sib_exc}")
+        # Cancel any still-running quarantine-retry task for the same track so
+        # the engine doesn't keep fetching new candidates after the user has
+        # already accepted one. Match by track title from the restored context.
+        cancelled_retry_task = None
+        try:
+            ti = context.get('track_info') if isinstance(context.get('track_info'), dict) else {}
+            _approved_name = (ti.get('name') or '').strip().lower()
+            if _approved_name:
+                with tasks_lock:
+                    for _tid, _t in download_tasks.items():
+                        if not _t.get('_quarantine_retry'):
+                            continue
+                        if _t.get('status') in ('completed', 'cancelled', 'failed'):
+                            continue
+                        _tti = _t.get('track_info') if isinstance(_t.get('track_info'), dict) else {}
+                        if (_tti.get('name') or '').strip().lower() == _approved_name:
+                            _t['status'] = 'cancelled'
+                            _t['_quarantine_approved_alternative'] = True
+                            cancelled_retry_task = _tid
+                            logger.info(f"[Quarantine] Cancelled in-flight retry task {_tid} for '{_approved_name}' (user approved alternative)")
+                            break
+        except Exception as _crt_exc:
+            logger.debug(f"[Quarantine] Retry-cancel scan failed: {_crt_exc}")
         return jsonify({
             "success": True,
             "trigger_bypassed": "all",
             "original_trigger": trigger,
             "removed_siblings": removed_siblings,
+            "cancelled_retry_task": cancelled_retry_task,
         })
     except Exception as e:
         logger.error(f"[Quarantine] Error approving {entry_id}: {e}")
@@ -7752,7 +7818,8 @@ def get_verification_config():
     queue collapses to quarantine-only in the UI."""
     try:
         enabled = bool(config_manager.get('acoustid.enabled', False))
-        return jsonify({"success": True, "acoustid_enabled": enabled})
+        require_verified = bool(config_manager.get('acoustid.require_verified', False))
+        return jsonify({"success": True, "acoustid_enabled": enabled, "require_verified": require_verified})
     except Exception as e:
         return jsonify({"success": True, "acoustid_enabled": True, "error": str(e)})
 
@@ -11927,6 +11994,9 @@ def _sync_tracks_to_server(track_rows, server_type):
     return result
 
 
+_resolve_library_diag_logged = False
+
+
 def _resolve_library_file_path(file_path):
     """Resolve a library file path to an actual file on disk."""
     if not file_path:
@@ -11963,22 +12033,58 @@ def _resolve_library_file_path(file_path):
     except Exception as e:
         logger.debug("library music paths read failed: %s", e)
 
-    path_parts = file_path.replace('\\', '/').split('/')
-
-    # Try progressively shorter path suffixes against each candidate directory
-    # (skip index 0 to avoid drive letter issues). find_on_disk matches each
-    # component exactly when present, else folds typographic confusables (#833:
-    # curly U+2019 apostrophe in DB metadata vs ASCII U+0027 on disk) — exact
-    # matches always win, so paths that already resolved are unaffected.
-    from core.library.path_resolve import find_on_disk
-    for base_dir in [transfer_dir, download_dir] + list(library_dirs):
-        if not base_dir or not os.path.isdir(base_dir):
+    # Build the set of candidate base directories (absolute forms only, so
+    # os.path.join produces unambiguous paths). Config often stores RELATIVE
+    # paths ("./Transfer") — take os.path.abspath() so they resolve from the
+    # current working directory of the server process.
+    library_dir_list = list(library_dirs)
+    raw_bases = [transfer_dir, download_dir] + library_dir_list
+    abs_bases = []
+    seen_abs = set()
+    for b in raw_bases:
+        if not b:
             continue
-        for i in range(1, len(path_parts)):
-            found = find_on_disk(base_dir, path_parts[i:])
+        for form in [os.path.abspath(b), b, '/' + b.replace('./', '', 1).lstrip('/')]:
+            a = os.path.abspath(form) if not os.path.isabs(form) else form
+            if a and a not in seen_abs and os.path.isdir(a):
+                seen_abs.add(a)
+                abs_bases.append(a)
+
+    # --- Fast path: direct join ---
+    # When the DB stores a clean relative path ("Artist/Album/Track.flac") this
+    # is all that's needed. No component-by-component descent, no confusable
+    # folding. This handles the common Docker case where CWD is /app, config
+    # says ./Transfer, and files live at /app/Transfer/Artist/Album/Track.flac.
+    clean_rel = file_path.replace('\\', '/')
+    for abs_base in abs_bases:
+        candidate = os.path.join(abs_base, clean_rel)
+        if os.path.exists(candidate):
+            logger.debug("[PathResolve] direct join: %r → %r", file_path, candidate)
+            return candidate
+
+    # --- Slow path: confusable-tolerant suffix scan ---
+    # Handles paths with typographic apostrophes/dashes that differ between the
+    # DB metadata and the actual on-disk filename (#833).
+    path_parts = clean_rel.split('/')
+    from core.library.path_resolve import find_on_disk
+    for abs_base in abs_bases:
+        for i in range(0, len(path_parts)):
+            found = find_on_disk(abs_base, path_parts[i:])
             if found:
                 return found
 
+    # Couldn't resolve — log the bases we searched ONCE so a path/mount mismatch
+    # is diagnosable (e.g. files live under a dir that isn't transfer/download/
+    # a configured library path).
+    global _resolve_library_diag_logged
+    if not _resolve_library_diag_logged:
+        _resolve_library_diag_logged = True
+        logger.warning(
+            "[PathResolve] Could not resolve %r — tried direct-join + suffix-scan under %r (cwd=%r). "
+            "If files live elsewhere, set soulseek.transfer_path to the absolute mount or add "
+            "the dir under Settings > Library music paths.",
+            file_path, abs_bases, os.getcwd(),
+        )
     return None
 
 
@@ -15200,6 +15306,14 @@ def _get_file_path_from_template_raw(template: str, context: dict) -> tuple:
         return '', _sanitize_filename(full_path)
 
 
+def _probe_audio_quality(file_path):
+    """Probe real measured audio quality (bit depth / sample rate / bitrate)
+    as an AudioQuality, for the library quality scanner. Delegates to the same
+    core the download import guard uses. Returns None on any error."""
+    from core.imports.file_ops import probe_audio_quality
+    return probe_audio_quality(file_path)
+
+
 def _get_audio_quality_string(file_path):
     """
     Read audio file and return a quality descriptor string.
@@ -18304,9 +18418,9 @@ def _build_candidates_deps():
     )
 
 
-def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None):
+def _attempt_download_with_candidates(task_id, candidates, track, batch_id=None, **kwargs):
     return _downloads_candidates.attempt_download_with_candidates(
-        task_id, candidates, track, batch_id, _build_candidates_deps()
+        task_id, candidates, track, batch_id, _build_candidates_deps(), **kwargs
     )
 
 
@@ -18757,6 +18871,7 @@ def _build_status_deps():
             page=1,
             limit=limit,
         )[0],
+        get_unverified_download_history=lambda: get_database().get_library_history_unverified(),
     )
 
 

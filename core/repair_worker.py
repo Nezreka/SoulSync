@@ -994,9 +994,9 @@ class RepairWorker:
             'unwanted_content': self._fix_unwanted_content,
             'unknown_artist': self._fix_unknown_artist,
             'acoustid_mismatch': self._fix_acoustid_mismatch,
+            'quality_upgrade': self._fix_quality_upgrade,
             'missing_discography_track': self._fix_discography_backfill,
             'library_retag': self._fix_library_retag,
-            'quality_upgrade': self._fix_quality_upgrade,
         }
         handler = handlers.get(finding_type)
         if not handler:
@@ -1024,9 +1024,43 @@ class RepairWorker:
             return {'success': False, 'error': str(e)}
 
     def _fix_quality_upgrade(self, entity_type, entity_id, file_path, details):
-        """Add the matched higher-quality version to the wishlist (with album
-        context). Applying a Quality Upgrade finding is the user-approved step
-        that the old auto-acting Quality Scanner did without review."""
+        """Apply a Quality Upgrade finding (user-approved; the old Quality
+        Scanner did this without review). Action via ``details['_fix_action']``:
+
+           'redownload' (default): add the matched higher-quality version to the
+               wishlist (with album context) for a profile-gated re-download.
+               The low-quality file stays in place — it's replaced only after the
+               better version actually imports (safe pattern; auto-delete-on-
+               import is handled separately).
+           'delete': remove the low-quality file + its DB row outright.
+           'ignore' is handled in the UI by dismissing the finding — never here.
+        """
+        fix_action = details.get('_fix_action', 'redownload')
+
+        if fix_action == 'delete':
+            if file_path:
+                resolved = _resolve_file_path(
+                    file_path, self.transfer_folder,
+                    config_manager=self._config_manager)
+                if resolved and os.path.exists(resolved):
+                    try:
+                        os.remove(resolved)
+                        self._cleanup_empty_parents(resolved)
+                    except Exception as e:
+                        logger.warning("Could not delete low-quality file %s: %s",
+                                       resolved, e)
+            if entity_id:
+                try:
+                    conn = self.db._get_connection()
+                    conn.cursor().execute("DELETE FROM tracks WHERE id = ?", (entity_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception as e:
+                    return {'success': False, 'error': f'DB delete failed: {e}'}
+            return {'success': True, 'action': 'deleted_file',
+                    'message': f'Deleted low-quality file: '
+                               f'{os.path.basename(file_path or "")}'}
+
         track_data = details.get('matched_track_data')
         if not track_data:
             return {'success': False, 'error': 'No matched track in finding'}
@@ -3384,7 +3418,8 @@ class RepairWorker:
                              'album_tag_inconsistency',
                              'incomplete_album', 'path_mismatch',
                              'missing_lossy_copy', 'missing_replaygain', 'empty_folder',
-                             'missing_discography_track', 'acoustid_mismatch')
+                             'missing_discography_track', 'acoustid_mismatch',
+                             'quality_upgrade')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)

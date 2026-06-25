@@ -144,6 +144,60 @@ def test_race_guard_failure_marker_marks_task_failed(_isolate_state):
     assert ('b2', 't2', False) in completion_calls
 
 
+def test_quality_quarantine_does_not_mark_completed(_isolate_state):
+    """When the inner pipeline quality-quarantines the file (``_bitdepth_rejected``),
+    the wrapper must NOT fall through to "assume success" and mark the task
+    Completed — that made the quarantined file appear in BOTH Completed and
+    Quarantine. The inner pipeline already owns the retry/fail for quality, so
+    the wrapper just returns."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+
+    _seed_task('t5', 'b5')
+
+    context = {'task_id': 't5', 'batch_id': 'b5', 'context_key': 'test::ctx5'}
+
+    def _inner(*a, **kw):
+        # Inner pipeline quarantined for quality and handled its own retry/fail;
+        # it sets the marker and leaves NO _final_processed_path.
+        context['_bitdepth_rejected'] = True
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _inner), \
+         patch.object(import_pipeline, '_mark_task_completed',
+                      lambda task_id, ti: runtime_state.download_tasks[task_id].update(
+                          {'status': 'completed'})):
+        import_pipeline.post_process_matched_download_with_verification(
+            'test::ctx5', context, '/fake/source.mp3', 't5', 'b5', runtime,
+        )
+
+    assert runtime_state.download_tasks['t5']['status'] != 'completed'
+    assert ('b5', 't5', True) not in completion_calls
+
+
+def test_silence_quarantine_does_not_mark_completed(_isolate_state):
+    """Same contract for the audio guard (``_silence_rejected``)."""
+    completion_calls = []
+    runtime = _build_runtime(completion_calls)
+
+    _seed_task('t6', 'b6')
+
+    context = {'task_id': 't6', 'batch_id': 'b6', 'context_key': 'test::ctx6'}
+
+    def _inner(*a, **kw):
+        context['_silence_rejected'] = True
+
+    with patch.object(import_pipeline, 'post_process_matched_download', _inner), \
+         patch.object(import_pipeline, '_mark_task_completed',
+                      lambda task_id, ti: runtime_state.download_tasks[task_id].update(
+                          {'status': 'completed'})):
+        import_pipeline.post_process_matched_download_with_verification(
+            'test::ctx6', context, '/fake/source.flac', 't6', 'b6', runtime,
+        )
+
+    assert runtime_state.download_tasks['t6']['status'] != 'completed'
+    assert ('b6', 't6', True) not in completion_calls
+
+
 def test_no_failure_markers_still_assumes_success(_isolate_state):
     """The pre-existing "assume success" fallback must STILL fire when
     no failure markers are set — some legitimate flows complete without

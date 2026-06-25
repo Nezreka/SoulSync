@@ -94,6 +94,10 @@ class StatusDeps:
     run_async: Optional[Callable] = None
     on_download_completed: Optional[Callable[[str, str, bool], None]] = None
     get_persistent_download_history: Optional[Callable[[int], list[dict]]] = None
+    # Returns ALL library_history rows with verification_status in
+    # ('unverified', 'force_imported') — no recency limit, so historical
+    # entries are never buried by the general history tail cap.
+    get_unverified_download_history: Optional[Callable[[], list[dict]]] = None
 
 
 # Streaming sources the engine fallback applies to. Soulseek goes through
@@ -796,6 +800,13 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'progress': progress,
                 'error': task.get('error_message'),
                 'verification_status': task.get('verification_status'),
+                # library_history row id (set at import) so the Unverified review
+                # queue can act on a still-live completed task before it becomes
+                # a persistent-history row.
+                'history_id': task.get('history_id'),
+                # Real probed audio quality (mutagen-read from the actual file),
+                # surfaced so the Downloads page can show what was downloaded.
+                'quality': task.get('quality') or '',
                 'retry_info': task.get('retry_info'),
                 'retry_trigger': task.get('retry_trigger'),
                 'batch_id': batch_id,
@@ -812,6 +823,32 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
                 'is_persistent_history': False,
             })
 
+    # --- Unverified history (unconditional, no limit) ---
+    # Always load every library_history row that still needs human confirmation
+    # (verification_status IN ('unverified', 'force_imported')).  This is NOT
+    # gated on len(items) < limit so that historical entries from past batches
+    # are visible even during a large active batch that would otherwise exhaust
+    # the limit before the history tail is read.  Dedup against live tasks by
+    # identity so a track currently in post-processing isn't shown twice.
+    if deps.get_unverified_download_history is not None:
+        try:
+            unverified_entries = deps.get_unverified_download_history() or []
+        except Exception as exc:
+            logger.debug("[Downloads] unverified history lookup failed: %s", exc)
+            unverified_entries = []
+
+        for entry in unverified_entries:
+            item = _build_history_download_item(entry)
+            identity = _download_identity(item.get('title'), item.get('artist'), item.get('album'))
+            if identity in live_identities:
+                continue
+            items.append(item)
+            live_identities.add(identity)
+
+    # --- General recent-history tail (capped, recency-ordered) ---
+    # Fills in the completed/verified tail so the full Downloads list looks
+    # populated.  Gated on len(items) < limit so a busy batch doesn't trigger
+    # an extra DB round-trip when we're already at capacity.
     if deps.get_persistent_download_history is not None and len(items) < limit:
         history_limit = min(limit - len(items), _PERSISTENT_HISTORY_TAIL_LIMIT)
         try:
@@ -832,7 +869,14 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
             live_identities.add(identity)
             appended_history += 1
 
-    # Sort: active first (by priority), then by timestamp desc within each group
+    # Sort: active first (by priority), then by timestamp desc within each group.
+    # NOTE: the array order is presentation-only — the Downloads page filters
+    # client-side per tab. What matters is that EVERY live task is present: an
+    # earlier `items[:limit]` truncation (active-first) starved completed/failed/
+    # unverified rows off the end during a busy batch, so those tabs stayed empty
+    # until the batch drained. `limit` now bounds only the persistent-history
+    # tail (handled above); live in-memory tasks are always returned in full
+    # (they're already bounded by the 5-min cleanup automation).
     items.sort(key=lambda x: (x['priority'], -x['timestamp']))
 
     # Build batch summaries for the batch context panel
@@ -860,7 +904,7 @@ def build_unified_downloads_response(limit: int, deps: StatusDeps) -> dict:
 
     return {
         'success': True,
-        'downloads': items[:limit],
+        'downloads': items,
         'total': len(items),
         'batches': batch_summaries,
         'timestamp': time.time(),

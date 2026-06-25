@@ -4224,7 +4224,8 @@
                                             <label class="checkbox-label"
                                                 style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                                                 <input type="checkbox" id="acoustid-enabled"
-                                                    style="width: 16px; height: 16px;">
+                                                    style="width: 16px; height: 16px;"
+                                                    onchange="if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();">
                                                 <span>Enable Download Verification</span>
                                             </label>
                                             <div style="color: #888; font-size: 0.8em; margin-top: 4px; margin-left: 24px;">
@@ -4744,21 +4745,8 @@
                                 <div id="tidal-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Tidal Download Quality:</label>
-                                        <select id="tidal-download-quality" class="form-select">
-                                            <option value="low">Low (AAC 96kbps)</option>
-                                            <option value="high">High (AAC 320kbps)</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Tidal downloads. HiRes requires a Tidal HiFi Plus subscription.
-                                        </div>
-                                        <label class="checkbox-inline" style="margin-top: 8px;">
-                                            <input type="checkbox" id="tidal-allow-fallback" checked>
-                                            Allow quality fallback
-                                        </label>
-                                        <div class="setting-help-text">
-                                            When disabled, only downloads at the exact quality selected. If unavailable, skips to the next source.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Tidal fetches the highest tier your profile accepts.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4778,21 +4766,8 @@
                                 <div id="qobuz-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Qobuz Download Quality:</label>
-                                        <select id="qobuz-quality" class="form-select">
-                                            <option value="mp3">MP3 320kbps</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">Hi-Res (FLAC 24-bit/96kHz)</option>
-                                            <option value="hires_max">Hi-Res Max (FLAC 24-bit/192kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Qobuz downloads. Hi-Res requires a Qobuz Studio or Sublime subscription.
-                                        </div>
-                                        <label class="checkbox-inline" style="margin-top: 8px;">
-                                            <input type="checkbox" id="qobuz-allow-fallback" checked>
-                                            Allow quality fallback
-                                        </label>
-                                        <div class="setting-help-text">
-                                            When disabled, only downloads at the exact quality selected. If unavailable, skips to the next source.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Qobuz fetches the highest tier your profile accepts. Hi-Res requires a Qobuz Studio or Sublime subscription.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4844,21 +4819,8 @@
                                 <div id="hifi-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>HiFi Download Quality:</label>
-                                        <select id="hifi-download-quality" class="form-select">
-                                            <option value="low">Low (AAC 96kbps)</option>
-                                            <option value="high">High (AAC 320kbps)</option>
-                                            <option value="lossless">Lossless (FLAC 16-bit/44.1kHz)</option>
-                                            <option value="hires">HiRes (FLAC 24-bit/96kHz)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for HiFi downloads. Uses public API instances — no account required.
-                                        </div>
-                                        <label class="checkbox-inline" style="margin-top: 8px;">
-                                            <input type="checkbox" id="hifi-allow-fallback" checked>
-                                            Allow quality fallback
-                                        </label>
-                                        <div class="setting-help-text">
-                                            When disabled, only downloads at the exact quality selected. If unavailable, skips to the next source.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — HiFi fetches the highest tier your profile accepts. Uses public API instances — no account required.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4892,21 +4854,8 @@
                                 <div id="deezer-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Deezer Download Quality:</label>
-                                        <select id="deezer-download-quality" class="form-select">
-                                            <option value="mp3_128">MP3 128kbps (Free)</option>
-                                            <option value="mp3_320">MP3 320kbps (Premium)</option>
-                                            <option value="flac">FLAC Lossless (HiFi)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Audio quality for Deezer downloads. FLAC requires a Deezer HiFi subscription.
-                                            MP3 320 requires Premium or higher.
-                                        </div>
-                                        <label class="checkbox-inline" style="margin-top: 8px;">
-                                            <input type="checkbox" id="deezer-allow-fallback" checked>
-                                            Allow quality fallback
-                                        </label>
-                                        <div class="setting-help-text">
-                                            When disabled, only downloads at the exact quality selected. If unavailable, skips to the next source.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Deezer fetches the highest tier your profile accepts. FLAC requires a Deezer HiFi subscription.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -4934,21 +4883,8 @@
                                 <div id="amazon-download-settings-container" style="display: none;">
                                     <div class="form-group">
                                         <label>Amazon Music Quality:</label>
-                                        <select id="amazon-quality" class="form-select">
-                                            <option value="flac">FLAC Lossless (24-bit/48kHz Hi-Res)</option>
-                                            <option value="opus">Opus (320kbps)</option>
-                                            <option value="eac3">EAC3 Dolby Atmos (768kbps 5.1)</option>
-                                        </select>
                                         <div class="setting-help-text">
-                                            Preferred codec tier. FLAC is 24-bit/48kHz Hi-Res — no subscription required.
-                                            Downloads via T2Tunes proxy.
-                                        </div>
-                                        <label class="checkbox-inline" style="margin-top: 8px;">
-                                            <input type="checkbox" id="amazon-allow-fallback" checked>
-                                            Allow quality fallback
-                                        </label>
-                                        <div class="setting-help-text">
-                                            Fall back to the next codec tier if the preferred one is unavailable.
+                                            Quality is set globally in <strong>Quality Profile</strong> (ranked targets) — Amazon fetches FLAC (24-bit/48kHz Hi-Res) when your profile wants lossless, otherwise a lossy tier. Downloads via T2Tunes proxy.
                                         </div>
                                     </div>
                                     <div class="form-group">
@@ -5082,7 +5018,7 @@
                             </div>
                             <div class="settings-section-body collapsed" data-stg="downloads">
 
-                            <!-- Quality Profile Settings (Soulseek only) -->
+                            <!-- Quality Profile Settings (global — applies to all download sources) -->
                             <div class="settings-group" id="quality-profile-section" data-stg="downloads">
                                 <h3>🎵 Quality Profile</h3>
 
@@ -5103,177 +5039,87 @@
                                             💾 Space Saver
                                         </button>
                                     </div>
+                                    <div class="help-text" style="margin-top:6px">
+                                        Edits you make below are saved <em>per preset</em> — switch away and back and
+                                        your changes are still there. Use
+                                        <a href="#" onclick="resetActiveQualityPreset(); return false;">Reset to defaults</a>
+                                        to restore the selected preset's factory settings.
+                                    </div>
                                 </div>
 
-                                <!-- FLAC Quality -->
-                                <div class="quality-tier">
-                                    <div class="quality-tier-header">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-flac-enabled" checked
-                                                onchange="toggleQuality('flac')">
-                                            <span class="quality-tier-name">FLAC (Lossless)</span>
-                                        </label>
-                                        <span class="quality-tier-priority" id="priority-flac">Priority: 1</span>
+                                <!-- Ranked target priority list (v3) -->
+                                <div class="ranked-targets-editor">
+                                    <label class="ranked-targets-label">Quality priority (drag to reorder — 1st = most preferred):</label>
+                                    <div id="ranked-targets-list" class="ranked-targets-list">
+                                        <!-- rows injected by renderRankedTargets() -->
                                     </div>
-                                    <div class="quality-tier-sliders" id="sliders-flac">
-                                        <div class="slider-group">
-                                            <label>Bitrate Range:</label>
-                                            <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min" id="flac-min"
-                                                    min="0" max="10000" value="500" step="100"
-                                                    oninput="updateQualityRange('flac')">
-                                                <input type="range" class="range-slider range-slider-max" id="flac-max"
-                                                    min="0" max="10000" value="10000" step="100"
-                                                    oninput="updateQualityRange('flac')">
-                                                <div class="range-slider-track"></div>
-                                            </div>
-                                            <div class="slider-values">
-                                                <span id="flac-min-value">500 kbps</span>
-                                                <span>-</span>
-                                                <span id="flac-max-value">10000 kbps</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="flac-bit-depth-selector" id="flac-bit-depth-selector">
-                                        <label>Bit Depth:</label>
-                                        <div class="bit-depth-buttons">
-                                            <button class="bit-depth-btn active" data-value="any" onclick="setFlacBitDepth('any')">Any</button>
-                                            <button class="bit-depth-btn" data-value="16" onclick="setFlacBitDepth('16')">16-bit</button>
-                                            <button class="bit-depth-btn" data-value="24" onclick="setFlacBitDepth('24')">24-bit</button>
-                                        </div>
-                                        <div class="flac-fallback-toggle" id="flac-fallback-toggle" style="display: none; margin-top: 6px;">
-                                            <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.8em; color: #ccc;">
-                                                <input type="checkbox" id="flac-bit-depth-fallback" checked onchange="setFlacBitDepthFallback(this.checked)">
-                                                Accept other bit depths as fallback
+
+                                    <!-- Add a new target -->
+                                    <div class="ranked-target-add">
+                                        <select id="rt-add-format" onchange="onRtAddFormatChange()">
+                                            <optgroup label="Lossless">
+                                                <option value="group:lossless">All lossless</option>
+                                                <option value="flac">FLAC</option>
+                                                <option value="alac">ALAC</option>
+                                                <option value="wav">WAV / AIFF</option>
+                                            </optgroup>
+                                            <optgroup label="Lossy">
+                                                <option value="group:lossy">All lossy</option>
+                                                <option value="mp3">MP3</option>
+                                                <option value="aac">AAC</option>
+                                                <option value="ogg">OGG (Vorbis)</option>
+                                                <option value="opus">Opus</option>
+                                                <option value="wma">WMA</option>
+                                            </optgroup>
+                                        </select>
+                                        <span class="rt-lossless-fields">
+                                            <select id="rt-add-bitdepth" title="Minimum bit depth">
+                                                <option value="">Any bit depth</option>
+                                                <option value="16">16-bit</option>
+                                                <option value="24">24-bit</option>
+                                            </select>
+                                            <select id="rt-add-samplerate" title="Minimum sample rate">
+                                                <option value="">Any sample rate</option>
+                                                <option value="44100">≥ 44.1 kHz</option>
+                                                <option value="48000">≥ 48 kHz</option>
+                                                <option value="96000">≥ 96 kHz</option>
+                                                <option value="192000">≥ 192 kHz</option>
+                                            </select>
+                                        </span>
+                                        <span class="rt-lossy-fields" style="display:none;">
+                                            <select id="rt-add-bitrate" title="Minimum bitrate" onchange="onRtBitrateChange()">
+                                                <option value="">Any bitrate</option>
+                                                <option value="96">≥ 96 kbps</option>
+                                                <option value="128">≥ 128 kbps</option>
+                                                <option value="192">≥ 192 kbps</option>
+                                                <option value="256">≥ 256 kbps</option>
+                                                <option value="320" selected>≥ 320 kbps</option>
+                                                <option value="custom">Custom…</option>
+                                            </select>
+                                            <label class="rt-inline-label" id="rt-add-bitrate-custom-wrap" style="display:none;">≥
+                                                <input type="number" id="rt-add-bitrate-custom" min="0" max="5000" step="1" value="320" style="width:72px;"
+                                                    autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true"> kbps
                                             </label>
-                                            <div style="color: #888; font-size: 0.75em; margin-top: 2px;">
-                                                When enabled, accepts any FLAC rather than rejecting on bit depth mismatch
-                                            </div>
-                                        </div>
+                                        </span>
+                                        <button type="button" class="rt-add-btn" onclick="addRankedTarget()">+ Add target</button>
                                     </div>
                                 </div>
 
-                                <!-- AAC Quality (opt-in; Soulseek/torrents — off by default) -->
-                                <div class="quality-tier">
-                                    <div class="quality-tier-header">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-aac-enabled"
-                                                onchange="toggleQuality('aac')">
-                                            <span class="quality-tier-name">AAC <span style="opacity:.6;font-weight:400;">(.m4a/.aac — Soulseek)</span></span>
-                                        </label>
-                                        <span class="quality-tier-priority" id="priority-aac">Priority: 1.5</span>
-                                    </div>
-                                    <div class="quality-tier-sliders" id="sliders-aac">
-                                        <div class="slider-group">
-                                            <label>Bitrate Range:</label>
-                                            <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min"
-                                                    id="aac-min" min="0" max="400" value="128" step="10"
-                                                    oninput="updateQualityRange('aac')">
-                                                <input type="range" class="range-slider range-slider-max"
-                                                    id="aac-max" min="0" max="400" value="400" step="10"
-                                                    oninput="updateQualityRange('aac')">
-                                                <div class="range-slider-track"></div>
-                                            </div>
-                                            <div class="slider-values">
-                                                <span id="aac-min-value">128 kbps</span>
-                                                <span>-</span>
-                                                <span id="aac-max-value">400 kbps</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- MP3 320 Quality -->
-                                <div class="quality-tier">
-                                    <div class="quality-tier-header">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_320-enabled" checked
-                                                onchange="toggleQuality('mp3_320')">
-                                            <span class="quality-tier-name">MP3 320 kbps</span>
-                                        </label>
-                                        <span class="quality-tier-priority" id="priority-mp3_320">Priority: 2</span>
-                                    </div>
-                                    <div class="quality-tier-sliders" id="sliders-mp3_320">
-                                        <div class="slider-group">
-                                            <label>Bitrate Range:</label>
-                                            <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_320-min" min="0" max="500" value="280" step="10"
-                                                    oninput="updateQualityRange('mp3_320')">
-                                                <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_320-max" min="0" max="500" value="500" step="10"
-                                                    oninput="updateQualityRange('mp3_320')">
-                                                <div class="range-slider-track"></div>
-                                            </div>
-                                            <div class="slider-values">
-                                                <span id="mp3_320-min-value">280 kbps</span>
-                                                <span>-</span>
-                                                <span id="mp3_320-max-value">500 kbps</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- MP3 256 Quality -->
-                                <div class="quality-tier">
-                                    <div class="quality-tier-header">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_256-enabled" checked
-                                                onchange="toggleQuality('mp3_256')">
-                                            <span class="quality-tier-name">MP3 256 kbps</span>
-                                        </label>
-                                        <span class="quality-tier-priority" id="priority-mp3_256">Priority: 3</span>
-                                    </div>
-                                    <div class="quality-tier-sliders" id="sliders-mp3_256">
-                                        <div class="slider-group">
-                                            <label>Bitrate Range:</label>
-                                            <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_256-min" min="0" max="400" value="200" step="10"
-                                                    oninput="updateQualityRange('mp3_256')">
-                                                <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_256-max" min="0" max="400" value="400" step="10"
-                                                    oninput="updateQualityRange('mp3_256')">
-                                                <div class="range-slider-track"></div>
-                                            </div>
-                                            <div class="slider-values">
-                                                <span id="mp3_256-min-value">200 kbps</span>
-                                                <span>-</span>
-                                                <span id="mp3_256-max-value">400 kbps</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- MP3 192 Quality -->
-                                <div class="quality-tier">
-                                    <div class="quality-tier-header">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="quality-mp3_192-enabled"
-                                                onchange="toggleQuality('mp3_192')">
-                                            <span class="quality-tier-name">MP3 192 kbps</span>
-                                        </label>
-                                        <span class="quality-tier-priority" id="priority-mp3_192">Priority: 4</span>
-                                    </div>
-                                    <div class="quality-tier-sliders disabled" id="sliders-mp3_192">
-                                        <div class="slider-group">
-                                            <label>Bitrate Range:</label>
-                                            <div class="dual-slider-container">
-                                                <input type="range" class="range-slider range-slider-min"
-                                                    id="mp3_192-min" min="0" max="300" value="150" step="10"
-                                                    oninput="updateQualityRange('mp3_192')">
-                                                <input type="range" class="range-slider range-slider-max"
-                                                    id="mp3_192-max" min="0" max="300" value="300" step="10"
-                                                    oninput="updateQualityRange('mp3_192')">
-                                                <div class="range-slider-track"></div>
-                                            </div>
-                                            <div class="slider-values">
-                                                <span id="mp3_192-min-value">150 kbps</span>
-                                                <span>-</span>
-                                                <span id="mp3_192-max-value">300 kbps</span>
-                                            </div>
-                                        </div>
+                                <!-- Search strategy -->
+                                <div class="form-group">
+                                    <label for="quality-search-mode" style="display:block;margin-bottom:4px;font-weight:600;">Search strategy</label>
+                                    <select id="quality-search-mode" style="width:100%;max-width:420px;">
+                                        <option value="priority">Source priority — fastest, stops at first good source</option>
+                                        <option value="best_quality">Best quality — search all sources, pick the highest</option>
+                                    </select>
+                                    <div class="help-text" style="margin-top:4px">
+                                        <strong>Source priority</strong> takes the first source in your chain that meets
+                                        a target — fast, fewer lookups. <strong>Best quality</strong> searches
+                                        <em>every</em> source for each track, pools the results, and downloads them
+                                        best→worst by actual audio quality (source order only breaks ties). Slower and
+                                        more API calls, but it won't settle for a passable Soulseek file when HiFi/Qobuz
+                                        has a higher-resolution version. Retry budgets are unchanged: a source that spends
+                                        its budget is dropped from the whole pool.
                                     </div>
                                 </div>
 
@@ -5281,16 +5127,55 @@
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="quality-fallback-enabled" checked>
-                                        Allow fallback to any quality if preferred qualities unavailable
+                                        Accept off-list quality when nothing in the list is available
                                     </label>
+                                    <div class="help-text" style="margin-top:4px">
+                                        ⚠️ This does <strong>not</strong> mean "walk down my list" — the list already
+                                        does that on its own. When <strong>on</strong>, a file that matches
+                                        <em>none</em> of your targets (e.g. a 16-bit FLAC or MP3 when you only listed
+                                        24-bit) is <strong>accepted anyway</strong> as a last resort. Turn it
+                                        <strong>off</strong> to strictly enforce your list — anything off-list is then
+                                        quarantined instead of completed.
+                                    </div>
+                                </div>
+
+                                <!-- Require hard AcoustID verification — only shown when AcoustID is enabled -->
+                                <div class="form-group" id="acoustid-require-verified-group" style="display:none;">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="acoustid-require-verified">
+                                        Only import AcoustID-verified tracks (reject "could not confirm")
+                                    </label>
+                                    <div class="help-text" style="margin-top:4px">
+                                        When <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
+                                        (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
+                                        <strong>quarantined</strong> instead of imported. Downloads then try the next
+                                        candidate; imports just quarantine (no candidate to retry). Only a clean AcoustID
+                                        <strong>pass</strong> is kept.
+                                        <br><br>
+                                        ⚠️ <strong>Use with care.</strong> AcoustID "could not confirm" is <em>common</em>
+                                        for perfectly good tracks — anything not in its fingerprint database: new/obscure
+                                        releases, classical, remixes, live cuts, remasters, non-Latin-script titles. With
+                                        this on, <strong>all of those get quarantined</strong>, so you may end up with many
+                                        legitimate files to review and approve by hand. Nothing is lost (quarantined files
+                                        can be approved), but expect manual cleanup. Leave this <strong>off</strong> to keep
+                                        the safer default: unconfirmed tracks import with the ⚠ "unverified" badge so you can
+                                        review them without anything being blocked. Transient lookup errors (rate-limit /
+                                        outage) always import, so an AcoustID outage never stalls you. Requires AcoustID enabled.
+                                    </div>
                                 </div>
 
                                 <div class="help-text">
-                                    <strong>How it works:</strong> Downloads try each enabled quality in priority order
-                                    (1 = highest).
-                                    MIN bitrate catches fake/transcoded files (e.g., FLAC below 500 kbps is likely a
-                                    re-encoded MP3). MAX bitrate limits hi-res files if you want to save space.
-                                    When track duration is unavailable, a generous file-size safety net is used instead.
+                                    <strong>How it works:</strong> Each download source is checked against this list
+                                    top-down. The first target a source can satisfy wins; a source that meets no target
+                                    is skipped for the next one (source priority still decides between sources that can).
+                                    For lossless, bit depth + sample rate decide the match. For MP3/AAC the bitrate is a
+                                    <em>minimum</em> threshold (≥), so VBR and mono files aren't falsely rejected. After
+                                    download the real file is verified against the same list. With fallback off, a track
+                                    is left missing rather than accepting a quality below every target.
+                                    <br><br>
+                                    <strong>Note:</strong> the <em>Downsample hi-res</em> option (under Lossy Copy) also
+                                    bypasses this gate — if off-list files keep slipping through with fallback off, check
+                                    that setting too.
                                 </div>
                             </div>
 
@@ -5810,6 +5695,13 @@
                                             <label for="duration-tolerance-seconds">Duration tolerance (seconds)</label>
                                             <input type="number" id="duration-tolerance-seconds" min="0" max="60" step="0.5" value="0" style="width: 100px;">
                                             <small class="settings-hint">Maximum drift between the file's actual length and the metadata source's expected length before the file is quarantined. <strong>0 = auto</strong> (3s normal, 5s for tracks &gt;10min). Raise this if tracks routinely quarantine for being a few seconds off (live recordings, alternate masterings, etc). Capped at 60s.</small>
+                                        </div>
+                                        <div class="form-group">
+                                            <label class="checkbox-label">
+                                                <input type="checkbox" id="audio-completeness-check">
+                                                Verify real audio with ffmpeg (detect truncated / silent files)
+                                            </label>
+                                            <small class="settings-hint">Decodes every downloaded file with ffmpeg to catch fake 30s previews padded to full length and mostly-silent files — the kind whose header lies about the length so mutagen can't catch them. <strong>Off by default:</strong> this fully decodes each file, the most CPU-heavy post-processing step. Most sources (HiFi, Qobuz) already catch previews on their own, so only turn this on if you see padded/silent files slip through. Applies to all download sources.</small>
                                         </div>
                                     </div>
 
@@ -6425,9 +6317,31 @@
                                 </div>
                             </div>
 
-                            <!-- Import Quality Settings -->
+                            <!-- Import Settings (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Import</h3>
+                                <span class="settings-section-hint">Quality filter, replace rules, folder-artist</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+
                             <div class="settings-group" data-stg="library">
                                 <h3>📥 Import Settings</h3>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="import-quality-filter-enabled" checked>
+                                        Only import tracks that meet your quality profile
+                                    </label>
+                                </div>
+                                <div class="help-text">
+                                    On by default. SoulSync always probes each downloaded file's real audio quality; this
+                                    toggle decides what to do with the result. <strong>On</strong> — files that don't meet your
+                                    quality profile are quarantined instead of imported (the same gate the download pipeline
+                                    uses; fallback/downsample settings still apply). <strong>Off</strong> — everything is
+                                    imported regardless of quality. Either way, the library <em>Quality Upgrade Scanner</em>
+                                    still flags below-profile tracks so you can act on them later.
+                                </div>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
@@ -6472,6 +6386,8 @@
                                     with disk, as a safety guard against wiping a library (issue #904).
                                 </div>
                             </div>
+
+                            </div><!-- end Import body -->
 
 
                             <!-- M3U Export Settings -->
@@ -8261,9 +8177,6 @@
                 </button>
                 <button class="library-history-tab" data-tab="import" onclick="switchHistoryTab('import')">
                     Server Imports <span class="library-history-tab-count" id="history-import-count">0</span>
-                </button>
-                <button class="library-history-tab" data-tab="quarantine" onclick="switchHistoryTab('quarantine')">
-                    Quarantine <span class="library-history-tab-count" id="history-quarantine-count">0</span>
                 </button>
             </div>
             <div class="history-source-bar" id="history-source-bar" style="display:none"></div>
