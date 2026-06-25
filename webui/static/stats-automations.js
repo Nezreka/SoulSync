@@ -2611,8 +2611,12 @@ async function loadAutomations() {
     if (!list || !empty) return;
     try {
         const res = await fetch('/api/automations');
-        const automations = await res.json();
-        if (automations.error) throw new Error(automations.error);
+        const payload = await res.json();
+        if (payload.error) throw new Error(payload.error);
+        // Hide video-app automations on the MUSIC page: they live in the shared automation
+        // engine (music_library.db, owned_by='video') but belong to the separate video
+        // automations page. Pure no-op for anyone without the video side — they have no such rows.
+        const automations = (Array.isArray(payload) ? payload : []).filter(a => a.owned_by !== 'video');
         if (!automations.length) {
             list.innerHTML = ''; empty.style.display = '';
             if (statsBar) statsBar.innerHTML = '';
