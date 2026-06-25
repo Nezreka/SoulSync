@@ -13140,6 +13140,61 @@ class MusicDatabase:
             logger.error(f"Error getting discovery pool stats: {e}")
             return {'matched': 0, 'failed': 0}
 
+    def get_wing_it_pool(self, profile_id: int = None, playlist_id: int = None) -> list:
+        """Get tracks that were auto-matched by Wing It mode (best-effort, unverified).
+
+        Wing-it tracks are persisted on the mirrored track's extra_data with
+        ``wing_it_fallback: true`` (set when a track couldn't match a metadata source and got a
+        raw-name stub). They count as 'discovered', so the Discovery Pool's failed list excludes
+        them — this is the only surface that lists them so the user can verify/re-match the guesses.
+        Excludes any the user has already manually matched (``manual_match: true``).
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT mpt.id, mpt.track_name, mpt.artist_name, mpt.album_name,
+                       mpt.playlist_id, mp.name as playlist_name
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.extra_data LIKE '%"wing_it_fallback": true%'
+                  AND mpt.extra_data NOT LIKE '%"manual_match": true%'
+            """
+            params = []
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            query += " ORDER BY mp.name, mpt.track_name"
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting wing it pool: {e}")
+            return []
+
+    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+        """Count of unverified Wing It auto-matches (excludes manually-matched)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            query = """
+                SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE mpt.extra_data LIKE '%"wing_it_fallback": true%'
+                  AND mpt.extra_data NOT LIKE '%"manual_match": true%'
+            """
+            params = []
+            if profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            cursor.execute(query, params)
+            return {'wing_it': cursor.fetchone()['cnt']}
+        except Exception as e:
+            logger.error(f"Error getting wing it pool stats: {e}")
+            return {'wing_it': 0}
+
     # ==================== Retag Tool Methods ====================
 
     def add_retag_group(self, group_type: str, artist_name: str, album_name: str,

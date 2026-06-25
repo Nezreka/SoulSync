@@ -35008,6 +35008,35 @@ def get_discovery_pool():
         logger.error(f"Error getting discovery pool: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/wing-it-pool', methods=['GET'])
+def get_wing_it_pool():
+    """List Wing It auto-matched tracks (unverified best-effort guesses), optionally per-playlist.
+
+    These are tracks that couldn't match a metadata source and got a raw-name Wing It stub. They
+    count as 'discovered' so the Discovery Pool hides them — this surfaces them so the user can
+    verify and re-match. Re-matching reuses the Discovery Pool's /api/discovery-pool/fix endpoint
+    (both key off the mirrored_playlist_tracks.id), and a manual match drops the track from here.
+    """
+    try:
+        database = get_database()
+        profile_id = get_current_profile_id()
+        playlist_id = request.args.get('playlist_id', type=int)
+
+        tracks = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id)
+        stats = database.get_wing_it_pool_stats(profile_id=profile_id)
+
+        playlists = database.get_mirrored_playlists(profile_id=profile_id)
+        playlist_options = [{'id': p['id'], 'name': p['name']} for p in playlists]
+
+        return jsonify({
+            'tracks': tracks,
+            'stats': stats,
+            'playlists': playlist_options,
+        })
+    except Exception as e:
+        logger.error(f"Error getting wing it pool: {e}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/discovery-pool/fix', methods=['POST'])
 def fix_discovery_pool_track():
     """Manually fix a failed discovery by linking a mirrored track to a Spotify/iTunes result."""
