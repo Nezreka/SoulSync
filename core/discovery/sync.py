@@ -307,35 +307,11 @@ def run_sync_task(
         # This avoids needing to re-fetch it from Spotify
         logger.info("Converting JSON tracks to SpotifyTrack objects...")
 
-        # Store original track data with full album objects (for wishlist with cover art)
-        # Normalize formats for wishlist: album must be dict {'name': ...}, artists must be [{'name': ...}]
-        # Important: copy data — don't mutate tracks_json since SpotifyTrack expects List[str] artists
-        original_tracks_map = {}
-        for t in tracks_json:
-            track_id = t.get('id', '')
-            if track_id:
-                normalized = dict(t)
-                # Normalize album to dict format, preserving images and metadata
-                raw_album = normalized.get('album', '')
-                if isinstance(raw_album, str):
-                    normalized['album'] = {
-                        'name': raw_album or normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                elif not isinstance(raw_album, dict):
-                    normalized['album'] = {
-                        'name': str(raw_album) if raw_album else normalized.get('name', 'Unknown Album'),
-                        'images': [], 'album_type': 'single', 'total_tracks': 1, 'release_date': ''
-                    }
-                else:
-                    # Dict — ensure required keys exist
-                    raw_album.setdefault('name', 'Unknown Album')
-                    raw_album.setdefault('images', [])
-                # Normalize artists to list of dicts
-                raw_artists = normalized.get('artists', [])
-                if raw_artists and isinstance(raw_artists[0], str):
-                    normalized['artists'] = [{'name': a} for a in raw_artists]
-                original_tracks_map[track_id] = normalized
+        # Store original track data with full album objects (for wishlist with cover art).
+        # Shared with the sync-detail "re-add to wishlist" action so both build the
+        # IDENTICAL payload (album→dict + images, artists→dicts). Copy-safe.
+        from core.sync.wishlist_readd import build_original_tracks_map
+        original_tracks_map = build_original_tracks_map(tracks_json)
 
         tracks = []
         for i, t in enumerate(tracks_json):

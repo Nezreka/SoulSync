@@ -112,6 +112,7 @@ def reconcile_playlist(
                 'match_status': 'matched',
                 'confidence': 1.0,
                 'override': True,
+                'server_index': j,   # position in the server playlist (for order-status)
             })
             continue
 
@@ -134,6 +135,7 @@ def reconcile_playlist(
                 'server_track': server_tracks[best_idx],
                 'match_status': 'matched',
                 'confidence': 1.0,
+                'server_index': best_idx,
             })
         else:
             idx = len(combined)
@@ -142,6 +144,7 @@ def reconcile_playlist(
                 'server_track': None,
                 'match_status': 'missing',
                 'confidence': 0.0,
+                'server_index': None,
             })
             # Carry the canonical artist for the fuzzy pass.
             unmatched_source.append((idx, src_entry, _canon_artist or src_artist))
@@ -168,6 +171,7 @@ def reconcile_playlist(
                 'server_track': server_tracks[best_j],
                 'match_status': 'matched',
                 'confidence': round(best_score, 3),
+                'server_index': best_j,
             }
 
     # Extra: server tracks no source claimed.
@@ -178,6 +182,7 @@ def reconcile_playlist(
                 'server_track': svr,
                 'match_status': 'extra',
                 'confidence': 0.0,
+                'server_index': j,
             })
 
     # #766: a source row with no art of its own (e.g. a YouTube source, which
@@ -194,4 +199,32 @@ def reconcile_playlist(
     return combined
 
 
-__all__ = ["reconcile_playlist", "norm_title"]
+def compute_order_status(combined: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Whether the server's MATCHED tracks sit in the same *relative* order as the
+    source. Pure.
+
+    Reads each matched entry's ``server_index`` (its position in the server
+    playlist) off the combined view — which is already in source order — and checks
+    that sequence is strictly ascending. Relative order is used on purpose: missing
+    and extra tracks shift absolute positions, so comparing positions directly would
+    false-flag any playlist that isn't a perfect 1:1. The model is one-way (source
+    order is truth; the server may have drifted), so we only ever report whether the
+    server is *behind* the source order — never the reverse.
+
+    Returns ``{matched, in_order, out_of_order}``. ``out_of_order`` is True only when
+    there are >= 2 matched tracks AND their server positions aren't ascending — so a
+    playlist with 0 or 1 matches (nothing to compare) is never flagged.
+    """
+    positions = [
+        e['server_index'] for e in combined
+        if e.get('match_status') == 'matched' and e.get('server_index') is not None
+    ]
+    in_order = all(a < b for a, b in zip(positions, positions[1:], strict=False))
+    return {
+        'matched': len(positions),
+        'in_order': in_order,
+        'out_of_order': len(positions) >= 2 and not in_order,
+    }
+
+
+__all__ = ["reconcile_playlist", "compute_order_status", "norm_title"]

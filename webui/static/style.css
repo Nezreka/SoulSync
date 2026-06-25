@@ -58023,6 +58023,28 @@ tr.tag-diff-same {
     font-weight: 600;
     white-space: nowrap;
 }
+/* unmatched (wing-it fallback) — never wishlisted; muted, non-actionable */
+.sync-dl-unmatched {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 600;
+    white-space: nowrap;
+}
+/* clickable variant — re-add to wishlist */
+.sync-dl-wishlist-btn {
+    border: 1px solid rgba(255, 183, 77, 0.35);
+    background: rgba(255, 183, 77, 0.1);
+    border-radius: 999px;
+    padding: 3px 9px;
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sync-dl-wishlist-btn:hover { background: rgba(255, 183, 77, 0.22); border-color: rgba(255, 183, 77, 0.6); color: #ffce8a; }
+.sync-dl-wishlist-btn.is-busy { opacity: 0.6; cursor: default; }
+.sync-dl-wishlist-btn.is-done {
+    color: rgba(76, 175, 80, 0.95); border-color: rgba(76, 175, 80, 0.4);
+    background: rgba(76, 175, 80, 0.12); cursor: default;
+}
 
 .sync-detail-track {
     font-weight: 500;
@@ -58560,6 +58582,82 @@ tr.tag-diff-same {
 .server-editor-stat-num.matched { color: #4caf50; }
 .server-editor-stat-num.missing { color: #ef5350; }
 .server-editor-stat-num.extra { color: #ffb74d; }
+
+/* "out of order" badge — server playlist has the right tracks but a different
+   sequence than the source. Opens a read-only view of the real server order. */
+.server-order-badge {
+    margin-left: 8px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.2px; white-space: nowrap;
+    color: #ffb74d; background: rgba(255, 183, 77, 0.12);
+    border: 1px solid rgba(255, 183, 77, 0.4);
+    transition: background 0.15s ease;
+}
+.server-order-badge:hover { background: rgba(255, 183, 77, 0.22); }
+
+/* read-only server-order modal */
+.server-order-overlay {
+    position: fixed; inset: 0; z-index: 10000; display: flex;
+    align-items: center; justify-content: center; padding: 24px;
+    background: rgba(8, 9, 13, 0.72); backdrop-filter: blur(6px);
+    animation: serverOrderFade 0.16s ease;
+}
+@keyframes serverOrderFade { from { opacity: 0; } to { opacity: 1; } }
+.server-order-dialog {
+    width: min(460px, 100%); max-height: 82vh; display: flex; flex-direction: column;
+    background: linear-gradient(180deg, #20232b, #16181e);
+    border: 1px solid rgba(255, 255, 255, 0.09); border-radius: 18px;
+    box-shadow: 0 30px 80px -20px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow: hidden; animation: serverOrderPop 0.2s cubic-bezier(0.2, 0.7, 0.2, 1.1);
+}
+@keyframes serverOrderPop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+.server-order-head {
+    display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+    padding: 18px 20px 15px;
+    background: linear-gradient(180deg, rgba(255, 183, 77, 0.08), transparent);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.server-order-h1 { font-size: 16px; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.server-order-sub { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); margin-top: 4px; line-height: 1.4; }
+.server-order-close {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05); border: none; color: rgba(255, 255, 255, 0.55);
+    font-size: 20px; line-height: 1; cursor: pointer; transition: all 0.15s ease;
+}
+.server-order-close:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.server-order-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 10px 12px; scrollbar-width: thin; }
+.server-order-row {
+    display: flex; align-items: center; gap: 12px; padding: 7px 8px; border-radius: 10px;
+    transition: background 0.12s ease;
+}
+.server-order-row:hover { background: rgba(255, 255, 255, 0.04); }
+.server-order-num {
+    flex: 0 0 22px; text-align: right; font-size: 12px; font-weight: 800;
+    color: rgba(255, 255, 255, 0.3); font-variant-numeric: tabular-nums;
+}
+.server-order-art {
+    flex: 0 0 40px; width: 40px; height: 40px; border-radius: 7px; object-fit: cover;
+    background: rgba(255, 255, 255, 0.05); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.server-order-art-ph { display: flex; align-items: center; justify-content: center;
+    font-size: 17px; color: rgba(255, 255, 255, 0.3); }
+.server-order-meta { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.server-order-title { font-size: 13.5px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.server-order-artist { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.server-order-empty { padding: 20px; text-align: center; color: rgba(255, 255, 255, 0.4); font-size: 13px; }
+.server-order-foot { flex: 0 0 auto; padding: 14px 16px 16px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.server-order-foot-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px;
+    color: rgba(255, 255, 255, 0.5); margin-bottom: 10px; }
+.server-order-actions { display: flex; gap: 10px; }
+.server-align-btn {
+    flex: 1; display: flex; flex-direction: column; gap: 3px; text-align: left;
+    padding: 10px 12px; border-radius: 10px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.12);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.server-align-btn:hover { background: rgba(76, 175, 80, 0.14); border-color: rgba(76, 175, 80, 0.5); }
+.server-align-btn-t { font-size: 13px; font-weight: 700; color: #fff; }
+.server-align-btn-d { font-size: 11px; color: rgba(255, 255, 255, 0.5); line-height: 1.35; }
+.server-order-foot-note { font-size: 11px; color: rgba(255, 255, 255, 0.4); margin-top: 9px; }
 
 .server-editor-stat-label {
     font-size: 9px;

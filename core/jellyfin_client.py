@@ -1711,6 +1711,81 @@ class JellyfinClient(MediaServerClient):
             logger.error(f"Error reconciling Jellyfin playlist '{playlist_name}': {e}")
             return False
 
+    def get_playlist_track_ids(self, playlist_id: str) -> List[str]:
+        """The playlist's current track ids (Item Ids), in current order. [] on miss."""
+        if not self.ensure_connection():
+            return []
+        try:
+            resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if not resp:
+                return []
+            return [str(i.get('Id')) for i in resp.get('Items', []) if i.get('Id')]
+        except Exception as e:
+            logger.error(f"Error getting Jellyfin playlist track ids '{playlist_id}': {e}")
+            return []
+
+    def reorder_playlist(self, playlist_id, playlist_name: str, ordered_ids) -> bool:
+        """In-place reorder a playlist to an exact ordered track-id list ('Align
+        playlists'). Removes any current entry whose track NOT in ``ordered_ids``
+        ('Mirror source' drops extras; 'Keep extras' keeps them in the list), then
+        moves each desired track to its target index via the Jellyfin Move endpoint.
+        Operates on the existing playlist (DELETE EntryIds + Items/{entryId}/Move/{i})
+        so its poster, name and Id survive — no delete/recreate."""
+        if not self.ensure_connection():
+            return False
+        try:
+            import requests
+            ordered = [str(i) for i in (ordered_ids or []) if str(i)]
+            ordered_set = set(ordered)
+
+            # Entries carry both the track Id and the PlaylistItemId (entry id);
+            # move/remove operate on the entry id.
+            entries = []  # (track_id, entry_id) in current order
+            resp = self._make_request(f'/Playlists/{playlist_id}/Items', {'UserId': self.user_id})
+            if resp:
+                for item in resp.get('Items', []):
+                    tid = str(item.get('Id') or '')
+                    eid = str(item.get('PlaylistItemId') or '')
+                    if tid:
+                        entries.append((tid, eid))
+            if not entries:
+                logger.error(f"Jellyfin reorder: no entries for playlist {playlist_id}")
+                return False
+
+            by_tid = {tid: eid for tid, eid in entries}
+            hdr = {'X-Emby-Token': self.api_key}
+
+            # Drop entries not in the desired list (extras, for Mirror source).
+            extra_eids = [eid for tid, eid in entries if tid not in ordered_set and eid]
+            for i in range(0, len(extra_eids), 100):
+                batch = extra_eids[i:i + 100]
+                r = requests.delete(
+                    f"{self.base_url}/Playlists/{playlist_id}/Items",
+                    params={'EntryIds': ','.join(batch)}, headers=hdr, timeout=30,
+                )
+                if r.status_code not in (200, 204):
+                    logger.error(f"Jellyfin reorder remove failed: HTTP {r.status_code}")
+                    return False
+
+            # Move each desired track to its target index, ascending — each move
+            # lands the item exactly at index i without disturbing 0..i-1.
+            for idx, tid in enumerate(ordered):
+                eid = by_tid.get(tid)
+                if not eid:
+                    continue
+                r = requests.post(
+                    f"{self.base_url}/Playlists/{playlist_id}/Items/{eid}/Move/{idx}",
+                    headers=hdr, timeout=30,
+                )
+                if r.status_code not in (200, 204):
+                    logger.warning(f"Jellyfin reorder move failed for {tid}: HTTP {r.status_code}")
+                    return False
+            logger.info(f"Aligned Jellyfin playlist '{playlist_name}' order ({len(ordered)} tracks)")
+            return True
+        except Exception as e:
+            logger.error(f"Error reordering Jellyfin playlist '{playlist_name}': {e}")
+            return False
+
     def update_playlist(self, playlist_name: str, tracks) -> bool:
         """Update an existing playlist or create it if it doesn't exist"""
         if not self.ensure_connection():
