@@ -1298,10 +1298,12 @@ function closeDiscoveryPoolModal() {
 // a manual match drops the row from here on the next refresh.
 let _wingItPoolOverlay = null;
 let _wingItPoolData = null;
+let _wingItPoolView = 'categories';   // 'categories' | 'attention' | 'matched'
 let _wingItPoolPlaylistFilter = null;
 
 async function openWingItPoolModal(playlistId = null) {
     _wingItPoolPlaylistFilter = playlistId;
+    _wingItPoolView = 'categories';
     let url = '/api/wing-it-pool';
     if (playlistId) url += `?playlist_id=${playlistId}`;
     try {
@@ -1321,7 +1323,8 @@ async function openWingItPoolModal(playlistId = null) {
     const playlistOptions = (_wingItPoolData.playlists || [])
         .map(p => `<option value="${p.id}" ${playlistId == p.id ? 'selected' : ''}>${_esc(p.name)}</option>`)
         .join('');
-    const count = (_wingItPoolData.tracks || []).length;
+    const attentionCount = (_wingItPoolData.tracks || []).length;
+    const matchedCount = (_wingItPoolData.matched || []).length;
 
     overlay.innerHTML = `
         <div class="modal-container playlist-modal">
@@ -1329,7 +1332,8 @@ async function openWingItPoolModal(playlistId = null) {
                 <div class="playlist-header-content">
                     <h2>Wing It Pool</h2>
                     <div class="playlist-quick-info">
-                        <span class="playlist-owner ${count > 0 ? 'pool-header-failed-highlight' : ''}" id="wing-it-header-count">${count} to review</span>
+                        <span class="playlist-owner ${attentionCount > 0 ? 'pool-header-failed-highlight' : ''}" id="wing-it-header-attention">${attentionCount} to review</span>
+                        <span class="playlist-track-count" id="wing-it-header-matched">${matchedCount} resolved</span>
                         <select class="pool-playlist-filter" onchange="filterWingItPool(this.value)">
                             <option value="">All Playlists</option>
                             ${playlistOptions}
@@ -1340,9 +1344,33 @@ async function openWingItPoolModal(playlistId = null) {
             </div>
 
             <div class="playlist-modal-body">
-                <div class="pool-list-view" style="display: block;">
+                <div class="pool-category-grid" id="wing-it-category-grid">
+                    <div class="pool-category-card failed" onclick="showWingItList('attention')">
+                        <div class="pool-category-fallback failed"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#9889;</div>
+                            <div class="pool-category-count failed" id="wing-it-cat-attention-count">${attentionCount}</div>
+                            <div class="pool-category-label">guesses to review</div>
+                        </div>
+                        <div class="pool-category-top-bar failed"></div>
+                    </div>
+                    <div class="pool-category-card matched" onclick="showWingItList('matched')">
+                        <div class="pool-category-fallback matched"></div>
+                        <div class="pool-category-overlay"></div>
+                        <div class="pool-category-content">
+                            <div class="pool-category-icon">&#10003;</div>
+                            <div class="pool-category-count matched" id="wing-it-cat-matched-count">${matchedCount}</div>
+                            <div class="pool-category-label">resolved manually</div>
+                        </div>
+                        <div class="pool-category-top-bar matched"></div>
+                    </div>
+                </div>
+
+                <div class="pool-list-view" id="wing-it-list-view" style="display: none;">
                     <div class="pool-list-header">
-                        <span class="pool-list-title">&#9889; Auto-matched by Wing It &mdash; verify or re-match</span>
+                        <button class="pool-back-btn" onclick="showWingItCategories()">&larr; Back</button>
+                        <span class="pool-list-title" id="wing-it-list-title"></span>
                         <input type="text" class="pool-list-search" id="wing-it-list-search" placeholder="Filter tracks..." oninput="renderWingItPoolList()">
                     </div>
                     <div class="pool-list-content" id="wing-it-list-content"></div>
@@ -1361,7 +1389,35 @@ async function openWingItPoolModal(playlistId = null) {
     document.body.appendChild(overlay);
     overlay.style.display = 'flex';
     _wingItPoolOverlay = overlay;
+}
+
+function showWingItList(view) {
+    _wingItPoolView = view;
+    const grid = document.getElementById('wing-it-category-grid');
+    const listView = document.getElementById('wing-it-list-view');
+    const title = document.getElementById('wing-it-list-title');
+    const search = document.getElementById('wing-it-list-search');
+    if (grid) grid.style.display = 'none';
+    if (listView) listView.style.display = 'block';
+    if (title) title.textContent = view === 'matched'
+        ? '✓ Resolved Wing It guesses' : '⚡ Guesses to review';
+    if (search) search.value = '';
     renderWingItPoolList();
+}
+
+function showWingItCategories() {
+    _wingItPoolView = 'categories';
+    const grid = document.getElementById('wing-it-category-grid');
+    const listView = document.getElementById('wing-it-list-view');
+    if (grid) grid.style.display = 'grid';
+    if (listView) listView.style.display = 'none';
+}
+
+function _wingItMatchedName(t) {
+    try {
+        const md = JSON.parse(t.extra_data || '{}').matched_data || {};
+        return md.name || '';
+    } catch (e) { return ''; }
 }
 
 function renderWingItPoolList() {
@@ -1370,7 +1426,8 @@ function renderWingItPoolList() {
 
     const searchEl = document.getElementById('wing-it-list-search');
     const query = (searchEl ? searchEl.value : '').toLowerCase().trim();
-    let tracks = _wingItPoolData.tracks || [];
+    const isMatched = _wingItPoolView === 'matched';
+    let tracks = (isMatched ? _wingItPoolData.matched : _wingItPoolData.tracks) || [];
     if (query) {
         tracks = tracks.filter(t =>
             (t.track_name || '').toLowerCase().includes(query) ||
@@ -1379,23 +1436,44 @@ function renderWingItPoolList() {
         );
     }
     if (tracks.length === 0) {
+        const emptyMsg = isMatched
+            ? 'No resolved Wing It tracks yet — ones you Fix here will land in this list.'
+            : 'No Wing It guesses to review.';
         container.innerHTML = query
-            ? '<div class="pool-empty">No Wing It tracks match your filter.</div>'
-            : '<div class="pool-empty">No Wing It tracks &mdash; nothing was auto-matched on a guess.</div>';
+            ? '<div class="pool-empty">No tracks match your filter.</div>'
+            : `<div class="pool-empty">${emptyMsg}</div>`;
         return;
     }
-    container.innerHTML = tracks.map(t => `
-        <div class="pool-track-row pool-failed">
-            <div class="pool-track-info">
-                <div class="pool-track-name">${_esc(t.track_name)}</div>
-                <div class="pool-track-meta">
-                    <span class="pool-track-artist">${_esc(t.artist_name)}</span>
-                    <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+    container.innerHTML = tracks.map(t => {
+        if (isMatched) {
+            const matchedName = _wingItMatchedName(t);
+            return `
+                <div class="pool-track-row pool-matched">
+                    <div class="pool-track-info">
+                        <div class="pool-track-name">${_esc(t.track_name)}</div>
+                        <div class="pool-track-meta">
+                            <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                            ${matchedName ? `<span class="pool-track-arrow">&rarr;</span><span class="pool-match-name">${_esc(matchedName)}</span>` : ''}
+                            <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                        </div>
+                    </div>
+                    <button class="pool-rematch-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')" title="Change this match">Re-match</button>
                 </div>
+            `;
+        }
+        return `
+            <div class="pool-track-row pool-failed">
+                <div class="pool-track-info">
+                    <div class="pool-track-name">${_esc(t.track_name)}</div>
+                    <div class="pool-track-meta">
+                        <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                        <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                    </div>
+                </div>
+                <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')">Fix Match</button>
             </div>
-            <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')">Fix Match</button>
-        </div>
-    `).join('');
+        `;
+    }).join('');
 }
 
 async function filterWingItPool(playlistId) {
@@ -1409,13 +1487,23 @@ async function filterWingItPool(playlistId) {
         showToast('Failed to filter Wing It pool', 'error');
         return;
     }
+    _updateWingItHeaderCounts();
+    if (_wingItPoolView === 'categories') return;
     renderWingItPoolList();
-    const countEl = document.getElementById('wing-it-header-count');
-    if (countEl) {
-        const c = (_wingItPoolData.tracks || []).length;
-        countEl.textContent = `${c} to review`;
-        countEl.classList.toggle('pool-header-failed-highlight', c > 0);
-    }
+}
+
+function _updateWingItHeaderCounts() {
+    if (!_wingItPoolData) return;
+    const a = (_wingItPoolData.tracks || []).length;
+    const m = (_wingItPoolData.matched || []).length;
+    const aEl = document.getElementById('wing-it-header-attention');
+    const mEl = document.getElementById('wing-it-header-matched');
+    const aCat = document.getElementById('wing-it-cat-attention-count');
+    const mCat = document.getElementById('wing-it-cat-matched-count');
+    if (aEl) { aEl.textContent = `${a} to review`; aEl.classList.toggle('pool-header-failed-highlight', a > 0); }
+    if (mEl) mEl.textContent = `${m} resolved`;
+    if (aCat) aCat.textContent = a;
+    if (mCat) mCat.textContent = m;
 }
 
 // Re-fetch + re-render the open Wing It pool (used after a Fix Match resolves a track).
