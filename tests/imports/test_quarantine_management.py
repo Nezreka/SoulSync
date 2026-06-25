@@ -470,9 +470,14 @@ def test_group_key_prefers_isrc_over_everything():
     assert quarantine_group_key("Artist", "Track", ctx) == "isrc:usrc12345678"
 
 
-def test_group_key_falls_back_to_source_id_then_uri():
-    assert quarantine_group_key("A", "T", {"track_info": {"id": "abc123"}}) == "id:abc123"
-    assert quarantine_group_key("A", "T", {"track_info": {"uri": "spotify:track:z"}}) == "uri:spotify:track:z"
+def test_group_key_uses_isrc_and_ignores_source_specific_ids():
+    # ISRC is the universal target identity → wins.
+    assert quarantine_group_key("A", "T", {"track_info": {"isrc": "USABC1234567"}}) == "isrc:usabc1234567"
+    # Source-specific ids / uris are intentionally NOT used (they differ across
+    # sources/batches and break cross-batch sibling matching) — with no ISRC the
+    # key falls back to the normalized artist|track name, NOT the id/uri.
+    assert quarantine_group_key("A", "T", {"track_info": {"id": "abc123"}}) == "nm:a|t"
+    assert quarantine_group_key("A", "T", {"track_info": {"uri": "spotify:track:z"}}) == "nm:a|t"
 
 
 def test_group_key_falls_back_to_normalized_name_without_context():

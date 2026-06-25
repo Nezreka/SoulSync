@@ -4110,6 +4110,167 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 }
 
 /* Quality tier cards - upgraded inner cards */
+/* ── Ranked-targets editor (v3 quality profile) ───────────────────────── */
+.ranked-targets-editor {
+    margin-bottom: 16px;
+}
+
+.ranked-targets-label {
+    display: block;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.ranked-targets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.ranked-targets-empty {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
+    font-style: italic;
+    padding: 10px 12px;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+}
+
+.ranked-target-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    transition: border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.ranked-target-row:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+}
+
+.ranked-target-row.rt-dragging {
+    opacity: 0.4;
+}
+
+.ranked-target-row.rt-dragover {
+    border-color: rgba(99, 179, 237, 0.7);
+}
+
+.ranked-target-row .rt-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 14px;
+    user-select: none;
+}
+
+.ranked-target-row .rt-rank {
+    min-width: 18px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.45);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.ranked-target-row .rt-label {
+    color: rgba(255, 255, 255, 0.95);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.ranked-target-row .rt-spacer {
+    flex: 1;
+}
+
+.ranked-target-row .rt-move,
+.ranked-target-row .rt-del {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.65);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 2px 7px;
+    transition: background 0.15s ease;
+}
+
+.ranked-target-row .rt-move:hover,
+.ranked-target-row .rt-del:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.ranked-target-row .rt-del:hover {
+    background: rgba(229, 62, 62, 0.25);
+    border-color: rgba(229, 62, 62, 0.5);
+}
+
+.ranked-target-add {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+}
+
+.ranked-target-add select,
+.ranked-target-add input[type="number"] {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    padding: 7px 9px;
+    min-height: 34px;
+}
+
+.ranked-target-add select { min-width: 130px; cursor: pointer; }
+
+/* Kill the default light optgroup/option bars in the dark dropdown. */
+.ranked-target-add select optgroup {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.55);
+    font-style: normal;
+    font-weight: 600;
+}
+
+.ranked-target-add select option {
+    background: #1a1a1e;
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 400;
+}
+
+.ranked-target-add .rt-inline-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.ranked-target-add .rt-add-btn {
+    background: rgba(99, 179, 237, 0.18);
+    border: 1px solid rgba(99, 179, 237, 0.4);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.92);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    transition: background 0.15s ease;
+}
+
+.ranked-target-add .rt-add-btn:hover {
+    background: rgba(99, 179, 237, 0.3);
+}
+
 .quality-tier {
     margin-bottom: 16px;
     padding: 12px;
@@ -68150,6 +68311,7 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-badge.verif-unverified { color: #f1c40f; background: rgba(241,196,15,0.14); }
 .verif-badge.verif-force { color: #e67e22; background: rgba(230,126,34,0.16); }
 .adl-retry-info { margin-left: 6px; font-size: 11px; color: #e67e22; cursor: help; }
+.adl-quality-chip { display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.02em; color: rgba(255,255,255,0.78); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 0 6px; line-height: 16px; cursor: help; vertical-align: middle; }
 .verif-badge.verif-human { color: #3498db; background: rgba(52,152,219,0.14); }
 .verif-actions { display: inline-flex; gap: 6px; margin-left: 10px; align-items: center; }
 .verif-act { border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.85); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer; line-height: 18px; }
@@ -68167,6 +68329,14 @@ body.em-scroll-lock { overflow: hidden; }
 .verif-detail-label { color: rgba(255,255,255,0.4); margin-right: 4px; }
 .verif-banner-spacer { flex: 1; }
 .verif-bulk-danger { border-color: rgba(248,113,113,0.4) !important; color: #f87171 !important; }
+
+.verif-quar-alt-wrapper { display: contents; }
+.verif-quar-alt-slot { min-width: 68px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0; }
+.verif-quar-alt-btn { border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.5); border-radius: 6px; padding: 2px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; line-height: 18px; }
+.verif-quar-alt-btn:hover { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.8); }
+.verif-quar-alt-btn.open { color: rgba(255,255,255,0.75); border-color: rgba(255,255,255,0.25); }
+.verif-quar-alt-members { display: none; padding-left: 20px; border-left: 2px solid rgba(255,255,255,0.07); margin-left: 8px; margin-bottom: 2px; }
+.verif-quar-alt-members.vqg-open { display: block; }
 
 /* ── Security settings: grouped sub-sections + dependency visuals ── */
 .security-subgroup {

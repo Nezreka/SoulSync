@@ -28,6 +28,7 @@ from config.settings import config_manager
 from core.download_engine import DownloadEngine
 from core.download_plugins.registry import DownloadPluginRegistry, build_default_registry
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.selection import load_search_mode
 
 logger = get_logger("download_orchestrator")
 
@@ -102,12 +103,14 @@ class DownloadOrchestrator:
         deezer_dl = self.client('deezer_dl')
         if deezer_arl and deezer_dl:
             deezer_dl.reconnect(deezer_arl)
-            deezer_dl._quality = config_manager.get('deezer_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            deezer_dl._quality = quality_tier_for_source('deezer', default='flac')
 
         # Reload Amazon quality preference (T2Tunes needs no reconnect — public proxy)
         amazon = self.client('amazon')
         if amazon:
-            quality = config_manager.get('amazon_download.quality', 'flac')
+            from core.quality.source_map import quality_tier_for_source
+            quality = quality_tier_for_source('amazon', default='flac')
             amazon._quality = quality
             amazon._allow_fallback = config_manager.get('amazon_download.allow_fallback', True)
             if hasattr(amazon, '_client') and amazon._client:
@@ -342,6 +345,11 @@ class DownloadOrchestrator:
         if not chain:
             logger.warning("Hybrid search exhausted: no eligible sources after exclusion filter")
             return [], []
+        if load_search_mode() == 'best_quality':
+            logger.info(f"Best-quality search ({' → '.join(chain)}): {query}")
+            return await self.engine.search_all_sources(
+                query, chain, timeout, progress_callback,
+            )
         logger.info(f"Hybrid search ({' → '.join(chain)}): {query}")
         return await self.engine.search_with_fallback(query, chain, timeout, progress_callback)
 
@@ -412,9 +420,17 @@ class DownloadOrchestrator:
 
             if scored:
                 scored.sort(key=lambda x: x._match_confidence, reverse=True)
-                filtered_results = scored
+                # Match filter done (right track); now prefer the best quality
+                # among the confidence-passing survivors so streaming isn't
+                # quality-blind like Soulseek already isn't. Stable ranking
+                # keeps confidence order within an equal quality tier; the
+                # `or scored` fail-safe never leaves us with nothing to try.
+                from core.quality.selection import rank_for_profile
+                ranked, _ = rank_for_profile(scored)
+                filtered_results = ranked or scored
                 logger.info(f"Streaming validation: {len(scored)}/{len(tracks)} passed "
-                            f"(best: {scored[0]._match_confidence:.2f})")
+                            f"(best: {scored[0]._match_confidence:.2f}, "
+                            f"quality pick: {filtered_results[0].audio_quality.label()})")
             else:
                 logger.warning(f"No streaming results passed validation for: {query}")
                 return None

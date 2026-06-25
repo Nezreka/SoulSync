@@ -25,6 +25,7 @@ big-bang switchover.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
@@ -391,6 +392,16 @@ class DownloadEngine:
         (tracks, albums) tuple, or ``([], [])`` when every source
         in the chain is exhausted.
 
+        Priority mode is deliberately quality-AGNOSTIC at search time — source
+        order is king and the first source that returns any tracks wins, exactly
+        matching pre-quality-system behaviour byte-for-byte (#896 review #3).
+        Quality-gating the priority path would deprioritise e.g. a soulseek
+        mp3 whose bitrate slskd omitted (``bitrate=None`` → "unsatisfied"),
+        changing which source wins and adding latency for users who never opted
+        in. Cross-source quality pooling is the job of best_quality mode
+        (``search_all_sources``); final per-result ranking still happens in the
+        orchestrator's match/quality filter. RAW tracks are returned.
+
         Replaces orchestrator's hand-rolled hybrid search loop. The
         chain is ordered (most-preferred first).
         """
@@ -406,9 +417,10 @@ class DownloadEngine:
             try:
                 logger.info(f"Trying {source_name} (priority {i+1}): {query}")
                 tracks, albums = await plugin.search(query, timeout, progress_callback)
-                if tracks:
-                    logger.info(f"{source_name} found {len(tracks)} tracks")
-                    return (tracks, albums)
+                if not tracks:
+                    continue
+                logger.info(f"{source_name} found {len(tracks)} tracks")
+                return (tracks, albums)
             except Exception as e:
                 logger.warning(f"{source_name} search failed: {e}")
 
@@ -417,6 +429,75 @@ class DownloadEngine:
             ', '.join(source_chain), query,
         )
         return ([], [])
+
+    async def search_all_sources(self, query: str, source_chain,
+                                 timeout=None, progress_callback=None,
+                                 exclude_sources=None):
+        """Best-quality mode: pool RAW tracks from EVERY configured source in
+        ``source_chain`` instead of stopping at the first satisfying one.
+
+        Unlike :meth:`search_with_fallback`, no source short-circuits the
+        search — the caller (orchestrator/worker) ranks the combined pool
+        best→worst by actual audio quality. ``exclude_sources`` drops sources
+        whose per-source retry budget is already spent (so their candidates
+        never re-enter the pool). Unconfigured / unregistered / raising sources
+        are skipped exactly like the fallback path. Returns
+        ``(combined_tracks, combined_albums)``.
+        """
+        excluded = {s.lower() for s in (exclude_sources or []) if s}
+        pooled_tracks = []
+        pooled_albums = []
+        # Per-source contribution for an honest pool log — e.g. a release-level
+        # source like usenet/torrent that returns nothing for a track-title
+        # query should read "usenet=0", not silently hide behind the chain name.
+        contributions = []
+
+        # Decide which sources to actually query, recording why the rest were
+        # skipped. Searches then run CONCURRENTLY so the pool waits only for the
+        # slowest source (e.g. usenet/Prowlarr, which can be slow) rather than
+        # the sum of every source's latency.
+        to_search = []  # (source_name, plugin)
+        for source_name in source_chain:
+            if source_name.lower() in excluded:
+                contributions.append(f"{source_name}=excluded")
+                continue
+            plugin = self._plugins.get(source_name)
+            if plugin is None:
+                logger.info(f"Skipping {source_name} (not available)")
+                contributions.append(f"{source_name}=unavailable")
+                continue
+            if hasattr(plugin, 'is_configured') and not plugin.is_configured():
+                logger.info(f"Skipping {source_name} (not configured)")
+                contributions.append(f"{source_name}=unconfigured")
+                continue
+            to_search.append((source_name, plugin))
+
+        async def _one(plugin):
+            return await plugin.search(query, timeout, progress_callback)
+
+        results = await asyncio.gather(
+            *[_one(plugin) for _, plugin in to_search],
+            return_exceptions=True,
+        )
+
+        for (source_name, _), result in zip(to_search, results):
+            if isinstance(result, Exception):
+                logger.warning(f"{source_name} search failed: {result}")
+                contributions.append(f"{source_name}=error")
+                continue
+            tracks, albums = result
+            n = len(tracks) if tracks else 0
+            if tracks:
+                pooled_tracks.extend(tracks)
+            if albums:
+                pooled_albums.extend(albums)
+            contributions.append(f"{source_name}={n}")
+
+        logger.info(
+            "Best-quality pool: %d candidates [%s] for: %s",
+            len(pooled_tracks), ', '.join(contributions), query,
+        )
+        return (pooled_tracks, pooled_albums)
 
     async def download_with_fallback(self, username: str, filename: str,
                                      file_size: int, source_chain) -> Optional[str]:

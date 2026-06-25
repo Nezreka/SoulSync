@@ -40,6 +40,7 @@ _JOB_MODULES = [
     'core.repair_jobs.metadata_gap_filler',
     'core.repair_jobs.album_completeness',
     'core.repair_jobs.fake_lossless_detector',
+    'core.repair_jobs.quality_upgrade_scanner',
     'core.repair_jobs.library_reorganize',
     'core.repair_jobs.mbid_mismatch_detector',
     'core.repair_jobs.single_album_dedup',

@@ -480,11 +480,33 @@ def test_stuck_searching_task_forced_to_not_found():
     assert download_tasks['t1']['status'] == 'not_found'
 
 
-def test_stuck_post_processing_task_forced_to_completed():
-    """Task post_processing > 5min gets forced to completed."""
+def test_stuck_post_processing_without_file_forced_to_failed():
+    """Task stuck in post_processing past the timeout with NO output file must
+    be marked FAILED, not falsely completed — otherwise it shows as a phantom
+    download with nothing on disk (big batches back up post-processing)."""
+    download_tasks['t1'] = {
+        'status': 'post_processing', 'track_info': {'name': 'X'},
+        'status_change_time': 0,  # ancient → past any timeout
+    }
+    download_batches['b1'] = {
+        'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
+        'max_concurrent': 1, 'permanently_failed_tracks': [],
+        'cancelled_tracks': set(),
+    }
+    deps, _ = _build_deps()
+    lc.on_download_completed('b1', 't1', True, deps)
+    assert download_tasks['t1']['status'] == 'failed'
+
+
+def test_stuck_post_processing_with_existing_file_completed(tmp_path):
+    """If the import really finished (final_file_path exists on disk), a stuck
+    post_processing task is legitimately completed."""
+    real_file = tmp_path / 'track.flac'
+    real_file.write_bytes(b'x')
     download_tasks['t1'] = {
         'status': 'post_processing', 'track_info': {'name': 'X'},
         'status_change_time': 0,
+        'final_file_path': str(real_file),
     }
     download_batches['b1'] = {
         'queue': ['t1'], 'queue_index': 1, 'active_count': 1,
