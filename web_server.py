@@ -35023,6 +35023,7 @@ def get_wing_it_pool():
         playlist_id = request.args.get('playlist_id', type=int)
 
         tracks = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id)
+        matched = database.get_wing_it_pool(profile_id=profile_id, playlist_id=playlist_id, resolved=True)
         stats = database.get_wing_it_pool_stats(profile_id=profile_id)
 
         playlists = database.get_mirrored_playlists(profile_id=profile_id)
@@ -35030,6 +35031,7 @@ def get_wing_it_pool():
 
         return jsonify({
             'tracks': tracks,
+            'matched': matched,
             'stats': stats,
             'playlists': playlist_options,
         })
@@ -35080,7 +35082,8 @@ def fix_discovery_pool_track():
             'source': 'spotify',
         }
 
-        # Update the mirrored track's extra_data
+        # Update the mirrored track's extra_data (merges, so a wing-it track keeps its
+        # wing_it_fallback flag — that + manual_match is how the Wing It Pool lists resolved guesses).
         extra_data = {
             'discovered': True,
             'provider': 'spotify',

@@ -33,8 +33,11 @@ def _track(db, playlist_id, pos, name, artist, extra):
 
 
 WING_IT = {'discovered': True, 'provider': 'wing_it_fallback', 'confidence': 0, 'wing_it_fallback': True}
-WING_IT_FIXED = {'discovered': True, 'provider': 'spotify', 'confidence': 1.0,
-                 'wing_it_fallback': True, 'manual_match': True}
+# A resolved wing-it track: /fix MERGES extra_data, so wing_it_fallback survives alongside the
+# new manual_match flag — that pairing is what marks it resolved (no separate marker needed).
+WING_IT_RESOLVED = {'discovered': True, 'provider': 'spotify', 'confidence': 1.0,
+                    'wing_it_fallback': True, 'manual_match': True,
+                    'matched_data': {'name': 'Dopamine (Real)'}}
 MATCHED = {'discovered': True, 'provider': 'spotify', 'confidence': 0.95}
 FAILED = {'discovery_attempted': True, 'discovered': False}
 
@@ -42,16 +45,20 @@ FAILED = {'discovery_attempted': True, 'discovered': False}
 def test_lists_only_unverified_wing_it_tracks(tmp_path):
     db = MusicDatabase(database_path=str(tmp_path / "w.db"))
     pid = _playlist(db, 'Liked Songs')
-    _track(db, pid, 0, 'Orbital Trans', 'Yoga Mao', WING_IT)        # unverified wing-it -> include
-    _track(db, pid, 1, 'Dopamine', 'Rvdical the Kid', WING_IT_FIXED)  # manually fixed -> exclude
-    _track(db, pid, 2, 'Real Match', 'Some Artist', MATCHED)        # normal match -> exclude
-    _track(db, pid, 3, 'Lost Track', 'Nobody', FAILED)             # failed -> exclude (it's Discovery Pool's)
+    _track(db, pid, 0, 'Orbital Trans', 'Yoga Mao', WING_IT)              # unverified -> attention
+    _track(db, pid, 1, 'Dopamine', 'Rvdical the Kid', WING_IT_RESOLVED)  # resolved -> matched list
+    _track(db, pid, 2, 'Real Match', 'Some Artist', MATCHED)             # normal match -> neither
+    _track(db, pid, 3, 'Lost Track', 'Nobody', FAILED)                   # failed -> Discovery Pool's
 
-    out = db.get_wing_it_pool(profile_id=1)
-    assert [t['track_name'] for t in out] == ['Orbital Trans']
-    assert out[0]['artist_name'] == 'Yoga Mao'
-    assert out[0]['playlist_name'] == 'Liked Songs'
-    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 1}
+    attention = db.get_wing_it_pool(profile_id=1)
+    assert [t['track_name'] for t in attention] == ['Orbital Trans']
+    assert attention[0]['artist_name'] == 'Yoga Mao'
+    assert attention[0]['playlist_name'] == 'Liked Songs'
+
+    resolved = db.get_wing_it_pool(profile_id=1, resolved=True)
+    assert [t['track_name'] for t in resolved] == ['Dopamine']
+
+    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 1, 'matched': 1}
 
 
 def test_scopes_by_playlist_and_profile(tmp_path):
@@ -65,7 +72,7 @@ def test_scopes_by_playlist_and_profile(tmp_path):
 
     assert {t['track_name'] for t in db.get_wing_it_pool(profile_id=1)} == {'A Song', 'B Song'}
     assert [t['track_name'] for t in db.get_wing_it_pool(playlist_id=a)] == ['A Song']
-    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 2}
+    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 2, 'matched': 0}
 
 
 def test_empty_when_no_wing_it(tmp_path):
@@ -73,4 +80,4 @@ def test_empty_when_no_wing_it(tmp_path):
     pid = _playlist(db, 'Clean')
     _track(db, pid, 0, 'Matched', 'X', MATCHED)
     assert db.get_wing_it_pool(profile_id=1) == []
-    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 0}
+    assert db.get_wing_it_pool_stats(profile_id=1) == {'wing_it': 0, 'matched': 0}
