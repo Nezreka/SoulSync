@@ -3633,8 +3633,13 @@ class WatchlistScanner:
             for source in sources_to_process:
                 logger.info(f"Curating Release Radar for {source}...")
 
-                # 1. Curate Release Radar - 50 tracks from recent albums
-                recent_albums = self.database.get_discovery_recent_albums(limit=50, source=source, profile_id=profile_id)
+                # 1. Curate Release Radar - 50 tracks from recent albums.
+                # Fetch a GENEROUS album budget (not 50) and exclude next-year announcements at the
+                # query: future-dated albums sort to the top of release_date DESC and used to eat the
+                # budget before the in-loop is_future_release skip ran, starving Fresh Tape to a few
+                # tracks. The downstream caps (6/artist, top 75, take 50) still bound the output.
+                recent_albums = self.database.get_discovery_recent_albums(
+                    limit=300, source=source, profile_id=profile_id, exclude_future_years=True)
                 release_radar_tracks = []
 
                 if not recent_albums:
@@ -4004,45 +4009,129 @@ class WatchlistScanner:
         The ranking lives in core.discovery.listening_recommendations (pure + tested); this only
         gathers inputs — all already in the DB, NO new network — and stores the result under NEW
         metadata/curated keys. Fully self-contained and guarded: any failure logs and returns, so
-        it can never disturb the scan. Phase-1 candidate tracks come from the discovery pool (like
-        BYLT); a later phase swaps in a direct top-tracks fetch for richer coverage.
+        it can never disturb the scan.
+
+        "Best in class" generation (the elevation over the first cut):
+          • Seeds are recency-weighted — recent plays boost lifetime favourites so the picks
+            track what you're into NOW, not just all-time totals.
+          • The ranker is fed the RAW per-seed edges (one row per seed→similar), so an artist
+            similar to several of your seeds accumulates real CONSENSUS — the old code fed the
+            name-collapsed ``get_top_similar_artists`` query, which flattened every similar to a
+            single seed (consensus could never fire). The raw edges also carry ``similarity_rank``,
+            so a seed's CLOSEST matches outweigh its long-tail ones.
+          • ``source_artist_id`` is a SOURCE id (Spotify/iTunes/Deezer/MusicBrainz), so the id→name
+            map is built from the artists' source-id columns, NOT the internal row id (the first
+            cut keyed it by ``artists.id`` and resolved nothing — the feature produced 0 recs).
+        Phase-1 candidate tracks still come from the discovery pool (like BYLT); a later phase
+        swaps in a direct top-tracks fetch for richer coverage.
         """
         try:
             import json as _json
             from core.discovery.listening_recommendations import (
                 aggregate_candidate_tracks,
+                build_recency_weighted_seeds,
                 group_similars_by_seed,
+                names_match,
                 rank_recommended_artists,
+                to_mix_track,
             )
 
-            seeds = [{'name': s['name'], 'weight': s.get('play_count', 1)}
-                     for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
-            if not seeds:
+            # Recency-weighted seeds: lifetime top artists, boosted by recent (30d) plays.
+            lifetime = [s for s in (self.database.get_top_artists('all', 30) or []) if s.get('name')]
+            if not lifetime:
                 return
+            recent_rows = self.database.get_top_artists('30d', 50) or []
+            recent_counts = {r['name'].lower(): r.get('play_count', 0)
+                             for r in recent_rows if r.get('name')}
+            seeds = build_recency_weighted_seeds(lifetime, recent_counts)
+            seed_names = {s['name'].lower() for s in seeds}
 
-            # id -> name + owned-artist set for the WHOLE library (similar_artists rows key the
-            # similar artist by the seed artist's id).
-            id_to_name, owned = {}, set()
+            # Owned-artist set (for exclusion) + the seeds' SOURCE ids (similar_artists.source_artist_id
+            # is a Spotify/iTunes/Deezer/MusicBrainz id, never the internal artists.id). We only need
+            # id→name for the SEED ids, since the edge query below is already scoped to them.
+            owned, seed_source_ids, seed_id_to_name = set(), [], {}
             with self.database._get_connection() as conn:
                 cur = conn.cursor()
-                cur.execute("SELECT id, name FROM artists WHERE name IS NOT NULL AND name != ''")
+                cur.execute("SELECT name, spotify_artist_id, itunes_artist_id, deezer_id, "
+                            "musicbrainz_id FROM artists WHERE name IS NOT NULL AND name != ''")
                 for row in cur.fetchall():
-                    id_to_name[str(row[0])] = row[1]
-                    owned.add((row[1] or '').lower())
+                    nm = row[0]
+                    lname = (nm or '').lower()
+                    owned.add(lname)
+                    if lname in seed_names:
+                        for sid in (row[1], row[2], row[3], row[4]):
+                            if sid:
+                                seed_source_ids.append(str(sid))
+                                seed_id_to_name[str(sid)] = nm
 
-            similar_rows = self.database.get_top_similar_artists(limit=1000, profile_id=profile_id)
-            similars_by_seed = group_similars_by_seed(seeds, similar_rows, id_to_name)
+                # RAW per-seed edges (preserve consensus + similarity_rank). Scoped to the seeds.
+                edges, edge_cols = [], ('source_artist_id', 'similar_artist_name', 'similarity_rank',
+                                       'spotify_id', 'itunes_id', 'deezer_id', 'image_url', 'genres')
+                if seed_source_ids:
+                    placeholders = ",".join("?" * len(seed_source_ids))
+                    cur.execute(
+                        f"SELECT source_artist_id, similar_artist_name, similarity_rank, "
+                        f"similar_artist_spotify_id, similar_artist_itunes_id, "
+                        f"similar_artist_deezer_id, image_url, genres FROM similar_artists "
+                        f"WHERE profile_id = ? AND source_artist_id IN ({placeholders})",
+                        [profile_id, *seed_source_ids])
+                    edges = [dict(zip(edge_cols, r, strict=False)) for r in cur.fetchall()]
+
+            # Per-name enrichment (image/ids/genres) so the Discover row can render rich cards.
+            artist_meta_by_name = {}
+            for e in edges:
+                key = (e['similar_artist_name'] or '').lower()
+                if not key:
+                    continue
+                m = artist_meta_by_name.setdefault(key, {})
+                for src_k, dst_k in (('spotify_id', 'spotify_artist_id'),
+                                     ('itunes_id', 'itunes_artist_id'),
+                                     ('deezer_id', 'deezer_artist_id')):
+                    if e.get(src_k) and not m.get(dst_k):
+                        m[dst_k] = e[src_k]
+                if e.get('image_url') and not m.get('image_url'):
+                    m['image_url'] = e['image_url']
+                if e.get('genres') and not m.get('genres'):
+                    m['genres'] = e['genres']
+
+            similars_by_seed = group_similars_by_seed(
+                seeds, edges, seed_id_to_name, rank_attr='similarity_rank')
+
+            # Fallback: if the raw edges resolved nothing (e.g. source ids not yet populated),
+            # degrade to the aggregated query so the feature still works rather than going dark.
+            if not similars_by_seed:
+                agg = self.database.get_top_similar_artists(limit=1000, profile_id=profile_id)
+                similars_by_seed = group_similars_by_seed(
+                    seeds, agg, seed_id_to_name, rank_attr='similarity_rank')
+
             recs = rank_recommended_artists(seeds, similars_by_seed, owned, limit=40)
             if not recs:
                 logger.info("[Listening Recs] no recommendations yet (no similar-artist coverage)")
                 return
 
-            self.database.set_metadata('listening_recs_artists', _json.dumps([
-                {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5], 'score': r.score}
-                for r in recs
-            ]))
+            def _enrich(r):
+                m = artist_meta_by_name.get(r.name.lower(), {})
+                genres = m.get('genres')
+                if isinstance(genres, str):
+                    try:
+                        genres = _json.loads(genres)
+                    except Exception:
+                        genres = None
+                return {'name': r.name, 'seed_count': r.seed_count, 'seeds': r.seeds[:5],
+                        'score': r.score, 'spotify_artist_id': m.get('spotify_artist_id'),
+                        'itunes_artist_id': m.get('itunes_artist_id'),
+                        'deezer_artist_id': m.get('deezer_artist_id'),
+                        'image_url': m.get('image_url'),
+                        'genres': (genres[:3] if isinstance(genres, list) else None)}
 
-            # Candidate tracks from the discovery pool grouped by artist (phase 1: no new network).
+            self.database.set_metadata('listening_recs_artists',
+                                       _json.dumps([_enrich(r) for r in recs]))
+
+            # Candidate tracks for the "Listening Mix" playlist row: each recommended artist's
+            # top tracks. Prefer a DIRECT top-tracks fetch (Spotify/Deezer — richest + most
+            # accurate), fall back to the discovery pool (covers iTunes + any artist the fetch
+            # missed). Stored as full render-ready dicts so the row needs NO pool re-hydration —
+            # robust against pool rotation (the bug that shrinks Fresh Tape/Archives at read time).
             pool, active_source = [], None
             for src in (sources_to_process or []):
                 pool = self.database.get_discovery_pool_tracks(
@@ -4050,24 +4139,85 @@ class WatchlistScanner:
                 if pool:
                     active_source = src
                     break
+            if not active_source:
+                active_source = (sources_to_process or ['spotify'])[0]
 
-            track_ids = []
-            if pool:
-                by_artist = {}
-                for t in pool:
-                    an = (getattr(t, 'artist_name', '') or '').lower()
-                    tid = (getattr(t, 'spotify_track_id', None) if active_source == 'spotify'
-                           else getattr(t, 'itunes_track_id', None) if active_source == 'itunes'
-                           else getattr(t, 'deezer_track_id', None))
-                    if an and tid:
-                        by_artist.setdefault(an, []).append({'name': getattr(t, 'track_name', ''), 'id': tid})
-                candidates = aggregate_candidate_tracks(recs, by_artist, per_artist=3, limit=50)
-                track_ids = [c['id'] for c in candidates if c.get('id')]
-                if track_ids:
-                    self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
+            # Pool baseline grouped by artist (full render dicts), no network.
+            pool_by_artist = {}
+            for t in (pool or []):
+                an = (getattr(t, 'artist_name', '') or '').lower()
+                tid = (getattr(t, 'spotify_track_id', None) if active_source == 'spotify'
+                       else getattr(t, 'itunes_track_id', None) if active_source == 'itunes'
+                       else getattr(t, 'deezer_track_id', None))
+                name = getattr(t, 'track_name', '') or ''
+                if not an or not tid or not name:
+                    continue
+                tdj = getattr(t, 'track_data_json', None)
+                if isinstance(tdj, str):
+                    try:
+                        tdj = _json.loads(tdj)
+                    except Exception:
+                        tdj = None
+                pool_by_artist.setdefault(an, []).append({
+                    'track_id': str(tid), 'name': name, 'track_name': name,
+                    'artist_name': getattr(t, 'artist_name', '') or '',
+                    'album_name': getattr(t, 'album_name', '') or '',
+                    'album_cover_url': getattr(t, 'album_cover_url', None),
+                    'duration_ms': getattr(t, 'duration_ms', 0) or 0,
+                    'track_data_json': tdj, 'source': active_source,
+                    f'{active_source}_track_id': str(tid)})
 
-            logger.info("[Listening Recs] %d recommended artists, %d candidate tracks",
-                        len(recs), len(track_ids))
+            # Direct top-tracks enrichment — guarded, bounded (top 20 recs), fail-soft per artist.
+            fetched_by_artist = {}
+            try:
+                if active_source in ('spotify', 'deezer'):
+                    client = get_client_for_source(active_source)
+                    if client and hasattr(client, 'get_artist_top_tracks'):
+                        id_key = 'spotify_artist_id' if active_source == 'spotify' else 'deezer_artist_id'
+                        can_search = hasattr(client, 'search_artists')
+                        for r in recs[:20]:
+                            aid = artist_meta_by_name.get(r.name.lower(), {}).get(id_key)
+                            # Most similar-artist rows store a name but no source id, so resolve
+                            # it by name-search — guarded by names_match so we never fetch the
+                            # WRONG artist's tracks (a same-name act).
+                            if not aid and can_search:
+                                try:
+                                    found = client.search_artists(r.name, limit=1) or []
+                                except Exception as _s_err:
+                                    logger.debug("[Listening Recs] artist search failed for %s: %s",
+                                                 r.name, _s_err)
+                                    found = []
+                                if found and names_match(r.name, getattr(found[0], 'name', '')):
+                                    aid = getattr(found[0], 'id', None)
+                            if not aid:
+                                continue
+                            try:
+                                raw = client.get_artist_top_tracks(str(aid), limit=8) or []
+                            except Exception as _tt_err:
+                                logger.debug("[Listening Recs] top-tracks fetch failed for %s: %s",
+                                             r.name, _tt_err)
+                                continue
+                            shaped = [s for s in (to_mix_track(x, active_source) for x in raw) if s][:5]
+                            if shaped:
+                                fetched_by_artist[r.name.lower()] = shaped
+            except Exception as _enr_err:
+                logger.debug("[Listening Recs] top-tracks enrichment skipped: %s", _enr_err)
+
+            # Merge: prefer fetched top tracks, fall back to the pool per artist.
+            top_tracks_by_artist = {}
+            for r in recs:
+                merged = fetched_by_artist.get(r.name.lower()) or pool_by_artist.get(r.name.lower())
+                if merged:
+                    top_tracks_by_artist[r.name.lower()] = merged
+
+            mix = aggregate_candidate_tracks(recs, top_tracks_by_artist, per_artist=3, limit=50)
+            track_ids = [m.get('track_id') for m in mix if m.get('track_id')]
+            if mix:
+                self.database.set_metadata('listening_recs_tracks_full', _json.dumps(mix))
+                self.database.save_curated_playlist('listening_recs_tracks', track_ids, profile_id=profile_id)
+
+            logger.info("[Listening Recs] %d recommended artists, %d mix tracks (%d artists via top-tracks fetch)",
+                        len(recs), len(mix), len(fetched_by_artist))
         except Exception as e:
             logger.debug("[Listening Recs] generation skipped: %s", e)
 
