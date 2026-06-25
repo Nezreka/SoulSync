@@ -1171,6 +1171,13 @@ class MusicDatabase:
             if track_cols and 'year' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN year INTEGER")
                 logger.info("Repaired missing year column on tracks table (#910)")
+            # #927 — multi-disc fix: the scan now writes a real disc_number, but the column
+            # was only ever added by a separate migration that doesn't run on fresh installs,
+            # so the new INSERT/UPDATE would hard-fail with "no column named disc_number".
+            # Same shape as the year repair above: additive, defaults to 1, ensured on every DB.
+            if track_cols and 'disc_number' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
+                logger.info("Repaired missing disc_number column on tracks table (#927)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}
@@ -6635,6 +6642,19 @@ class MusicDatabase:
                 track_id = str(track_obj.ratingKey)
                 title = track_obj.title
                 track_number = getattr(track_obj, 'trackNumber', None)
+                # Multi-disc: capture the disc number so multi-disc albums don't all
+                # collapse onto disc 1 (which mis-files disc-2+ tracks and flags them
+                # "missing"). Jellyfin/Navidrome wrappers set .discNumber; plexapi's Track
+                # exposes .parentIndex. Floor to >=1 — a missing/0 disc is disc 1.
+                _raw_disc = getattr(track_obj, 'discNumber', None)
+                if _raw_disc is None:
+                    _raw_disc = getattr(track_obj, 'parentIndex', None)
+                try:
+                    disc_number = int(_raw_disc)
+                    if disc_number < 1:
+                        disc_number = 1
+                except (TypeError, ValueError):
+                    disc_number = 1
                 duration = getattr(track_obj, 'duration', None)
                 
                 # Get file path and media info (Plex-specific, Jellyfin may not have these)
@@ -6726,9 +6746,9 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -6737,7 +6757,7 @@ class MusicDatabase:
                     # an existing value.
                     cursor.execute("""
                         UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
+                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
                             duration = ?, file_path = ?, bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
@@ -6745,7 +6765,7 @@ class MusicDatabase:
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
