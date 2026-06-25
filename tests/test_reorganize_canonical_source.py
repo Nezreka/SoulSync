@@ -73,3 +73,27 @@ def test_no_canonical_unchanged(monkeypatch):
     album_data = {"spotify_album_id": "sp1"}
     source, _, _ = lr._resolve_source(album_data, "spotify")
     assert source == "spotify"
+
+
+def test_musicbrainz_release_id_is_used_by_priority_walk(monkeypatch):
+    _patch_fetch(monkeypatch, {
+        ('musicbrainz', 'mb-release-1'): [{'name': 'x'}],
+    })
+    monkeypatch.setattr(
+        lr,
+        'get_source_priority',
+        lambda primary: ['musicbrainz', 'spotify'],
+    )
+
+    album_data = {
+        'musicbrainz_release_id': 'mb-release-1',
+    }
+
+    source, api_album, items = lr._resolve_source(
+        album_data,
+        'musicbrainz',
+    )
+
+    assert source == 'musicbrainz'
+    assert api_album == {'name': 'musicbrainz:mb-release-1'}
+    assert items == [{'name': 'x'}]

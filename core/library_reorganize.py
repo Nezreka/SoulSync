@@ -100,6 +100,7 @@ _ALBUM_ID_COLUMNS = {
     'deezer': 'deezer_id',
     'discogs': 'discogs_id',
     'hydrabase': 'soul_id',
+    'musicbrainz': 'musicbrainz_release_id',
 }
 
 # Human-facing label for each source.
