@@ -1290,6 +1290,147 @@ function closeDiscoveryPoolModal() {
     loadDiscoveryPoolStats();
 }
 
+// ── Wing It Pool ───────────────────────────────────────────────────────────
+// Lists tracks Wing It auto-matched on a best-effort guess (extra_data
+// wing_it_fallback flag). They count as 'discovered' so the Discovery Pool hides
+// them — this is the only place to review + re-match the guesses. Re-match reuses
+// the Discovery Pool's openPoolFixModal / /api/discovery-pool/fix (same track id);
+// a manual match drops the row from here on the next refresh.
+let _wingItPoolOverlay = null;
+let _wingItPoolData = null;
+let _wingItPoolPlaylistFilter = null;
+
+async function openWingItPoolModal(playlistId = null) {
+    _wingItPoolPlaylistFilter = playlistId;
+    let url = '/api/wing-it-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _wingItPoolData = await res.json();
+    } catch (err) {
+        showToast('Failed to load Wing It pool', 'error');
+        return;
+    }
+    if (_wingItPoolOverlay) _wingItPoolOverlay.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'wing-it-pool-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) closeWingItPoolModal(); };
+
+    const playlistOptions = (_wingItPoolData.playlists || [])
+        .map(p => `<option value="${p.id}" ${playlistId == p.id ? 'selected' : ''}>${_esc(p.name)}</option>`)
+        .join('');
+    const count = (_wingItPoolData.tracks || []).length;
+
+    overlay.innerHTML = `
+        <div class="modal-container playlist-modal">
+            <div class="playlist-modal-header">
+                <div class="playlist-header-content">
+                    <h2>Wing It Pool</h2>
+                    <div class="playlist-quick-info">
+                        <span class="playlist-owner ${count > 0 ? 'pool-header-failed-highlight' : ''}" id="wing-it-header-count">${count} to review</span>
+                        <select class="pool-playlist-filter" onchange="filterWingItPool(this.value)">
+                            <option value="">All Playlists</option>
+                            ${playlistOptions}
+                        </select>
+                    </div>
+                </div>
+                <span class="playlist-modal-close" onclick="closeWingItPoolModal()">&times;</span>
+            </div>
+
+            <div class="playlist-modal-body">
+                <div class="pool-list-view" style="display: block;">
+                    <div class="pool-list-header">
+                        <span class="pool-list-title">&#9889; Auto-matched by Wing It &mdash; verify or re-match</span>
+                        <input type="text" class="pool-list-search" id="wing-it-list-search" placeholder="Filter tracks..." oninput="renderWingItPoolList()">
+                    </div>
+                    <div class="pool-list-content" id="wing-it-list-content"></div>
+                </div>
+            </div>
+
+            <div class="playlist-modal-footer">
+                <div class="playlist-modal-footer-left"></div>
+                <div class="playlist-modal-footer-right">
+                    <button class="playlist-modal-btn playlist-modal-btn-secondary" onclick="closeWingItPoolModal()">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    overlay.style.display = 'flex';
+    _wingItPoolOverlay = overlay;
+    renderWingItPoolList();
+}
+
+function renderWingItPoolList() {
+    const container = document.getElementById('wing-it-list-content');
+    if (!container || !_wingItPoolData) return;
+
+    const searchEl = document.getElementById('wing-it-list-search');
+    const query = (searchEl ? searchEl.value : '').toLowerCase().trim();
+    let tracks = _wingItPoolData.tracks || [];
+    if (query) {
+        tracks = tracks.filter(t =>
+            (t.track_name || '').toLowerCase().includes(query) ||
+            (t.artist_name || '').toLowerCase().includes(query) ||
+            (t.playlist_name || '').toLowerCase().includes(query)
+        );
+    }
+    if (tracks.length === 0) {
+        container.innerHTML = query
+            ? '<div class="pool-empty">No Wing It tracks match your filter.</div>'
+            : '<div class="pool-empty">No Wing It tracks &mdash; nothing was auto-matched on a guess.</div>';
+        return;
+    }
+    container.innerHTML = tracks.map(t => `
+        <div class="pool-track-row pool-failed">
+            <div class="pool-track-info">
+                <div class="pool-track-name">${_esc(t.track_name)}</div>
+                <div class="pool-track-meta">
+                    <span class="pool-track-artist">${_esc(t.artist_name)}</span>
+                    <span class="pool-track-playlist-badge">${_esc(t.playlist_name)}</span>
+                </div>
+            </div>
+            <button class="playlist-modal-btn playlist-modal-btn-primary pool-fix-btn" onclick="openPoolFixModal(${t.id}, '${_escJs(t.track_name)}', '${_escJs(t.artist_name)}')">Fix Match</button>
+        </div>
+    `).join('');
+}
+
+async function filterWingItPool(playlistId) {
+    _wingItPoolPlaylistFilter = playlistId || null;
+    let url = '/api/wing-it-pool';
+    if (playlistId) url += `?playlist_id=${playlistId}`;
+    try {
+        const res = await fetch(url);
+        _wingItPoolData = await res.json();
+    } catch (e) {
+        showToast('Failed to filter Wing It pool', 'error');
+        return;
+    }
+    renderWingItPoolList();
+    const countEl = document.getElementById('wing-it-header-count');
+    if (countEl) {
+        const c = (_wingItPoolData.tracks || []).length;
+        countEl.textContent = `${c} to review`;
+        countEl.classList.toggle('pool-header-failed-highlight', c > 0);
+    }
+}
+
+// Re-fetch + re-render the open Wing It pool (used after a Fix Match resolves a track).
+function refreshWingItPool() {
+    filterWingItPool(_wingItPoolPlaylistFilter || '');
+}
+
+function closeWingItPoolModal() {
+    if (_wingItPoolOverlay) {
+        _wingItPoolOverlay.remove();
+        _wingItPoolOverlay = null;
+    }
+    _wingItPoolData = null;
+}
+
 function showPoolCategories() {
     _discoveryPoolView = 'categories';
     const grid = document.getElementById('pool-category-grid');
@@ -1700,8 +1841,12 @@ async function selectPoolFixTrack(track) {
         if (data.success) {
             showToast(`Matched: ${track.name}`, 'success');
             closePoolFixModal();
-            // Refresh pool data
-            filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+            // Refresh whichever pool the fix was launched from (Discovery or Wing It).
+            if (typeof _wingItPoolOverlay !== 'undefined' && _wingItPoolOverlay) {
+                refreshWingItPool();
+            } else {
+                filterDiscoveryPool(_discoveryPoolPlaylistFilter || '');
+            }
         } else {
             showToast(data.error || 'Failed to fix track', 'error');
         }
