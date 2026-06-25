@@ -10884,23 +10884,40 @@ class MusicDatabase:
             logger.error(f"Error caching discovery recent album: {e}")
             return False
 
-    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
-        """Get cached recent albums for discover page, optionally filtered by source"""
+    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None, profile_id: int = 1,
+                                    exclude_future_years: bool = False) -> List[Dict[str, Any]]:
+        """Get cached recent albums for discover page, optionally filtered by source.
+
+        exclude_future_years: drop announced-but-unreleased albums dated to a LATER YEAR.
+        Because rows are ordered ``release_date DESC``, future-dated albums otherwise sort to
+        the very top and consume the ``limit`` budget — which is exactly why Fresh Tape / Release
+        Radar starved down to a handful of tracks. Year-level so it's precision-safe across
+        'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD'; same-year future months are left for the caller's precise
+        ``is_future_release`` check. NULL/blank dates are kept (treated as released).
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                future_clause = ""
+                if exclude_future_years:
+                    future_clause = (
+                        " AND (release_date IS NULL OR release_date = '' "
+                        "OR CAST(substr(release_date, 1, 4) AS INTEGER) "
+                        "<= CAST(strftime('%Y','now') AS INTEGER))"
+                    )
+
                 if source:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT * FROM discovery_recent_albums
-                        WHERE source = ? AND profile_id = ?
+                        WHERE source = ? AND profile_id = ?{future_clause}
                         ORDER BY release_date DESC
                         LIMIT ?
                     """, (source, profile_id, limit))
                 else:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT * FROM discovery_recent_albums
-                        WHERE profile_id = ?
+                        WHERE profile_id = ?{future_clause}
                         ORDER BY release_date DESC
                         LIMIT ?
                     """, (profile_id, limit))

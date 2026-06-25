@@ -4,12 +4,65 @@ from __future__ import annotations
 
 from core.discovery.listening_recommendations import (
     aggregate_candidate_tracks,
+    build_recency_weighted_seeds,
+    names_match,
     rank_recommended_artists,
+    similarity_from_rank,
+    to_mix_track,
 )
+
+
+# ── names_match (guards the top-tracks fetch against wrong-artist results) ─────
+def test_names_match_ignores_case_and_punctuation():
+    assert names_match("Tyler, The Creator", "Tyler The Creator")
+    assert names_match("BEYONCÉ", "beyoncé")
+    assert names_match("AC/DC", "ac dc")
+
+
+def test_names_match_rejects_near_misses_and_empty():
+    assert not names_match("Drake", "Drake Bell")
+    assert not names_match("", "anything")
+    assert not names_match("X", None)
 
 
 def _seed(name, weight=1.0):
     return {"name": name, "weight": weight}
+
+
+# ── similarity_from_rank (1=closest .. 10=farthest -> 1.0 .. 0.1) ─────────────
+def test_similarity_from_rank_decays_over_documented_range():
+    assert similarity_from_rank(1) == 1.0
+    assert similarity_from_rank(5) == 0.6
+    assert similarity_from_rank(10) == 0.1
+
+
+def test_similarity_from_rank_clamps_and_defaults():
+    assert similarity_from_rank(0) == 1.0          # <=1 -> full weight
+    assert similarity_from_rank(50) == 0.1         # beyond range -> floor
+    assert similarity_from_rank(None) == 1.0       # missing -> full weight (no rank info)
+    assert similarity_from_rank("nan") == 1.0
+
+
+# ── build_recency_weighted_seeds (lifetime + factor*recent) ───────────────────
+def test_recency_boost_reorders_toward_current_taste():
+    # Old-fav has more lifetime plays, but New-fav dominates recently.
+    lifetime = [{"name": "OldFav", "play_count": 100}, {"name": "NewFav", "play_count": 40}]
+    recent = {"newfav": 60}
+    seeds = build_recency_weighted_seeds(lifetime, recent, recency_factor=1.5)
+    by = {s["name"]: s["weight"] for s in seeds}
+    assert by["OldFav"] == 100.0                   # no recent plays -> unchanged
+    assert by["NewFav"] == 40 + 1.5 * 60           # 130 -> now outranks OldFav
+
+
+def test_recency_factor_zero_is_pure_lifetime():
+    seeds = build_recency_weighted_seeds(
+        [{"name": "A", "play_count": 7}], {"a": 99}, recency_factor=0)
+    assert seeds == [{"name": "A", "weight": 7.0}]
+
+
+def test_recency_seeds_skip_blank_names_and_tolerate_missing_recent():
+    seeds = build_recency_weighted_seeds([{"name": ""}, {"name": "A", "play_count": 3}])
+    assert seeds == [{"name": "A", "weight": 3.0}]
 
 
 # ── rank_recommended_artists ─────────────────────────────────────────────────
@@ -117,6 +170,46 @@ def test_aggregate_skips_artist_with_no_tracks():
     assert [t["name"] for t in out] == ["only"]   # sim-b had no tracks -> skipped
 
 
+# ── to_mix_track (source top-track dict -> Discover compact-row dict) ─────────
+def _sp_track(tid="t1", name="Song", artist="Artist", album="Album", cover="http://cdn/c.jpg"):
+    return {"id": tid, "name": name, "artists": [{"name": artist}],
+            "album": {"name": album, "images": ([{"url": cover}] if cover else [])},
+            "duration_ms": 210000, "popularity": 55}
+
+
+def test_to_mix_track_shapes_render_fields():
+    out = to_mix_track(_sp_track(), "spotify")
+    assert out["track_name"] == "Song" and out["artist_name"] == "Artist"
+    assert out["album_name"] == "Album" and out["album_cover_url"] == "http://cdn/c.jpg"
+    assert out["duration_ms"] == 210000
+    assert out["spotify_track_id"] == "t1" and out["track_id"] == "t1"
+    assert out["track_data_json"]["id"] == "t1"      # full payload kept for sync
+    assert out["name"] == "Song"                     # kept for aggregate dedup
+
+
+def test_to_mix_track_source_id_field_per_source():
+    assert to_mix_track(_sp_track(), "deezer")["deezer_track_id"] == "t1"
+    assert to_mix_track(_sp_track(), "itunes")["itunes_track_id"] == "t1"
+
+
+def test_to_mix_track_rejects_unusable_and_tolerates_missing_album():
+    assert to_mix_track({"id": "x"}, "spotify") is None        # no title
+    assert to_mix_track({"name": "y"}, "spotify") is None       # no id
+    assert to_mix_track("garbage", "spotify") is None
+    bare = to_mix_track({"id": "z", "name": "Z"}, "spotify")    # no artists/album
+    assert bare["artist_name"] == "" and bare["album_cover_url"] is None
+
+
+def test_to_mix_track_feeds_aggregate_end_to_end():
+    # The real pipeline: shape source tracks, then aggregate by recommended artist.
+    recs = _recs("A")  # recommends 'sim-A'
+    shaped = [to_mix_track(_sp_track(tid="1", name="One", artist="sim-A"), "spotify"),
+              to_mix_track(_sp_track(tid="2", name="Two", artist="sim-A"), "spotify")]
+    out = aggregate_candidate_tracks(recs, {"sim-a": shaped}, per_artist=5, limit=10)
+    assert [t["track_name"] for t in out] == ["One", "Two"]
+    assert out[0]["spotify_track_id"] == "1"
+
+
 # ── group_similars_by_seed (id->name join) ───────────────────────────────────
 from dataclasses import dataclass as _dc  # noqa: E402
 
@@ -167,3 +260,37 @@ def test_group_then_rank_end_to_end():
     ranked = rank_recommended_artists(seeds, grouped, owned_artist_names={"solo"})
     assert ranked[0].name == "Common" and ranked[0].seed_count == 2
     assert all(r.name != "Solo" for r in ranked)   # owned excluded
+
+
+# ── rank-aware grouping (similarity_rank -> score) ────────────────────────────
+@_dc
+class _RankRow:
+    source_artist_id: str
+    similar_artist_name: str
+    similarity_rank: int
+
+
+def test_group_with_rank_attr_carries_similarity_score():
+    seeds = [_seed("A")]
+    rows = [_RankRow("ia", "Close", 1), _RankRow("ia", "Far", 10)]
+    out = group_similars_by_seed(seeds, rows, {"ia": "A"}, rank_attr="similarity_rank")
+    by = {e["name"]: e["score"] for e in out["a"]}
+    assert by == {"Close": 1.0, "Far": 0.1}
+
+
+def test_group_without_rank_attr_is_scoreless_backcompat():
+    seeds = [_seed("A")]
+    rows = [_RankRow("ia", "X", 3)]
+    out = group_similars_by_seed(seeds, rows, {"ia": "A"})
+    assert out["a"] == [{"name": "X"}]            # no score key -> original behavior
+
+
+def test_rank_threading_changes_winner_within_a_seed():
+    # The production fix: a CLOSER match (rank 1) on a heavy seed beats a far match (rank 9),
+    # even though both come from the same seed. Without rank threading they'd tie.
+    seeds = [_seed("Fav", weight=10)]
+    rows = [_RankRow("if", "Close", 1), _RankRow("if", "Far", 9)]
+    grouped = group_similars_by_seed(seeds, rows, {"if": "Fav"}, rank_attr="similarity_rank")
+    ranked = rank_recommended_artists(seeds, grouped)
+    assert [r.name for r in ranked] == ["Close", "Far"]
+    assert ranked[0].score > ranked[1].score

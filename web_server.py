@@ -29083,6 +29083,96 @@ def get_discover_similar_artists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/listening-recommendations', methods=['GET'])
+def get_discover_listening_recommendations():
+    """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
+
+    Distinct from /api/discover/similar-artists (which is driven by your whole library /
+    watchlist): this is seeded by your most-PLAYED artists, consensus-ranked across the
+    similar-artist graph, and recency-boosted. The heavy lifting + storage happen during the
+    watchlist scan (core.watchlist_scanner._build_listening_recommendations -> the
+    'listening_recs_artists' metadata key); this endpoint just reshapes the stored list to the
+    same card shape the recommended-artists row already renders. Read-only, fail-soft.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+        raw = database.get_metadata('listening_recs_artists')
+        if not raw:
+            return jsonify({"success": True, "artists": [], "source": active_source, "count": 0})
+        try:
+            stored = json.loads(raw) or []
+        except (ValueError, TypeError):
+            stored = []
+
+        result_artists = []
+        for a in stored:
+            name = a.get('name')
+            if not name:
+                continue
+            if active_source == 'spotify':
+                artist_id = a.get('spotify_artist_id')
+            elif active_source == 'deezer':
+                artist_id = a.get('deezer_artist_id') or a.get('itunes_artist_id')
+            else:
+                artist_id = a.get('itunes_artist_id')
+            entry = {
+                "artist_id": artist_id,
+                "spotify_artist_id": a.get('spotify_artist_id'),
+                "itunes_artist_id": a.get('itunes_artist_id'),
+                "deezer_artist_id": a.get('deezer_artist_id'),
+                "artist_name": name,
+                "seed_count": a.get('seed_count'),
+                "source": active_source,
+            }
+            img = a.get('image_url')
+            if img:
+                entry["image_url"] = fix_artist_image_url(img)
+            if a.get('genres'):
+                entry["genres"] = a['genres'][:3]
+            # "because you listen to X, Y, Z" — the most-played artists that point here.
+            if a.get('seeds'):
+                entry["because"] = a['seeds']
+            result_artists.append(entry)
+
+        return jsonify({
+            "success": True,
+            "artists": result_artists,
+            "source": active_source,
+            "count": len(result_artists),
+        })
+    except Exception as e:
+        logger.error(f"Error getting listening recommendations: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/personalized/listening-mix', methods=['GET'])
+def get_discover_listening_mix():
+    """#913: the "Listening Mix" playlist row — a playable track mix from the artists you'd
+    love based on what you actually listen to.
+
+    The tracks are built during the watchlist scan (core.watchlist_scanner
+    ._build_listening_recommendations -> the 'listening_recs_tracks_full' metadata key) as full
+    render-ready dicts, so this endpoint just hands them back — no discovery-pool re-hydration,
+    which means it can't shrink when the pool rotates (the failure mode Fresh Tape/Archives hit).
+    Same {success, tracks} shape renderCompactPlaylist + the sync/download chains expect.
+    """
+    try:
+        database = get_database()
+        active_source = _get_active_discovery_source()
+        raw = database.get_metadata('listening_recs_tracks_full')
+        tracks = []
+        if raw:
+            try:
+                tracks = json.loads(raw) or []
+            except (ValueError, TypeError):
+                tracks = []
+        return jsonify({"success": True, "tracks": tracks, "source": active_source})
+    except Exception as e:
+        logger.error(f"Error getting listening mix: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/similar-artists/enrich', methods=['POST'])
 def enrich_similar_artists():
     """Enrich a batch of artist IDs with images/genres from Spotify or iTunes.

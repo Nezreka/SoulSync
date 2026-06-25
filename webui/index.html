@@ -3133,6 +3133,53 @@
                     </div>
 
                     <!-- Recommended For You Section (similar-artists graph) -->
+                    <!-- #913: listening-driven recommendations (play-weighted, consensus-ranked) -->
+                    <div class="discover-section" id="listening-recs-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">Based On Your Listening</h2>
+                                <p class="discover-section-subtitle">Artists you'd love — ranked from who you actually play the most</p>
+                            </div>
+                        </div>
+                        <div class="discover-carousel" id="listening-recs-carousel">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+
+                    <!-- #913: Listening Mix — a playable track mix from those recommended artists -->
+                    <div class="discover-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">🎧 Your Listening Mix</h2>
+                                <p class="discover-section-subtitle">A fresh playlist of tracks from artists matched to your listening</p>
+                            </div>
+                            <div class="discover-section-actions">
+                                <button class="action-button secondary"
+                                    onclick="openDownloadModalForDiscoverPlaylist('listening_mix', 'Your Listening Mix')"
+                                    title="Download missing tracks">
+                                    <span class="button-icon">↓</span><span class="button-text">Download</span>
+                                </button>
+                                <button class="action-button primary" id="listening-mix-sync-btn"
+                                    onclick="startDiscoverPlaylistSync('listening_mix', 'Your Listening Mix')"
+                                    title="Sync to media server">
+                                    <span class="button-icon">⟳</span><span class="button-text">Sync</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="discover-sync-status" id="listening-mix-sync-status" style="display: none;">
+                            <div class="sync-status-content">
+                                <div class="sync-status-label"><span class="sync-icon">⟳</span><span>Syncing to media server...</span></div>
+                                <div class="sync-status-stats">
+                                    <span class="sync-stat">✓ <span id="listening-mix-sync-completed">0</span></span>
+                                    <span class="sync-stat">⏳ <span id="listening-mix-sync-pending">0</span></span>
+                                    <span class="sync-stat">✗ <span id="listening-mix-sync-failed">0</span></span>
+                                    <span class="sync-stat">(<span id="listening-mix-sync-percentage">0</span>%)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="discover-playlist-container compact" id="personalized-listening-mix"></div>
+                    </div>
+
                     <div class="discover-section" id="recommended-artists-section" style="display: none;">
                         <div class="discover-section-header">
                             <div>
