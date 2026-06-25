@@ -429,14 +429,15 @@ def test_popularity_thresholds_spotify_returns_60_40():
     assert hidden_max == 40
 
 
-def test_popularity_thresholds_deezer_returns_higher_scale():
-    """Deezer writes `rank` (raw integer, often 100k+) into the popularity
-    column, so thresholds must be in that range — Spotify's 60/40 would
-    classify almost every Deezer track as a hidden gem."""
+def test_popularity_thresholds_deezer_on_0_100_scale():
+    """Corrected: the discovery pool SYNTHESIZES deezer popularity onto a 0-100 score (capped
+    at 100) at scan time — it is NOT Deezer's raw rank. The old 500000/100000 rank thresholds
+    matched nothing, so Popular Picks came back empty for deezer-primary users while Hidden
+    Gems' < 100000 caught the whole pool. Thresholds must stay on the 0-100 scale."""
     svc = PersonalizedPlaylistsService(_FakeDatabase())
     popular_min, hidden_max = svc._get_popularity_thresholds('deezer')
-    assert popular_min is not None and popular_min >= 100_000
-    assert hidden_max is not None and hidden_max >= 50_000
+    assert (popular_min, hidden_max) == (60, 50)
+    assert 0 < popular_min <= 100 and 0 < hidden_max <= 100
     assert popular_min > hidden_max
 
 
