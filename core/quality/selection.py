@@ -119,6 +119,26 @@ def load_search_mode() -> str:
     return mode if mode in _VALID_SEARCH_MODES else "priority"
 
 
+def load_rank_candidates_by_quality() -> bool:
+    """Opt-in: order the priority-mode download walk (and thus the
+    version-mismatch force-import pick, which takes the first-tried = best)
+    by ranked-target quality instead of confidence-first.
+
+    Best-quality search mode is always quality-first regardless of this flag;
+    this toggle only affects *priority* mode. Default ``False`` keeps the
+    byte-for-byte old behaviour (confidence/peer-speed first), so existing
+    installs are unaffected unless they opt in. Any missing value or DB error
+    resolves to ``False``.
+    """
+    from database.music_database import MusicDatabase
+
+    try:
+        profile = MusicDatabase().get_quality_profile()
+        return bool(profile.get("rank_candidates_by_quality", False))
+    except Exception:
+        return False
+
+
 def rank_for_profile(candidates: list) -> Tuple[list, bool]:
     """Load the user's quality profile and rank *candidates* against it.
 

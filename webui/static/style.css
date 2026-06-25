@@ -3921,6 +3921,41 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+/* Setting label + inline ⓘ info icon. The icon sits on the (fixed) label row;
+   clicking it only toggles the help text below, so the trigger never moves. */
+.setting-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+/* Kill the default .form-group label margin-bottom so the label centers on the
+   icon row instead of sitting high. */
+.setting-row > label { margin: 0; }
+/* Field-heading labels (e.g. "Search strategy") sit next to a 12px control and
+   the brighter checkbox labels — match that weight/brightness so they don't look
+   dim or undersized. */
+.setting-row > label:not(.checkbox-label) {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.85);
+}
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex: 0 0 auto;
+    font-size: 12px;
+    line-height: 1;
+    color: rgba(var(--accent-rgb), 0.85);
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s ease;
+}
+.info-icon:hover { color: rgba(var(--accent-rgb), 1); }
+.setting-help-body { margin-top: 4px; }
+
 /* Supported Formats */
 .supported-formats {
     color: rgba(255, 255, 255, 0.7);
@@ -4109,6 +4144,39 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
 }
 
+/* Presets footer: explanation on the left, a tidy Reset button on the right */
+.quality-presets-footer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+}
+.preset-reset-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+.preset-reset-btn:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    color: rgb(var(--accent-light-rgb));
+}
+.preset-reset-icon {
+    font-size: 13px;
+    line-height: 1;
+}
+
 /* Quality tier cards - upgraded inner cards */
 /* ── Ranked-targets editor (v3 quality profile) ───────────────────────── */
 .ranked-targets-editor {
@@ -4122,6 +4190,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-weight: 600;
     margin-bottom: 8px;
 }
+
+/* The label now sits in a .setting-row (alongside the ⓘ), whose label margin is
+   zeroed — restore a healthy gap before the draggable target list below. */
+.ranked-targets-editor > .setting-row { margin-bottom: 10px; }
 
 .ranked-targets-list {
     display: flex;

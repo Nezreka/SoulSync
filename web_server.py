@@ -192,6 +192,7 @@ from core.runtime_state import (
     activity_feed,
     activity_feed_lock,
     add_activity_item,
+    claim_for_post_processing,
     download_batches,
     download_tasks,
     matched_context_lock,
@@ -4549,9 +4550,12 @@ def apply_quality_preset(preset_name):
 
         current = db.get_quality_profile()
         preset = dict(db.get_quality_preset(preset_name))
-        # search_mode is a global search strategy, not a per-preset audio setting —
-        # carry the user's current choice across preset switches.
+        # search_mode + rank_candidates_by_quality are global search/ordering
+        # strategies, not per-preset audio settings — carry the user's current
+        # choices across preset switches.
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         success = db.set_quality_profile(preset)
 
         if success:
@@ -4579,6 +4583,8 @@ def reset_quality_preset(preset_name):
         current = db.get_quality_profile()
         preset = dict(db.reset_quality_preset(preset_name))
         preset['search_mode'] = current.get('search_mode', preset.get('search_mode', 'priority'))
+        preset['rank_candidates_by_quality'] = current.get(
+            'rank_candidates_by_quality', preset.get('rank_candidates_by_quality', False))
         success = db.set_quality_profile(preset)
 
         if success:
@@ -6796,6 +6802,19 @@ def get_download_status():
                         _pp_task_id = context.get('task_id')
                         _pp_batch_id = context.get('batch_id')
                         if _pp_task_id and _pp_batch_id:
+                            # Atomic claim: the download monitor ALSO watches slskd
+                            # transfers and submits its own post-processing worker for
+                            # this task. Losing the claim means the monitor (or a
+                            # parallel poll) already owns it — skip to avoid a double
+                            # import and the quarantine-requeue race that produced the
+                            # bogus "missing file or source information" failure.
+                            if not claim_for_post_processing(_pp_task_id):
+                                logger.info(
+                                    f"Task {_pp_task_id} already claimed for post-processing "
+                                    f"by another path — skipping duplicate for {context_key}"
+                                )
+                                processed_download_ids.add(context_key)
+                                continue
                             _pp_target = _post_process_matched_download_with_verification
                             _pp_args = (context_key, context, found_path, _pp_task_id, _pp_batch_id)
                         else:
@@ -6817,6 +6836,15 @@ def get_download_status():
                         logger.error(f"Error starting post-processing thread for {context_key}: {e}")
                         # Don't add to processed set if thread failed to start
                         logger.warning(f"Will retry {context_key} on next check")
+                        # Release the post-processing claim so a later poll (or the
+                        # monitor) can retry — otherwise the task is stuck in
+                        # 'post_processing' with no worker running.
+                        _failed_task_id = context.get('task_id')
+                        if _failed_task_id:
+                            with tasks_lock:
+                                _ft = download_tasks.get(_failed_task_id)
+                                if _ft and _ft.get('status') == 'post_processing':
+                                    _ft['status'] = 'downloading'
 
             # Start a single thread to manage the launching of all processing threads
             processing_thread = threading.Thread(target=process_completed_downloads)
@@ -6874,6 +6902,16 @@ def get_download_status():
                                         _st_task_id = _ctx.get('task_id')
                                         _st_batch_id = _ctx.get('batch_id')
                                         if _st_task_id and _st_batch_id:
+                                            # Atomic claim — the download monitor watches
+                                            # these (non-soulseek) transfers too and would
+                                            # otherwise double-process this same task.
+                                            if not claim_for_post_processing(_st_task_id):
+                                                logger.info(
+                                                    f"[{_label}] Task {_st_task_id} already claimed "
+                                                    f"for post-processing — skipping duplicate for {_ctx_key}"
+                                                )
+                                                processed_download_ids.add(_ctx_key)
+                                                return
                                             _st_target = _post_process_matched_download_with_verification
                                             _st_args = (_ctx_key, _ctx, _path, _st_task_id, _st_batch_id)
                                         else:
@@ -6886,6 +6924,13 @@ def get_download_status():
                                         logger.info(f"[{_label}] Marked as processed: {_ctx_key}")
                                     except Exception as e:
                                         logger.error(f"[{_label}] Error starting post-processing thread for {_ctx_key}: {e}")
+                                        # Release the claim so a later poll / the monitor retries.
+                                        _st_failed_id = _ctx.get('task_id')
+                                        if _st_failed_id:
+                                            with tasks_lock:
+                                                _stf = download_tasks.get(_st_failed_id)
+                                                if _stf and _stf.get('status') == 'post_processing':
+                                                    _stf['status'] = 'downloading'
 
                                 processing_thread = threading.Thread(target=process_streaming_download)
                                 processing_thread.daemon = True

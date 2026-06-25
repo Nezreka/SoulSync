@@ -54,21 +54,34 @@ def _cand_user_file(candidate):
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
 
 
-def _best_quality_ordering():
-    """Return ``(quality_first, targets)`` for the active search mode.
+def _candidate_ordering():
+    """Return ``(quality_first, targets)`` for the active search mode + toggle.
 
-    In best-quality mode the candidate walk is ordered by the user's profile
-    quality rank (best→worst) instead of confidence-first. Fails closed to
-    priority-mode ordering on any error so a profile/DB hiccup never blocks a
-    download. See docs/superpowers/specs/2026-06-14-best-quality-search-mode-design.md.
+    The candidate walk is ordered by the user's profile quality rank
+    (best→worst) instead of confidence-first when EITHER:
+      - best-quality search mode is active (always quality-first), OR
+      - priority mode and the ``rank_candidates_by_quality`` toggle is on
+        (opt-in; default off keeps the byte-for-byte confidence-first walk).
+
+    Quality-first ordering also makes the version-mismatch force-import pick
+    the highest-quality candidate, because that fallback accepts the
+    first-tried (= best-ordered) quarantined entry.
+
+    Fails closed to confidence-first ordering on any error so a profile/DB
+    hiccup never blocks a download. See
+    docs/superpowers/specs/2026-06-14-best-quality-search-mode-design.md.
     """
     try:
-        from core.quality.selection import load_search_mode, load_profile_targets
-        if load_search_mode() == 'best_quality':
+        from core.quality.selection import (
+            load_search_mode,
+            load_profile_targets,
+            load_rank_candidates_by_quality,
+        )
+        if load_search_mode() == 'best_quality' or load_rank_candidates_by_quality():
             targets, _ = load_profile_targets()
             return True, targets
     except Exception as exc:
-        logger.debug("[Modal Worker] best-quality ordering unavailable: %s", exc)
+        logger.debug("[Modal Worker] quality ordering unavailable: %s", exc)
     return False, None
 
 
@@ -109,7 +122,7 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
         f"candidate(s) before re-searching (task {task_id})"
     )
-    _qf, _qt = _best_quality_ordering()
+    _qf, _qt = _candidate_ordering()
     return deps.attempt_download_with_candidates(
         task_id, remaining, track, batch_id, quality_first=_qf, quality_targets=_qt,
     )
@@ -393,7 +406,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # Best-quality search mode: the orchestrator already pooled candidates
         # across every source for each query, so order the candidate walk by the
         # user's profile quality rank (best→worst). Computed once per task.
-        _best_quality, _quality_targets = _best_quality_ordering()
+        _best_quality, _quality_targets = _candidate_ordering()
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
