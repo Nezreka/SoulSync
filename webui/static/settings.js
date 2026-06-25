@@ -2001,6 +2001,32 @@ function populateQualityProfileUI(profile) {
 
     const searchModeSelect = document.getElementById('quality-search-mode');
     if (searchModeSelect) searchModeSelect.value = profile.search_mode === 'best_quality' ? 'best_quality' : 'priority';
+
+    const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
+    if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
+
+    onSearchModeChange();
+}
+
+// Hide the "rank-based download order" toggle when Best quality is active —
+// that mode always ranks by quality, so the toggle would be meaningless there.
+function onSearchModeChange() {
+    const mode = document.getElementById('quality-search-mode')?.value;
+    const group = document.getElementById('quality-rank-candidates-group');
+    if (group) group.style.display = mode === 'best_quality' ? 'none' : '';
+}
+
+// Toggle the collapsible help text below a setting's ⓘ icon. Walks forward from
+// the icon's row to the next .setting-help-body sibling, so it works whether the
+// body is the immediate next element or sits after a control (e.g. a <select>),
+// and regardless of any wrapping container.
+function toggleSettingHelp(iconEl) {
+    const row = iconEl.closest('.setting-row') || iconEl;
+    let el = row.nextElementSibling;
+    while (el && !el.classList.contains('setting-help-body')) {
+        el = el.nextElementSibling;
+    }
+    if (el) el.hidden = !el.hidden;
 }
 
 function renderRankedTargets() {
@@ -2211,6 +2237,7 @@ function collectQualityProfileFromUI() {
         preset: (currentQualityProfile && currentQualityProfile.preset) || 'custom',
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
+        rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
         ranked_targets,
     };
 }
