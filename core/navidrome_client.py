@@ -110,6 +110,7 @@ class NavidromeTrack:
         self.title = navidrome_data.get('title', 'Unknown Track')
         self.duration = navidrome_data.get('duration', 0) * 1000  # Convert to milliseconds
         self.trackNumber = navidrome_data.get('track')
+        self.discNumber = navidrome_data.get('discNumber')  # multi-disc: disc number
         self.year = navidrome_data.get('year')
         self.userRating = navidrome_data.get('userRating')
         self.addedAt = self._parse_date(navidrome_data.get('created'))
