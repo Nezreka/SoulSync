@@ -20765,6 +20765,56 @@ def _save_sync_status_file(sync_statuses):
     except Exception as e:
         logger.error(f"Error saving sync status: {e}")
 
+def _sync_status_timestamp(status_info):
+    """Return comparable timestamp for a persisted sync-status record."""
+    if not status_info or 'last_synced' not in status_info:
+        return None
+    try:
+        return datetime.fromisoformat(status_info['last_synced'])
+    except (TypeError, ValueError):
+        return None
+
+def _latest_sync_status(*status_infos):
+    """Pick the newest non-empty sync-status record."""
+    candidates = [s for s in status_infos if s]
+    if not candidates:
+        return {}
+    return max(candidates, key=lambda s: _sync_status_timestamp(s) or datetime.min)
+
+def _mirrored_spotify_sync_status(playlist_id, sync_statuses, *, database=None, profile_id=None):
+    """Return auto-sync status for a Spotify playlist mirrored into SoulSync."""
+    try:
+        db = database or get_database()
+        profile = profile_id if profile_id is not None else get_current_profile_id()
+        mirrored = db.get_mirrored_playlist_by_source('spotify', str(playlist_id), profile)
+        if not mirrored:
+            return {}
+        return sync_statuses.get(f"auto_mirror_{mirrored.get('id')}", {})
+    except Exception as e:
+        logger.debug("Spotify mirrored sync-status lookup failed for %s: %s", playlist_id, e)
+        return {}
+
+def _resolve_spotify_playlist_sync_status(playlist_id, sync_statuses, *, database=None, profile_id=None):
+    """Resolve direct or mirrored sync status for a Spotify playlist card."""
+    direct_status = sync_statuses.get(playlist_id, {})
+    mirrored_status = _mirrored_spotify_sync_status(
+        playlist_id,
+        sync_statuses,
+        database=database,
+        profile_id=profile_id,
+    )
+    return _latest_sync_status(direct_status, mirrored_status)
+
+def _format_playlist_sync_status(status_info, playlist_snapshot):
+    """Build user-facing sync-status text from persisted status + snapshot."""
+    if 'last_synced' not in status_info:
+        return "Never Synced"
+    last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
+    stored_snapshot = status_info.get('snapshot_id')
+    if stored_snapshot and playlist_snapshot and playlist_snapshot != stored_snapshot:
+        return f"Last Sync: {last_sync_time}"
+    return f"Synced: {last_sync_time}"
+
 def _update_and_save_sync_status(playlist_id, playlist_name, playlist_owner, snapshot_id, **kwargs):
     """Updates the sync status for a given playlist and saves to file (same logic as GUI)."""
     try:
@@ -20807,16 +20857,14 @@ def get_spotify_playlists():
 
         # Add regular playlists first
         for p in playlists:
-            status_info = sync_statuses.get(p.id, {})
-            sync_status = "Never Synced"
+            status_info = _resolve_spotify_playlist_sync_status(p.id, sync_statuses)
             # Handle snapshot_id safely - may not exist in core Playlist class
             playlist_snapshot = getattr(p, 'snapshot_id', '')
+            sync_status = _format_playlist_sync_status(status_info, playlist_snapshot)
 
             if 'last_synced' in status_info:
                 stored_snapshot = status_info.get('snapshot_id')
-                last_sync_time = datetime.fromisoformat(status_info['last_synced']).strftime('%b %d, %H:%M')
-                if playlist_snapshot != stored_snapshot:
-                    sync_status = f"Last Sync: {last_sync_time}"
+                if stored_snapshot and playlist_snapshot and playlist_snapshot != stored_snapshot:
                     logger.info(
                         "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Needs Sync display=%s",
                         p.name,
@@ -20826,7 +20874,6 @@ def get_spotify_playlists():
                         sync_status,
                     )
                 else:
-                    sync_status = f"Synced: {last_sync_time}"
                     logger.info(
                         "Playlist sync status: name=%s id=%s snapshot=%r stored_snapshot=%r result=Synced display=%s",
                         p.name,
