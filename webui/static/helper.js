@@ -3404,22 +3404,13 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.7': [
-        { date: 'June 2026 — 2.7.7 release' },
-        { title: 'Downloads tag + path like Reorganize (#915)', desc: 'adding/redownloading music used to backfill missing album data from Spotify ONLY — so an iTunes/Deezer-primary user kept a "lean" context, the path dropped the $year and the date defaulted to YYYY-01-01 until you ran a reorganize. now post-processing AND redownload pull the full album from your PRIMARY metadata source (the same place reorganize/enrich read), so the year, real release date and album type are right the first time.', page: 'downloads' },
-        { title: 'Listening-driven recommendations — foundation (#913)', desc: 'the start of "discover based on what you actually listen to". during the watchlist scan, soulsync now ranks artists you\'d love but don\'t own — seeded from your top-played artists, scored by consensus (similar to MANY of your favorites), play weight and similarity — and builds a candidate track list. generated + stored now; the discover row + synced playlist come next.', page: 'discover' },
-        { title: 'Jellyfin stops indexing half-written tracks', desc: 'multi-disc tracks landing with "no disc" in jellyfin was a write race — a cross-filesystem move wrote the file to its final path incrementally and jellyfin caught it mid-write. final placement is now atomic (temp sibling + atomic rename), so a watcher only ever sees the COMPLETE file.', page: 'downloads' },
-        { title: 'Navidrome playlists doubling (#905)', desc: 'every resync re-added the whole playlist (a 4-song list grew to 12) — reconcile read the server\'s current tracks via a missing attribute, so it always thought the playlist was empty. fixed, plus a deduped push.', page: 'sync' },
-        { title: 'YouTube playlists capped at ~100 (#908)', desc: 'a yt-dlp/youtube regression truncated big playlists (Liked Music came back as 104). worked around to page past it (~200) until the upstream fix lands.', page: 'sync' },
-        { title: 'Album redownload grabbed the wrong edition (#911)', desc: 'redownload did a fresh search instead of using the album\'s matched source id, so a 66-track OST could come back as a 19-track single. now uses the canonical matched source.', page: 'library' },
-        { title: 'iTunes albums over 50 tracks truncated (#918)', desc: 'the iTunes lookup defaulted to 50 entities, cutting big albums off in the download window. now requests the full album.', page: 'library' },
-        { title: 'Enhanced view showed multi-disc tracks as missing (#916)', desc: 'owned disc-2+ tracks (stored as disc 1) no longer flag as "missing" — matched by title like reorganize.', page: 'library' },
-        { title: 'Reorganize vs "(feat. X)" (#914)', desc: 'a bare local title now matches an iTunes track titled "Song (feat. Artist)" instead of being reported not-in-tracklist.', page: 'library' },
-        { title: '"I have this" dropped the year (#917)', desc: 'it rebuilt a yearless path and copied into a NEW folder; now reuses the album\'s existing folder.', page: 'library' },
-        { title: 'Full Refresh imported 0 tracks (#910)', desc: 'every track insert failed on a missing year column; added it + a migration so older DBs self-heal.', page: 'settings' },
-        { title: 'YouTube discovery "Unknown Artist" (#909)', desc: 'when youtube hands back only a title, the matched artist now backfills the column instead of leaving "Unknown Artist".', page: 'sync' },
-        { title: 'Empty Folder Cleaner toggle did nothing (#912)', desc: 'the "also remove image/sidecar-only folders" option read the wrong config key; now honored.', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.7.6 went the OTHER way with playlists — exporting them TO listenbrainz (#903) — plus youtube liked-music sync (#902), a deep-scan data-loss guard (#904), and dashboard perf. 2.7.5 was matching & artwork accuracy + M3U import; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.' },
+    '2.7.8': [
+        { date: 'June 2026 — 2.7.8 release' },
+        { title: 'Align playlists — fix the order on the server', desc: 'the server-playlist editor only cared about WHICH tracks were on the server, never their order — and it drew the server column in the source\'s order, so a right-tracks-wrong-sequence playlist read as "in sync" when it wasn\'t. now an "out of order" badge appears when the tracks match but the sequence differs (relative order, so missing/extra don\'t false-flag), with a read-only view of the server\'s ACTUAL order. and a new "Align playlists" action reorders the server to match the source — Plex, Navidrome and Jellyfin, all preserving the playlist\'s identity/poster. order-only: never adds missing tracks, never touches metadata.', page: 'sync' },
+        { title: 'Re-add to wishlist from sync history', desc: 'in Recent Syncs → details, the "→ Wishlist" status on an unmatched track is now a button — click it to re-add that exact track with the SAME context the sync used (source playlist, cover art, everything). the re-add and the live sync build the identical payload from one shared path, so the cover and album/single classification carry through. wing-it stubs (couldn\'t be resolved) show as "Unmatched" and aren\'t re-addable, matching the sync.', page: 'dashboard' },
+        { title: 'Import search said "Deezer" for Spotify Free (#922)', desc: 'manual album-import told no-auth Spotify users that Deezer was their primary source. the functional source legitimately falls back (the free path has no album-name search), but the label should name what you configured — now it reads "Spotify".', page: 'import' },
+        { title: 'iTunes albums over 50 still truncating (#918 follow-up)', desc: 'the limit=200 fix only helped fresh fetches; albums cached at 50 before it kept serving 50 from the persistent cache. now a cached tracklist shorter than the album\'s known track count self-heals on next load.', page: 'library' },
+        { title: 'Earlier versions', desc: '2.7.7 was fix-heavy — downloads tag + path right without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep (#905/#908–#912/#914/#916–#918). 2.7.6 exported playlists TO listenbrainz + youtube liked-music sync; 2.7.5 matching & artwork accuracy; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3450,34 +3441,38 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Downloads tag + path like Reorganize (#915)",
-        description: "the headline fix — adding or redownloading music now gets the year, release date and album type right the FIRST time, instead of needing a manual reorganize after.",
+        title: "Align playlists — fix the order on the server",
+        description: "the headline — the server-playlist editor can now put a playlist back in the SOURCE's order, not just sync which tracks are on it.",
         features: [
-            "post-processing used to backfill missing album data from Spotify ONLY — so an iTunes/Deezer-primary user kept a \"lean\" context, the path dropped the $year, and the release date defaulted to YYYY-01-01",
-            "now post-processing AND single-track redownload pull the full album from your PRIMARY metadata source — the exact same place reorganize / manual enrich read",
-            "so the $year folder, real release date and album type land correctly on the first pass (iTunes + Deezer)",
+            "an \"out of order\" badge when the tracks match but the sequence differs (relative order, so missing/extra tracks don't false-flag it), plus a read-only view of the server's ACTUAL order with cover art",
+            "a new \"Align playlists\" action reorders the server to match the source — Plex, Navidrome and Jellyfin, all preserving the playlist's identity/poster",
+            "two choices for server-only extras (mirror source = drop them, or keep extras at the end); order-only — never adds missing tracks, never touches metadata",
         ],
     },
     {
-        title: "Listening-driven recommendations — foundation (#913)",
-        description: "the start of \"discover based on what you actually listen to.\"",
+        title: "Re-add to wishlist from sync history",
+        description: "in Recent Syncs → details, re-wishlist a track the sync couldn't place — with the exact same context.",
         features: [
-            "during the watchlist scan, soulsync ranks artists you'd love but don't own — seeded from your top-played artists",
-            "scored by consensus (similar to MANY of your favorites), play weight, and similarity strength — not just \"appears in a list\"",
-            "generated + stored now; the discover row + a synced playlist come next",
+            "the \"→ Wishlist\" status on an unmatched track is now a button; click it to re-add that exact track with the SAME context the sync used (source playlist, cover art, everything)",
+            "the re-add and the live sync build the identical payload from one shared path, so the cover and album/single classification carry through",
+            "wing-it stubs (couldn't be resolved to real metadata) show as \"Unmatched\" and aren't re-addable, matching what the sync does",
         ],
     },
     {
-        title: "A big batch of fixes",
-        description: "a fix-heavy cycle — playlists, downloads, multi-disc and the enhanced view.",
+        title: "Recent fixes",
+        description: "a couple of reported fixes.",
         features: [
-            "jellyfin \"no disc\" tracks — a cross-filesystem move wrote the file to its final path incrementally and jellyfin caught it mid-write; final placement is now atomic, so a watcher only ever sees the complete file",
-            "#905 — navidrome playlists doubling every resync (reconcile thought the playlist was empty); fixed + a deduped push",
-            "#908 — youtube playlists capped at ~100 (a yt-dlp/youtube regression); worked around to ~200 until upstream lands",
-            "#911 — album redownload grabbed the wrong edition (fresh search vs the matched source id); now uses the canonical source",
-            "#918 — iTunes albums over 50 tracks were truncated in the download window; now requests the full album",
-            "#916 — the enhanced view flagged multi-disc tracks as missing; now matched by title like reorganize",
-            "#914 #917 #910 #909 #912 — reorganize vs \"(feat. X)\", \"I have this\" dropping the year, Full Refresh importing 0 tracks, youtube \"Unknown Artist\", and the Empty Folder Cleaner toggle that did nothing",
+            "#922 — manual import told Spotify Free users their primary source was \"Deezer\"; the search legitimately falls back (the free path can't search albums by name), but the label now reads \"Spotify\"",
+            "#918 follow-up — iTunes albums over 50 tracks could still show 50 from a stale cache; a cached tracklist shorter than the album's known track count now self-heals on next load",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.7",
+        description: "2.7.7 was fix-heavy — downloads tag + path right the first time without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep.",
+        features: [
+            "#915 — post-processing + redownload now pull the full album from your PRIMARY metadata source, so the $year, real release date and album type land right the first time",
+            "#913 — listening-driven recommendations: ranks artists you'd love but don't own, scored by consensus from your top-played",
+            "#905/#908/#911/#918/#916/#914/#917/#910/#909/#912 — navidrome playlists doubling, youtube ~100 cap, wrong redownload edition, iTunes 50-track truncation, multi-disc shown missing, and the rest of the batch",
         ],
     },
     {
