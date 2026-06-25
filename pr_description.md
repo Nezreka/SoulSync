@@ -1,38 +1,49 @@
-# soulsync 2.7.8 — `dev` → `main`
+# soulsync 2.7.9 — `dev` → `main`
 
-a feature patch on top of 2.7.7 — playlists can now be put back in order on the server, you can re-wishlist a missed track straight from sync history, plus a couple of reported fixes.
+a big one. the headline is the new **best-quality download system + a real quality profile**, plus a much smarter **Discover** page, a new **Wing It Pool**, a redesigned **Auto-Sync** board, and a pile of reported fixes (multi-disc albums, playlist sync labels, the import-vs-quarantine race).
 
 ---
 
 ## what's new
 
-### align playlists — server order, not just contents
-the server-playlist editor only ever cared about *which* tracks were on the server, never their order — and it rendered the server column in the source's order, so a playlist with the right tracks in the wrong sequence read as "in sync" when it wasn't. now it tells the truth:
-- an **"out of order"** badge appears when the tracks match but the sequence differs (relative order, so missing/extra tracks don't false-flag it), and a **read-only view** shows the server's *actual* order with cover art.
-- a new **"Align playlists"** action reorders the server playlist to match the source — **Plex** (in-place via moveItem), **Navidrome** (ordered rewrite), and **Jellyfin** (Move endpoint), all of which preserve the playlist's identity/poster. two choices for server-only extras: **mirror source** (drop them) or **keep extras** (park them at the end). it's order-only — it never adds the missing tracks (that's a normal sync's job) and never touches metadata, just reshuffles ids already on the server.
+### best-quality downloads + a real quality profile
+downloads are now driven by a **ranked-target quality profile** instead of a fixed preference. you order the formats you want (drag to reorder — FLAC 24/192 down to mp3, every format controllable, with "all lossless / all lossy" group shortcuts), and:
+- **best-quality search mode** pools candidates across *every* source per query and grabs the highest-quality copy that meets your profile — not just the first/fastest match. priority mode is still there, now with an opt-in **"rank-based download order"** toggle if you want quality-first ordering there too.
+- each streaming source's download tier is derived from the one global profile, so you set it once.
+- AAC is an opt-in tier; old per-source Hi-Res preferences migrate into the profile automatically.
 
-### re-add to wishlist from sync history
-in the dashboard's **Recent Syncs → details**, the "→ Wishlist" status on an unmatched track is now a button — click it to re-add that exact track to the wishlist with the **same context the sync used** (source playlist, cover art, everything), so it's indistinguishable from the original auto-add. the re-add and the live sync now build the *identical* payload from one shared path, so the cover and album/single classification carry through. wing-it fallback stubs (tracks that couldn't be resolved to real metadata) are correctly shown as **"Unmatched"** and aren't re-addable — matching what the sync itself does.
+### quarantine, cleaned up + safer
+- the quarantine view is **consolidated into the Downloads page** as a filter (no separate place to check), with real audio quality shown on the rows and approve/retry handled inline.
+- **AcoustID fail-closed mode** (opt-in): only import tracks that actually verify, so a wrong file never lands in your library.
+- **silence + truncated-download guards** catch mostly-silent preview files and downloads that are shorter than their container claims, before they import.
+- a **library quality check** runs as a repair job and can flag files that are upgradeable to your preferred quality.
 
-### fixes
-- **import search said "Deezer" for Spotify Free users (#922)** — manual album-import told no-auth Spotify users that Deezer was their primary source. the functional source legitimately downgrades to a working fallback (the free path has no album-name search), but the *label* should name what you configured. now it reads "Spotify."
-- **iTunes albums >50 tracks could still truncate (#918 follow-up)** — the limit=200 fix only helped fresh fetches; albums cached at 50 before the fix kept serving 50 from the persistent cache. now a cached tracklist shorter than the album's known track count self-heals on next load.
+### Discover got a lot smarter
+- **"Based On Your Listening"** — a new artist row, ranked from who you actually *play* the most (consensus + recency weighted), with a "because you listen to X, Y" reason on each card.
+- **"Your Listening Mix"** — a playable track playlist built from those artists' top tracks. works on **any** metadata source (falls back to Deezer's public API), not just Spotify.
+- **Fresh Tape** actually fills now — it was starving down to 5–10 tracks because future-dated albums ate the candidate budget.
+- the **SoulSync Discovery** tab on the Sync page now lists *every* playlist kind (incl. the Listening Mix) so you can mirror + auto-sync them.
 
-### under the hood
-- `.gitignore` now covers **all** `database/*.db` (+ wal/shm/backup), not just `music_library` — so the video db and any future db can't be committed by accident.
+### Wing It Pool
+a new button next to **Discovery Pool** on the Mirrored Playlists tab. Wing It auto-matches tracks it couldn't match to metadata on a best-effort guess — those were invisible until now. the Wing It Pool opens to a two-card view (**guesses to review** + **resolved**) so you can verify or re-match what it guessed.
+
+### Auto-Sync Manager redesign
+the scheduling board no longer scrolls sideways through a wall of columns. intervals (hourly) and days (weekly) are now **horizontal lanes** — empty ones collapse, busy ones grow, and the scroll position holds when you add a playlist.
 
 ---
 
-## a brief recap of what came before
-2.7.7 was a fix-heavy patch — the metadata-parity fix so downloads tag + path right without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep (#905/#908–#912/#914/#916–#918). 2.7.6 exported playlists TO listenbrainz + youtube liked-music sync; 2.7.5 matching & artwork accuracy; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.
+## fixes
+
+- **multi-disc albums showed disc-2 tracks as "missing" / under disc 1 (#927)** — the library scan never read the disc number, so every track was stored as disc 1. it now captures the real disc from Jellyfin/Plex/Navidrome at scan time. *(re-scan your library once to backfill existing tracks.)*
+- **playlists always said "Never Synced" (#925)** — auto-synced/mirrored playlists were only checked against the direct-sync status, never their auto-sync status. fixed (thanks @ramonskie).
+- **tracks imported while quarantined / shown "completed" (#928)** — a race let both the browser poll and the download monitor post-process the same finished download. an atomic claim now ensures exactly one path handles it (thanks @nick2000713).
+- **library card badges hijacked the click** — clicking the watchlist eye or a source badge on an artist card also opened the artist detail page (and the badge's own link). badges now do only their own thing.
 
 ---
 
-## tests
-additive + scoped — the new write paths are their own routes that don't touch the normal sync. new seam/regression suites for the order-status detection (incl. the reported "moved to #2" case + missing/extra false-flag guards), the pure align-rewrite planner (mirror vs keep-extras, never-injects-a-foreign-track, stale-data rejection), the sync re-add payload (a direct parity assertion that the re-add == the live-sync payload, plus the wing-it skip), and the `get_primary_source_label` fix (#922). iTunes self-heal proven against the real persistent-cache shape. relevant suites green; `ruff check` clean.
+## under the hood
+- music automations page no longer shows video-app automations (they live in the shared engine DB).
+- quality-settings tile tidied up — collapsible ⓘ help instead of walls of text, proper reset button, dropped the redundant per-source "quality is global" notes.
+- download clients don't crash on init when the download path can't be created.
 
-## post-merge
-- [ ] tag `v2.7.8` on `main`
-- [ ] docker-publish with `version_tag: 2.7.8`
-- [ ] discord announce (auto-fired by the workflow)
-- [ ] reply on #922 and the #918 follow-up
+---
