@@ -46,6 +46,20 @@ def _get(row: object, attr: str):
     return getattr(row, attr, None)
 
 
+def choose_mix_fetch_source(active_source: object, active_can_fetch: bool) -> str:
+    """Pick which source to fetch the "Listening Mix" top tracks from.
+
+    The mix is a list of (artist, title) pairs acquired via Soulseek, so the fetch source need
+    NOT match the user's active metadata source. Use the active source when it can fetch top
+    tracks itself (Spotify/Deezer); otherwise fall back to Deezer, whose public ``artist/{id}/top``
+    needs no auth and is available to every user — so iTunes / Discogs / MusicBrainz users still
+    get a full mix without switching sources. Pure.
+    """
+    if str(active_source or "").lower() in ("spotify", "deezer") and active_can_fetch:
+        return str(active_source).lower()
+    return "deezer"
+
+
 def names_match(a: object, b: object) -> bool:
     """Strict artist-name equality after stripping case + non-alphanumerics.
 
@@ -315,6 +329,7 @@ def to_mix_track(track: object, source: str) -> Optional[dict]:
 
 __all__ = [
     "RecommendedArtist",
+    "choose_mix_fetch_source",
     "names_match",
     "similarity_from_rank",
     "build_recency_weighted_seeds",

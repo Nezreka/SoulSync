@@ -5,11 +5,31 @@ from __future__ import annotations
 from core.discovery.listening_recommendations import (
     aggregate_candidate_tracks,
     build_recency_weighted_seeds,
+    choose_mix_fetch_source,
     names_match,
     rank_recommended_artists,
     similarity_from_rank,
     to_mix_track,
 )
+
+
+# ── choose_mix_fetch_source (universal Deezer fallback) ───────────────────────
+def test_fetch_source_uses_active_when_it_can_fetch():
+    assert choose_mix_fetch_source("spotify", True) == "spotify"
+    assert choose_mix_fetch_source("deezer", True) == "deezer"
+
+
+def test_fetch_source_falls_back_to_deezer_for_other_sources():
+    # iTunes / Discogs / MusicBrainz can't fetch top tracks -> Deezer public.
+    assert choose_mix_fetch_source("itunes", False) == "deezer"
+    assert choose_mix_fetch_source("musicbrainz", False) == "deezer"
+    assert choose_mix_fetch_source("discogs", False) == "deezer"
+
+
+def test_fetch_source_falls_back_when_active_client_unavailable():
+    # Active source is Spotify but its client isn't usable (not authed) -> Deezer.
+    assert choose_mix_fetch_source("spotify", False) == "deezer"
+    assert choose_mix_fetch_source(None, False) == "deezer"
 
 
 # ── names_match (guards the top-tracks fetch against wrong-artist results) ─────

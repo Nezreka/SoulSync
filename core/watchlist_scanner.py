@@ -4030,6 +4030,7 @@ class WatchlistScanner:
             from core.discovery.listening_recommendations import (
                 aggregate_candidate_tracks,
                 build_recency_weighted_seeds,
+                choose_mix_fetch_source,
                 group_similars_by_seed,
                 names_match,
                 rank_recommended_artists,
@@ -4168,38 +4169,47 @@ class WatchlistScanner:
                     f'{active_source}_track_id': str(tid)})
 
             # Direct top-tracks enrichment — guarded, bounded (top 20 recs), fail-soft per artist.
+            # Source-independent: the active source is used when it can fetch top tracks
+            # (Spotify/Deezer); otherwise we fall back to Deezer's public top-tracks API (no auth,
+            # available to every user) so iTunes / Discogs / MusicBrainz users still get a full mix
+            # without switching sources — the tracks are acquired via Soulseek by artist+title, so
+            # the fetch source need not match the user's active source.
             fetched_by_artist = {}
             try:
-                if active_source in ('spotify', 'deezer'):
-                    client = get_client_for_source(active_source)
-                    if client and hasattr(client, 'get_artist_top_tracks'):
-                        id_key = 'spotify_artist_id' if active_source == 'spotify' else 'deezer_artist_id'
-                        can_search = hasattr(client, 'search_artists')
-                        for r in recs[:20]:
-                            aid = artist_meta_by_name.get(r.name.lower(), {}).get(id_key)
-                            # Most similar-artist rows store a name but no source id, so resolve
-                            # it by name-search — guarded by names_match so we never fetch the
-                            # WRONG artist's tracks (a same-name act).
-                            if not aid and can_search:
-                                try:
-                                    found = client.search_artists(r.name, limit=1) or []
-                                except Exception as _s_err:
-                                    logger.debug("[Listening Recs] artist search failed for %s: %s",
-                                                 r.name, _s_err)
-                                    found = []
-                                if found and names_match(r.name, getattr(found[0], 'name', '')):
-                                    aid = getattr(found[0], 'id', None)
-                            if not aid:
-                                continue
+                active_client = get_client_for_source(active_source) if active_source in ('spotify', 'deezer') else None
+                active_can_fetch = bool(active_client and hasattr(active_client, 'get_artist_top_tracks'))
+                fetch_source = choose_mix_fetch_source(active_source, active_can_fetch)
+                client = active_client if (active_can_fetch and fetch_source == active_source) \
+                    else get_client_for_source(fetch_source)
+                if client and hasattr(client, 'get_artist_top_tracks'):
+                    id_key = 'spotify_artist_id' if fetch_source == 'spotify' else 'deezer_artist_id'
+                    can_search = hasattr(client, 'search_artists')
+                    for r in recs[:20]:
+                        aid = artist_meta_by_name.get(r.name.lower(), {}).get(id_key)
+                        # Most similar-artist rows store a name but no source id (and a fallback
+                        # fetch source won't have the active source's ids at all), so resolve it
+                        # by name-search — guarded by names_match so we never fetch the WRONG
+                        # artist's tracks (a same-name act).
+                        if not aid and can_search:
                             try:
-                                raw = client.get_artist_top_tracks(str(aid), limit=8) or []
-                            except Exception as _tt_err:
-                                logger.debug("[Listening Recs] top-tracks fetch failed for %s: %s",
-                                             r.name, _tt_err)
-                                continue
-                            shaped = [s for s in (to_mix_track(x, active_source) for x in raw) if s][:5]
-                            if shaped:
-                                fetched_by_artist[r.name.lower()] = shaped
+                                found = client.search_artists(r.name, limit=1) or []
+                            except Exception as _s_err:
+                                logger.debug("[Listening Recs] artist search failed for %s: %s",
+                                             r.name, _s_err)
+                                found = []
+                            if found and names_match(r.name, getattr(found[0], 'name', '')):
+                                aid = getattr(found[0], 'id', None)
+                        if not aid:
+                            continue
+                        try:
+                            raw = client.get_artist_top_tracks(str(aid), limit=8) or []
+                        except Exception as _tt_err:
+                            logger.debug("[Listening Recs] top-tracks fetch failed for %s: %s",
+                                         r.name, _tt_err)
+                            continue
+                        shaped = [s for s in (to_mix_track(x, fetch_source) for x in raw) if s][:5]
+                        if shaped:
+                            fetched_by_artist[r.name.lower()] = shaped
             except Exception as _enr_err:
                 logger.debug("[Listening Recs] top-tracks enrichment skipped: %s", _enr_err)
 
