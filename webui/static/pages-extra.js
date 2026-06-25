@@ -1424,6 +1424,11 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
 
         _serverEditorState.tracks = data.tracks || [];
         _serverEditorState.serverType = data.server_type;
+        // Order status: the columns render in SOURCE order, so a same-tracks-but-
+        // reordered server playlist looks in-sync. order_status flags that drift;
+        // server_order is the server's ACTUAL sequence for the read-only view.
+        _serverEditorState.orderStatus = data.order_status || null;
+        _serverEditorState.serverOrder = data.server_order || [];
 
         const tracks = _serverEditorState.tracks;
         const serverLabel = data.server_type ? data.server_type.charAt(0).toUpperCase() + data.server_type.slice(1) : 'Server';
@@ -1456,7 +1461,19 @@ async function _openServerCompareView(playlistId, playlistName, mirroredPlaylist
         if (srcCountEl) srcCountEl.textContent = `${data.source_track_count || 0} tracks`;
         if (svrIconEl) svrIconEl.textContent = serverIconMap[data.server_type] || '💻';
         if (svrLabelEl) svrLabelEl.textContent = serverLabel;
-        if (svrCountEl) svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+        if (svrCountEl) {
+            const os = _serverEditorState.orderStatus;
+            if (os && os.out_of_order) {
+                // Accurate membership but different order than the source. Read-only:
+                // source order is the source of truth; the badge opens the real order.
+                svrCountEl.innerHTML = `${data.server_track_count || 0} tracks ` +
+                    `<button type="button" class="server-order-badge" onclick="_showServerOrder()" ` +
+                    `title="These tracks match the source, but the playlist is in a different order on ${serverLabel}. Click to view the actual server order.">` +
+                    `&#9888; out of order</button>`;
+            } else {
+                svrCountEl.textContent = `${data.server_track_count || 0} tracks`;
+            }
+        }
 
         // Render columns
         _renderCompareColumns(tracks);
@@ -1496,6 +1513,105 @@ function _updateCompareStats(tracks) {
 
     const footer = document.getElementById('server-editor-footer');
     if (footer) footer.textContent = `${matched}/${matched + missing} matched${extra > 0 ? ` · ${extra} extra on server` : ''}`;
+}
+
+// Read-only view of the server playlist's ACTUAL order. Source order is the source
+// of truth; this just lets the user SEE how the server currently differs (no editing).
+function _showServerOrder() {
+    const esc = typeof _esc === 'function' ? _esc : s => s;
+    const order = (_serverEditorState && _serverEditorState.serverOrder) || [];
+    const serverType = (_serverEditorState && _serverEditorState.serverType) || 'server';
+    const serverLabel = serverType.charAt(0).toUpperCase() + serverType.slice(1);
+
+    document.getElementById('server-order-modal')?.remove();
+    const rows = order.map((t, i) => {
+        const art = t.thumb
+            ? `<img class="server-order-art" src="${esc(t.thumb)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=&quot;server-order-art server-order-art-ph&quot;>&#9835;</div>'">`
+            : `<div class="server-order-art server-order-art-ph">&#9835;</div>`;
+        return `
+        <div class="server-order-row">
+            <span class="server-order-num">${i + 1}</span>
+            ${art}
+            <div class="server-order-meta">
+                <span class="server-order-title">${esc(t.title || 'Unknown')}</span>
+                <span class="server-order-artist">${esc(t.artist || '')}</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Align actions — reorder the server playlist to the source order. Two choices
+    // for server-only "extra" tracks. Order-only: never adds the missing tracks
+    // (that's the normal sync's job). Supported where reorder is implemented.
+    const canAlign = serverType === 'navidrome' || serverType === 'plex' || serverType === 'jellyfin';
+    const alignFoot = canAlign ? `
+            <div class="server-order-foot">
+                <div class="server-order-foot-label">Align this playlist to the source order</div>
+                <div class="server-order-actions">
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(false)">
+                        <span class="server-align-btn-t">Mirror source</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; remove server-only tracks</span>
+                    </button>
+                    <button type="button" class="server-align-btn" onclick="_alignPlaylist(true)">
+                        <span class="server-align-btn-t">Keep extras</span>
+                        <span class="server-align-btn-d">reorder to match the source &middot; keep server-only tracks at the end</span>
+                    </button>
+                </div>
+                <div class="server-order-foot-note">Missing tracks aren't added here &mdash; run a normal sync for those.</div>
+            </div>` : '';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'server-order-modal';
+    overlay.className = 'server-order-overlay';
+    overlay.innerHTML = `
+        <div class="server-order-dialog" onclick="event.stopPropagation()">
+            <div class="server-order-head">
+                <div>
+                    <div class="server-order-h1">${esc(serverLabel)} playlist order</div>
+                    <div class="server-order-sub">the actual order on your server · source order stays the source of truth</div>
+                </div>
+                <button type="button" class="server-order-close" onclick="document.getElementById('server-order-modal').remove()">&times;</button>
+            </div>
+            <div class="server-order-list">${rows || '<div class="server-order-empty">No server tracks.</div>'}</div>
+            ${alignFoot}
+        </div>`;
+    overlay.onclick = () => overlay.remove();
+    document.body.appendChild(overlay);
+}
+
+// Align the server playlist's ORDER to the source (the "Align playlists" action).
+// Sends the matched server-track ids in SOURCE order + the extras choice; the
+// backend validates they're all in the playlist and rewrites. Order-only.
+async function _alignPlaylist(keepExtras) {
+    const st = _serverEditorState;
+    if (!st || !st.playlistId) return;
+    const matchedIds = (Array.isArray(st.tracks) ? st.tracks : [])
+        .filter(t => t.match_status === 'matched' && t.server_track && t.server_track.id != null)
+        .map(t => String(t.server_track.id));
+    if (!matchedIds.length) {
+        if (typeof showToast === 'function') showToast('Nothing to align', 'warning');
+        return;
+    }
+    try {
+        const resp = await fetch(`/api/server/playlist/${st.playlistId}/align`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                playlist_name: st.playlistName || '',
+                matched_ids: matchedIds,
+                keep_extras: !!keepExtras,
+            }),
+        });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (typeof showToast === 'function') showToast(`Playlist order aligned (${data.track_count} tracks)`, 'success');
+            document.getElementById('server-order-modal')?.remove();
+            _serverEditorRefresh();
+        } else {
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Align failed', 'error');
+        }
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Align failed: ' + e.message, 'error');
+    }
 }
 
 function _formatDurationMs(ms) {
@@ -2082,6 +2198,37 @@ function _relativeTime(dateStr) {
     } catch (e) { return ''; }
 }
 
+// Re-add a synced unmatched track to the wishlist from the sync-detail modal, with
+// the same context the original sync used (resolved server-side from the entry).
+async function _readdSyncWishlist(entryId, index, el) {
+    if (el && el.dataset.busy) return;
+    if (el) { el.dataset.busy = '1'; el.classList.add('is-busy'); }
+    try {
+        const resp = await fetch(`/api/sync/history/${entryId}/track/${index}/wishlist`, { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.success) {
+            if (el) {
+                el.classList.remove('is-busy');
+                el.classList.add('is-done');
+                el.disabled = true;
+                el.innerHTML = data.added ? '&#10003; Re-added' : '&#10003; On wishlist';
+            }
+            if (typeof showToast === 'function') {
+                showToast(
+                    data.added ? `Re-added "${data.name}" to wishlist` : `"${data.name}" is already on the wishlist`,
+                    data.added ? 'success' : 'info',
+                );
+            }
+        } else {
+            if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+            if (typeof showToast === 'function') showToast((data && data.error) || 'Could not re-add to wishlist', 'error');
+        }
+    } catch (e) {
+        if (el) { delete el.dataset.busy; el.classList.remove('is-busy'); }
+        if (typeof showToast === 'function') showToast('Could not re-add to wishlist: ' + e.message, 'error');
+    }
+}
+
 async function openSyncDetailModal(entryId) {
     try {
         showLoadingOverlay('Loading sync details...');
@@ -2123,7 +2270,20 @@ async function openSyncDetailModal(entryId) {
                 else if (t.download_status === 'cancelled') dlIcon = '🚫';
 
                 let dlDisplay = dlIcon;
-                if (!dlDisplay && t.download_status === 'wishlist') dlDisplay = '<span class="sync-dl-wishlist">→ Wishlist</span>';
+                if (!dlDisplay && t.download_status === 'wishlist') {
+                    // Wing-it fallback stubs (no real metadata) were never actually
+                    // wishlisted by the sync — show them as plain, non-clickable.
+                    const isWingIt = String(t.source_track_id || '').startsWith('wing_it_');
+                    if (isWingIt) {
+                        dlDisplay = `<span class="sync-dl-unmatched" title="Couldn't be resolved to real metadata (wing-it fallback), so it was never added to the wishlist">Unmatched</span>`;
+                    } else {
+                        // Clickable: re-add this exact track to the wishlist with the
+                        // same context the sync originally used.
+                        dlDisplay = `<button type="button" class="sync-dl-wishlist sync-dl-wishlist-btn" `
+                            + `onclick="_readdSyncWishlist(${entryId}, ${i}, this)" `
+                            + `title="Re-add to wishlist with the original sync context">&rarr; Wishlist</button>`;
+                    }
+                }
 
                 return `
                     <tr class="sync-detail-row ${statusClass}">

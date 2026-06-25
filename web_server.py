@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.7"
+_SOULSYNC_BASE_VERSION = "2.7.8"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -19420,6 +19420,44 @@ def get_sync_history_entry(entry_id):
         logger.error(f"Error getting sync history entry: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
+@app.route('/api/sync/history/<int:entry_id>/track/<int:track_index>/wishlist', methods=['POST'])
+def readd_sync_track_to_wishlist(entry_id, track_index):
+    """Re-add a synced unmatched track to the wishlist with the SAME context the
+    sync originally used (source_type='playlist' + the playlist's name/id), so it
+    behaves identically to the auto-add. Only 'wishlist'-status rows are eligible."""
+    try:
+        db = MusicDatabase()
+        entry = db.get_sync_history_entry(entry_id)
+        if not entry:
+            return jsonify({"success": False, "error": "Sync entry not found"}), 404
+
+        tracks = json.loads(entry['tracks_json']) if entry.get('tracks_json') else []
+        track_results = json.loads(entry['track_results']) if entry.get('track_results') else []
+
+        from core.sync.wishlist_readd import reconstruct_sync_track_data
+        spotify_track_data = reconstruct_sync_track_data(track_results, tracks, track_index)
+        if not spotify_track_data:
+            return jsonify({"success": False, "error": "This track can't be re-added to the wishlist"}), 400
+
+        from core.wishlist_service import get_wishlist_service
+        added = get_wishlist_service().add_spotify_track_to_wishlist(
+            spotify_track_data=spotify_track_data,
+            failure_reason='Missing from media server after sync',
+            source_type='playlist',
+            source_context={
+                'playlist_name': entry.get('playlist_name'),
+                'playlist_id': entry.get('playlist_id'),
+                'sync_type': 'automatic_sync',
+                'timestamp': datetime.now().isoformat(),
+            },
+        )
+        return jsonify({"success": True, "added": bool(added),
+                        "name": spotify_track_data.get('name', '')})
+    except Exception as e:
+        logger.error(f"Error re-adding synced track to wishlist (entry {entry_id}, track {track_index}): {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/sync/history/<int:entry_id>', methods=['DELETE'])
 def delete_sync_history_entry_api(entry_id):
     """Delete a sync history entry."""
@@ -19697,7 +19735,7 @@ def get_server_playlist_tracks(playlist_id):
         # core.sync.playlist_reconcile (pure + tested) — fixes #768 (YouTube
         # "Artist - Title" sources now match, and source_track_id is echoed
         # back so manual "Find & add" overrides persist).
-        from core.sync.playlist_reconcile import reconcile_playlist
+        from core.sync.playlist_reconcile import compute_order_status, reconcile_playlist
 
         # Pass 0: User-confirmed match overrides from sync_match_cache.
         # When a user previously picked a local file via "Find & Add",
@@ -19729,6 +19767,21 @@ def get_server_playlist_tracks(playlist_id):
 
         combined = reconcile_playlist(source_tracks, server_tracks, _override_pairs)
 
+        # Order status: the editor renders the server column in SOURCE order, so a
+        # reordered-but-same-membership playlist reads "in sync" when Navidrome's real
+        # order differs. Surface that (one-way: source order is truth). `server_order`
+        # is the server's ACTUAL sequence, for the read-only "view server order" view.
+        order_status = compute_order_status(combined)
+        server_order = [
+            {
+                "title": t.get("title"),
+                "artist": t.get("artist"),
+                "thumb": t.get("thumb"),
+                "id": t.get("id"),
+            }
+            for t in server_tracks if isinstance(t, dict)
+        ]
+
         return jsonify({
             "success": True,
             "server_type": active_server,
@@ -19736,9 +19789,65 @@ def get_server_playlist_tracks(playlist_id):
             "tracks": combined,
             "server_track_count": len(server_tracks),
             "source_track_count": len(source_tracks),
+            "order_status": order_status,
+            "server_order": server_order,
         })
     except Exception as e:
         logger.error(f"Error getting server playlist tracks: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/server/playlist/<playlist_id>/align', methods=['POST'])
+def server_playlist_align(playlist_id):
+    """Align a server playlist's ORDER to the source ('Align playlists').
+
+    Order-only and metadata-free: the client sends the matched server-track ids in
+    SOURCE order (`matched_ids`) plus the extras choice (`keep_extras`); the server
+    validates every id is currently in the playlist (so this can only reorder/drop
+    tracks already there — never inject one) and rewrites the playlist in that order
+    via the overwrite primitive. Does NOT touch membership-completeness — missing
+    tracks are the normal sync's job. Navidrome only for now."""
+    try:
+        data = request.get_json() or {}
+        playlist_name = (data.get('playlist_name') or '').strip()
+        matched_ids = data.get('matched_ids') or []
+        keep_extras = bool(data.get('keep_extras', False))
+        if not playlist_name:
+            return jsonify({"success": False, "error": "playlist_name required"}), 400
+        if not matched_ids:
+            return jsonify({"success": False, "error": "no matched tracks to align"}), 400
+
+        active_server = config_manager.get_active_media_server()
+        client = media_server_engine.client(active_server) if active_server else None
+        if active_server not in ('navidrome', 'plex', 'jellyfin') or not client:
+            return jsonify({"success": False,
+                            "error": "Align isn't supported on this server yet"}), 400
+
+        # Current playlist track ids (in current server order) — per server.
+        if active_server == 'navidrome':
+            current_tracks = client.get_playlist_tracks(playlist_id) or []
+            current_ids = [str(t.ratingKey) for t in current_tracks if getattr(t, 'ratingKey', None)]
+        elif active_server == 'plex':
+            current_ids = client.get_playlist_track_ids(playlist_id, playlist_name)
+        else:  # jellyfin
+            current_ids = client.get_playlist_track_ids(playlist_id)
+
+        from core.sync.playlist_edit import plan_align_rewrite
+        ordered = plan_align_rewrite(current_ids, matched_ids, keep_extras=keep_extras)
+        if ordered is None:
+            return jsonify({"success": False,
+                            "error": "Playlist changed on the server — reload and try again"}), 409
+
+        if active_server == 'navidrome':
+            ok = client.rewrite_playlist_order(playlist_id, playlist_name, ordered)
+        else:  # plex / jellyfin — in-place reorder
+            ok = client.reorder_playlist(playlist_id, playlist_name, ordered)
+        if not ok:
+            return jsonify({"success": False, "error": "Failed to reorder playlist"}), 500
+        return jsonify({"success": True, "track_count": len(ordered),
+                        "kept_extras": keep_extras})
+    except Exception as e:
+        logger.error(f"Error aligning server playlist '{playlist_id}': {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

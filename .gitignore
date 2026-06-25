@@ -13,10 +13,11 @@ __pycache__/
 # User-specific files (auto-created by the app if missing)
 config/config.json
 config/youtube_cookies.txt
-database/music_library.db
-database/music_library.db-shm
-database/music_library.db-wal
-database/music_library.db.backup_*
+# All app databases are live user data — never commit (music_library, video_library, …)
+database/*.db
+database/*.db-shm
+database/*.db-wal
+database/*.db.backup_*
 database/api_call_history.json
 storage/image_cache/
 logs/*.log
