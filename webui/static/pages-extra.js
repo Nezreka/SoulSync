@@ -2275,7 +2275,7 @@ async function openSyncDetailModal(entryId) {
                     // wishlisted by the sync — show them as plain, non-clickable.
                     const isWingIt = String(t.source_track_id || '').startsWith('wing_it_');
                     if (isWingIt) {
-                        dlDisplay = `<span class="sync-dl-wishlist" title="No metadata — this track couldn't be resolved, so it can't be added to the wishlist">&rarr; Wishlist</span>`;
+                        dlDisplay = `<span class="sync-dl-unmatched" title="Couldn't be resolved to real metadata (wing-it fallback), so it was never added to the wishlist">Unmatched</span>`;
                     } else {
                         // Clickable: re-add this exact track to the wishlist with the
                         // same context the sync originally used.

@@ -58023,6 +58023,13 @@ tr.tag-diff-same {
     font-weight: 600;
     white-space: nowrap;
 }
+/* unmatched (wing-it fallback) — never wishlisted; muted, non-actionable */
+.sync-dl-unmatched {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 600;
+    white-space: nowrap;
+}
 /* clickable variant — re-add to wishlist */
 .sync-dl-wishlist-btn {
     border: 1px solid rgba(255, 183, 77, 0.35);
