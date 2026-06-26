@@ -130,3 +130,16 @@ def test_clear_button_wired_for_all_tabs():
     assert "kind: kind" in _JS                       # clears the active tab
     # shown only when the active tab has items
     assert "function updateClearBtn(" in _JS
+
+
+def test_nav_badge_uses_the_endpoint_total_not_a_partial_sum():
+    # regression: movie/episode and YouTube counts load separately, so neither setter may
+    # compute the nav badge from its partial state (it 'switches' to the TV-only number).
+    # Both must defer to the authoritative /wishlist/counts endpoint via refreshBadge().
+    import re
+    sc = _JS[_JS.index("function setCounts("):_JS.index("function setYtCounts(")]
+    syc = _JS[_JS.index("function setYtCounts("):]
+    syc = syc[:syc.index("function ", 1)]
+    assert "refreshBadge();" in sc and "refreshBadge();" in syc
+    assert "state.counts.movie + state.counts.episode" not in _JS   # old partial-total math gone
+    assert "/api/video/wishlist/counts" in _JS                       # the endpoint is the source
