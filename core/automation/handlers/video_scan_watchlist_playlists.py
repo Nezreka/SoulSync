@@ -86,7 +86,10 @@ def _default_wishlisted_ids(playlist_id: Any) -> List[Any]:
 
 
 def _default_downloaded_ids(playlist_id: Any) -> List[Any]:
-    return []   # populated once the download-history ledger carries youtube grabs
+    # Already-downloaded YouTube videos (global). A completed download leaves the wishlist,
+    # so without this the scan would re-add + re-download it.
+    from api.video import get_video_db
+    return get_video_db().downloaded_youtube_video_ids()
 
 
 def _default_dismissed_ids(playlist_id: Any) -> List[Any]:

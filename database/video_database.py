@@ -1459,6 +1459,19 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def downloaded_youtube_video_ids(self) -> list:
+        """YouTube video ids already successfully downloaded (from the permanent history).
+        The watchlist scans exclude these — a completed video is removed from the wishlist
+        on download, so without this it would be re-added (it's still in the channel's recent
+        uploads / last-N net) and re-downloaded on every scan."""
+        conn = self._get_connection()
+        try:
+            return [r["media_id"] for r in conn.execute(
+                "SELECT DISTINCT media_id FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' AND media_id IS NOT NULL")]
+        finally:
+            conn.close()
+
     def media_tmdb_id(self, kind: str, media_id) -> tuple:
         """(tmdb_id, imdb_id) for a library movie/show row — used to resolve sidecar /
         subtitle metadata for an owned re-grab (whose media_id is the library id, not a
