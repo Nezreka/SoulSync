@@ -24,6 +24,8 @@
         var meta = n > 0 ? (n + ' video' + (n === 1 ? '' : 's')) : 'Channel';
         return '<div class="vyt-wcard" data-vyt-open-channel="' + esc(ch.youtube_id) + '" title="Open channel">' +
             '<div class="vyt-wcard-art">' + av + '</div>' +
+            '<button class="vyt-wcard-cog" type="button" data-vyt-wsettings="' + esc(ch.youtube_id) +
+                '" data-title="' + esc(ch.title) + '" title="Channel settings">&#9881;</button>' +
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow="' + esc(ch.youtube_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(ch.title) + '">' +
@@ -257,6 +259,12 @@
     // FULL page reload). The eye button's capture-phase handler already stops its
     // own clicks from reaching here. Mirrors video-library.js.
     function onGridClick(e) {
+        var cog = e.target.closest('[data-vyt-wsettings]');
+        if (cog && window.VideoYoutube && VideoYoutube.openChannelSettings) {
+            e.preventDefault(); e.stopPropagation();
+            VideoYoutube.openChannelSettings(cog.getAttribute('data-vyt-wsettings'), cog.getAttribute('data-title'));
+            return;
+        }
         var unf = e.target.closest('[data-vyt-wunfollow]');
         if (unf && window.VideoYoutube) {
             e.preventDefault(); e.stopPropagation();

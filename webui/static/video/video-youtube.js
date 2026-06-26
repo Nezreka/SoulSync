@@ -202,6 +202,94 @@
             { headers: { Accept: 'application/json' } }).then(function (r) { return r.ok ? r.json() : (r.status === 404 ? r.json() : null); });
     }
 
+    // ── Per-channel settings modal (cog on the watchlist Channels tab) ────────
+    // Custom show-name (the $channel folder token used when its videos download) + an
+    // optional quality override that beats the global YouTube quality for this channel.
+    var _RES = ['best', '4320p', '2160p', '1440p', '1080p', '720p', '480p', '360p'];
+    var _COD = ['any', 'av1', 'vp9', 'h264'];
+    var _CON = ['mp4', 'mkv', 'webm'];
+
+    function _opt(list, sel) {
+        return list.map(function (v) {
+            return '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + '</option>';
+        }).join('');
+    }
+
+    function _csetForm(title, s, q, dq) {
+        var on = !!s.quality;                         // a stored override → start enabled
+        var b = (q && q.max_resolution) ? q : dq;     // seed fields from override, else default
+        b = b || {};
+        return '' +
+            '<label class="vyt-cset-lbl">Show name (folder)</label>' +
+            '<input class="vyt-cset-in" data-cset-name type="text" value="' + esc(s.custom_name || '') +
+                '" placeholder="' + esc(title || '') + '">' +
+            '<div class="vyt-cset-hint">Overrides the <code>$channel</code> folder/show name when this channel’s videos download. Blank = use the channel’s real name.</div>' +
+            '<label class="vyt-cset-toggle"><input type="checkbox" data-cset-qon' + (on ? ' checked' : '') +
+                '> Force a specific quality for this channel</label>' +
+            '<div class="vyt-cset-q" data-cset-q' + (on ? '' : ' hidden') + '>' +
+                '<div class="vyt-cset-row"><span>Max resolution</span><select data-cset-res>' + _opt(_RES, b.max_resolution || '1080p') + '</select></div>' +
+                '<div class="vyt-cset-row"><span>Codec</span><select data-cset-cod>' + _opt(_COD, b.video_codec || 'any') + '</select></div>' +
+                '<div class="vyt-cset-row"><span>Container</span><select data-cset-con>' + _opt(_CON, b.container || 'mp4') + '</select></div>' +
+                '<label class="vyt-cset-ck"><input type="checkbox" data-cset-fps' + (b.prefer_60fps !== false ? ' checked' : '') + '> Prefer 60fps</label>' +
+                '<label class="vyt-cset-ck"><input type="checkbox" data-cset-hdr' + (b.allow_hdr ? ' checked' : '') + '> Allow HDR</label>' +
+            '</div>' +
+            '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>';
+    }
+
+    function openChannelSettings(channelId, title) {
+        if (!channelId) return;
+        var prev = document.getElementById('vyt-cset-overlay'); if (prev) prev.remove();
+        var ov = document.createElement('div');
+        ov.id = 'vyt-cset-overlay'; ov.className = 'vyt-cset-overlay';
+        ov.innerHTML = '<div class="vyt-cset" role="dialog" aria-label="Channel settings">' +
+            '<div class="vyt-cset-head"><span class="vyt-cset-h">Channel settings</span>' +
+                '<button class="vyt-cset-x" type="button" title="Close">✕</button></div>' +
+            '<div class="vyt-cset-body">Loading…</div>' +
+            '<div class="vyt-cset-foot"><button class="vyt-cset-save" type="button" disabled>Save</button></div></div>';
+        document.body.appendChild(ov);
+        function close() { ov.remove(); }
+        ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+        ov.querySelector('.vyt-cset-x').addEventListener('click', close);
+        var body = ov.querySelector('.vyt-cset-body'), saveBtn = ov.querySelector('.vyt-cset-save');
+
+        fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+            { headers: { Accept: 'application/json' } })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+                var s = (d && d.settings) || {}, dq = (d && d.default_quality) || {};
+                body.innerHTML = _csetForm(title, s, s.quality || {}, dq);
+                saveBtn.disabled = false;
+                var qon = body.querySelector('[data-cset-qon]'), qbox = body.querySelector('[data-cset-q]');
+                if (qon && qbox) qon.addEventListener('change', function () { qbox.hidden = !qon.checked; });
+            })
+            .catch(function () { body.innerHTML = 'Could not load settings.'; });
+
+        saveBtn.addEventListener('click', function () {
+            var nameEl = body.querySelector('[data-cset-name]');
+            var payload = { custom_name: (nameEl ? nameEl.value : '').trim() };
+            var qon = body.querySelector('[data-cset-qon]');
+            if (qon && qon.checked) {
+                payload.quality = {
+                    max_resolution: body.querySelector('[data-cset-res]').value,
+                    video_codec: body.querySelector('[data-cset-cod]').value,
+                    container: body.querySelector('[data-cset-con]').value,
+                    prefer_60fps: body.querySelector('[data-cset-fps]').checked,
+                    allow_hdr: body.querySelector('[data-cset-hdr]').checked,
+                };
+            }
+            saveBtn.disabled = true;
+            fetch('/api/video/youtube/channel/' + encodeURIComponent(channelId) + '/settings',
+                { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                  body: JSON.stringify(payload) })
+                .then(function (r) { return r.json(); })
+                .then(function () {
+                    if (typeof showToast === 'function') showToast('Channel settings saved', 'success');
+                    close();
+                })
+                .catch(function () { saveBtn.disabled = false; if (typeof showToast === 'function') showToast('Save failed', 'error'); });
+        });
+    }
+
     window.VideoYoutube = {
         esc: esc, isChannelRef: isChannelRef, isPlaylistRef: isPlaylistRef, fmtDate: fmtDate, avatar: avatar, img: img,
         fmtDuration: fmtDuration, compactCount: compactCount,
@@ -209,5 +297,6 @@
         follow: follow, unfollow: unfollow, followPlaylist: followPlaylist, unfollowPlaylist: unfollowPlaylist,
         removeWish: removeWish, addVideos: addVideos, resolve: resolve,
         searchChannels: searchChannels, channelResultCard: channelResultCard,
+        openChannelSettings: openChannelSettings,
     };
 })();
