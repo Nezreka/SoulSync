@@ -12,6 +12,7 @@ import threading
 from utils.logging_config import get_logger
 
 from .cache import TTLCache
+from .clients import OMDbAuthError
 from .worker import VideoEnrichmentWorker
 
 logger = get_logger("video_enrichment.engine")
@@ -62,7 +63,10 @@ class VideoEnrichmentEngine:
         # for tests that don't build a worker).
         w = self.workers.get("omdb")
         rc = w.client if w else self.ratings_client
-        if not rc or not getattr(rc, "enabled", False):
+        # _omdb_blocked latches once the daily request limit / a bad key is hit — it affects
+        # EVERY item, so we stop calling OMDb for the rest of the process instead of failing
+        # (and logging a traceback) once per show.
+        if not rc or not getattr(rc, "enabled", False) or getattr(self, "_omdb_blocked", False):
             return
         info = (self.db.movie_match_info(item_id) if kind == "movie"
                 else self.db.show_match_info(item_id))
@@ -81,6 +85,10 @@ class VideoEnrichmentEngine:
             ratings = rc.ratings(imdb_id)
             if ratings:
                 self.db.apply_ratings(kind, item_id, ratings)
+        except OMDbAuthError as e:
+            # daily limit / bad key — hits every item; latch off + one quiet warning, no spam.
+            self._omdb_blocked = True
+            logger.warning("OMDb ratings paused for this run: %s", e)
         except Exception:
             logger.exception("ratings backfill failed for %s %s", kind, item_id)
 
@@ -142,11 +150,15 @@ class VideoEnrichmentEngine:
                         ", ".join(sorted(self._scan_paused)))
         self._scan_paused = set()
 
-    def refresh_show_art(self, show_id) -> dict:
+    def refresh_show_art(self, show_id, *, with_ratings: bool = True) -> dict:
         """On-demand (lazy) backfill of a show's season posters + episode art from
         TMDB, used when the detail page is opened and art is missing. Works
         regardless of the show's match status (sidesteps 'already matched, never
-        re-runs'), and caches the result so it's a one-time cost per show."""
+        re-runs'), and caches the result so it's a one-time cost per show.
+
+        ``with_ratings=False`` skips the OMDb ratings backfill — used by the bulk
+        'Refresh Airing TV Schedules' automation, which only needs episode schedules and
+        would otherwise burn the daily OMDb quota one call per show."""
         w = self.workers.get("tmdb")
         if not w or not w.enabled:
             return {"ok": False, "reason": "tmdb_not_configured"}
@@ -169,7 +181,8 @@ class VideoEnrichmentEngine:
             w._cascade_episodes(show_id, result["id"], nums)    # full list: owned + missing
         except Exception:
             logger.exception("refresh_show_art: episode cascade failed for show %s", show_id)
-        self._backfill_ratings("show", show_id)
+        if with_ratings:
+            self._backfill_ratings("show", show_id)
         return {"ok": True}
 
     def refresh_movie_art(self, movie_id) -> dict:

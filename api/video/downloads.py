@@ -172,17 +172,33 @@ def register_routes(bp):
 
     @bp.route("/downloads/meta/<kind>/<int:tmdb_id>", methods=["GET"])
     def video_download_meta(kind, tmdb_id):
-        """Lazy TMDB detail (overview + cast + backdrop) for a download's expand drawer,
-        keyed by the grabbed title's TMDB id. Best-effort — the drawer still shows the
-        download facts without it."""
+        """Lazy TMDB detail for a download's expand drawer (logo, cast w/ photos, trailer,
+        where-to-watch, rating/runtime/genres…), keyed by the grabbed title's TMDB id.
+        Best-effort — the drawer still shows the download facts without it."""
         if kind not in ("movie", "show"):
             return jsonify({}), 400
         try:
             from core.video.enrichment.engine import get_video_enrichment_engine
-            data = get_video_enrichment_engine().tmdb_full_detail(kind, tmdb_id) or {}
-            return jsonify({k: data.get(k) for k in
-                            ("title", "overview", "tagline", "backdrop_url", "poster_url",
-                             "genres", "rating", "cast", "year", "runtime", "status")})
+            d = get_video_enrichment_engine().tmdb_full_detail(kind, tmdb_id) or {}
+            if not d:
+                return jsonify({})
+            extras = d.get("_extras") or {}
+            tr = extras.get("trailer") or {}
+            director = next((c.get("name") for c in (d.get("crew") or [])
+                             if (c.get("job") or "").lower() in ("director", "creator")), None)
+            return jsonify({
+                "title": d.get("title"), "overview": d.get("overview"), "tagline": d.get("tagline"),
+                "backdrop_url": d.get("backdrop_url"), "logo": d.get("logo"),
+                "genres": d.get("genres") or [], "rating": d.get("rating"),
+                "runtime_minutes": d.get("runtime_minutes"), "year": d.get("year"),
+                "network": d.get("network"), "studio": d.get("studio"),
+                "status": d.get("status"), "director": director,
+                "cast": [{"name": c.get("name"), "character": c.get("character"), "photo": c.get("photo")}
+                         for c in (d.get("cast") or [])[:10]],
+                "trailer_url": ("https://www.youtube.com/watch?v=" + tr["key"]) if tr.get("key") else None,
+                "providers": (extras.get("providers") or [])[:6],
+                "providers_link": extras.get("providers_link"),
+            })
         except Exception:
             logger.exception("download meta failed for %s %s", kind, tmdb_id)
             return jsonify({})

@@ -32,9 +32,11 @@ def _default_fetch_shows() -> List[Dict[str, Any]]:
 
 def _default_refresh_show(library_id: Any) -> Dict[str, Any]:
     """Re-pull a library show's TMDB season/episode schedule (the lazy on-view backfill,
-    invoked deliberately). Re-matches + cascades episodes, so air dates/stills refresh."""
+    invoked deliberately). Re-matches + cascades episodes, so air dates/stills refresh.
+    ``with_ratings=False`` — we only need schedules, and the per-show OMDb ratings call
+    would burn the daily quota across a whole watchlist."""
     from core.video.enrichment.engine import get_video_enrichment_engine
-    return get_video_enrichment_engine().refresh_show_art(library_id) or {}
+    return get_video_enrichment_engine().refresh_show_art(library_id, with_ratings=False) or {}
 
 
 def auto_video_refresh_airing_schedules(
