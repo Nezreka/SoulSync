@@ -262,20 +262,26 @@ def _fail_or_retry(db, dl, error_msg) -> None:
 
 
 def _search_for_retry(query, max_seconds=22):
-    """A bounded blocking slskd search for the retry worker (shorter than the UI's)."""
-    from core.video.slskd_search import poll_search, start_search
+    """A bounded blocking slskd search for the retry worker (shorter than the UI's).
+    Always STOPS the slskd search when done — otherwise it keeps running its full timeout
+    (~60s) and, since the bounded auto-grab fires searches back-to-back, they pile up on
+    slskd. Stopping each one keeps concurrent slskd searches ≈ the worker pool size."""
+    from core.video.slskd_search import poll_search, start_search, stop_search
     res = start_search(query)
     sid = res.get("id")
     if not sid:
         return {"hits": [], "total_files": 0}
     deadline = time.monotonic() + max_seconds
     last = {"hits": [], "total_files": 0}
-    while time.monotonic() < deadline:
-        last = poll_search(sid)
-        if len(last.get("hits") or []) >= 12:
-            break
-        time.sleep(1.5)
-    return last
+    try:
+        while time.monotonic() < deadline:
+            last = poll_search(sid)
+            if len(last.get("hits") or []) >= 12:
+                break
+            time.sleep(1.5)
+        return last
+    finally:
+        stop_search(sid)
 
 
 def _requery_worker(dl_id) -> None:
