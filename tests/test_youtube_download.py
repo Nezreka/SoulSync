@@ -174,6 +174,59 @@ def test_process_import_failure_is_terminal_and_keeps_the_wish():
     assert calls["unwish"] == []                                      # not unwished → can retry
 
 
+def test_build_episode_nfo():
+    from core.video.youtube_download import build_episode_nfo
+    nfo = build_episode_nfo({"title": "Cool", "channel": "Chan", "published_at": "2026-06-22",
+                             "youtube_id": "abc"}, description="Hi & <there>", runtime=754)
+    assert "<title>Cool</title>" in nfo and "<season>2026</season>" in nfo
+    assert "<episode>622</episode>" in nfo and "<aired>2026-06-22</aired>" in nfo
+    assert "<studio>Chan</studio>" in nfo and '<uniqueid type="youtube"' in nfo
+    assert "Hi &amp; &lt;there&gt;" in nfo                     # xml-escaped
+    assert "<runtime>13</runtime>" in nfo                      # 754s ≈ 13 min
+
+
+def test_default_sidecars_writes_thumb_and_nfo_when_on(tmp_path):
+    stage, lib = tmp_path / "stage", tmp_path / "lib"
+    stage.mkdir(); lib.mkdir()
+    base = "Chan - 2026-06-22 - Vid"
+    (stage / (base + ".mp4")).write_text("v")
+    (stage / (base + ".jpg")).write_text("img")
+    (stage / (base + ".info.json")).write_text('{"description": "Desc", "duration": 754}')
+    ytd._default_sidecars(str(stage / (base + ".mp4")), str(lib / (base + ".mp4")),
+                          {"title": "Vid", "channel": "Chan", "published_at": "2026-06-22", "youtube_id": "v9"},
+                          {"save_artwork": True, "write_nfo": True})
+    assert (lib / (base + "-thumb.jpg")).exists()              # episode art
+    nfo = (lib / (base + ".nfo")).read_text()
+    assert "<title>Vid</title>" in nfo and "<aired>2026-06-22</aired>" in nfo and "Desc" in nfo
+    assert not (stage / (base + ".info.json")).exists()        # mined + dropped
+    assert not (stage / (base + ".jpg")).exists()              # moved out of staging
+
+
+def test_default_sidecars_off_discards_staged_extras(tmp_path):
+    stage, lib = tmp_path / "s", tmp_path / "l"
+    stage.mkdir(); lib.mkdir()
+    (stage / "V.jpg").write_text("i")
+    (stage / "V.info.json").write_text("{}")
+    ytd._default_sidecars(str(stage / "V.mp4"), str(lib / "V.mp4"), {"title": "V"}, {})
+    assert not (stage / "V.jpg").exists() and not (stage / "V.info.json").exists()   # cleaned up
+    assert not (lib / "V-thumb.jpg").exists() and not (lib / "V.nfo").exists()        # nothing written
+
+
+def test_process_passes_settings_to_sidecars():
+    calls, update_row, archive, clear = _recorder()
+    got = {}
+
+    def sc(staged, final, fields, settings):
+        got["settings"], got["fields"] = settings, fields
+
+    ytd.process_youtube_download(
+        _dl(), profile=default_profile(), settings={"write_nfo": True, "save_artwork": False},
+        download=lambda *a, **k: {"ok": True, "dest_path": "/yt/Chan/Season 2024/x.mp4"},
+        update_row=update_row, archive=archive, clear_wishlist=clear, sidecars=sc, now=lambda: "t")
+    assert got["settings"] == {"write_nfo": True, "save_artwork": False}
+    assert got["fields"]["youtube_id"] == "vid1"
+
+
 def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
     """After a restart no worker threads survive, so any 'downloading' YouTube row is an
     orphan → back to 'queued'. A row whose worker is still alive (in _active_worker_ids) and

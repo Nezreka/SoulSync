@@ -98,6 +98,12 @@ def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
         "merge_output_format": sel["merge_output_format"],
         "paths": {"home": str(dest_dir or "")},
         "outtmpl": dest_stem + ".%(ext)s",
+        # sidecars: the episode thumbnail (→ '<name>-thumb.jpg' on import) + the metadata
+        # json we mine for the .nfo (description / duration). ffmpeg (already needed to merge)
+        # normalises the thumbnail to jpg.
+        "writethumbnail": True,
+        "writeinfojson": True,
+        "postprocessors": [{"key": "FFmpegThumbnailsConvertor", "format": "jpg"}],
     }
     if cookie_opts:
         opts.update(cookie_opts)
@@ -144,6 +150,84 @@ def _default_move(src: str, dest: str) -> None:
     shutil.move(src, dest)
 
 
+def build_episode_nfo(fields: Dict[str, Any], *, description: Any = None, runtime: Any = None) -> str:
+    """A Jellyfin/Kodi/Plex ``<episodedetails>`` sidecar for a YouTube 'episode'. Pure — the
+    description/runtime come from yt-dlp's info json. season = upload year, episode = MMDD
+    (Plex 'by date' matches on ``<aired>``; the numbers help Jellyfin/Kodi)."""
+    from xml.sax.saxutils import escape
+    date = str(fields.get("published_at") or "")[:10]
+    year = date[:4]
+    out = ['<?xml version="1.0" encoding="UTF-8"?>', '<episodedetails>',
+           '  <title>%s</title>' % escape(str(fields.get("title") or fields.get("channel") or "Video"))]
+    if year.isdigit():
+        out.append('  <season>%s</season>' % year)
+    if len(date) == 10 and date[5:7].isdigit() and date[8:10].isdigit():
+        out.append('  <episode>%d</episode>' % int(date[5:7] + date[8:10]))
+    if description:
+        out.append('  <plot>%s</plot>' % escape(str(description)))
+    if date:
+        out.append('  <aired>%s</aired>' % escape(date))
+    if fields.get("channel"):
+        out.append('  <studio>%s</studio>' % escape(str(fields["channel"])))
+    if fields.get("youtube_id"):
+        out.append('  <uniqueid type="youtube" default="true">%s</uniqueid>' % escape(str(fields["youtube_id"])))
+    try:
+        if runtime:
+            out.append('  <runtime>%d</runtime>' % round(float(runtime) / 60))
+    except (TypeError, ValueError):
+        pass
+    out.append('</episodedetails>')
+    return "\n".join(out) + "\n"
+
+
+def _silent_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _default_sidecars(staged_video: str, final_video: str, fields: Dict[str, Any],
+                      settings: Dict[str, Any]) -> None:
+    """Place the YouTube episode's sidecars next to the imported video — gated by the SAME
+    post-processing toggles as the movie/TV side: ``save_artwork`` → ``<name>-thumb.jpg``
+    (server episode art), ``write_nfo`` → ``<name>.nfo`` (metadata). yt-dlp dropped a
+    thumbnail + ``.info.json`` next to the staged video; we always clean those up (move the
+    wanted ones into the library, delete the rest), so nothing litters the download folder
+    when a toggle is off. Best-effort — never fails the grab."""
+    settings = settings if isinstance(settings, dict) else {}
+    want_thumb, want_nfo = bool(settings.get("save_artwork")), bool(settings.get("write_nfo"))
+    try:
+        src_dir, src_stem = os.path.dirname(staged_video), os.path.splitext(os.path.basename(staged_video))[0]
+        dst_dir, dst_stem = os.path.dirname(final_video), os.path.splitext(os.path.basename(final_video))[0]
+        # thumbnail: keep as -thumb when wanted, else discard the staged copy
+        for ext in (".jpg", ".jpeg", ".png", ".webp"):
+            src_thumb = os.path.join(src_dir, src_stem + ext)
+            if os.path.exists(src_thumb):
+                if want_thumb:
+                    os.makedirs(dst_dir or ".", exist_ok=True)
+                    shutil.move(src_thumb, os.path.join(dst_dir, dst_stem + "-thumb" + (".jpg" if ext == ".jpeg" else ext)))
+                else:
+                    _silent_remove(src_thumb)
+                break
+        # info json → mine for the nfo (when wanted), then always drop it
+        info = {}
+        info_path = os.path.join(src_dir, src_stem + ".info.json")
+        if os.path.exists(info_path):
+            try:
+                with open(info_path, encoding="utf-8") as f:
+                    info = json.load(f)
+            except (ValueError, OSError):
+                info = {}
+            _silent_remove(info_path)
+        if want_nfo:
+            os.makedirs(dst_dir or ".", exist_ok=True)
+            with open(os.path.join(dst_dir, dst_stem + ".nfo"), "w", encoding="utf-8") as f:
+                f.write(build_episode_nfo(fields, description=info.get("description"), runtime=info.get("duration")))
+    except Exception:   # noqa: BLE001 - sidecars are a nice-to-have, never fatal to the grab
+        logger.exception("youtube sidecars failed for %s", final_video)
+
+
 def process_youtube_download(
     dl: Dict[str, Any],
     *,
@@ -155,6 +239,7 @@ def process_youtube_download(
     clear_wishlist: Callable[[Any], Any],
     stage_dir: Optional[str] = None,
     move: Callable[[str, str], Any] = _default_move,
+    sidecars: Callable[[str, str, Dict[str, Any], Dict[str, Any]], Any] = _default_sidecars,
     progress_hook: Optional[Callable] = None,
     cookie_opts: Optional[dict] = None,
     now: Optional[Callable[[], str]] = None,
@@ -210,6 +295,10 @@ def process_youtube_download(
         dest_path = final_path
     else:
         dest_path = staged_path or final_path
+
+    # episode sidecars (-thumb.jpg + .nfo) next to the imported video — gated by the
+    # save_artwork / write_nfo post-processing toggles (shared with the movie/TV side).
+    sidecars(staged_path, dest_path, youtube_fields_from_download(dl), settings)
 
     completed = now()
     update_row(dl.get("id"), status="completed", progress=100,

@@ -19,9 +19,10 @@ def test_normalize_fills_and_validates():
                                 "movie_template": "  ", "episode_template": "$series/$episode"})
     assert d["transfer_mode"] == "move"
     assert d["verify_with_ffprobe"] is False
-    assert organization.default_settings()["save_artwork"] is False         # off by default
-    assert organization.normalize({"save_artwork": 1})["save_artwork"] is True
-    assert organization.default_settings()["download_subtitles"] is False
+    assert organization.default_settings()["save_artwork"] is True          # on by default (cheap, local)
+    assert organization.default_settings()["write_nfo"] is True
+    assert organization.normalize({"save_artwork": 0})["save_artwork"] is False
+    assert organization.default_settings()["download_subtitles"] is False   # opt-in (external API)
     assert organization.default_settings()["subtitle_langs"] == "en"
     assert organization.normalize({"subtitle_langs": "EN, es"})["subtitle_langs"] == "en,es"
     assert d["movie_template"] == organization.DEFAULTS["movie_template"]   # blank → default
