@@ -186,13 +186,28 @@ def register_routes(bp):
             tr = extras.get("trailer") or {}
             director = next((c.get("name") for c in (d.get("crew") or [])
                              if (c.get("job") or "").lower() in ("director", "creator")), None)
+            # episode-specific detail (still + that episode's own title/overview/air date) when a
+            # specific episode is downloading — more relevant than the show synopsis.
+            episode = None
+            sn, en = request.args.get("season"), request.args.get("episode")
+            if kind == "show" and sn and en:
+                try:
+                    season = get_video_enrichment_engine().tmdb_season(tmdb_id, int(sn)) or {}
+                    ep = next((e for e in (season.get("episodes") or [])
+                               if str(e.get("episode_number")) == str(int(en))), None)
+                    if ep:
+                        episode = {"season": int(sn), "episode": int(en), "title": ep.get("title"),
+                                   "overview": ep.get("overview"), "air_date": ep.get("air_date"),
+                                   "still_url": ep.get("still_url")}
+                except (ValueError, TypeError):
+                    pass
             return jsonify({
                 "title": d.get("title"), "overview": d.get("overview"), "tagline": d.get("tagline"),
                 "backdrop_url": d.get("backdrop_url"), "logo": d.get("logo"),
                 "genres": d.get("genres") or [], "rating": d.get("rating"),
                 "runtime_minutes": d.get("runtime_minutes"), "year": d.get("year"),
                 "network": d.get("network"), "studio": d.get("studio"),
-                "status": d.get("status"), "director": director,
+                "status": d.get("status"), "director": director, "episode": episode,
                 "cast": [{"name": c.get("name"), "character": c.get("character"), "photo": c.get("photo")}
                          for c in (d.get("cast") or [])[:10]],
                 "trailer_url": ("https://www.youtube.com/watch?v=" + tr["key"]) if tr.get("key") else None,
@@ -201,6 +216,16 @@ def register_routes(bp):
             })
         except Exception:
             logger.exception("download meta failed for %s %s", kind, tmdb_id)
+            return jsonify({})
+
+    @bp.route("/downloads/yt-meta/<video_id>", methods=["GET"])
+    def video_download_yt_meta(video_id):
+        """Cached extra detail for a YouTube download's drawer (duration / views / thumbnail)."""
+        from . import get_video_db
+        try:
+            return jsonify(get_video_db().youtube_video_detail(video_id) or {})
+        except Exception:
+            logger.exception("yt meta failed for %s", video_id)
             return jsonify({})
 
     @bp.route("/downloads/quality", methods=["GET"])

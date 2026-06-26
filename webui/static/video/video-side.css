@@ -3820,6 +3820,19 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-prov { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
 .vdpg-prov-txt { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 7px;
     font-size: 10px; font-weight: 700; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.8); }
+/* youtube: big 16:9 thumbnail in the header */
+.vdpg-dr-ytthumb { width: 100%; max-width: 340px; aspect-ratio: 16 / 9; border-radius: 10px; margin-bottom: 10px;
+    background-size: cover; background-position: center; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45); }
+/* episode block: still + the specific episode's meta */
+.vdpg-dr-ep { display: flex; gap: 16px; margin-bottom: 6px; }
+.vdpg-dr-epstill { flex: 0 0 auto; width: 200px; aspect-ratio: 16 / 9; border-radius: 9px;
+    background-size: cover; background-position: center; background-color: rgba(255, 255, 255, 0.05);
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45); }
+.vdpg-dr-epbody { min-width: 0; }
+.vdpg-dr-epnum { font-size: 11px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: rgb(var(--vt)); }
+.vdpg-dr-eptitle { font-size: 15px; font-weight: 700; color: #fff; margin: 3px 0 6px; }
+.vdpg-dr-epov { font-size: 12.5px; line-height: 1.5; color: rgba(255, 255, 255, 0.78); margin: 0; }
+@media (max-width: 620px) { .vdpg-dr-ep { flex-direction: column; } .vdpg-dr-epstill { width: 100%; max-width: 320px; } }
 .vdpg-dr-st { font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.4); margin: 16px 0 9px; }
 .vdpg-dr-cast { display: flex; flex-wrap: wrap; gap: 12px; }

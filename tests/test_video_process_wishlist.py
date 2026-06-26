@@ -69,6 +69,15 @@ def test_build_record_movie_shape():
     assert [c["filename"] for c in json.loads(rec["candidates"])] == ["other.mkv"]   # best excluded
 
 
+def test_build_record_stashes_peer_availability_in_ctx():
+    # the chosen source's free-slot/queue/speed snapshot rides in search_ctx for the drawer
+    item = {"tmdb_id": 5, "title": "M", "year": "1999"}
+    best = dict(_cand("M.1999.mkv"), slots=1, queue=0, speed=2100000, availability=0.15)
+    rec = build_download_record(item, best, [best], media_type="movie", target_dir="/m", query="q")
+    assert json.loads(rec["search_ctx"])["peer"] == {
+        "slots": 1, "queue": 0, "speed": 2100000, "availability": 0.15}
+
+
 def test_build_record_episode_shape():
     item = {"show_tmdb_id": 9, "show_title": "Breaking Bad", "season_number": 1,
             "episode_number": 3, "air_date": "2008-02-10"}
