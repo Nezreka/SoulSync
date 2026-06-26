@@ -83,6 +83,11 @@ def build_download_record(item: Dict[str, Any], best: Dict[str, Any], candidates
     grab, so the monitor finishes it the same way (other accepted hits become the retry
     pool)."""
     ctx = search_context(item, media_type)
+    # stash the chosen source's peer stats so the drawer can show its availability snapshot
+    # (free slot / queue depth / speed at grab time). Retry ignores the extra key.
+    peer = {k: best.get(k) for k in ("slots", "queue", "speed", "availability") if best.get(k) is not None}
+    if peer:
+        ctx = {**ctx, "peer": peer}
     rest = [c for c in (candidates or []) if c.get("filename") != best.get("filename")]
     media_id = str(item.get("tmdb_id") if media_type == "movie" else item.get("show_tmdb_id"))
     return {

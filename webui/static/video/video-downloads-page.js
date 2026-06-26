@@ -169,7 +169,7 @@
     }
 
     // ── expand drawer ─────────────────────────────────────────────────────────────
-    function ytCtx(d) {
+    function parseCtx(d) {   // the download's search_ctx (peer/season/episode/channel/…)
         try { return d.search_ctx ? (typeof d.search_ctx === 'string' ? JSON.parse(d.search_ctx) : d.search_ctx) : {}; }
         catch (e) { return {}; }
     }
@@ -181,48 +181,86 @@
         var h = Math.floor(m / 60), mm = m % 60;
         return h ? (h + 'h' + (mm ? ' ' + mm + 'm' : '')) : (mm + 'm');
     }
-    function drawerHTML(d, meta) {
-        var isYt = dlType(d.kind) === 'youtube', ctx = isYt ? ytCtx(d) : {};
-        var loading = meta === null && !isYt;
-        meta = meta || {};
-        var overview = meta.overview || ctx.description || '';
-        var back = meta.backdrop_url
-            ? '<div class="vdpg-dr-back" style="background-image:url(\'' + esc(meta.backdrop_url) + '\')"></div>' : '';
-
-        // header: title logo (or text) + a meta line (year · ⭐rating · runtime · network) + tagline
-        var titleHTML = meta.logo
-            ? '<img class="vdpg-dr-logo" src="' + esc(meta.logo) + '" alt="' + esc(meta.title || d.title || '') + '">'
-            : '<div class="vdpg-dr-title">' + esc(meta.title || d.title || 'Download') + '</div>';
-        var bits = [];
-        if (meta.year || d.year) bits.push(esc(meta.year || d.year));
-        if (meta.rating) bits.push('⭐ ' + (Math.round(meta.rating * 10) / 10));
-        var rt = fmtRuntime(meta.runtime_minutes); if (rt) bits.push(rt);
-        if (meta.network || meta.studio) bits.push(esc(meta.network || meta.studio));
-        if (isYt && (ctx.channel || ctx.channel_title)) bits.push(esc(ctx.channel || ctx.channel_title));
-        if (meta.status && !isYt) bits.push(esc(meta.status));
-        var metaLine = bits.length ? '<div class="vdpg-dr-metaline">' + bits.join('  ·  ') + '</div>' : '';
-        var tagline = meta.tagline ? '<div class="vdpg-dr-tagline">' + esc(meta.tagline) + '</div>' : '';
-        var genres = (meta.genres || []).slice(0, 4).join('  ·  ');
-
-        // watch row: trailer + where-to-watch provider logos
-        var watch = '';
-        if (meta.trailer_url) watch += '<a class="vdpg-dr-btn vdpg-dr-trailer" href="' + esc(meta.trailer_url) + '" target="_blank" rel="noopener">▶ Trailer</a>';
-        var provs = meta.providers || [];
-        if (provs.length) watch += '<span class="vdpg-dr-provs"><span class="vdpg-dr-provs-t">Watch on</span>' + provs.map(function (p) {
-            return p.logo ? '<img class="vdpg-prov" src="' + esc(p.logo) + '" alt="' + esc(p.name || '') + '" title="' + esc(p.name || '') + '">'
-                : '<span class="vdpg-prov vdpg-prov-txt">' + esc(p.name || '') + '</span>';
-        }).join('') + '</span>';
-        var watchHTML = watch ? '<div class="vdpg-dr-watch">' + watch + '</div>' : '';
-
-        // cast with photos
+    function fmtViews(n) {
+        n = +n || 0;
+        return n >= 1e6 ? (Math.round(n / 1e5) / 10 + 'M') : n >= 1e3 ? (Math.round(n / 100) / 10 + 'K') : String(n);
+    }
+    function fmtSpeed(bps) {
+        bps = +bps || 0; if (!bps) return '';
+        return bps >= 1e6 ? (Math.round(bps / 1e5) / 10 + ' MB/s') : Math.max(1, Math.round(bps / 1e3)) + ' KB/s';
+    }
+    function pad2(n) { n = parseInt(n, 10) || 0; return (n < 10 ? '0' : '') + n; }
+    function castHTMLOf(meta) {
         var cast = (meta.cast || []).slice(0, 8);
-        var castHTML = cast.length ? '<div class="vdpg-dr-st">Cast</div><div class="vdpg-dr-cast">' + cast.map(function (c) {
+        return cast.length ? '<div class="vdpg-dr-st">Cast</div><div class="vdpg-dr-cast">' + cast.map(function (c) {
             var pic = c.photo
                 ? '<span class="vdpg-cast-pic" style="background-image:url(\'' + esc(c.photo) + '\')"></span>'
                 : '<span class="vdpg-cast-pic vdpg-cast-none">' + esc((c.name || '?').charAt(0)) + '</span>';
             return '<div class="vdpg-cast">' + pic + '<span class="vdpg-cast-nm">' + esc(c.name) +
                 '</span>' + (c.character ? '<span class="vdpg-cast-ch">' + esc(c.character) + '</span>' : '') + '</div>';
         }).join('') + '</div>' : '';
+    }
+
+    function drawerHTML(d, meta) {
+        var isYt = dlType(d.kind) === 'youtube', ctx = parseCtx(d);
+        var loading = meta === null;
+        meta = meta || {};
+        var back = '', head = '', lead = '', extra = '';
+
+        if (isYt) {
+            // big thumbnail + channel · duration · views · upload date, then the description
+            var thumb = meta.thumbnail_url || d.poster_url;
+            var yb = [];
+            if (ctx.channel || ctx.channel_title) yb.push(esc(ctx.channel || ctx.channel_title));
+            if (meta.duration) yb.push(esc(meta.duration));
+            if (meta.view_count) yb.push(fmtViews(meta.view_count) + ' views');
+            if (ctx.published_at) yb.push(esc(String(ctx.published_at).slice(0, 10)));
+            head = '<div class="vdpg-dr-head">' +
+                (thumb ? '<div class="vdpg-dr-ytthumb" style="background-image:url(\'' + esc(thumb) + '\')"></div>' : '') +
+                '<div class="vdpg-dr-title">' + esc(d.title || meta.title || 'Video') + '</div>' +
+                (yb.length ? '<div class="vdpg-dr-metaline">' + yb.join('  ·  ') + '</div>' : '') + '</div>';
+            lead = ctx.description ? '<p class="vdpg-dr-syn">' + esc(ctx.description) + '</p>' : '';
+        } else {
+            back = meta.backdrop_url
+                ? '<div class="vdpg-dr-back" style="background-image:url(\'' + esc(meta.backdrop_url) + '\')"></div>' : '';
+            var titleHTML = meta.logo
+                ? '<img class="vdpg-dr-logo" src="' + esc(meta.logo) + '" alt="' + esc(meta.title || d.title || '') + '">'
+                : '<div class="vdpg-dr-title">' + esc(meta.title || d.title || 'Download') + '</div>';
+            var bits = [];
+            if (meta.year || d.year) bits.push(esc(meta.year || d.year));
+            if (meta.rating) bits.push('⭐ ' + (Math.round(meta.rating * 10) / 10));
+            var rt = fmtRuntime(meta.runtime_minutes); if (rt) bits.push(rt);
+            if (meta.network || meta.studio) bits.push(esc(meta.network || meta.studio));
+            if (meta.status) bits.push(esc(meta.status));
+            var tagline = meta.tagline ? '<div class="vdpg-dr-tagline">' + esc(meta.tagline) + '</div>' : '';
+            head = '<div class="vdpg-dr-head">' + titleHTML +
+                (bits.length ? '<div class="vdpg-dr-metaline">' + bits.join('  ·  ') + '</div>' : '') + tagline + '</div>';
+
+            var ep = meta.episode;
+            if (ep) {   // the SPECIFIC episode: still + SxE · air date + episode title + its own synopsis
+                lead = '<div class="vdpg-dr-ep">' +
+                    (ep.still_url ? '<div class="vdpg-dr-epstill" style="background-image:url(\'' + esc(ep.still_url) + '\')"></div>' : '') +
+                    '<div class="vdpg-dr-epbody"><div class="vdpg-dr-epnum">S' + pad2(ep.season) + 'E' + pad2(ep.episode) +
+                    (ep.air_date ? '   ·   ' + esc(ep.air_date) : '') + '</div>' +
+                    '<div class="vdpg-dr-eptitle">' + esc(ep.title || '') + '</div>' +
+                    (ep.overview ? '<p class="vdpg-dr-epov">' + esc(ep.overview) + '</p>' : '') + '</div></div>';
+            } else {
+                lead = loading ? '<p class="vdpg-dr-syn vdpg-dr-muted">Loading…</p>'
+                    : (meta.overview ? '<p class="vdpg-dr-syn">' + esc(meta.overview) + '</p>'
+                        : '<p class="vdpg-dr-syn vdpg-dr-muted">No synopsis available.</p>');
+            }
+
+            var genres = (meta.genres || []).slice(0, 4).join('  ·  ');
+            var watch = '';
+            if (meta.trailer_url) watch += '<a class="vdpg-dr-btn vdpg-dr-trailer" href="' + esc(meta.trailer_url) + '" target="_blank" rel="noopener">▶ Trailer</a>';
+            var provs = meta.providers || [];
+            if (provs.length) watch += '<span class="vdpg-dr-provs"><span class="vdpg-dr-provs-t">Watch on</span>' + provs.map(function (p) {
+                return p.logo ? '<img class="vdpg-prov" src="' + esc(p.logo) + '" alt="' + esc(p.name || '') + '" title="' + esc(p.name || '') + '">'
+                    : '<span class="vdpg-prov vdpg-prov-txt">' + esc(p.name || '') + '</span>';
+            }).join('') + '</span>';
+            extra = (genres ? '<div class="vdpg-dr-genres">' + esc(genres) + '</div>' : '') +
+                (watch ? '<div class="vdpg-dr-watch">' + watch + '</div>' : '') + castHTMLOf(meta);
+        }
 
         // download facts (only the fields that exist render)
         var facts = '';
@@ -233,7 +271,14 @@
             facts += fact('Quality target', d.quality_label);
             facts += fact('Release', d.release_title);
             facts += fact('Format', [d.resolution, d.source, d.codec].filter(Boolean).join(' · '));
-            facts += fact('Source', d.username ? ('👤 ' + d.username + (d.queue != null ? ('   ·   queue ' + d.queue) : '')) : '');
+            facts += fact('Source', d.username ? ('👤 ' + d.username) : '');
+            if (ctx.peer) {   // the chosen source's availability snapshot at grab time
+                var p = ctx.peer, av = [];
+                if (p.slots != null) av.push(p.slots > 0 ? '✓ free slot' : 'no free slot');
+                if (p.queue != null) av.push('queue ' + p.queue);
+                var sp = fmtSpeed(p.speed); if (sp) av.push(sp);
+                facts += fact('Availability', av.join('   ·   '));
+            }
         }
         facts += fact('Size', d.size_bytes ? fmtSize(d.size_bytes) : '');
         facts += fact('Attempts', d.attempts > 1 ? (d.attempts + 'x') : '');
@@ -242,7 +287,6 @@
             '<button class="vdpg-copy" type="button" data-vdpg-copy="' + esc(d.dest_path) + '" title="Copy path">⧉</button></div>';
         if (isFail(d.status) && d.error) facts += '<div class="vdpg-f vdpg-f-wide vdpg-f-err"><span class="vdpg-fk">Error</span><span class="vdpg-fv">' + esc(d.error) + '</span></div>';
 
-        // big actions
         var btns = [];
         if (d.media_id && !isYt) btns.push('<button class="vdpg-dr-btn" type="button" data-vdpg-open="' + esc(d.media_id) +
             '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') + '">Open in library</button>');
@@ -251,14 +295,21 @@
         else if (isFail(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-retry="' + d.id + '">Retry</button>');
         var actions = btns.length ? '<div class="vdpg-dr-actions">' + btns.join('') + '</div>' : '';
 
-        var syn = loading ? '<p class="vdpg-dr-syn vdpg-dr-muted">Loading…</p>'
-            : (overview ? '<p class="vdpg-dr-syn">' + esc(overview) + '</p>'
-                : (isYt ? '' : '<p class="vdpg-dr-syn vdpg-dr-muted">No synopsis available.</p>'));
-        return back + '<div class="vdpg-dr-body">' +
-            '<div class="vdpg-dr-head">' + titleHTML + metaLine + tagline + '</div>' +
-            syn + (genres ? '<div class="vdpg-dr-genres">' + esc(genres) + '</div>' : '') + watchHTML +
-            castHTML + '<div class="vdpg-dr-st">Download</div><div class="vdpg-dr-facts">' + facts + '</div>' +
+        return back + '<div class="vdpg-dr-body">' + head + lead + extra +
+            '<div class="vdpg-dr-st">Download</div><div class="vdpg-dr-facts">' + facts + '</div>' +
             actions + '</div>';
+    }
+
+    function metaURL(d) {
+        var t = dlType(d.kind);
+        if (t === 'youtube') return '/api/video/downloads/yt-meta/' + encodeURIComponent(d.media_id);
+        if (d.media_source === 'library') return null;   // owned re-grab: media_id isn't a tmdb id
+        var url = '/api/video/downloads/meta/' + (t === 'movie' ? 'movie' : 'show') + '/' + encodeURIComponent(d.media_id);
+        if (d.kind === 'episode') {
+            var c = parseCtx(d);
+            if (c.season != null && c.episode != null) url += '?season=' + encodeURIComponent(c.season) + '&episode=' + encodeURIComponent(c.episode);
+        }
+        return url;
     }
     function renderDrawer(el, d) {
         var dr = el.querySelector('[data-f="drawer"]'); if (!dr) return;
@@ -266,16 +317,20 @@
         el.classList.toggle('vdpg-card-open', open);
         dr.hidden = !open;
         if (!open) { dr.innerHTML = ''; return; }
-        dr.innerHTML = drawerHTML(d, _meta[d.id]);
-        // lazily fetch TMDB detail for movie/TV (skip youtube + owned library re-grabs)
-        if (_meta[d.id] === undefined && d.media_id && dlType(d.kind) !== 'youtube' && d.media_source !== 'library') {
-            _meta[d.id] = null;
-            var k = dlType(d.kind) === 'movie' ? 'movie' : 'show';
-            getJSON('/api/video/downloads/meta/' + k + '/' + encodeURIComponent(d.media_id)).then(function (m) {
-                _meta[d.id] = m || {};
-                if (_expanded[d.id]) { var dr2 = el.querySelector('[data-f="drawer"]'); if (dr2) dr2.innerHTML = drawerHTML(d, _meta[d.id]); }
-            });
+        // kick off the lazy detail fetch (TMDB for movie/TV, cached metadata for youtube) so the
+        // first paint already shows 'Loading…' rather than 'no synopsis' flashing before content.
+        if (_meta[d.id] === undefined && d.media_id) {
+            var url = metaURL(d);
+            if (!url) { _meta[d.id] = {}; }
+            else {
+                _meta[d.id] = null;
+                getJSON(url).then(function (m) {
+                    _meta[d.id] = m || {};
+                    if (_expanded[d.id]) { var dr2 = el.querySelector('[data-f="drawer"]'); if (dr2) dr2.innerHTML = drawerHTML(d, _meta[d.id]); }
+                });
+            }
         }
+        dr.innerHTML = drawerHTML(d, _meta[d.id]);
     }
 
     function render(list) {

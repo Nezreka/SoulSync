@@ -1474,6 +1474,18 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_video_detail(self, youtube_id) -> dict | None:
+        """Cached metadata for one YouTube video (title / thumbnail / duration / views) — the
+        extra detail the download drawer shows. None if it was never cached by a channel scan."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute(
+                "SELECT title, thumbnail_url, duration, view_count "
+                "FROM youtube_channel_videos WHERE youtube_id=? LIMIT 1", (youtube_id,)).fetchone()
+            return dict(r) if r else None
+        finally:
+            conn.close()
+
     def media_tmdb_id(self, kind: str, media_id) -> tuple:
         """(tmdb_id, imdb_id) for a library movie/show row — used to resolve sidecar /
         subtitle metadata for an owned re-grab (whose media_id is the library id, not a

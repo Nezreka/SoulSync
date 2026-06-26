@@ -187,6 +187,18 @@ def test_downloaded_youtube_video_ids_only_completed_youtube(db):
     assert set(db.downloaded_youtube_video_ids()) == {"v1"}
 
 
+def test_youtube_video_detail(db):
+    conn = db._get_connection()
+    conn.execute("INSERT INTO youtube_channel_videos (channel_id, youtube_id, title, thumbnail_url, "
+                 "duration, view_count) VALUES (?,?,?,?,?,?)",
+                 ("UC1", "vid9", "Cool Vid", "/t.jpg", "12:34", 50000))
+    conn.commit()
+    conn.close()
+    d = db.youtube_video_detail("vid9")
+    assert d["title"] == "Cool Vid" and d["duration"] == "12:34" and d["view_count"] == 50000
+    assert db.youtube_video_detail("missing") is None
+
+
 def test_count_and_claim_queue(db):
     a = db.add_video_download({"kind": "youtube", "source": "youtube", "media_id": "v1",
                                "title": "A", "status": "queued"})

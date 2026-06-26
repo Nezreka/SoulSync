@@ -50,11 +50,20 @@ def test_drawer_renders_the_rich_tmdb_fields():
     assert "trailer_url" in _JS and "providers" in _JS
 
 
-def test_download_meta_route_is_registered():
+def test_drawer_has_episode_youtube_and_availability_blocks():
+    assert "vdpg-dr-ytthumb" in _JS                     # youtube big thumbnail header
+    assert "vdpg-dr-ep" in _JS and "vdpg-dr-epstill" in _JS   # episode still + block
+    assert "ctx.peer" in _JS                           # grab-time availability snapshot
+    assert "yt-meta" in _JS                            # youtube metadata fetch
+    assert "season=" in _JS and "episode=" in _JS      # episode params on the meta fetch
+
+
+def test_download_meta_routes_are_registered():
     import api.video as videoapi
     from flask import Flask
     app = Flask(__name__)
     app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
     rules = {r.rule for r in app.url_map.iter_rules()}
     assert "/api/video/downloads/meta/<kind>/<int:tmdb_id>" in rules
+    assert "/api/video/downloads/yt-meta/<video_id>" in rules
 
