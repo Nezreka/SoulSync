@@ -103,6 +103,13 @@ def test_video_page_exposes_reload_hook():
 
 # --- the System list is shown in a logical pipeline order -----------------
 
+def test_video_automations_poll_does_not_rebuild_when_unchanged():
+    # regression: the 8s poll used to replaceChild the whole section every time → blink +
+    # wiped live progress. It must skip the rebuild when nothing structural changed.
+    assert 'if (sig === _lastSig) return;' in _VAUTO
+    assert 'var sig = JSON.stringify(' in _VAUTO
+
+
 def test_video_system_automations_are_sorted_by_pipeline_order():
     # The API returns newest-created-first (jumbled); the page re-sorts by an
     # explicit order so it reads scans → processors → library → maintenance.
