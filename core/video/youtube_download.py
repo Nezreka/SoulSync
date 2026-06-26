@@ -196,9 +196,28 @@ def _pace(delay: float) -> None:
         time.sleep(wait)
 
 
+# Download ids with a live worker thread right now. After a restart this is empty, so any
+# row still marked 'downloading' is an orphan (its thread died) → the reaper re-queues it.
+_active_worker_ids: set = set()
+
+
 def _spawn_worker(dl_id: Any, db_provider: Callable) -> None:
     threading.Thread(target=run_youtube_download, args=(dl_id, db_provider),
                      daemon=True, name="yt-dl-%s" % dl_id).start()
+
+
+def requeue_orphaned_youtube(db_provider: Callable) -> int:
+    """Recover YouTube downloads stuck in 'downloading' with no live worker (e.g. after a
+    restart killed the threads) by putting them back to 'queued' so the pump re-runs them.
+    A download whose worker is alive is in ``_active_worker_ids`` and is left untouched.
+    Returns the count recovered."""
+    n = 0
+    for d in (db_provider().get_active_video_downloads() or []):
+        if (d.get("source") == "youtube" and d.get("status") == "downloading"
+                and d.get("id") not in _active_worker_ids):
+            db_provider().update_video_download(d["id"], status="queued", progress=0)
+            n += 1
+    return n
 
 
 def start_next_queued(db_provider: Callable) -> Any:
@@ -216,9 +235,11 @@ def start_next_queued(db_provider: Callable) -> Any:
 def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
     """Production entry: fetch the row, bind real seams, fulfil it. Called on a worker
     thread by the pump; on finish it starts the next queued download (one-out-one-in)."""
+    _active_worker_ids.add(dl_id)             # mark this download as having a live worker
     db = db_provider()
     dl = db.get_video_download(dl_id)
     if not dl:
+        _active_worker_ids.discard(dl_id)
         start_next_queued(db_provider)        # keep the queue moving even on a stale id
         return
     profile = youtube_quality.load(db)
@@ -260,11 +281,12 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
             clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
             progress_hook=_progress, cookie_opts=cookie_opts, now=_now)
     finally:
+        _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row
         start_next_queued(db_provider)         # one out, one in — drain the queue
 
 
 __all__ = [
     "youtube_fields_from_download", "plan_destination", "ydl_download_opts",
     "download_one", "process_youtube_download", "run_youtube_download",
-    "start_next_queued",
+    "start_next_queued", "requeue_orphaned_youtube",
 ]
