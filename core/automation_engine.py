@@ -239,6 +239,37 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'deep', 'media_type': 'movie'},
         'owned_by': 'video',
     },
+    # Watchlist scans — keep the wishlist fed from the people + channels you follow.
+    # People: daily (filmographies change slowly) at 03:00, after the airing/deep-scan
+    # jobs so they don't overlap. No-ops cleanly if you follow nobody.
+    {
+        'name': 'Auto-Scan Watchlist People',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '03:00'},
+        'action_type': 'video_scan_watchlist_people',
+        'owned_by': 'video',
+    },
+    # Channels: every 6h (YouTube posts at all hours). No-ops cleanly if you follow none.
+    {
+        'name': 'Auto-Scan Watchlist Channels',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_scan_watchlist_channels',
+        'action_config': {'backfill_count': 10},
+        'initial_delay': 1200,
+        'owned_by': 'video',
+    },
+    # Drain side: download wished YouTube videos hourly (queues the whole wishlist, runs a
+    # few at a time). Skips quietly until a YouTube library folder is set.
+    {
+        'name': 'Auto-Download YouTube Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_process_youtube_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1500,
+        'owned_by': 'video',
+    },
 ]
 
 

@@ -101,10 +101,12 @@ def test_stops_starting_when_queue_drains_early():
     assert started == 2
 
 
-def test_missing_youtube_folder_is_an_error():
+def test_missing_youtube_folder_is_a_quiet_skip():
+    # always-on automation: no folder set → skip cleanly (not an error every run)
     res, enq, started, deps = _run([_v("a")], root="")
-    assert res["status"] == "error" and "library folder" in res["error"]
-    assert enq == [] and any(p.get("status") == "error" for p in deps.progress)
+    assert res["status"] == "completed" and res.get("skipped") == "no_youtube_folder"
+    assert enq == [] and started == 0
+    assert not any(p.get("status") == "error" for p in deps.progress)
 
 
 def test_nothing_wanted_and_empty_queue_is_a_clean_noop():
