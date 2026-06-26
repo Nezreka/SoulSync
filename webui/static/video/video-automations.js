@@ -91,10 +91,21 @@
             '<span class="auto-stat"><strong>' + sys.length + '</strong> System</span>';
     }
 
+    var _lastSig = null;
     function load() {
         return getJSON('/api/automations').then(function (d) {
             var all = Array.isArray(d) ? d : (d && d.automations) || [];
             var sys = sortSystem(all.filter(isVideoAutomation));
+            // Re-rendering the whole System section every 8s poll destroys + recreates every
+            // card — that's the blink, and it wipes the live progress the socket patches in.
+            // Only rebuild when something STRUCTURAL changed (added/removed/toggled/ran);
+            // live progress arrives via socket, the "Next: in Xm" countdown ticks locally.
+            var sig = JSON.stringify(sys.map(function (a) {
+                return [a.id, a.enabled, a.name, a.trigger_type, a.action_type,
+                        a.last_run, a.next_run, a.run_count, a.last_result];
+            }));
+            if (sig === _lastSig) return;
+            _lastSig = sig;
             renderStats(sys);
             renderSystem(sys);
             renderHubOnce();

@@ -261,11 +261,17 @@ def _fail_or_retry(db, dl, error_msg) -> None:
     _archive_history(db, dl, {"status": "failed", "error": err, "completed_at": completed})
 
 
-def _search_for_retry(query, max_seconds=22):
-    """A bounded blocking slskd search for the retry worker (shorter than the UI's).
+def _search_for_retry(query, max_seconds=55):
+    """A bounded blocking slskd search for the retry worker + the auto-grab automation.
+
+    slskd gathers peer responses over its full search window (~60s by default), so a short
+    wait misses almost everything. We poll up to ``max_seconds`` but return EARLY once
+    results have arrived and settled — break on either plenty of hits (12+) or no new hits
+    for ~12s after getting some, so fast searches don't burn the whole window.
+
     Always STOPS the slskd search when done — otherwise it keeps running its full timeout
-    (~60s) and, since the bounded auto-grab fires searches back-to-back, they pile up on
-    slskd. Stopping each one keeps concurrent slskd searches ≈ the worker pool size."""
+    and, since the auto-grab fires searches back-to-back, they pile up. Stopping each one
+    keeps concurrent slskd searches ≈ the worker pool size."""
     from core.video.slskd_search import poll_search, start_search, stop_search
     res = start_search(query)
     sid = res.get("id")
@@ -273,11 +279,20 @@ def _search_for_retry(query, max_seconds=22):
         return {"hits": [], "total_files": 0}
     deadline = time.monotonic() + max_seconds
     last = {"hits": [], "total_files": 0}
+    prev, settle = 0, 0          # track hit growth; settle = consecutive no-growth polls (~1.5s each)
     try:
         while time.monotonic() < deadline:
             last = poll_search(sid)
-            if len(last.get("hits") or []) >= 12:
-                break
+            n = len(last.get("hits") or [])
+            if n >= 12:
+                break                          # plenty — stop waiting
+            if n > prev:
+                settle = 0                     # still arriving — keep waiting
+            elif n > 0:
+                settle += 1
+                if settle >= 8:                # ~12s with no new hits → results have settled
+                    break
+            prev = n
             time.sleep(1.5)
         return last
     finally:
