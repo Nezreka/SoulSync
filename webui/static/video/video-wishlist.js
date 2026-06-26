@@ -299,12 +299,18 @@
     }
 
     // ── counts / badges / pager ───────────────────────────────────────────────
+    // The nav badge is the WHOLE wishlist (movies + episodes + YouTube videos). movie/episode
+    // and YouTube counts arrive from SEPARATE loads, and on the dashboard only one of them
+    // runs — so neither setter can compute the whole total from its partial state without
+    // clobbering the other (the bug: badge shows the right number, then 'switches' to the
+    // TV-only count). The endpoint /wishlist/counts is the single source of truth for the
+    // grand total, so the setters just (re)sync the nav badge from it.
     function setCounts(counts) {
         state.counts = { movie: (counts && counts.movie) || 0, show: (counts && counts.show) || 0,
                          episode: (counts && counts.episode) || 0 };
         var cm = $('[data-vwsh-count-movie]'); if (cm) cm.textContent = state.counts.movie;
         var cs = $('[data-vwsh-count-show]'); if (cs) cs.textContent = state.counts.show;
-        updateBadges(counts && counts.total != null ? counts.total : (state.counts.movie + state.counts.episode));
+        refreshBadge();                                   // authoritative grand total
         updateSub();
         updateClearBtn();
     }
@@ -312,6 +318,7 @@
         state.ytChannel = (counts && counts.channel) || 0;
         state.ytVideo = (counts && counts.video) || 0;
         var cy = $('[data-vwsh-count-youtube]'); if (cy) cy.textContent = state.ytVideo;
+        refreshBadge();                                   // authoritative grand total
         updateSub();
         updateClearBtn();
     }
