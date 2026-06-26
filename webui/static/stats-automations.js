@@ -1777,8 +1777,9 @@ const _autoIcons = {
     video_scan_library: '\uD83C\uDFAC', video_scan_server: '\uD83D\uDD04', video_update_database: '\uD83D\uDDC4\uFE0F',
     video_add_airing_episodes: '\uD83D\uDCFA', video_deep_scan_movies: '\uD83C\uDFAC', video_deep_scan_tv: '\uD83D\uDCFA',
     video_scan_watchlist_people: '\uD83C\uDFAD', video_scan_watchlist_channels: '\uD83D\uDCE1',
-    video_scan_watchlist_playlists: '\uD83C\uDFB5', video_process_youtube_wishlist: '\u2B07\uFE0F',
-    video_download_movie_wishlist: '\uD83C\uDFAC', video_download_episode_wishlist: '\uD83D\uDCFA',
+    video_scan_watchlist_playlists: '\uD83C\uDFB5',
+    video_process_movie_wishlist: '\uD83C\uDFAC', video_process_episode_wishlist: '\uD83D\uDCFA',
+    video_process_youtube_wishlist: '\u2B07\uFE0F',
 };
 
 // --- Inspiration Templates ---
@@ -3376,9 +3377,9 @@ function _autoFormatAction(type) {
         video_scan_watchlist_people: 'Scan Watchlist People',
         video_scan_watchlist_channels: 'Scan Watchlist Channels',
         video_scan_watchlist_playlists: 'Scan Watchlist Playlists',
-        video_process_youtube_wishlist: 'Download YouTube Wishlist',
-        video_download_movie_wishlist: 'Download Movie Wishlist',
-        video_download_episode_wishlist: 'Download Episode Wishlist',
+        video_process_movie_wishlist: 'Process Movie Wishlist',
+        video_process_episode_wishlist: 'Process Episode Wishlist',
+        video_process_youtube_wishlist: 'Process YouTube Wishlist',
     };
     return labels[type] || type || 'Unknown';
 }

@@ -232,40 +232,39 @@ def register_all(deps: AutomationDeps) -> None:
         'video_add_airing_episodes',
         lambda config: auto_video_add_airing_episodes(config, deps),
     )
-    # Watchlist-people scan: wishlist every un-owned movie the followed people acted in or
-    # directed (back catalog + upcoming).
+    # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
+    # Stage 1 — SCANS that fill the wishlist from what you follow.
+    # People: wishlist every un-owned movie followed actors/directors made (catalog + upcoming).
     engine.register_action_handler(
         'video_scan_watchlist_people',
         lambda config: auto_video_scan_watchlist_people(config, deps),
     )
-    # Watchlist-channels scan: wishlist new long-form uploads from followed YouTube
-    # channels (forward-looking + last-N safety net).
+    # Channels: new long-form uploads from followed YouTube channels (forward + last-N net).
     engine.register_action_handler(
         'video_scan_watchlist_channels',
         lambda config: auto_video_scan_watchlist_channels(config, deps),
     )
-    # Watchlist-playlists scan: mirror followed YouTube playlists into the wishlist
-    # (whole list + new additions; playlist-as-show).
+    # Playlists: mirror followed YouTube playlists (whole list + new additions; playlist-as-show).
     engine.register_action_handler(
         'video_scan_watchlist_playlists',
         lambda config: auto_video_scan_watchlist_playlists(config, deps),
     )
-    # Drain side: enqueue wished YouTube videos into the download queue (yt-dlp worker).
+    # Stage 2 — PROCESSORS that drain the wishlist by downloading. Movie/episode go through
+    # slskd (search → pick best → grab); the guard skips an hourly tick while a drain is still
+    # working. YouTube goes through yt-dlp (queue all, a few concurrent).
     engine.register_action_handler(
-        'video_process_youtube_wishlist',
-        lambda config: auto_video_process_youtube_wishlist(config, deps),
-    )
-    # Soulseek drain: auto-grab wished movies / episodes (search → pick best → download).
-    # The guard skips an hourly tick while a drain is still working (searches are slow).
-    engine.register_action_handler(
-        'video_download_movie_wishlist',
+        'video_process_movie_wishlist',
         lambda config: auto_video_process_wishlist(config, deps, media_type='movie'),
         lambda: is_running('movie'),
     )
     engine.register_action_handler(
-        'video_download_episode_wishlist',
+        'video_process_episode_wishlist',
         lambda config: auto_video_process_wishlist(config, deps, media_type='episode'),
         lambda: is_running('episode'),
+    )
+    engine.register_action_handler(
+        'video_process_youtube_wishlist',
+        lambda config: auto_video_process_youtube_wishlist(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around

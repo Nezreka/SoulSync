@@ -265,6 +265,8 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "prune_ended", "type": "checkbox", "label": "Also remove ended/canceled shows from the watchlist", "default": True}
      ]},
+    # ── Watchlist → Wishlist pipeline ────────────────────────────────────────
+    # Stage 1 — scans that FILL the wishlist from what you follow.
     {"type": "video_scan_watchlist_people", "label": "Scan Watchlist People", "icon": "users", "scope": "video",
      "description": "For everyone you follow on the watchlist, wishlist every movie they acted in or directed that you don't already own — the whole back catalog plus anything upcoming (kept as 'monitored' until it's released). First run backlogs everything; later runs are fast.", "available": True},
     {"type": "video_scan_watchlist_channels", "label": "Scan Watchlist Channels", "icon": "youtube", "scope": "video",
@@ -274,17 +276,18 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",
      "description": "For every YouTube playlist you follow, wishlist its videos you don't have yet (and anything later added to it) — mirrors the whole list. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},
-    {"type": "video_download_movie_wishlist", "label": "Download Movie Wishlist", "icon": "download", "scope": "video",
+    # Stage 2 — processors that DRAIN the wishlist by downloading.
+    {"type": "video_process_movie_wishlist", "label": "Process Movie Wishlist", "icon": "download", "scope": "video",
      "description": "Auto-grab your wished, released MOVIES from Soulseek: searches each, picks the best release per your quality profile, and downloads it (the monitor finishes + organises it). Skips unreleased ('monitored') ones and any already downloading. Needs the Movie library folder + slskd set. Pair with an hourly schedule.", "available": True,
      "config_fields": [
          {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
      ]},
-    {"type": "video_download_episode_wishlist", "label": "Download Episode Wishlist", "icon": "download", "scope": "video",
+    {"type": "video_process_episode_wishlist", "label": "Process Episode Wishlist", "icon": "download", "scope": "video",
      "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Today's Airings' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule.", "available": True,
      "config_fields": [
          {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
      ]},
-    {"type": "video_process_youtube_wishlist", "label": "Download YouTube Wishlist", "icon": "download", "scope": "video",
+    {"type": "video_process_youtube_wishlist", "label": "Process YouTube Wishlist", "icon": "download", "scope": "video",
      "description": "Download wished YouTube videos (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). Queues the WHOLE wishlist — the setting only limits how many download at the same time; each finished one starts the next, so it all drains. A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads.", "available": True,
      "config_fields": [
          {"key": "max_concurrent", "type": "number", "label": "Max simultaneous downloads", "default": 3, "min": 1}

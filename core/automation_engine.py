@@ -239,65 +239,60 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'deep', 'media_type': 'movie'},
         'owned_by': 'video',
     },
-    # Watchlist scans — keep the wishlist fed from the people + channels you follow.
-    # People: daily (filmographies change slowly) at 03:00, after the airing/deep-scan
-    # jobs so they don't overlap. No-ops cleanly if you follow nobody.
+    # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
+    # Stage 1: SCANS that FILL the wishlist from what you follow. (The airing-episodes
+    # scan above is the show equivalent.) All no-op cleanly if you follow nobody.
     {
-        'name': 'Auto-Scan Watchlist People',
-        'trigger_type': 'daily_time',
-        'trigger_config': {'time': '03:00'},
+        'name': 'Auto-Scan Watchlist People',          # followed actors/directors → wished movies
+        'trigger_type': 'daily_time',                  # daily; filmographies change slowly
+        'trigger_config': {'time': '03:00'},           # after airing/deep-scan jobs, no overlap
         'action_type': 'video_scan_watchlist_people',
         'owned_by': 'video',
     },
-    # Channels: every 6h (YouTube posts at all hours). No-ops cleanly if you follow none.
     {
-        'name': 'Auto-Scan Watchlist Channels',
+        'name': 'Auto-Scan Watchlist Channels',        # followed YouTube channels → wished videos
         'trigger_type': 'schedule',
-        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'trigger_config': {'interval': 6, 'unit': 'hours'},   # YouTube posts at all hours
         'action_type': 'video_scan_watchlist_channels',
         'action_config': {'backfill_count': 10},
         'initial_delay': 1200,
         'owned_by': 'video',
     },
-    # Playlists: every 6h, mirror the whole list (playlist-as-show). No-ops if you follow none.
     {
-        'name': 'Auto-Scan Watchlist Playlists',
+        'name': 'Auto-Scan Watchlist Playlists',       # followed playlists (mirror-all) → wished videos
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 6, 'unit': 'hours'},
         'action_type': 'video_scan_watchlist_playlists',
         'initial_delay': 1320,
         'owned_by': 'video',
     },
-    # Drain side: download wished YouTube videos hourly (queues the whole wishlist, runs a
-    # few at a time). Skips quietly until a YouTube library folder is set.
+    # Stage 2: PROCESSORS that DRAIN the wishlist by downloading. Hourly; each skips
+    # quietly until its library folder (+ slskd, for movie/episode) is configured.
     {
-        'name': 'Auto-Download YouTube Wishlist',
+        'name': 'Auto-Process Movie Wishlist',         # wished movies → slskd search/pick/grab
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 1, 'unit': 'hours'},
-        'action_type': 'video_process_youtube_wishlist',
-        'action_config': {'max_concurrent': 3},
-        'initial_delay': 1500,
-        'owned_by': 'video',
-    },
-    # Soulseek drains: auto-grab wished movies / episodes hourly (search → pick best →
-    # download). A guard skips the tick while a drain is still working. Skip quietly until
-    # the library folder + slskd are set.
-    {
-        'name': 'Auto-Download Movie Wishlist',
-        'trigger_type': 'schedule',
-        'trigger_config': {'interval': 1, 'unit': 'hours'},
-        'action_type': 'video_download_movie_wishlist',
+        'action_type': 'video_process_movie_wishlist',
         'action_config': {'max_concurrent': 3},
         'initial_delay': 1620,
         'owned_by': 'video',
     },
     {
-        'name': 'Auto-Download Episode Wishlist',
+        'name': 'Auto-Process Episode Wishlist',       # wished episodes → slskd search/pick/grab
         'trigger_type': 'schedule',
         'trigger_config': {'interval': 1, 'unit': 'hours'},
-        'action_type': 'video_download_episode_wishlist',
+        'action_type': 'video_process_episode_wishlist',
         'action_config': {'max_concurrent': 3},
         'initial_delay': 1740,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Process YouTube Wishlist',       # wished YouTube videos → yt-dlp download
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_process_youtube_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1500,
         'owned_by': 'video',
     },
 ]
