@@ -67,3 +67,28 @@ def test_merge_candidates_dedupes_against_tried():
     out = merge_candidates(new, ["b.mkv"])
     assert [c["filename"] for c in out] == ["a.mkv"]   # b excluded (tried), dup a collapsed
     assert out[0]["release_title"] == "Dune.2021.1080p"
+
+
+# ── bounded search stops its slskd search (so they don't pile up) ─────────────
+def test_search_for_retry_stops_the_slskd_search(monkeypatch):
+    """The bounded auto-grab search MUST stop its slskd search when done — slskd otherwise
+    keeps each running ~60s, and back-to-back searches pile up and swamp it. Stopped even on
+    an early break (12+ hits arrive fast)."""
+    import core.video.slskd_search as ss
+    from core.video import download_monitor as dm
+    stopped = []
+    monkeypatch.setattr(ss, "start_search", lambda q: {"id": "S1"})
+    monkeypatch.setattr(ss, "poll_search", lambda sid: {"hits": list(range(12)), "total_files": 12})
+    monkeypatch.setattr(ss, "stop_search", lambda sid: stopped.append(sid))
+    res = dm._search_for_retry("Dune 2021")
+    assert len(res["hits"]) == 12 and stopped == ["S1"]      # early-broke AND stopped
+
+
+def test_search_for_retry_no_id_skips_stop(monkeypatch):
+    import core.video.slskd_search as ss
+    from core.video import download_monitor as dm
+    stopped = []
+    monkeypatch.setattr(ss, "start_search", lambda q: {"configured": True, "error": "boom"})
+    monkeypatch.setattr(ss, "stop_search", lambda sid: stopped.append(sid))
+    assert dm._search_for_retry("x") == {"hits": [], "total_files": 0}
+    assert stopped == []                                     # nothing started → nothing to stop

@@ -147,6 +147,20 @@ def start_search(query: str) -> dict:
     return {"configured": True, "id": sid}
 
 
+def stop_search(search_id) -> None:
+    """Stop + forget a search on slskd once we're done polling it. slskd otherwise keeps
+    every search running its full ``search_timeout`` (default 60s), so the bounded automation
+    searches — which finish fast when results come in — pile up dozens-deep and swamp slskd.
+    Best-effort; a failed cleanup never matters."""
+    base, headers = _conn()
+    if not base or not search_id:
+        return
+    try:
+        requests.delete(base + "/api/v0/searches/%s" % search_id, headers=headers, timeout=10)
+    except Exception:   # noqa: BLE001, S110 - cleanup is best-effort
+        pass
+
+
 def poll_responses(search_id: str) -> list:
     """Current grouped video hits for an in-flight search (cheap; call repeatedly)."""
     return poll_search(search_id)["hits"]
