@@ -54,6 +54,44 @@ def normalize(raw: Any) -> dict:
     return d
 
 
+# Resolution → pixel-height ceiling for yt-dlp's ``height<=`` filter. "best" = no cap.
+_RES_HEIGHT = {"best": None, "4320p": 4320, "2160p": 2160, "1440p": 1440,
+               "1080p": 1080, "720p": 720, "480p": 480, "360p": 360}
+
+
+def format_selection(profile: Any) -> dict:
+    """Map a profile to the yt-dlp options the (download) engine passes through:
+    ``{format, format_sort, merge_output_format}``. Pure — no DB, no network.
+
+    * ``format`` takes the best video+audio capped to the resolution ceiling, falling
+      back to an uncapped best so a video that only exists above the cap still grabs.
+    * ``format_sort`` is an ordered soft-preference list (codec → resolution → fps →
+      SDR) — yt-dlp picks the top match, so these never *exclude* a stream, they rank it.
+    * ``merge_output_format`` is the container yt-dlp muxes into.
+
+    NB: the exact yt-dlp tokens are tunable against the live yt-dlp version when the
+    downloader is wired; the shape (one capped format expr + a ranked sort list) is the
+    contract the tests pin.
+    """
+    p = normalize(profile)
+    height = _RES_HEIGHT.get(p["max_resolution"])
+    if height:
+        fmt = "bv*[height<=%d]+ba/b[height<=%d]/bv*+ba/b" % (height, height)
+    else:
+        fmt = "bv*+ba/b"
+
+    sort: list[str] = []
+    if p["video_codec"] != "any":
+        sort.append("vcodec:%s" % p["video_codec"])     # soft codec preference
+    sort.append("res:%d" % height if height else "res")  # prefer the ceiling, else highest
+    if p["prefer_60fps"]:
+        sort.append("fps")                               # prefer higher frame rate
+    if not p["allow_hdr"]:
+        sort.append("hdr:SDR")                           # rank SDR above HDR (don't exclude)
+
+    return {"format": fmt, "format_sort": sort, "merge_output_format": p["container"]}
+
+
 def load(db) -> dict:
     """Read + normalize the stored profile, or the default if none/garbage."""
     raw = db.get_setting("youtube_quality_profile")
@@ -74,5 +112,5 @@ def save(db, raw: Any) -> dict:
 
 __all__ = [
     "RESOLUTIONS", "CODECS", "CONTAINERS",
-    "default_profile", "normalize", "load", "save",
+    "default_profile", "normalize", "format_selection", "load", "save",
 ]

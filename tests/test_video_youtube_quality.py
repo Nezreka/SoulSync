@@ -11,6 +11,7 @@ from core.video.youtube_quality import (
     CONTAINERS,
     RESOLUTIONS,
     default_profile,
+    format_selection,
     load,
     normalize,
     save,
@@ -79,3 +80,38 @@ def test_load_recovers_from_corrupt_json():
     db = _FakeDB()
     db.set_setting("youtube_quality_profile", "{nope")
     assert load(db) == default_profile()
+
+
+# ── yt-dlp format mapping (what the downloader passes through) ────────────────
+def test_format_selection_default_caps_to_1080_sdr_60fps_mp4():
+    sel = format_selection(default_profile())
+    assert sel["format"] == "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"
+    assert sel["merge_output_format"] == "mp4"
+    # default: any-codec (no vcodec pref), prefer the cap res, 60fps, SDR
+    assert sel["format_sort"] == ["res:1080", "fps", "hdr:SDR"]
+
+
+def test_format_selection_best_has_no_height_cap():
+    sel = format_selection({"max_resolution": "best", "video_codec": "any",
+                            "prefer_60fps": False, "allow_hdr": True})
+    assert sel["format"] == "bv*+ba/b"
+    assert sel["format_sort"] == ["res"]          # no codec/fps/sdr prefs → just highest res
+
+
+def test_format_selection_codec_pref_leads_the_sort():
+    sel = format_selection({"max_resolution": "2160p", "video_codec": "av1",
+                            "container": "mkv", "prefer_60fps": True, "allow_hdr": False})
+    assert sel["format"].startswith("bv*[height<=2160]")
+    assert sel["format_sort"] == ["vcodec:av1", "res:2160", "fps", "hdr:SDR"]
+    assert sel["merge_output_format"] == "mkv"
+
+
+def test_format_selection_allow_hdr_drops_the_sdr_rank():
+    sel = format_selection({"max_resolution": "1080p", "video_codec": "any",
+                            "prefer_60fps": True, "allow_hdr": True})
+    assert "hdr:SDR" not in sel["format_sort"]
+
+
+def test_format_selection_normalizes_garbage_input():
+    # a junk profile still yields a valid default selection (never raises)
+    assert format_selection("nope")["format"] == "bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b"
