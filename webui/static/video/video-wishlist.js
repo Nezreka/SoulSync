@@ -600,11 +600,25 @@
 
     function onShown(e) { if (e && e.detail === PAGE_ID) { state.page = 1; load(); refreshYtCount(); } }
 
+    // The nav badge also has to track wishlist changes that happen SERVER-SIDE — when a
+    // download finishes it removes its item from the wishlist, and that fires no frontend
+    // 'changed' event. So poll the authoritative count: quicker while downloads are active
+    // (the downloads page exposes _vdpgAnyActive), slower when idle, paused when hidden.
+    function scheduleBadgePoll() {
+        var active = (typeof window._vdpgAnyActive === 'function') && window._vdpgAnyActive();
+        if (scheduleBadgePoll._t) clearTimeout(scheduleBadgePoll._t);
+        scheduleBadgePoll._t = setTimeout(function () {
+            if (!document.hidden) refreshBadge();
+            scheduleBadgePoll();
+        }, active ? 8000 : 30000);
+    }
+
     function init() {
         wire();
         document.addEventListener('soulsync:video-page-shown', onShown);
         refreshBadge();
         refreshYtCount();
+        scheduleBadgePoll();
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
