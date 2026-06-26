@@ -36,12 +36,14 @@
         downloading: { label: 'Downloading', cls: 'active' },
         queued: { label: 'Queued', cls: 'queued' },
         searching: { label: 'Searching', cls: 'active' },     // retrying — finding another release
+        importing: { label: 'Importing', cls: 'active' },     // post-processing → moving into library
         completed: { label: 'Completed', cls: 'completed' },
         failed: { label: 'Failed', cls: 'failed' },
+        import_failed: { label: 'Import failed', cls: 'failed' },
         cancelled: { label: 'Cancelled', cls: 'cancelled' }
     };
-    function isActive(s) { return s === 'downloading' || s === 'queued' || s === 'searching'; }
-    function isFail(s) { return s === 'failed' || s === 'cancelled'; }
+    function isActive(s) { return s === 'downloading' || s === 'queued' || s === 'searching' || s === 'importing'; }
+    function isFail(s) { return s === 'failed' || s === 'cancelled' || s === 'import_failed'; }
     function matches(s) {
         return _filter === 'all' || (_filter === 'active' && isActive(s)) ||
             (_filter === 'completed' && s === 'completed') || (_filter === 'failed' && isFail(s));

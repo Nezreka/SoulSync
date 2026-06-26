@@ -102,6 +102,13 @@ def _make_organizer(db):
     prober = probe if settings.get("verify_with_ffprobe", True) else None
 
     def organize(dl, src):
+        # The file's down — flip to 'importing' so the UI shows the post-processing phase
+        # (move into the library + nfo/artwork sidecars + subtitles) instead of sitting on
+        # 'downloading' while this runs. Best-effort; the patch below is the real transition.
+        try:
+            db.update_video_download(dl["id"], status="importing", progress=100)
+        except Exception:   # noqa: BLE001, S110 - a status blip must never wedge the import
+            pass
         patch = run_import(dl, src, fs=fs, prober=prober, settings=settings)
         if patch.get("status") == "completed" and patch.get("dest_path"):
             if settings.get("save_artwork") or settings.get("write_nfo"):
