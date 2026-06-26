@@ -99,3 +99,17 @@ def test_generic_config_renderer_is_video_gated():
 
 def test_video_page_exposes_reload_hook():
     assert 'window._reloadVideoAutomations = load' in _VAUTO
+
+
+# --- the System list is shown in a logical pipeline order -----------------
+
+def test_video_system_automations_are_sorted_by_pipeline_order():
+    # The API returns newest-created-first (jumbled); the page re-sorts by an
+    # explicit order so it reads scans → processors → library → maintenance.
+    assert 'sortSystem(all.filter(isVideoAutomation))' in _VAUTO
+    assert '_SYS_ORDER' in _VAUTO
+    # the order must put the watchlist SCANS before the wishlist PROCESSORS
+    scan = _VAUTO.index("'video_scan_watchlist_people'")
+    proc = _VAUTO.index("'video_process_movie_wishlist'")
+    maint = _VAUTO.index("'video_backup_database'")
+    assert scan < proc < maint
