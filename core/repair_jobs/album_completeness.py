@@ -21,9 +21,10 @@ class AlbumCompletenessJob(RepairJob):
     help_text = (
         'Compares the number of tracks you have for each album against the expected total '
         'from your configured metadata sources. Counts cached during normal enrichment are '
-        'used when available; otherwise the job queries a metadata source directly. Albums '
-        'where tracks are missing get flagged as findings with details about which tracks '
-        'are absent.\n\n'
+        'used when no canonical edition is pinned; otherwise the exact canonical source and '
+        'album ID are queried directly. The same canonical tracklist is used for both the '
+        'expected total and the missing-track calculation. Albums where tracks are missing '
+        'get flagged as findings with details about which tracks are absent.\n\n'
         'Useful for catching partial downloads or albums where some tracks failed to download. '
         'You can use the Download Missing feature from the album page to fill gaps.\n\n'
         'Settings:\n'
@@ -56,6 +57,7 @@ class AlbumCompletenessJob(RepairJob):
         has_itunes = False
         has_deezer = False
         has_api_track_count = False
+        has_canonical = False
         try:
             conn = context.db._get_connection()
             cursor = conn.cursor()
@@ -67,6 +69,10 @@ class AlbumCompletenessJob(RepairJob):
             has_deezer = 'deezer_id' in columns
             has_discogs = 'discogs_id' in columns
             has_hydrabase = 'soul_id' in columns
+            has_canonical = (
+                'canonical_source' in columns
+                and 'canonical_album_id' in columns
+            )
 
             # Detect the `api_track_count` column — older DBs may not have it
             # yet (migration runs on app start, but repair-job code mustn't
@@ -101,8 +107,13 @@ class AlbumCompletenessJob(RepairJob):
                 select_cols.append(('al.discogs_id', 'discogs_album_id'))
             if has_hydrabase:
                 select_cols.append(('al.soul_id', 'hydrabase_album_id'))
+            if has_canonical:
+                select_cols.extend([
+                    ('al.canonical_source', 'canonical_source'),
+                    ('al.canonical_album_id', 'canonical_album_id'),
+                ])
 
-            # WHERE: album has at least one source ID
+            # WHERE: album has at least one source ID or a complete canonical pair
             where_parts = ["(al.spotify_album_id IS NOT NULL AND al.spotify_album_id != '')"]
             if has_itunes:
                 where_parts.append("(al.itunes_album_id IS NOT NULL AND al.itunes_album_id != '')")
@@ -112,6 +123,11 @@ class AlbumCompletenessJob(RepairJob):
                 where_parts.append("(al.discogs_id IS NOT NULL AND al.discogs_id != '')")
             if has_hydrabase:
                 where_parts.append("(al.soul_id IS NOT NULL AND al.soul_id != '')")
+            if has_canonical:
+                where_parts.append(
+                    "(al.canonical_source IS NOT NULL AND al.canonical_source != '' "
+                    "AND al.canonical_album_id IS NOT NULL AND al.canonical_album_id != '')"
+                )
             where_clause = ' OR '.join(where_parts)
 
             select_sql = ', '.join(f'{expr} AS {alias}' for expr, alias in select_cols)
@@ -159,6 +175,8 @@ class AlbumCompletenessJob(RepairJob):
             deezer_album_id = row[column_index['deezer_album_id']] if 'deezer_album_id' in column_index else None
             discogs_album_id = row[column_index['discogs_album_id']] if 'discogs_album_id' in column_index else None
             hydrabase_album_id = row[column_index['hydrabase_album_id']] if 'hydrabase_album_id' in column_index else None
+            canonical_source = row[column_index['canonical_source']] if 'canonical_source' in column_index else None
+            canonical_album_id = row[column_index['canonical_album_id']] if 'canonical_album_id' in column_index else None
             # Cached authoritative track count from a prior API lookup (NULL
             # on unscanned albums and on DBs predating the column migration).
             cached_api_count = row[column_index['api_track_count']] if 'api_track_count' in column_index else None
@@ -181,20 +199,41 @@ class AlbumCompletenessJob(RepairJob):
                 'hydrabase': hydrabase_album_id or '',
             }
 
-            # Expected total comes from the metadata provider, NOT from
-            # al.track_count — that column holds the observed count from
-            # server syncs (Plex leafCount, SoulSync standalone len(tracks))
-            # which by definition always equals actual_count and made the
-            # job skip every album. Use the cached api_track_count if a
-            # prior scan already looked it up; otherwise hit the API and
-            # persist the answer for next time.
-            expected_total = cached_api_count
-            if not expected_total:
-                expected_total = self._get_expected_total(context, primary_source, album_ids)
-                # Only persist positive results. Zero/None would keep
-                # re-triggering the lookup on every scan.
-                if expected_total and expected_total > 0 and has_api_track_count:
-                    self._save_api_track_count(context, album_id, expected_total)
+            # A complete canonical pair identifies one exact edition,
+            # independently of provider. Its tracklist must drive both the
+            # expected total and the missing-track calculation; neither a
+            # cached count nor another source may silently replace it.
+            canonical_items = None
+            resolved_source = primary_source
+            resolved_album_id = self._get_album_id_for_source(primary_source, album_ids) or ''
+
+            if canonical_source and canonical_album_id:
+                api_tracks = self._get_album_tracks(
+                    str(canonical_source),
+                    str(canonical_album_id),
+                )
+                canonical_items = self._extract_track_items(api_tracks)
+                expected_total = len(canonical_items)
+                resolved_source = str(canonical_source)
+                resolved_album_id = str(canonical_album_id)
+            else:
+                # Preserve the existing behavior for albums that have not
+                # resolved a canonical edition yet.
+                expected_total = cached_api_count
+                if not expected_total:
+                    expected_total = self._get_expected_total(
+                        context,
+                        primary_source,
+                        album_ids,
+                    )
+                    # Only persist positive results. Zero/None would keep
+                    # re-triggering the lookup on every scan.
+                    if expected_total and expected_total > 0 and has_api_track_count:
+                        self._save_api_track_count(
+                            context,
+                            album_id,
+                            expected_total,
+                        )
 
             # Skip singles/EPs based on expected track count (not local count)
             if expected_total and expected_total < min_tracks:
@@ -224,8 +263,20 @@ class AlbumCompletenessJob(RepairJob):
                         context.update_progress(i + 1, total)
                     continue
 
-            # Album is incomplete — try to find which tracks are missing
-            missing_tracks = self._find_missing_tracks(context, primary_source, album_id, album_ids)
+            # Album is incomplete — identify missing tracks from the same
+            # canonical edition used for the expected total when one is pinned.
+            missing_tracks = self._find_missing_tracks(
+                context,
+                primary_source,
+                album_id,
+                album_ids,
+                resolved_source=(
+                    resolved_source
+                    if canonical_items is not None
+                    else None
+                ),
+                resolved_items=canonical_items,
+            )
 
             if context.report_progress:
                 context.report_progress(
@@ -250,8 +301,10 @@ class AlbumCompletenessJob(RepairJob):
                             'album_id': album_id,
                             'album_title': title,
                             'artist': artist_name,
-                            'primary_source': primary_source,
-                            'primary_album_id': self._get_album_id_for_source(primary_source, album_ids) or '',
+                            'primary_source': resolved_source,
+                            'primary_album_id': resolved_album_id,
+                            'canonical_source': canonical_source or '',
+                            'canonical_album_id': canonical_album_id or '',
                             'spotify_album_id': spotify_album_id or '',
                             'itunes_album_id': itunes_album_id or '',
                             'deezer_album_id': deezer_album_id or '',
@@ -316,8 +369,19 @@ class AlbumCompletenessJob(RepairJob):
 
         return 0
 
-    def _find_missing_tracks(self, context, primary_source, album_id, album_ids):
-        """Identify which specific tracks are missing using the active metadata provider first."""
+    def _find_missing_tracks(
+        self,
+        context,
+        primary_source,
+        album_id,
+        album_ids,
+        resolved_source=None,
+        resolved_items=None,
+    ):
+        """Identify missing tracks from one resolved metadata edition.
+
+        Without a supplied edition, preserve the existing source-priority lookup.
+        """
         # Get track numbers we already have
         owned_numbers = set()
         conn = None
@@ -336,18 +400,32 @@ class AlbumCompletenessJob(RepairJob):
             if conn:
                 conn.close()
 
-        api_tracks = None
-        for source in get_source_priority(primary_source):
-            source_album_id = self._get_album_id_for_source(source, album_ids)
-            if not source_album_id:
-                continue
-            api_tracks = self._get_album_tracks(source, source_album_id)
-            if self._extract_track_items(api_tracks):
-                break
+        if resolved_items is None:
+            api_tracks = None
+            for source in get_source_priority(primary_source):
+                source_album_id = self._get_album_id_for_source(
+                    source,
+                    album_ids,
+                )
+                if not source_album_id:
+                    continue
 
-        items = self._extract_track_items(api_tracks)
+                api_tracks = self._get_album_tracks(
+                    source,
+                    source_album_id,
+                )
+                if self._extract_track_items(api_tracks):
+                    resolved_source = source
+                    break
+
+            items = self._extract_track_items(api_tracks)
+        else:
+            items = resolved_items
+
         if not items:
             return []
+
+        track_source = resolved_source or primary_source
 
         # All supported provider responses expose the same core fields once normalized.
         # items[].track_number, items[].name, items[].disc_number, items[].id, items[].artists
@@ -365,7 +443,7 @@ class AlbumCompletenessJob(RepairJob):
                     'track_number': tn,
                     'name': item.get('name', ''),
                     'disc_number': item.get('disc_number', 1),
-                    'source': item.get('_source', primary_source),
+                    'source': item.get('_source', track_source),
                     'source_track_id': item.get('id', ''),
                     'track_id': item.get('id', ''),
                     'spotify_track_id': item.get('id', ''),
@@ -430,6 +508,14 @@ class AlbumCompletenessJob(RepairJob):
                 where_parts.append("(discogs_id IS NOT NULL AND discogs_id != '')")
             if 'soul_id' in columns:
                 where_parts.append("(soul_id IS NOT NULL AND soul_id != '')")
+            if (
+                'canonical_source' in columns
+                and 'canonical_album_id' in columns
+            ):
+                where_parts.append(
+                    "(canonical_source IS NOT NULL AND canonical_source != '' "
+                    "AND canonical_album_id IS NOT NULL AND canonical_album_id != '')"
+                )
 
             cursor.execute(f"""
                 SELECT COUNT(*) FROM albums
