@@ -176,6 +176,17 @@ def test_youtube_wishlist_to_download_shape(db):
     assert top["video_title"] == "Second" and top["published_at"] == "2024-05-01"
 
 
+def test_downloaded_youtube_video_ids_only_completed_youtube(db):
+    # the dedup the scans use so a downloaded video (removed from the wishlist) isn't re-added
+    db.record_download_history({"id": 1, "kind": "youtube", "source": "youtube",
+                                "media_id": "v1", "status": "completed", "dest_path": "/a.mp4"})
+    db.record_download_history({"id": 2, "kind": "youtube", "source": "youtube",
+                                "media_id": "v2", "status": "failed"})          # failed → not counted
+    db.record_download_history({"id": 3, "kind": "movie", "source": "soulseek",
+                                "media_id": "99", "status": "completed"})        # not youtube
+    assert set(db.downloaded_youtube_video_ids()) == {"v1"}
+
+
 def test_count_and_claim_queue(db):
     a = db.add_video_download({"kind": "youtube", "source": "youtube", "media_id": "v1",
                                "title": "A", "status": "queued"})

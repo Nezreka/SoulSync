@@ -143,9 +143,10 @@ def _default_dismissed_ids(channel_id: Any) -> List[Any]:
 
 
 def _default_downloaded_ids(channel_id: Any) -> List[Any]:
-    # The permanent download-history ledger has no YouTube grabs until the fulfillment
-    # engine runs; empty for now, so the scan is correct the day those rows appear.
-    return []
+    # Already-downloaded YouTube videos (global; a video id is unique). A completed download
+    # leaves the wishlist, so without this the scan would re-add + re-download it.
+    from api.video import get_video_db
+    return get_video_db().downloaded_youtube_video_ids()
 
 
 def _default_add_videos(channel: Dict[str, Any], videos: List[Dict[str, Any]]) -> int:
