@@ -175,6 +175,15 @@ SYSTEM_AUTOMATIONS = [
     # are queued overnight. A fixed wall-clock 'daily_time' (not a rolling 24h interval
     # that drifts with restarts) — the seeder now arms timed system triggers, and
     # _fix_airing_automation_schedule migrates the old 24h-interval row.
+    # Runs before the airing automation so the calendar it reads is current — re-pulls
+    # TMDB episode schedules for still-airing watchlist shows (the airing read is LOCAL).
+    {
+        'name': 'Refresh Airing TV Schedules',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '23:00'},
+        'action_type': 'video_refresh_airing_schedules',
+        'owned_by': 'video',
+    },
     {
         'name': 'Auto-Wishlist Episodes Airing Today',
         'trigger_type': 'daily_time',
