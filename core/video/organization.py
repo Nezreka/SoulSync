@@ -37,6 +37,9 @@ DEFAULTS = {
     "version": 1,
     "movie_template": "$title ($year)/$title ($year) $quality",
     "episode_template": "$series/Season $season/$series - S$seasonE$episode - $episodetitle $quality",
+    # YouTube channels organise as a Plex "TV by date" show: channel = series,
+    # season = upload YEAR, episode named by upload DATE + title.
+    "youtube_template": "$channel/Season $year/$channel - $date - $title",
     "verify_with_ffprobe": True,
     "replace_existing": True,
     "transfer_mode": "copy",
@@ -60,7 +63,7 @@ def normalize(raw: Any) -> dict:
     d = default_settings()
     if not isinstance(raw, dict):
         return d
-    for key in ("movie_template", "episode_template"):
+    for key in ("movie_template", "episode_template", "youtube_template"):
         v = raw.get(key)
         if isinstance(v, str) and v.strip():
             d[key] = v.strip()
@@ -154,6 +157,26 @@ def _episode_values(f: dict) -> dict:
     }
 
 
+def _youtube_values(f: dict) -> dict:
+    """Template values for a YouTube upload — channel-as-show, season=year, date-named
+    episode (Plex 'TV by date'). ``published_at``/``date`` is 'YYYY-MM-DD'."""
+    channel = f.get("channel") or f.get("series") or f.get("title") or "Unknown"
+    pub = str(f.get("published_at") or f.get("date") or "")[:10]
+    y = m = d = ""
+    if len(pub) == 10 and pub[4] == "-" and pub[7] == "-":
+        y, m, d = pub[0:4], pub[5:7], pub[8:10]
+    has_year = _plausible_year(y)
+    return {
+        "channel": channel,
+        "title": _str(f.get("title")) or "Unknown",
+        "year": y if has_year else "",
+        "date": pub if has_year else "",     # only a trustworthy full date
+        "month": m if has_year else "",
+        "day": d if has_year else "",
+        "videoid": _str(f.get("youtube_id")),
+    }
+
+
 def render_template(template: Any, values: dict) -> str:
     """Substitute ``$token`` / ``${token}`` from ``values`` into ``template``. Each
     value is path-sanitised first (so a title with '/' can't spawn a folder), and
@@ -194,6 +217,9 @@ def render_path(scope: Any, root: Any, fields: dict, settings: Any, ext: Any) ->
     elif sc == "episode":
         tmpl = settings.get("episode_template") or DEFAULTS["episode_template"]
         values = _episode_values(fields)
+    elif sc == "youtube":
+        tmpl = settings.get("youtube_template") or DEFAULTS["youtube_template"]
+        values = _youtube_values(fields)
     else:
         base = (sanitize(fields.get("title")) or "download") + _ext(ext)
         return {"dir": root, "filename": base, "path": os.path.join(root, base)}
