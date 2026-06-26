@@ -3071,6 +3071,34 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def get_channel_settings(self, channel_id) -> dict:
+        """Per-channel YouTube overrides — ``{custom_name?, quality?}`` — or {} if none.
+        ``custom_name`` overrides the show-name (the ``$channel`` folder token); ``quality``
+        is a youtube_quality profile that forces a different quality than the global default
+        for this channel. Kept in the settings KV store, so no schema change."""
+        if not channel_id:
+            return {}
+        raw = self.get_setting("youtube_channel_settings:" + str(channel_id))
+        if not raw:
+            return {}
+        try:
+            import json
+            d = json.loads(raw)
+            return d if isinstance(d, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+
+    def set_channel_settings(self, channel_id, settings: dict) -> bool:
+        """Persist per-channel overrides (or clear them with an empty/blank dict)."""
+        if not channel_id:
+            return False
+        import json
+        clean = settings if isinstance(settings, dict) else {}
+        # Drop empty values so a blank form clears the override rather than storing noise.
+        clean = {k: v for k, v in clean.items() if v not in (None, "", {})}
+        self.set_setting("youtube_channel_settings:" + str(channel_id), json.dumps(clean))
+        return True
+
     def wishlisted_video_ids_for_channel(self, channel_id) -> list:
         """The youtube video ids wished under a channel (the per-video date fallback set)."""
         if not channel_id:

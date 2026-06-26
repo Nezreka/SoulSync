@@ -44,6 +44,20 @@ def slots_free(running: int, max_concurrent: int) -> int:
     return max(0, int(max_concurrent) - max(0, int(running)))
 
 
+def enqueue_ctx(video: Dict[str, Any], channel_settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The download row's ``search_ctx``, applying per-channel overrides: a custom show-name
+    (the ``$channel`` folder token) and/or a quality override. Pure."""
+    cs = channel_settings if isinstance(channel_settings, dict) else {}
+    ctx = {
+        "channel": cs.get("custom_name") or video.get("channel_title"),
+        "video_title": video.get("video_title"),
+        "published_at": video.get("published_at"),
+    }
+    if cs.get("quality"):
+        ctx["quality"] = cs["quality"]
+    return ctx
+
+
 # ── production seams ──────────────────────────────────────────────────────────
 def _default_youtube_root() -> str:
     from api.video import get_video_db
@@ -72,15 +86,15 @@ def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
     import json
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
-    return get_video_db().add_video_download({
+    db = get_video_db()
+    ctx = enqueue_ctx(video, db.get_channel_settings(video.get("channel_id")))
+    ctx["server_source"] = resolve_video_server()
+    return db.add_video_download({
         "kind": "youtube", "source": "youtube", "media_source": "youtube",
         "title": video.get("video_title") or video.get("channel_title"),
         "media_id": video.get("video_id"), "target_dir": root, "status": "queued",
         "year": video.get("published_at"), "poster_url": video.get("thumbnail_url"),
-        "search_ctx": json.dumps({"channel": video.get("channel_title"),
-                                  "video_title": video.get("video_title"),
-                                  "published_at": video.get("published_at"),
-                                  "server_source": resolve_video_server()}),
+        "search_ctx": json.dumps(ctx),
     })
 
 
