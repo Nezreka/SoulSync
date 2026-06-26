@@ -6011,6 +6011,13 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label>YouTube Path Template:</label>
+                                    <input type="text" id="vo-youtube-template" placeholder="$channel/Season $year/$channel - $date - $title">
+                                    <small class="settings-hint">Followed YouTube channels organize as a Plex "TV by date" show. Variables: $channel, $year, $date (2024-03-15), $month (03), $day (15), $title, $videoid.</small>
+                                    <small class="settings-hint">Example: <code id="vo-youtube-preview">&hellip;</code></small>
+                                </div>
+
+                                <div class="form-group">
                                     <label>When a file finishes:</label>
                                     <select id="vo-transfer-mode" class="form-select">
                                         <option value="copy">Copy in, then remove the source (kept for torrents)</option>
