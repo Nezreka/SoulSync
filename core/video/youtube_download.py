@@ -60,6 +60,20 @@ def youtube_fields_from_download(dl: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def quality_override_from_download(dl: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """A per-channel quality override stashed in the row's ``search_ctx`` at enqueue time,
+    or None (use the global YouTube quality profile)."""
+    ctx = dl.get("search_ctx")
+    if isinstance(ctx, str):
+        try:
+            ctx = json.loads(ctx)
+        except (ValueError, TypeError):
+            ctx = {}
+    ctx = ctx if isinstance(ctx, dict) else {}
+    q = ctx.get("quality")
+    return q if isinstance(q, dict) else None
+
+
 def plan_destination(dl: Dict[str, Any], settings: Dict[str, Any], container: str) -> Dict[str, str]:
     """Where this video lands in the library: ``{dir, filename, path}`` under the youtube
     root (``target_dir``), organised by the youtube template. Pure."""
@@ -242,7 +256,9 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         _active_worker_ids.discard(dl_id)
         start_next_queued(db_provider)        # keep the queue moving even on a stale id
         return
-    profile = youtube_quality.load(db)
+    # Per-channel quality override (stashed in search_ctx at enqueue) wins over the global.
+    override = quality_override_from_download(dl)
+    profile = youtube_quality.normalize(override) if override else youtube_quality.load(db)
     settings = organization.load(db)
     from datetime import datetime, timezone
 
@@ -288,5 +304,5 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
 __all__ = [
     "youtube_fields_from_download", "plan_destination", "ydl_download_opts",
     "download_one", "process_youtube_download", "run_youtube_download",
-    "start_next_queued", "requeue_orphaned_youtube",
+    "start_next_queued", "requeue_orphaned_youtube", "quality_override_from_download",
 ]

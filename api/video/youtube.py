@@ -187,6 +187,34 @@ def register_routes(bp):
             logger.exception("youtube channels list failed")
             return jsonify({"success": False, "error": "Failed"}), 500
 
+    @bp.route("/youtube/channel/<channel_id>/settings", methods=["GET"])
+    def video_youtube_channel_settings(channel_id):
+        """Per-channel overrides (custom show-name + quality), plus the global quality
+        default so the modal can show 'using default' until the user overrides."""
+        from . import get_video_db
+        from core.video.youtube_quality import default_profile, load as load_quality
+        db = get_video_db()
+        return jsonify({"success": True, "settings": db.get_channel_settings(channel_id) or {},
+                        "default_quality": load_quality(db) or default_profile()})
+
+    @bp.route("/youtube/channel/<channel_id>/settings", methods=["POST"])
+    def video_youtube_channel_settings_save(channel_id):
+        """Save per-channel overrides. A blank custom_name / absent quality clears that
+        override (falls back to the channel title / global quality). Body:
+        {custom_name?, quality?{...}}."""
+        from . import get_video_db
+        from core.video.youtube_quality import normalize as normalize_quality
+        db = get_video_db()
+        body = request.get_json(silent=True) or {}
+        out = {}
+        name = str(body.get("custom_name") or "").strip()
+        if name:
+            out["custom_name"] = name
+        if body.get("quality"):       # falsy/absent → no override (use the global default)
+            out["quality"] = normalize_quality(body.get("quality"))
+        db.set_channel_settings(channel_id, out)
+        return jsonify({"success": True, "settings": out})
+
     @bp.route("/youtube/wishlist", methods=["GET"])
     def video_youtube_wishlist():
         """Wished videos grouped by channel (channel = group, videos = feed)."""
