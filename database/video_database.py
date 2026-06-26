@@ -2308,6 +2308,30 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def watchlist_continuing_shows(self, server_source=None) -> list[dict]:
+        """Effective-watchlist shows that are IN the library (so they have an episodes table
+        to refresh) and still airing — the set whose TMDB episode schedules the 'Refresh
+        Airing TV Schedules' automation re-pulls so the calendar stays current. Skips
+        tmdb-only follows (no episodes to refresh) and ended/canceled shows (no new episodes
+        coming); unknown status is kept (never skip on uncertainty)."""
+        terminal = ("ended", "canceled", "cancelled", "completed")
+        conn = self._get_connection()
+        try:
+            rows = self._effective_shows(conn, server_source)
+        finally:
+            conn.close()
+        out, seen = [], set()
+        for r in rows:
+            lib = r.get("library_id")
+            if lib is None or lib in seen:
+                continue
+            if str(r.get("status") or "").strip().lower() in terminal:
+                continue
+            seen.add(lib)
+            out.append({"library_id": lib, "tmdb_id": r.get("tmdb_id"),
+                        "title": r.get("title"), "status": r.get("status")})
+        return out
+
     def remove_from_watchlist(self, kind: str, tmdb_id: int) -> bool:
         """Un-follow. Stored as a 'mute' tombstone (not a delete) so an
         actively-airing library show — watched by default — is not silently

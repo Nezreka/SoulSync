@@ -32,7 +32,7 @@
     var _SYS_ORDER = [
         // Stage 1 — scans that FILL the wishlist
         'video_scan_watchlist_people', 'video_scan_watchlist_channels',
-        'video_scan_watchlist_playlists', 'video_add_airing_episodes',
+        'video_scan_watchlist_playlists', 'video_refresh_airing_schedules', 'video_add_airing_episodes',
         // Stage 2 — processors that DRAIN it (download)
         'video_process_movie_wishlist', 'video_process_episode_wishlist', 'video_process_youtube_wishlist',
         // Library scan / sync
