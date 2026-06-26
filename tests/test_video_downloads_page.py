@@ -50,15 +50,15 @@ def test_drawer_renders_the_rich_tmdb_fields():
     assert "trailer_url" in _JS and "providers" in _JS
 
 
-def test_youtube_open_button_links_to_youtube_not_a_show_page():
+def test_youtube_open_button_opens_the_channel_page_not_a_show():
     # regression: the open-show button ran parseInt(youtube_id) → opened a random library
-    # show (e.g. id 3) or a broken link. youtube cards must open a YouTube link instead.
+    # show (id 3 → '3rd Rock'). youtube cards must open the in-app CHANNEL page instead.
     open_block = _JS.split("var openBtn")[1].split("var stateBtn")[0]
     assert "dlType(d.kind) === 'youtube'" in open_block
-    assert "youtube.com/watch?v=" in open_block
-    # the data-vdpg-open (open-show) path must NOT be taken for youtube
-    assert "data-vdpg-open" in open_block            # still there for movie/show
-    assert open_block.index("'youtube'") < open_block.index("data-vdpg-open")  # youtube branch first
+    assert "data-vdpg-open-channel" in open_block      # opens the in-app channel page
+    assert "youtube.com/watch?v=" in open_block         # fallback when the channel id is unknown
+    # clicking it dispatches an open-detail for the channel (reuses the show-detail page)
+    assert "kind: 'channel', source: 'youtube'" in _JS
 
 
 def test_drawer_has_episode_youtube_and_availability_blocks():

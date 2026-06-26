@@ -50,6 +50,7 @@ def enqueue_ctx(video: Dict[str, Any], channel_settings: Dict[str, Any]) -> Dict
     cs = channel_settings if isinstance(channel_settings, dict) else {}
     ctx = {
         "channel": cs.get("custom_name") or video.get("channel_title"),
+        "channel_id": video.get("channel_id"),   # so the drawer can open the in-app channel page
         "video_title": video.get("video_title"),
         "published_at": video.get("published_at"),
     }
