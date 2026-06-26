@@ -154,9 +154,15 @@
         var lab = q('label'); if (lab.textContent !== labelTxt) lab.textContent = labelTxt;
 
         var act = q('actions');
-        var openBtn = d.media_id ? '<button class="vdpg-open" type="button" data-vdpg-open="' + esc(d.media_id) +
-            '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') +
-            '" title="Open ' + (d.kind === 'movie' ? 'movie' : 'show') + ' page">' + OPEN_SVG + '</button>' : '';
+        // youtube videos aren't TMDB titles — the open button links to YouTube, not a show page
+        // (parseInt on a video id was opening a random library show / a broken link).
+        var openBtn = !d.media_id ? ''
+            : (dlType(d.kind) === 'youtube'
+                ? '<a class="vdpg-open" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) +
+                  '" target="_blank" rel="noopener" title="Open on YouTube">' + OPEN_SVG + '</a>'
+                : '<button class="vdpg-open" type="button" data-vdpg-open="' + esc(d.media_id) +
+                  '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') +
+                  '" title="Open ' + (d.kind === 'movie' ? 'movie' : 'show') + ' page">' + OPEN_SVG + '</button>');
         var stateBtn = active
             ? '<button class="adl-row-cancel" type="button" data-vdpg-cancel="' + d.id + '" title="Cancel">' + X_SVG + '</button>'
             : isFail(d.status)
