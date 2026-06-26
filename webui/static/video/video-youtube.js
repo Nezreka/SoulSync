@@ -215,15 +215,17 @@
         }).join('');
     }
 
-    function _csetForm(title, s, q, dq) {
+    function _csetForm(title, s, q, dq, kind) {
         var on = !!s.quality;                         // a stored override → start enabled
         var b = (q && q.max_resolution) ? q : dq;     // seed fields from override, else default
         b = b || {};
+        var noun = kind === 'playlist' ? 'playlist' : 'channel';
         return '' +
             '<label class="vyt-cset-lbl">Show name (folder)</label>' +
             '<input class="vyt-cset-in" data-cset-name type="text" value="' + esc(s.custom_name || '') +
                 '" placeholder="' + esc(title || '') + '">' +
-            '<div class="vyt-cset-hint">Overrides the <code>$channel</code> folder/show name when this channel’s videos download. Blank = use the channel’s real name.</div>' +
+            '<div class="vyt-cset-hint">Overrides the <code>$channel</code> folder/show name when this ' + noun +
+                '’s videos download. Blank = use the ' + noun + '’s real name.</div>' +
             '<label class="vyt-cset-toggle"><input type="checkbox" data-cset-qon' + (on ? ' checked' : '') +
                 '> Force a specific quality for this channel</label>' +
             '<div class="vyt-cset-q" data-cset-q' + (on ? '' : ' hidden') + '>' +
@@ -236,13 +238,14 @@
             '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>';
     }
 
-    function openChannelSettings(channelId, title) {
+    function openChannelSettings(channelId, title, kind) {
         if (!channelId) return;
+        var heading = (kind === 'playlist' ? 'Playlist' : 'Channel') + ' settings';
         var prev = document.getElementById('vyt-cset-overlay'); if (prev) prev.remove();
         var ov = document.createElement('div');
         ov.id = 'vyt-cset-overlay'; ov.className = 'vyt-cset-overlay';
-        ov.innerHTML = '<div class="vyt-cset" role="dialog" aria-label="Channel settings">' +
-            '<div class="vyt-cset-head"><span class="vyt-cset-h">Channel settings</span>' +
+        ov.innerHTML = '<div class="vyt-cset" role="dialog" aria-label="' + heading + '">' +
+            '<div class="vyt-cset-head"><span class="vyt-cset-h">' + heading + '</span>' +
                 '<button class="vyt-cset-x" type="button" title="Close">✕</button></div>' +
             '<div class="vyt-cset-body">Loading…</div>' +
             '<div class="vyt-cset-foot"><button class="vyt-cset-save" type="button" disabled>Save</button></div></div>';
@@ -257,7 +260,7 @@
             .then(function (r) { return r.json(); })
             .then(function (d) {
                 var s = (d && d.settings) || {}, dq = (d && d.default_quality) || {};
-                body.innerHTML = _csetForm(title, s, s.quality || {}, dq);
+                body.innerHTML = _csetForm(title, s, s.quality || {}, dq, kind);
                 saveBtn.disabled = false;
                 var qon = body.querySelector('[data-cset-qon]'), qbox = body.querySelector('[data-cset-q]');
                 if (qon && qbox) qon.addEventListener('change', function () { qbox.hidden = !qon.checked; });

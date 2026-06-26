@@ -25,7 +25,7 @@
         return '<div class="vyt-wcard" data-vyt-open-channel="' + esc(ch.youtube_id) + '" title="Open channel">' +
             '<div class="vyt-wcard-art">' + av + '</div>' +
             '<button class="vyt-wcard-cog" type="button" data-vyt-wsettings="' + esc(ch.youtube_id) +
-                '" data-title="' + esc(ch.title) + '" title="Channel settings">&#9881;</button>' +
+                '" data-kind="channel" data-title="' + esc(ch.title) + '" title="Channel settings">&#9881;</button>' +
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow="' + esc(ch.youtube_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(ch.title) + '">' +
@@ -38,6 +38,8 @@
             ? VideoYoutube.avatar({ poster_url: pl.poster_url, title: pl.title }, 'vyt-wcard-avatar') : '';
         return '<div class="vyt-wcard vyt-wcard--pl" data-vyt-open-playlist="' + esc(pl.playlist_id) + '" title="Open playlist">' +
             '<div class="vyt-wcard-art">' + av + '<span class="vyt-wcard-pl-ic" aria-hidden="true">▤</span></div>' +
+            '<button class="vyt-wcard-cog" type="button" data-vyt-wsettings="' + esc(pl.playlist_id) +
+                '" data-kind="playlist" data-title="' + esc(pl.title) + '" title="Playlist settings">&#9881;</button>' +
             '<button class="vyt-wcard-unfollow" type="button" data-vyt-wunfollow-playlist="' + esc(pl.playlist_id) +
                 '" title="Unfollow">&#10005;</button>' +
             '<div class="vyt-wcard-info"><span class="vyt-wcard-title" title="' + esc(pl.title) + '">' +
@@ -262,7 +264,8 @@
         var cog = e.target.closest('[data-vyt-wsettings]');
         if (cog && window.VideoYoutube && VideoYoutube.openChannelSettings) {
             e.preventDefault(); e.stopPropagation();
-            VideoYoutube.openChannelSettings(cog.getAttribute('data-vyt-wsettings'), cog.getAttribute('data-title'));
+            VideoYoutube.openChannelSettings(cog.getAttribute('data-vyt-wsettings'),
+                cog.getAttribute('data-title'), cog.getAttribute('data-kind') || 'channel');
             return;
         }
         var unf = e.target.closest('[data-vyt-wunfollow]');

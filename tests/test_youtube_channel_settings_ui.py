@@ -12,14 +12,19 @@ _WL = (_ROOT / "webui" / "static" / "video" / "video-watchlist.js").read_text(en
 _CSS = (_ROOT / "webui" / "static" / "video" / "video-side.css").read_text(encoding="utf-8")
 
 
-def test_channel_card_has_a_settings_cog():
-    assert 'data-vyt-wsettings' in _WL          # cog button on the watchlist channel card
-    assert 'vyt-wcard-cog' in _WL and '.vyt-wcard-cog' in _CSS
+def test_channel_and_playlist_cards_both_have_a_settings_cog():
+    assert 'data-vyt-wsettings' in _WL          # cog button on the watchlist cards
+    assert _WL.count('vyt-wcard-cog') >= 2      # channel + playlist cards
+    assert '.vyt-wcard-cog' in _CSS
+    assert 'data-kind="channel"' in _WL and 'data-kind="playlist"' in _WL
 
 
-def test_cog_click_opens_the_settings_modal():
+def test_cog_click_opens_the_settings_modal_with_kind():
     assert 'VideoYoutube.openChannelSettings(' in _WL
     assert "cog.getAttribute('data-vyt-wsettings')" in _WL
+    assert "cog.getAttribute('data-kind')" in _WL          # kind passed through
+    # the modal reads the kind to label channel vs playlist
+    assert "kind === 'playlist' ? 'Playlist' : 'Channel'" in _YT
 
 
 def test_modal_is_exposed_and_built():
