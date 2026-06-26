@@ -120,6 +120,16 @@ def test_every_video_automation_has_a_friendly_label_and_icon():
     assert not missing, "video actions missing a label/icon: " + ", ".join(sorted(missing))
 
 
+def test_hourly_db_update_is_a_scheduled_safety_net():
+    # second trigger (a schedule) for the same incremental DB read, so manual library adds
+    # show up within the hour instead of waiting for the weekly deep scan.
+    import core.automation_engine as ae
+    row = next((a for a in ae.SYSTEM_AUTOMATIONS if a.get("action_type") == "video_update_database_hourly"), None)
+    assert row is not None
+    assert row["trigger_type"] == "schedule" and row["trigger_config"]["unit"] == "hours"
+    assert row["action_config"]["mode"] == "incremental"     # cheap read, not a deep scan
+
+
 def test_video_system_automations_are_sorted_by_pipeline_order():
     # The API returns newest-created-first (jumbled); the page re-sorts by an
     # explicit order so it reads scans → processors → library → maintenance.

@@ -1774,7 +1774,7 @@ const _autoIcons = {
     full_cleanup: '\uD83E\uDDF9',
     playlist_pipeline: '\uD83D\uDE80',
     // Video side
-    video_scan_library: '\uD83C\uDFAC', video_scan_server: '\uD83D\uDD04', video_update_database: '\uD83D\uDDC4\uFE0F',
+    video_scan_library: '\uD83C\uDFAC', video_scan_server: '\uD83D\uDD04', video_update_database: '\uD83D\uDDC4\uFE0F', video_update_database_hourly: '\uD83D\uDDC4\uFE0F',
     video_add_airing_episodes: '\uD83D\uDCFA', video_deep_scan_movies: '\uD83C\uDFAC', video_deep_scan_tv: '\uD83D\uDCFA',
     video_scan_watchlist_people: '\uD83C\uDFAD', video_scan_watchlist_channels: '\uD83D\uDCE1',
     video_scan_watchlist_playlists: '\uD83C\uDFB5',
@@ -3375,7 +3375,8 @@ function _autoFormatAction(type) {
         playlist_pipeline: 'Playlist Pipeline',
         // Video side
         video_scan_library: 'Scan Video Library', video_scan_server: 'Scan Video Server',
-        video_update_database: 'Update Video Database', video_add_airing_episodes: 'Wishlist Airing Episodes',
+        video_update_database: 'Update Video Database', video_update_database_hourly: 'Update Video Database (Hourly)',
+        video_add_airing_episodes: 'Wishlist Airing Episodes',
         video_deep_scan_movies: 'Deep Scan Movie Library', video_deep_scan_tv: 'Deep Scan TV Library',
         video_scan_watchlist_people: 'Scan Watchlist People',
         video_scan_watchlist_channels: 'Scan Watchlist Channels',

@@ -170,6 +170,18 @@ SYSTEM_AUTOMATIONS = [
         'action_config': {'mode': 'incremental'},
         'owned_by': 'video',
     },
+    # Safety net: re-read the server hourly too, so MANUAL library additions (which Plex
+    # auto-scans) appear within the hour instead of waiting for the weekly deep scan. Same
+    # cheap incremental read as the after-scan one.
+    {
+        'name': 'Auto-Update Video Database (Hourly)',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_update_database_hourly',
+        'action_config': {'mode': 'incremental'},
+        'initial_delay': 900,
+        'owned_by': 'video',
+    },
     # Sonarr-style: once a day at 1am (server-local), wishlist every episode airing
     # today for the shows you follow (skipping ones already owned) so the day's episodes
     # are queued overnight. A fixed wall-clock 'daily_time' (not a rolling 24h interval
