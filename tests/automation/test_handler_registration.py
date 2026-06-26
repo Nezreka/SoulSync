@@ -60,6 +60,8 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_scan_server',
     'video_update_database',
     'video_add_airing_episodes',
+    'video_scan_watchlist_people',
+    'video_scan_watchlist_channels',
     'video_clean_search_history',
     'video_clean_completed_downloads',
     'video_full_cleanup',

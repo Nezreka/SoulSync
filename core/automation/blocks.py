@@ -265,6 +265,13 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "prune_ended", "type": "checkbox", "label": "Also remove ended/canceled shows from the watchlist", "default": True}
      ]},
+    {"type": "video_scan_watchlist_people", "label": "Scan Watchlist People", "icon": "users", "scope": "video",
+     "description": "For everyone you follow on the watchlist, wishlist every movie they acted in or directed that you don't already own — the whole back catalog plus anything upcoming (kept as 'monitored' until it's released). First run backlogs everything; later runs are fast.", "available": True},
+    {"type": "video_scan_watchlist_channels", "label": "Scan Watchlist Channels", "icon": "youtube", "scope": "video",
+     "description": "For every YouTube channel you follow, wishlist its new long-form uploads (Shorts excluded). Forward-looking from when you followed, plus a safety net that always keeps the last N videos. Pair with a 6-hourly Schedule trigger — channels post at all hours.", "available": True,
+     "config_fields": [
+         {"key": "backfill_count", "type": "number", "label": "Always keep the last N videos from each channel", "default": 10, "min": 0}
+     ]},
     # Video twins of the music maintenance actions. Distinct action_type (the
     # system seeder keys on action_type, so a shared key would collide with the
     # music row) but the SAME shared handler — the cleanup operates on the common
