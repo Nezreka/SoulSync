@@ -1780,6 +1780,9 @@ const _autoIcons = {
     video_scan_watchlist_playlists: '\uD83C\uDFB5',
     video_process_movie_wishlist: '\uD83C\uDFAC', video_process_episode_wishlist: '\uD83D\uDCFA',
     video_process_youtube_wishlist: '\u2B07\uFE0F',
+    video_refresh_airing_schedules: '\uD83D\uDDD3\uFE0F',
+    video_clean_search_history: '\uD83D\uDDD1\uFE0F', video_clean_completed_downloads: '\u2705',
+    video_full_cleanup: '\uD83E\uDDF9', video_backup_database: '\uD83D\uDCBE',
 };
 
 // --- Inspiration Templates ---
@@ -3380,6 +3383,10 @@ function _autoFormatAction(type) {
         video_process_movie_wishlist: 'Process Movie Wishlist',
         video_process_episode_wishlist: 'Process Episode Wishlist',
         video_process_youtube_wishlist: 'Process YouTube Wishlist',
+        video_refresh_airing_schedules: 'Refresh Airing Schedules',
+        video_clean_search_history: 'Clean Search History',
+        video_clean_completed_downloads: 'Clean Completed Downloads',
+        video_full_cleanup: 'Full Cleanup', video_backup_database: 'Backup Database',
     };
     return labels[type] || type || 'Unknown';
 }

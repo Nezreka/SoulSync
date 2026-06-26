@@ -110,6 +110,16 @@ def test_video_automations_poll_does_not_rebuild_when_unchanged():
     assert 'var sig = JSON.stringify(' in _VAUTO
 
 
+def test_every_video_automation_has_a_friendly_label_and_icon():
+    # regression: a video action missing from the label/icon maps falls back to the gear +
+    # raw action_type ("⚙️ video_clean_search_history") — inconsistent. Every seeded video
+    # automation must have an entry in BOTH maps in stats-automations.js.
+    import core.automation_engine as ae
+    types = {a.get("action_type") for a in ae.SYSTEM_AUTOMATIONS if a.get("owned_by") == "video"}
+    missing = [t for t in types if _STATS.count(t + ":") < 2]   # icon map + label map
+    assert not missing, "video actions missing a label/icon: " + ", ".join(sorted(missing))
+
+
 def test_video_system_automations_are_sorted_by_pipeline_order():
     # The API returns newest-created-first (jumbled); the page re-sorts by an
     # explicit order so it reads scans → processors → library → maintenance.
