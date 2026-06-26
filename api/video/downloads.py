@@ -170,6 +170,23 @@ def register_routes(bp):
         n = get_video_db().clear_download_history(kind=body.get("kind"))
         return jsonify({"success": True, "removed": n})
 
+    @bp.route("/downloads/meta/<kind>/<int:tmdb_id>", methods=["GET"])
+    def video_download_meta(kind, tmdb_id):
+        """Lazy TMDB detail (overview + cast + backdrop) for a download's expand drawer,
+        keyed by the grabbed title's TMDB id. Best-effort — the drawer still shows the
+        download facts without it."""
+        if kind not in ("movie", "show"):
+            return jsonify({}), 400
+        try:
+            from core.video.enrichment.engine import get_video_enrichment_engine
+            data = get_video_enrichment_engine().tmdb_full_detail(kind, tmdb_id) or {}
+            return jsonify({k: data.get(k) for k in
+                            ("title", "overview", "tagline", "backdrop_url", "poster_url",
+                             "genres", "rating", "cast", "year", "runtime", "status")})
+        except Exception:
+            logger.exception("download meta failed for %s %s", kind, tmdb_id)
+            return jsonify({})
+
     @bp.route("/downloads/quality", methods=["GET"])
     def video_quality_profile():
         from . import get_video_db
