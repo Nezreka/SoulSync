@@ -259,6 +259,15 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1200,
         'owned_by': 'video',
     },
+    # Playlists: every 6h, mirror the whole list (playlist-as-show). No-ops if you follow none.
+    {
+        'name': 'Auto-Scan Watchlist Playlists',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 6, 'unit': 'hours'},
+        'action_type': 'video_scan_watchlist_playlists',
+        'initial_delay': 1320,
+        'owned_by': 'video',
+    },
     # Drain side: download wished YouTube videos hourly (queues the whole wishlist, runs a
     # few at a time). Skips quietly until a YouTube library folder is set.
     {

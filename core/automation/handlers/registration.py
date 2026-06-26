@@ -40,6 +40,7 @@ from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_a
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
+from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -241,6 +242,12 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_scan_watchlist_channels',
         lambda config: auto_video_scan_watchlist_channels(config, deps),
+    )
+    # Watchlist-playlists scan: mirror followed YouTube playlists into the wishlist
+    # (whole list + new additions; playlist-as-show).
+    engine.register_action_handler(
+        'video_scan_watchlist_playlists',
+        lambda config: auto_video_scan_watchlist_playlists(config, deps),
     )
     # Drain side: enqueue wished YouTube videos into the download queue (yt-dlp worker).
     engine.register_action_handler(
