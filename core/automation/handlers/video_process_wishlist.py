@@ -213,6 +213,8 @@ def auto_video_process_wishlist(
 
         grabbed = [0]
         searched = [0]
+        noresults = [0]    # search came back empty (the source had nothing)
+        rejected = [0]     # source had hits, but none passed the quality profile
         total = len(todo)
         lock = threading.Lock()
 
@@ -224,25 +226,45 @@ def auto_video_process_wishlist(
             if media_type == 'episode':
                 name = "%s S%02dE%02d" % (name, int(it.get('season_number') or 0),
                                           int(it.get('episode_number') or 0))
+            # distinguish "source returned nothing" from "returned hits but all rejected"
+            # (the rejected case carries the reason on the top-ranked hit) so the log is useful.
+            if ok:
+                msg, lt = "Grabbed '%s'" % name, 'success'
+            elif not cands:
+                msg, lt = "No search results for '%s'" % name, 'info'
+            else:
+                why = (cands[0].get('rejected') or 'none met your quality profile')
+                msg, lt = "%d result(s) for '%s', none accepted — %s" % (len(cands), name, why), 'info'
             with lock:
                 searched[0] += 1
                 if ok:
                     grabbed[0] += 1
+                elif not cands:
+                    noresults[0] += 1
+                else:
+                    rejected[0] += 1
                 deps.update_progress(
                     automation_id, phase='Searching + grabbing…',
                     progress=10 + int(85 * searched[0] / max(total, 1)),
-                    log_line=("Grabbed '%s'" % name) if ok else ("No acceptable release for '%s'" % name),
-                    log_type='success' if ok else 'info')
+                    log_line=msg, log_type=lt)
 
         with ThreadPoolExecutor(max_workers=concurrency) as ex:
             list(ex.map(_one, todo))
 
-        done = ('Grabbed %d %s(s) of %d searched' % (grabbed[0], label, searched[0])) if grabbed[0] \
-            else ('Searched %d %s(s) — no acceptable releases found' % (searched[0], label))
+        # Headline with the WHY breakdown: it's the difference between "the source has
+        # nothing" (noresults) and "it has stuff but your quality profile rejects it" (rejected).
+        tail = []
+        if noresults[0]:
+            tail.append('%d had no results' % noresults[0])
+        if rejected[0]:
+            tail.append('%d rejected on quality' % rejected[0])
+        breakdown = (' · ' + ', '.join(tail)) if tail else ''
+        done = ('Grabbed %d %s(s) of %d searched%s' % (grabbed[0], label, searched[0], breakdown)) if grabbed[0] \
+            else ('Searched %d %s(s), grabbed 0%s' % (searched[0], label, breakdown))
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type='success' if grabbed[0] else 'info')
         return {'status': 'completed', 'searched': searched[0], 'grabbed': grabbed[0],
-                '_manages_own_progress': True}
+                'noresults': noresults[0], 'rejected': rejected[0], '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

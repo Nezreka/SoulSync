@@ -123,6 +123,19 @@ def test_no_acceptable_release_grabs_nothing():
     assert res["searched"] == 1 and res["grabbed"] == 0 and enq == []
 
 
+def test_breakdown_distinguishes_no_results_from_quality_rejection():
+    # the diagnostic: "the source had nothing" vs "had hits but quality rejected them"
+    items = [{"tmdb_id": 1, "title": "A"}, {"tmdb_id": 2, "title": "B"}]
+    res, enq, _, deps = _run(items, searches={
+        ("movie", "1"): [],                                                  # source had nothing
+        ("movie", "2"): [dict(_cand("junk", accepted=False), rejected="Unknown / unsupported quality")],
+    })
+    assert res["grabbed"] == 0 and res["noresults"] == 1 and res["rejected"] == 1
+    logs = " ".join(p.get("log_line") or "" for p in deps.progress)
+    assert "No search results for 'A'" in logs
+    assert "none accepted — Unknown / unsupported quality" in logs   # reason surfaced
+
+
 def test_missing_library_folder_is_a_quiet_skip():
     res, enq, _, deps = _run([{"tmdb_id": 1, "title": "A"}], root="")
     assert res["status"] == "completed" and res.get("skipped") == "no_folder"
