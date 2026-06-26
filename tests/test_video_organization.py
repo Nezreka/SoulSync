@@ -83,3 +83,30 @@ def test_token_values_cannot_inject_extra_folders():
     fields = {"title": "AC/DC Live", "year": 2020, "quality": "Bluray-1080p"}
     got = organization.render_path("movie", "/m", fields, organization.default_settings(), ".mkv")
     assert got["dir"] == os.path.join("/m", "ACDC Live (2020)")
+
+
+# ── youtube channels: Plex "TV by date" organisation ─────────────────────────
+def test_youtube_default_template_is_channel_year_date():
+    fields = {"channel": "Veritasium", "title": "How Electricity Works",
+              "published_at": "2024-03-15", "youtube_id": "abc123"}
+    got = organization.render_path("youtube", "/yt", fields, organization.default_settings(), ".mp4")
+    assert got["path"] == os.path.join(
+        "/yt", "Veritasium", "Season 2024",
+        "Veritasium - 2024-03-15 - How Electricity Works.mp4")
+
+
+def test_youtube_sanitises_channel_and_title():
+    # slashes/illegal chars in channel or title can't spawn folders
+    fields = {"channel": "Mark/Rober", "title": "Glitter Bomb 4/5",
+              "published_at": "2023-12-01", "youtube_id": "v1"}
+    got = organization.render_path("youtube", "/yt", fields, organization.default_settings(), ".mp4")
+    assert got["dir"] == os.path.join("/yt", "MarkRober", "Season 2023")
+    assert got["filename"] == "MarkRober - 2023-12-01 - Glitter Bomb 45.mp4"
+
+
+def test_youtube_undated_falls_back_cleanly():
+    # no date → no empty 'Season ' garbage, no dangling ' - ' in the filename
+    fields = {"channel": "Some Channel", "title": "Mystery", "published_at": None}
+    got = organization.render_path("youtube", "/yt", fields, organization.default_settings(), ".mp4")
+    assert got["dir"] == os.path.join("/yt", "Some Channel", "Season")
+    assert got["filename"] == "Some Channel - Mystery.mp4"
