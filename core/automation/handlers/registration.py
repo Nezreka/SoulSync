@@ -39,6 +39,7 @@ from core.automation.handlers.search_and_download import auto_search_and_downloa
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
+from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -240,6 +241,11 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_scan_watchlist_channels',
         lambda config: auto_video_scan_watchlist_channels(config, deps),
+    )
+    # Drain side: enqueue wished YouTube videos into the download queue (yt-dlp worker).
+    engine.register_action_handler(
+        'video_process_youtube_wishlist',
+        lambda config: auto_video_process_youtube_wishlist(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around

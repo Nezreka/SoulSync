@@ -352,8 +352,10 @@ def _spawn_requery(dl_id) -> None:
 
 
 def _tick(db) -> None:
-    # 'searching' rows are owned by their requery thread — skip them here.
-    active = [d for d in db.get_active_video_downloads() if d.get("status") != "searching"]
+    # 'searching' rows are owned by their requery thread; 'youtube' rows are owned by
+    # their yt-dlp worker thread (no slskd transfer to match) — skip both here.
+    active = [d for d in db.get_active_video_downloads()
+              if d.get("status") != "searching" and d.get("source") != "youtube"]
     if not active:
         _misses.clear()
         return

@@ -272,6 +272,11 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "backfill_count", "type": "number", "label": "Always keep the last N videos from each channel", "default": 10, "min": 0}
      ]},
+    {"type": "video_process_youtube_wishlist", "label": "Download YouTube Wishlist", "icon": "download", "scope": "video",
+     "description": "Grab wished YouTube videos: pushes a batch into the download queue (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads. Pair with a schedule to drain continuously.", "available": True,
+     "config_fields": [
+         {"key": "batch_size", "type": "number", "label": "Max downloads to queue per run", "default": 3, "min": 0}
+     ]},
     # Video twins of the music maintenance actions. Distinct action_type (the
     # system seeder keys on action_type, so a shared key would collide with the
     # music row) but the SAME shared handler — the cleanup operates on the common
