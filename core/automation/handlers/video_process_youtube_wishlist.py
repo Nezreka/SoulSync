@@ -117,10 +117,13 @@ def auto_video_process_youtube_wishlist(
     try:
         root = youtube_root()
         if not root:
-            msg = 'Set the YouTube library folder on Settings → Downloads first'
-            deps.update_progress(automation_id, status='error', phase='Error',
-                                 log_line=msg, log_type='error')
-            return {'status': 'error', 'error': msg, '_manages_own_progress': True}
+            # Always-on automation: a missing folder isn't a failure, it's "not set up for
+            # YouTube" — skip quietly so non-YouTube users don't see a recurring error.
+            deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
+                                 log_line='YouTube library folder not set — skipping (Settings → Downloads)',
+                                 log_type='info')
+            return {'status': 'completed', 'queued': 0, 'started': 0, 'running': 0,
+                    'skipped': 'no_youtube_folder', '_manages_own_progress': True}
 
         deps.update_progress(automation_id, phase='Checking the YouTube wishlist…', progress=15,
                              log_line='Queueing new videos for download', log_type='info')
