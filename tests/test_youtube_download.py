@@ -179,3 +179,26 @@ def test_process_passes_the_organised_dir_to_the_downloader():
     assert seen["video_id"] == "vid1"
     assert seen["dest_dir"] == os.path.join("/yt", "Chan", "Season 2024")
     assert seen["stem"] == "Chan - 2024-03-15 - T" and seen["container"] == "mp4"
+
+
+def test_process_never_clobbers_target_dir_so_reruns_dont_nest():
+    """The row's target_dir is the youtube ROOT; plan_destination derives the channel/season
+    folders under it. The worker must NOT write the organised dir back to target_dir, or a
+    re-run (e.g. the orphan reaper re-queues an interrupted download) would organise AGAIN →
+    Channel/Season/Channel/Season. Re-processing the same row must be idempotent."""
+    seen = []
+
+    def fake_download(video_id, dest_dir, stem, profile, container, **kw):
+        seen.append(dest_dir)
+        return {"ok": True, "dest_path": "/x"}
+
+    calls, update_row, archive, clear = _recorder()
+    dl = _dl()                                          # target_dir = "/yt" (the root)
+    for _ in range(2):                                  # simulate the interrupted-then-requeued re-run
+        ytd.process_youtube_download(dl, profile=default_profile(), settings={},
+                                     download=fake_download, update_row=update_row,
+                                     archive=archive, clear_wishlist=clear, now=lambda: "t")
+    # no update_row call writes target_dir (that's what caused the nesting)
+    assert all("target_dir" not in kw for _, kw in calls["rows"])
+    # both runs target the SAME organised dir — not a doubly-nested one
+    assert seen[0] == seen[1] == os.path.join("/yt", "Chan", "Season 2024")
