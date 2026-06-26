@@ -64,6 +64,8 @@ EXPECTED_ACTION_NAMES = frozenset({
     'video_scan_watchlist_channels',
     'video_scan_watchlist_playlists',
     'video_process_youtube_wishlist',
+    'video_download_movie_wishlist',
+    'video_download_episode_wishlist',
     'video_clean_search_history',
     'video_clean_completed_downloads',
     'video_full_cleanup',
@@ -81,6 +83,8 @@ EXPECTED_GUARDED_ACTIONS = frozenset({
     'deep_scan_library',
     'run_duplicate_cleaner',
     'start_quality_scan',
+    'video_download_movie_wishlist',
+    'video_download_episode_wishlist',
 })
 
 
