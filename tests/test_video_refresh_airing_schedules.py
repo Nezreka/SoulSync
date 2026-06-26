@@ -151,6 +151,31 @@ def test_omdb_limit_latches_off_and_stops_hammering():
     assert rc.n == 1                               # only the first attempt ever reached OMDb
 
 
+def test_tmdb_detail_ratings_share_the_same_latch():
+    # the detail/drawer path (_fill_tmdb_ratings) must honour + set the SAME latch — it was
+    # the source of the per-title traceback spam on the download drawer / detail pages.
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    from core.video.enrichment.clients import OMDbAuthError
+
+    class _RC:
+        enabled = True
+
+        def __init__(self):
+            self.n = 0
+
+        def ratings(self, imdb):
+            self.n += 1
+            raise OMDbAuthError("Request limit reached!")
+
+    eng = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    rc = _RC()
+    eng.workers = {"omdb": type("W", (), {"client": rc})()}
+    eng._fill_tmdb_ratings({"imdb_id": "tt1"})     # hits the limit → latches (no raise out)
+    assert getattr(eng, "_omdb_blocked", False) is True
+    eng._fill_tmdb_ratings({"imdb_id": "tt2"})     # short-circuits before calling OMDb
+    assert rc.n == 1
+
+
 # ── wiring contract ───────────────────────────────────────────────────────────
 def test_seeded_before_the_airing_automation():
     import core.automation_engine as ae

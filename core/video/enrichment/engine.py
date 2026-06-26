@@ -567,13 +567,19 @@ class VideoEnrichmentEngine:
     def _fill_tmdb_ratings(self, d) -> None:
         imdb_id = d.get("imdb_id")
         ow = self.workers.get("omdb")
-        if not imdb_id or not ow or not getattr(ow.client, "enabled", False):
+        # share the same daily-limit latch as _backfill_ratings — once OMDb is over quota,
+        # every detail fetch would otherwise re-hit it and dump a traceback per title.
+        if (not imdb_id or not ow or not getattr(ow.client, "enabled", False)
+                or getattr(self, "_omdb_blocked", False)):
             return
         try:
             r = ow.client.ratings(imdb_id) or {}
             for k in ("imdb_rating", "rt_rating", "metacritic"):
                 if r.get(k) is not None:
                     d[k] = r[k]
+        except OMDbAuthError as e:
+            self._omdb_blocked = True
+            logger.warning("OMDb ratings paused for this run: %s", e)
         except Exception:
             logger.exception("tmdb_detail ratings failed for %s", imdb_id)
 
