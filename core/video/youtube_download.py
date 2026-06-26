@@ -162,9 +162,13 @@ def process_youtube_download(
     dest = plan_destination(dl, settings, container)
     stem, cont = _stem_and_container(dest, container)
 
-    # Record where it's going up front (Downloads page shows the organised name).
+    # Record the organised filename for the Downloads page. CRITICAL: do NOT write the
+    # organised DIR back to target_dir — target_dir is the youtube ROOT, and plan_destination
+    # re-derives the channel/season folders under it. Clobbering it would re-nest on any
+    # re-run (e.g. the orphan reaper re-queues an interrupted download) →
+    # Channel/Season/Channel/Season. Leave target_dir = root so re-processing is idempotent.
     update_row(dl.get("id"), status="downloading", progress=0,
-               target_dir=dest.get("dir"), filename=dest.get("filename"))
+               filename=dest.get("filename"))
 
     res = download(dl.get("media_id"), dest.get("dir"), stem, profile, cont,
                    progress_hook=progress_hook, cookie_opts=cookie_opts)
