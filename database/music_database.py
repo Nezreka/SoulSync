@@ -677,6 +677,12 @@ class MusicDatabase:
                     cursor.execute(f"ALTER TABLE library_history ADD COLUMN {_col} TEXT")
                     logger.info(f"Added {_col} column to library_history")
 
+            # Index on verification_status — MUST come after the ALTER above:
+            # on a fresh DB the base CREATE TABLE has no verification_status
+            # column, so indexing it before the migration adds it raises
+            # "no such column: verification_status" and aborts DB init.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_lh_verification_status ON library_history (verification_status)")
+
             # One-time backfill: derive verification_status for history rows
             # written before the column existed (or by pipeline exits that
             # missed it) from the acoustid_result those imports already
@@ -1165,6 +1171,13 @@ class MusicDatabase:
             if track_cols and 'year' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN year INTEGER")
                 logger.info("Repaired missing year column on tracks table (#910)")
+            # #927 — multi-disc fix: the scan now writes a real disc_number, but the column
+            # was only ever added by a separate migration that doesn't run on fresh installs,
+            # so the new INSERT/UPDATE would hard-fail with "no column named disc_number".
+            # Same shape as the year repair above: additive, defaults to 1, ensured on every DB.
+            if track_cols and 'disc_number' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
+                logger.info("Repaired missing disc_number column on tracks table (#927)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}
@@ -6629,6 +6642,19 @@ class MusicDatabase:
                 track_id = str(track_obj.ratingKey)
                 title = track_obj.title
                 track_number = getattr(track_obj, 'trackNumber', None)
+                # Multi-disc: capture the disc number so multi-disc albums don't all
+                # collapse onto disc 1 (which mis-files disc-2+ tracks and flags them
+                # "missing"). Jellyfin/Navidrome wrappers set .discNumber; plexapi's Track
+                # exposes .parentIndex. Floor to >=1 — a missing/0 disc is disc 1.
+                _raw_disc = getattr(track_obj, 'discNumber', None)
+                if _raw_disc is None:
+                    _raw_disc = getattr(track_obj, 'parentIndex', None)
+                try:
+                    disc_number = int(_raw_disc)
+                    if disc_number < 1:
+                        disc_number = 1
+                except (TypeError, ValueError):
+                    disc_number = 1
                 duration = getattr(track_obj, 'duration', None)
                 
                 # Get file path and media info (Plex-specific, Jellyfin may not have these)
@@ -6720,9 +6746,9 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -6731,7 +6757,7 @@ class MusicDatabase:
                     # an existing value.
                     cursor.execute("""
                         UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
+                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
                             duration = ?, file_path = ?, bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
@@ -6739,7 +6765,7 @@ class MusicDatabase:
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
@@ -8742,7 +8768,7 @@ class MusicDatabase:
     # Quality profile management methods
 
     def get_quality_profile(self) -> dict:
-        """Get the quality profile configuration, returns default if not set"""
+        """Get the quality profile configuration, returns default if not set."""
         import json
 
         profile_json = self.get_preference('quality_profile')
@@ -8750,21 +8776,86 @@ class MusicDatabase:
         if profile_json:
             try:
                 profile = json.loads(profile_json)
-                # Migrate v1 profiles (min_mb/max_mb) to v2 (min_kbps/max_kbps)
-                if profile.get('version', 1) < 2:
-                    logger.info("Migrating quality profile from v1 (file size) to v2 (bitrate density)")
+                version = profile.get('version', 1)
+                if version < 2:
+                    logger.info("Migrating quality profile v1 → v3")
                     return self._get_default_quality_profile()
+                if version == 2:
+                    logger.info("Migrating quality profile v2 → v3 (adding ranked_targets)")
+                    return self._migrate_v2_to_v3(profile)
                 return profile
             except json.JSONDecodeError:
                 logger.error("Failed to parse quality profile JSON, returning default")
 
         return self._get_default_quality_profile()
 
+    # 24-bit FLAC ladder seeded on migration for users who had a streaming
+    # source on Hi-Res under the old (now removed) per-source quality dropdowns.
+    _HIRES_24BIT_TARGETS = [
+        {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+        {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+        {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+        {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+    ]
+
+    def _had_hires_source_preference(self) -> bool:
+        """True if the user had any streaming source set to a Hi-Res tier under
+        the old per-source quality dropdowns (tidal_download/qobuz/hifi_download
+        .quality = 'hires'|'hires_max'), which #896 removed in favour of the
+        global profile. Used to preserve their intent on migration."""
+        try:
+            from config.settings import config_manager
+        except Exception:
+            return False
+        hires = {'hires', 'hires_max'}
+        for key in ('tidal_download.quality', 'qobuz.quality', 'hifi_download.quality'):
+            try:
+                if str(config_manager.get(key) or '').strip().lower() in hires:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _migrate_v2_to_v3(self, profile: dict) -> dict:
+        """Add ranked_targets to a v2 profile without losing its qualities dict."""
+        from core.quality.model import v2_qualities_to_ranked_targets
+        profile = dict(profile)
+        profile['version'] = 3
+        if 'ranked_targets' not in profile:
+            ranked = v2_qualities_to_ranked_targets(profile.get('qualities', {}))
+            # #896 review #5: the per-source quality dropdowns are gone — sources
+            # now derive their tier from this profile. If the user had a source on
+            # Hi-Res, seed 24-bit FLAC targets at the top so they keep Hi-Res
+            # instead of silently dropping to lossless. Skip when the profile
+            # already expresses 24-bit (don't duplicate the ladder).
+            already_24bit = any(
+                t.get('format') == 'flac' and (t.get('bit_depth') or 0) >= 24
+                for t in ranked
+            )
+            if not already_24bit and self._had_hires_source_preference():
+                ranked = [dict(t) for t in self._HIRES_24BIT_TARGETS] + ranked
+            profile['ranked_targets'] = ranked
+        return profile
+
     def _get_default_quality_profile(self) -> dict:
-        """Return the default v2 quality profile (balanced preset)"""
+        """Return the default v3 quality profile (balanced preset)."""
         return {
-            "version": 2,
+            "version": 3,
             "preset": "balanced",
+            "fallback_enabled": True,
+            "search_mode": "priority",
+            "rank_candidates_by_quality": False,
+            "ranked_targets": [
+                {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+                {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+                {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+                {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+                {"label": "FLAC 16-bit",        "format": "flac", "bit_depth": 16},
+                {"label": "MP3 320kbps",        "format": "mp3",  "min_bitrate": 320},
+                {"label": "MP3 256kbps",        "format": "mp3",  "min_bitrate": 256},
+                {"label": "MP3 192kbps",        "format": "mp3",  "min_bitrate": 192},
+            ],
+            # Keep qualities dict for backwards compat with any old code paths still reading it
             "qualities": {
                 "flac": {
                     "enabled": True,
@@ -8801,141 +8892,119 @@ class MusicDatabase:
                     "priority": 1.5
                 }
             },
-            "fallback_enabled": True
         }
 
+    # Presets whose per-preset customizations we remember across switches.
+    _KNOWN_PRESETS = ('audiophile', 'balanced', 'space_saver')
+
     def set_quality_profile(self, profile: dict) -> bool:
-        """Save quality profile configuration"""
+        """Save quality profile configuration.
+
+        Besides the single active profile (read by the download pipeline), we also
+        stash the profile under its preset name so switching presets and coming
+        back restores the user's edits instead of the factory defaults. 'custom'
+        and unknown preset names are not stashed."""
         import json
 
         try:
             profile_json = json.dumps(profile)
             self.set_preference('quality_profile', profile_json)
+
+            preset_name = profile.get('preset')
+            if preset_name in self._KNOWN_PRESETS:
+                store = self._load_preset_store()
+                store[preset_name] = profile
+                self.set_preference('quality_profile_presets', json.dumps(store))
+
             logger.info(f"Quality profile saved: preset={profile.get('preset', 'custom')}")
             return True
         except Exception as e:
             logger.error(f"Failed to save quality profile: {e}")
             return False
 
-    def get_quality_preset(self, preset_name: str) -> dict:
-        """Get a predefined quality preset"""
+    def _load_preset_store(self) -> dict:
+        """Per-preset customizations, keyed by preset name. {} if none saved."""
+        import json
+        raw = self.get_preference('quality_profile_presets')
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                logger.error("Failed to parse quality_profile_presets, ignoring")
+        return {}
+
+    def reset_quality_preset(self, preset_name: str) -> dict:
+        """Forget a preset's saved customizations and return its factory defaults."""
+        import json
+        store = self._load_preset_store()
+        if preset_name in store:
+            del store[preset_name]
+            self.set_preference('quality_profile_presets', json.dumps(store))
+        return self.get_quality_preset(preset_name, customized=False)
+
+    def get_quality_preset(self, preset_name: str, *, customized: bool = True) -> dict:
+        """Get a quality preset (v3 format with ranked_targets).
+
+        With ``customized`` (default), a preset the user has edited is returned in
+        its saved form; otherwise the hard-coded factory defaults are returned."""
+        if customized:
+            saved = self._load_preset_store().get(preset_name)
+            if saved:
+                return saved
+        return self._factory_quality_preset(preset_name)
+
+    def _factory_quality_preset(self, preset_name: str) -> dict:
+        """The hard-coded factory defaults for a preset (ignores customizations)."""
+        # Strict 24-bit FLAC ladder — no 16-bit, no lossy. This is what
+        # "audiophile" means: only true hi-res passes.
+        _FLAC_24BIT_TARGETS = [
+            {"label": "FLAC 24-bit/192kHz", "format": "flac", "bit_depth": 24, "min_sample_rate": 192000},
+            {"label": "FLAC 24-bit/96kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 96000},
+            {"label": "FLAC 24-bit/48kHz",  "format": "flac", "bit_depth": 24, "min_sample_rate": 48000},
+            {"label": "FLAC 24-bit/44.1kHz","format": "flac", "bit_depth": 24, "min_sample_rate": 44100},
+        ]
+        # Lossless ladder used by "balanced" — hi-res first, then CD-quality 16-bit.
+        _FLAC_HI_RES_TARGETS = _FLAC_24BIT_TARGETS + [
+            {"label": "FLAC 16-bit",        "format": "flac", "bit_depth": 16},
+        ]
+        _MP3_TARGETS = [
+            {"label": "MP3 320kbps", "format": "mp3", "min_bitrate": 320},
+            {"label": "MP3 256kbps", "format": "mp3", "min_bitrate": 256},
+            {"label": "MP3 192kbps", "format": "mp3", "min_bitrate": 192},
+        ]
+        # Legacy v2 ``qualities`` dict carried alongside ranked_targets for
+        # backwards compat — read by the settings UI and the #886 AAC opt-in
+        # toggle. AAC ships OFF in every preset; its priority sits it above MP3
+        # but below FLAC (space_saver puts it at 0.5, still above its MP3 tiers).
+        def _quals(*, flac_en, flac_prio, mp3_320_en, mp3_256_en, mp3_192_en,
+                   mp3_320_prio=2, mp3_256_prio=3, mp3_192_prio=4, aac_prio=1.5):
+            return {
+                "flac":    {"enabled": flac_en, "min_kbps": 500, "max_kbps": 10000, "priority": flac_prio, "bit_depth": "any"},
+                "mp3_320": {"enabled": mp3_320_en, "min_kbps": 280, "max_kbps": 500, "priority": mp3_320_prio},
+                "mp3_256": {"enabled": mp3_256_en, "min_kbps": 200, "max_kbps": 400, "priority": mp3_256_prio},
+                "mp3_192": {"enabled": mp3_192_en, "min_kbps": 150, "max_kbps": 300, "priority": mp3_192_prio},
+                "aac":     {"enabled": False, "min_kbps": 128, "max_kbps": 400, "priority": aac_prio},
+            }
+
         presets = {
             "audiophile": {
-                "version": 2,
-                "preset": "audiophile",
-                "qualities": {
-                    "flac": {
-                        "enabled": True,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 1,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": False,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 2
-                    },
-                    "mp3_256": {
-                        "enabled": False,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 3
-                    },
-                    "mp3_192": {
-                        "enabled": False,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 4
-                    },
-                    "aac": {
-                        "enabled": False,
-                        "min_kbps": 128,
-                        "max_kbps": 400,
-                        "priority": 1.5
-                    }
-                },
-                "fallback_enabled": False
+                "version": 3, "preset": "audiophile", "fallback_enabled": False,
+                "ranked_targets": _FLAC_24BIT_TARGETS,
+                "qualities": _quals(flac_en=True, flac_prio=1, mp3_320_en=False, mp3_256_en=False, mp3_192_en=False),
             },
             "balanced": {
-                "version": 2,
-                "preset": "balanced",
-                "qualities": {
-                    "flac": {
-                        "enabled": True,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 1,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": True,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 2
-                    },
-                    "mp3_256": {
-                        "enabled": True,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 3
-                    },
-                    "mp3_192": {
-                        "enabled": False,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 4
-                    },
-                    "aac": {
-                        "enabled": False,
-                        "min_kbps": 128,
-                        "max_kbps": 400,
-                        "priority": 1.5
-                    }
-                },
-                "fallback_enabled": True
+                "version": 3, "preset": "balanced", "fallback_enabled": True,
+                "ranked_targets": _FLAC_HI_RES_TARGETS + _MP3_TARGETS,
+                "qualities": _quals(flac_en=True, flac_prio=1, mp3_320_en=True, mp3_256_en=True, mp3_192_en=False),
             },
             "space_saver": {
-                "version": 2,
-                "preset": "space_saver",
-                "qualities": {
-                    "flac": {
-                        "enabled": False,
-                        "min_kbps": 500,
-                        "max_kbps": 10000,
-                        "priority": 4,
-                        "bit_depth": "any"
-                    },
-                    "mp3_320": {
-                        "enabled": True,
-                        "min_kbps": 280,
-                        "max_kbps": 500,
-                        "priority": 1
-                    },
-                    "mp3_256": {
-                        "enabled": True,
-                        "min_kbps": 200,
-                        "max_kbps": 400,
-                        "priority": 2
-                    },
-                    "mp3_192": {
-                        "enabled": True,
-                        "min_kbps": 150,
-                        "max_kbps": 300,
-                        "priority": 3
-                    },
-                    # Space-saver favours small files, where AAC shines — but it
-                    # still ships OFF (opt-in). Priority 0.5 puts it above MP3.
-                    "aac": {
-                        "enabled": False,
-                        "min_kbps": 128,
-                        "max_kbps": 400,
-                        "priority": 0.5
-                    }
-                },
-                "fallback_enabled": True
-            }
+                "version": 3, "preset": "space_saver", "fallback_enabled": True,
+                "ranked_targets": _MP3_TARGETS,
+                "qualities": _quals(flac_en=False, flac_prio=4, mp3_320_en=True, mp3_256_en=True, mp3_192_en=True,
+                                    mp3_320_prio=1, mp3_256_prio=2, mp3_192_prio=3, aac_prio=0.5),
+            },
         }
 
         return presets.get(preset_name, presets["balanced"])
@@ -10836,23 +10905,40 @@ class MusicDatabase:
             logger.error(f"Error caching discovery recent album: {e}")
             return False
 
-    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None, profile_id: int = 1) -> List[Dict[str, Any]]:
-        """Get cached recent albums for discover page, optionally filtered by source"""
+    def get_discovery_recent_albums(self, limit: int = 10, source: Optional[str] = None, profile_id: int = 1,
+                                    exclude_future_years: bool = False) -> List[Dict[str, Any]]:
+        """Get cached recent albums for discover page, optionally filtered by source.
+
+        exclude_future_years: drop announced-but-unreleased albums dated to a LATER YEAR.
+        Because rows are ordered ``release_date DESC``, future-dated albums otherwise sort to
+        the very top and consume the ``limit`` budget — which is exactly why Fresh Tape / Release
+        Radar starved down to a handful of tracks. Year-level so it's precision-safe across
+        'YYYY' / 'YYYY-MM' / 'YYYY-MM-DD'; same-year future months are left for the caller's precise
+        ``is_future_release`` check. NULL/blank dates are kept (treated as released).
+        """
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
+                future_clause = ""
+                if exclude_future_years:
+                    future_clause = (
+                        " AND (release_date IS NULL OR release_date = '' "
+                        "OR CAST(substr(release_date, 1, 4) AS INTEGER) "
+                        "<= CAST(strftime('%Y','now') AS INTEGER))"
+                    )
+
                 if source:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT * FROM discovery_recent_albums
-                        WHERE source = ? AND profile_id = ?
+                        WHERE source = ? AND profile_id = ?{future_clause}
                         ORDER BY release_date DESC
                         LIMIT ?
                     """, (source, profile_id, limit))
                 else:
-                    cursor.execute("""
+                    cursor.execute(f"""
                         SELECT * FROM discovery_recent_albums
-                        WHERE profile_id = ?
+                        WHERE profile_id = ?{future_clause}
                         ORDER BY release_date DESC
                         LIMIT ?
                     """, (profile_id, limit))
@@ -13075,6 +13161,73 @@ class MusicDatabase:
             logger.error(f"Error getting discovery pool stats: {e}")
             return {'matched': 0, 'failed': 0}
 
+    # Wing It Pool: two states on a mirrored track's extra_data. Both key off wing_it_fallback,
+    # which is set by the wing-it stub and SURVIVES a manual fix (update_mirrored_track_extra_data
+    # merges rather than replaces), so the only difference is the manual_match flag:
+    #   needs attention : wing_it_fallback=true AND NOT manual_match  (unverified guess)
+    #   resolved        : wing_it_fallback=true AND manual_match=true (user fixed it — incl. fixes
+    #                     made before this feature existed, since the flag was never wiped)
+    _WING_IT_ATTENTION = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
+                          "AND mpt.extra_data NOT LIKE '%\"manual_match\": true%'")
+    _WING_IT_RESOLVED = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
+                         "AND mpt.extra_data LIKE '%\"manual_match\": true%'")
+
+    def get_wing_it_pool(self, profile_id: int = None, playlist_id: int = None,
+                         resolved: bool = False) -> list:
+        """Get Wing It tracks — the unverified guesses (default) or the ones you've resolved.
+
+        Wing-it tracks are persisted on extra_data with ``wing_it_fallback: true`` (a best-effort
+        stub when a track couldn't match a metadata source). They count as 'discovered', so the
+        Discovery Pool hides them — this is the only surface that lists them. ``resolved=True``
+        returns the ones a manual match has since fixed (carrying the ``was_wing_it`` marker).
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._WING_IT_RESOLVED if resolved else self._WING_IT_ATTENTION
+            query = f"""
+                SELECT mpt.id, mpt.track_name, mpt.artist_name, mpt.album_name,
+                       mpt.playlist_id, mp.name as playlist_name, mpt.extra_data
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE {where}
+            """
+            params = []
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            query += " ORDER BY mp.name, mpt.track_name"
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting wing it pool: {e}")
+            return []
+
+    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+        """Counts for both Wing It states: unverified (``wing_it``) + resolved (``matched``)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            def _count(where):
+                q = (f"SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt "
+                     f"JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id WHERE {where}")
+                params = []
+                if profile_id:
+                    q += " AND mp.profile_id = ?"
+                    params.append(profile_id)
+                cursor.execute(q, params)
+                return cursor.fetchone()['cnt']
+
+            return {'wing_it': _count(self._WING_IT_ATTENTION),
+                    'matched': _count(self._WING_IT_RESOLVED)}
+        except Exception as e:
+            logger.error(f"Error getting wing it pool stats: {e}")
+            return {'wing_it': 0, 'matched': 0}
+
     # ==================== Retag Tool Methods ====================
 
     def add_retag_group(self, group_type: str, artist_name: str, album_name: str,
@@ -13483,7 +13636,10 @@ class MusicDatabase:
                   download_source, source_track_id, source_track_title, source_filename,
                   acoustid_result, source_artist, origin, origin_context, verification_status))
             conn.commit()
-            return True
+            # Return the new row id (truthy on success) so callers can link the
+            # live download task to its library_history row — e.g. the Unverified
+            # review queue needs the id for its play/approve/delete actions.
+            return cursor.lastrowid
         except Exception as e:
             logger.debug(f"Error adding library history entry: {e}")
             return False
@@ -13680,6 +13836,26 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error querying library history: {e}")
             return [], 0
+
+    def get_library_history_unverified(self) -> list[dict]:
+        """Return every library_history row that still needs human confirmation.
+
+        Fetches all rows where verification_status is 'unverified' or
+        'force_imported', ordered newest-first. No row limit — the full
+        set must always be visible on the Downloads → Unverified tab.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM library_history
+                WHERE verification_status IN ('unverified', 'force_imported')
+                ORDER BY created_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error("Error querying unverified library history: %s", e)
+            return []
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""

@@ -105,6 +105,7 @@ class JellyfinTrack:
         self.title = jellyfin_data.get('Name', 'Unknown Track')
         self.duration = jellyfin_data.get('RunTimeTicks', 0) // 10000  # Convert from ticks to milliseconds
         self.trackNumber = jellyfin_data.get('IndexNumber')
+        self.discNumber = jellyfin_data.get('ParentIndexNumber')  # multi-disc: disc number
         self.year = jellyfin_data.get('ProductionYear')
         self.userRating = jellyfin_data.get('UserData', {}).get('Rating')
         self.addedAt = self._parse_date(jellyfin_data.get('DateCreated'))

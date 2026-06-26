@@ -241,3 +241,10 @@ export interface ImportSinglesQueueJob {
 }
 
 export type ImportQueueJob = ImportAlbumQueueJob | ImportSinglesQueueJob;
+
+// The two import behaviour toggles also shown in Settings → Import, mirrored
+// onto the Import page for visibility. Both map to `import.*` config keys.
+export interface ImportOptionsPayload {
+  qualityFilterEnabled: boolean;
+  folderArtistOverride: boolean;
+}

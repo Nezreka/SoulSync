@@ -38,14 +38,14 @@ def _cand(quality, size_mb, bitrate=None):
         queue_length=0, artist='A', title='Song', album='B', track_number=1)
 
 
-def _q(enabled_flac=True, enabled_mp3=True, aac=None):
+def _q(enabled_flac=True, enabled_mp3=True, aac=None, fallback=True):
     qualities = {
         'flac': {'enabled': enabled_flac, 'min_kbps': 500, 'max_kbps': 10000, 'priority': 1, 'bit_depth': 'any'},
         'mp3_320': {'enabled': enabled_mp3, 'min_kbps': 280, 'max_kbps': 500, 'priority': 2},
     }
-    if aac is not None:               # None => omit the tier entirely (pre-existing profile)
+    if aac is not None:               # None => omit the tier entirely
         qualities['aac'] = {'enabled': aac, 'min_kbps': 128, 'max_kbps': 400, 'priority': 1.5}
-    return {'preset': 'custom', 'qualities': qualities, 'fallback_enabled': True}
+    return {'preset': 'custom', 'qualities': qualities, 'fallback_enabled': fallback}
 
 
 def _filter(candidates, profile):
@@ -56,51 +56,44 @@ def _filter(candidates, profile):
         return c.filter_results_by_quality_preference(candidates)
 
 
-# ── additive proof: AAC off == today (dropped) ────────────────────────────────
-def test_aac_dropped_when_tier_absent_pre_existing_profile():
-    # A profile saved before this feature has no 'aac' key at all.
-    out = _filter([_cand('aac', 5)], _q(aac=None))
-    assert out == []   # AAC went to 'other' -> never returned, exactly as before
+# ── AAC follows the UNIVERSAL rule (no per-format special-casing) ──────────────
+# AAC is just another format: it passes only if it matches a ranked target;
+# when nothing matches, the fallback toggle decides — exactly like every format.
+
+def test_aac_not_targeted_fallback_off_is_dropped():
+    out = _filter([_cand('aac', 5)], _q(aac=None, fallback=False))
+    assert out == []   # no AAC target + fallback off → nothing comes through
 
 
-def test_aac_dropped_when_tier_present_but_disabled():
-    out = _filter([_cand('aac', 5)], _q(aac=False))
-    assert out == []
+def test_aac_not_targeted_fallback_on_comes_through():
+    out = _filter([_cand('aac', 5)], _q(aac=None, fallback=True))
+    assert len(out) == 1 and out[0].quality == 'aac'   # fallback grabs it
+
+
+def test_aac_disabled_tier_behaves_like_not_targeted():
+    # An explicitly-disabled aac tier is not a target → same as absent.
+    assert _filter([_cand('aac', 5)], _q(aac=False, fallback=False)) == []
 
 
 def test_flac_mp3_selection_unchanged_when_aac_absent():
-    # The headline no-regression guard: a normal FLAC/MP3 mix is unaffected.
     flac, mp3 = _cand('flac', 30), _cand('mp3', 5, bitrate=320)
     out = _filter([mp3, flac], _q(aac=None))
-    assert out and out[0].quality == 'flac'   # FLAC still wins, as before
+    assert out and out[0].quality == 'flac'   # FLAC still wins
 
 
-# ── opt-in: AAC on makes it a real tier ───────────────────────────────────────
-def test_aac_selected_when_enabled():
+# ── AAC as a real ranked target ───────────────────────────────────────────────
+def test_aac_selected_when_targeted():
     out = _filter([_cand('aac', 5)], _q(aac=True))
     assert len(out) == 1 and out[0].quality == 'aac'
 
 
-def test_flac_beats_aac_when_both_present():
+def test_flac_beats_aac_when_listed_higher():
     flac, aac = _cand('flac', 30), _cand('aac', 5)
     out = _filter([aac, flac], _q(aac=True))
-    assert out[0].quality == 'flac'   # priority 1 < 1.5
+    assert out[0].quality == 'flac'   # flac target ranked above aac (priority 1 < 1.5)
 
 
-def test_aac_beats_mp3_when_both_present():
+def test_aac_beats_mp3_when_listed_higher():
     mp3, aac = _cand('mp3', 5, bitrate=320), _cand('aac', 5)
     out = _filter([mp3, aac], _q(aac=True))
-    assert out[0].quality == 'aac'    # priority 1.5 < 2
-
-
-def test_default_and_presets_ship_aac_disabled_above_mp3():
-    from database.music_database import MusicDatabase
-    db = MusicDatabase.__new__(MusicDatabase)        # no DB init
-    profiles = [db._get_default_quality_profile()]
-    profiles += [db.get_quality_preset(p) for p in ('audiophile', 'balanced', 'space_saver')]
-    for prof in profiles:
-        aac = prof['qualities']['aac']
-        assert aac['enabled'] is False                # opt-in everywhere
-        # above MP3: lower priority number than the best MP3 tier present
-        mp3_prios = [v['priority'] for k, v in prof['qualities'].items() if k.startswith('mp3')]
-        assert aac['priority'] < min(mp3_prios)
+    assert out[0].quality == 'aac'    # aac target (1.5) ranked above mp3 (2)
