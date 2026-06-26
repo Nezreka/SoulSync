@@ -25,6 +25,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
+import time
 from typing import Any, Callable, Dict, Optional
 
 from core.video import organization, youtube_quality
@@ -172,13 +174,52 @@ def process_youtube_download(
     return {"status": "failed", "error": err}
 
 
+# ── concurrency + pacing (the music side's lesson: cap concurrency AND space starts) ──
+# yt-dlp 429s if hammered, so fetch STARTS are spaced ≥ this far apart across all workers.
+_DELAY_SECONDS = 3.0
+_pace_lock = threading.Lock()
+_last_start = [0.0]
+
+
+def _pace(delay: float) -> None:
+    """Block until at least ``delay`` seconds after the previous fetch start, then reserve
+    this start slot. Reserving under the lock (sleeping outside it) staggers concurrent
+    workers without serialising them past the delay."""
+    if delay <= 0:
+        return
+    with _pace_lock:
+        now = time.monotonic()
+        start_at = max(now, _last_start[0] + delay) if _last_start[0] else now
+        _last_start[0] = start_at
+    wait = start_at - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _spawn_worker(dl_id: Any, db_provider: Callable) -> None:
+    threading.Thread(target=run_youtube_download, args=(dl_id, db_provider),
+                     daemon=True, name="yt-dl-%s" % dl_id).start()
+
+
+def start_next_queued(db_provider: Callable) -> Any:
+    """Claim the next queued YouTube download and start it. Returns its id, or None if the
+    queue is empty. The wishlist pump uses this to fill slots; each finished worker calls it
+    once (one-out-one-in) so the queue drains continuously at the established concurrency."""
+    row = db_provider().claim_next_youtube_queued()
+    if not row:
+        return None
+    _spawn_worker(row["id"], db_provider)
+    return row["id"]
+
+
 # ── production wiring ─────────────────────────────────────────────────────────
 def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
     """Production entry: fetch the row, bind real seams, fulfil it. Called on a worker
-    thread by the enqueue path; swallows nothing silently into the DB."""
+    thread by the pump; on finish it starts the next queued download (one-out-one-in)."""
     db = db_provider()
     dl = db.get_video_download(dl_id)
     if not dl:
+        start_next_queued(db_provider)        # keep the queue moving even on a stale id
         return
     profile = youtube_quality.load(db)
     settings = organization.load(db)
@@ -211,14 +252,19 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
     except Exception:   # noqa: BLE001 - cookies are optional
         cookie_opts = None
 
-    process_youtube_download(
-        dl, profile=profile, settings=settings,
-        update_row=db.update_video_download, archive=_archive,
-        clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
-        progress_hook=_progress, cookie_opts=cookie_opts, now=_now)
+    try:
+        _pace(_DELAY_SECONDS)                  # space fetch starts to avoid yt-dlp 429s
+        process_youtube_download(
+            dl, profile=profile, settings=settings,
+            update_row=db.update_video_download, archive=_archive,
+            clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
+            progress_hook=_progress, cookie_opts=cookie_opts, now=_now)
+    finally:
+        start_next_queued(db_provider)         # one out, one in — drain the queue
 
 
 __all__ = [
     "youtube_fields_from_download", "plan_destination", "ydl_download_opts",
     "download_one", "process_youtube_download", "run_youtube_download",
+    "start_next_queued",
 ]
