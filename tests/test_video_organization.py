@@ -28,6 +28,10 @@ def test_normalize_fills_and_validates():
     assert d["episode_template"] == "$series/$episode"
     # an invalid transfer mode falls back to the default
     assert organization.normalize({"transfer_mode": "torrent"})["transfer_mode"] == "copy"
+    # youtube template is a first-class setting: defaulted + editable + blank→default
+    assert organization.default_settings()["youtube_template"] == organization.DEFAULTS["youtube_template"]
+    assert organization.normalize({"youtube_template": "$channel/$title"})["youtube_template"] == "$channel/$title"
+    assert organization.normalize({"youtube_template": "   "})["youtube_template"] == organization.DEFAULTS["youtube_template"]
 
 
 def test_load_save_roundtrip():

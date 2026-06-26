@@ -693,6 +693,8 @@
         resolution: '1080p', source: 'Bluray', codec: 'HEVC', edition: '', tmdbid: '603', imdbid: 'tt0133093' };
     var _ORG_EP_EG = { series: 'Breaking Bad', season: '01', seasonraw: '1', episode: '01', episodetitle: 'Pilot',
         year: '2008', quality: 'WEBDL-1080p', resolution: '1080p', source: 'WEBDL', codec: 'H264', tvdbid: '81189' };
+    var _ORG_YT_EG = { channel: 'Veritasium', title: 'How Electricity Actually Works', year: '2024',
+        date: '2024-03-15', month: '03', day: '15', videoid: 'oI_X2cMHNe0' };
 
     function _orgSanitize(v) {
         return String(v == null ? '' : v).replace(/[\\/:*?"<>|\x00-\x1f]/g, '')
@@ -714,10 +716,13 @@
     function renderOrgPreview() {
         var mt = document.getElementById('vo-movie-template');
         var et = document.getElementById('vo-episode-template');
+        var yt = document.getElementById('vo-youtube-template');
         var mp = document.getElementById('vo-movie-preview');
         var ep = document.getElementById('vo-episode-preview');
+        var yp = document.getElementById('vo-youtube-preview');
         if (mp && mt) mp.textContent = _orgRender(mt.value || mt.placeholder, _ORG_MOVIE_EG) + '.mkv';
         if (ep && et) ep.textContent = _orgRender(et.value || et.placeholder, _ORG_EP_EG) + '.mkv';
+        if (yp && yt) yp.textContent = _orgRender(yt.value || yt.placeholder, _ORG_YT_EG) + '.mp4';
     }
     function fillOrg() {
         if (!_videoOrg) return;
@@ -725,6 +730,7 @@
         var chk = function (id, v) { var el = document.getElementById(id); if (el) el.checked = !!v; };
         set('vo-movie-template', _videoOrg.movie_template || '');
         set('vo-episode-template', _videoOrg.episode_template || '');
+        set('vo-youtube-template', _videoOrg.youtube_template || '');
         set('vo-transfer-mode', _videoOrg.transfer_mode || 'copy');
         chk('vo-verify', _videoOrg.verify_with_ffprobe);
         chk('vo-replace', _videoOrg.replace_existing);
@@ -747,6 +753,7 @@
         return {
             movie_template: val('vo-movie-template'),
             episode_template: val('vo-episode-template'),
+            youtube_template: val('vo-youtube-template'),
             transfer_mode: val('vo-transfer-mode'),
             verify_with_ffprobe: on('vo-verify'),
             replace_existing: on('vo-replace'),
@@ -771,7 +778,7 @@
         var card = anchor.closest('.settings-group');
         if (!card || card._voWired) return;
         card._voWired = true;
-        ['vo-movie-template', 'vo-episode-template'].forEach(function (id) {
+        ['vo-movie-template', 'vo-episode-template', 'vo-youtube-template'].forEach(function (id) {
             var el = document.getElementById(id);
             if (!el) return;
             el.addEventListener('input', renderOrgPreview);          // live preview while typing
@@ -788,9 +795,10 @@
             // Radarr/Sonarr defaults and echoes them back.
             fetch(ORG_URL, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-                body: JSON.stringify({ movie_template: '', episode_template: '', transfer_mode: 'copy',
-                    verify_with_ffprobe: true, replace_existing: true, carry_subtitles: true,
-                    save_artwork: false, write_nfo: false, download_subtitles: false, subtitle_langs: 'en' })
+                body: JSON.stringify({ movie_template: '', episode_template: '', youtube_template: '',
+                    transfer_mode: 'copy', verify_with_ffprobe: true, replace_existing: true,
+                    carry_subtitles: true, save_artwork: false, write_nfo: false,
+                    download_subtitles: false, subtitle_langs: 'en' })
             }).then(function (r) { return r.ok ? r.json() : null; })
               .then(function (d) { if (d) { _videoOrg = d; fillOrg(); toast('Reset to the standard layout', 'success'); } });
         });
