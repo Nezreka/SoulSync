@@ -276,7 +276,9 @@ def _search_for_retry(query, max_seconds=55):
     res = start_search(query)
     sid = res.get("id")
     if not sid:
-        return {"hits": [], "total_files": 0}
+        # slskd didn't accept the search (not configured, errored, or rate-limited). Surface
+        # it as 'not started' so the caller doesn't report it as a genuine "no results".
+        return {"hits": [], "total_files": 0, "started": False, "error": res.get("error")}
     deadline = time.monotonic() + max_seconds
     last = {"hits": [], "total_files": 0}
     prev, settle = 0, 0          # track hit growth; settle = consecutive no-growth polls (~1.5s each)
