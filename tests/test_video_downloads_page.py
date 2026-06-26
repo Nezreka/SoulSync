@@ -42,6 +42,14 @@ def test_cards_expand_into_a_detail_drawer():
     assert "/downloads/meta/" in _JS
 
 
+def test_drawer_renders_the_rich_tmdb_fields():
+    # cast PHOTOS (the bug was the wrong field name) + logo header + trailer + providers
+    assert "c.photo" in _JS                            # correct TMDB cast-photo field
+    assert "vdpg-dr-logo" in _JS                       # title logo header
+    assert "vdpg-dr-trailer" in _JS and "vdpg-prov" in _JS   # trailer + where-to-watch
+    assert "trailer_url" in _JS and "providers" in _JS
+
+
 def test_download_meta_route_is_registered():
     import api.video as videoapi
     from flask import Flask

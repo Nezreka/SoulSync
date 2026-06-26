@@ -87,6 +87,70 @@ def test_watchlist_continuing_shows_skips_ended_tmdbonly_and_dupes(tmp_path, mon
     assert [s["library_id"] for s in out] == [1, 4]
 
 
+# ── OMDb quota safety ─────────────────────────────────────────────────────────
+def test_refresh_skips_omdb_ratings(monkeypatch):
+    # the bulk refresh must NOT do the per-show OMDb ratings call (it'd burn the daily quota)
+    import core.automation.handlers.video_refresh_airing_schedules as mod
+    seen = {}
+
+    class _Eng:
+        def refresh_show_art(self, lib, *, with_ratings=True):
+            seen["lib"], seen["with_ratings"] = lib, with_ratings
+            return {"ok": True}
+
+    monkeypatch.setattr("core.video.enrichment.engine.get_video_enrichment_engine", lambda: _Eng())
+    assert mod._default_refresh_show(7) == {"ok": True}
+    assert seen == {"lib": 7, "with_ratings": False}
+
+
+def test_omdb_limit_latches_off_and_stops_hammering():
+    from core.video.enrichment.engine import VideoEnrichmentEngine
+    from core.video.enrichment.clients import OMDbAuthError
+
+    class _Row:                                        # truthy row carrying an imdb id
+        def __getitem__(self, k):
+            return "tt123"
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a):
+            return type("C", (), {"fetchone": lambda s: _Row()})()
+
+    class _DB:
+        def show_match_info(self, i):
+            return {"title": "X"}
+
+        def connect(self):
+            return _Conn()
+
+        def apply_ratings(self, *a):
+            pass
+
+    class _RC:
+        enabled = True
+
+        def __init__(self):
+            self.n = 0
+
+        def ratings(self, imdb):
+            self.n += 1
+            raise OMDbAuthError("Request limit reached!")
+
+    eng = VideoEnrichmentEngine.__new__(VideoEnrichmentEngine)
+    eng.db, eng.ratings_client = _DB(), None
+    rc = _RC()
+    eng.workers = {"omdb": type("W", (), {"client": rc})()}
+    eng._backfill_ratings("show", 1)               # hits the limit → latches off (no raise)
+    assert getattr(eng, "_omdb_blocked", False) is True
+    eng._backfill_ratings("show", 2)               # now short-circuits before calling OMDb
+    assert rc.n == 1                               # only the first attempt ever reached OMDb
+
+
 # ── wiring contract ───────────────────────────────────────────────────────────
 def test_seeded_before_the_airing_automation():
     import core.automation_engine as ae

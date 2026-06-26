@@ -176,17 +176,49 @@
     function fact(k, v) {
         return v ? '<div class="vdpg-f"><span class="vdpg-fk">' + esc(k) + '</span><span class="vdpg-fv">' + esc(v) + '</span></div>' : '';
     }
+    function fmtRuntime(m) {
+        m = parseInt(m, 10); if (!m) return '';
+        var h = Math.floor(m / 60), mm = m % 60;
+        return h ? (h + 'h' + (mm ? ' ' + mm + 'm' : '')) : (mm + 'm');
+    }
     function drawerHTML(d, meta) {
         var isYt = dlType(d.kind) === 'youtube', ctx = isYt ? ytCtx(d) : {};
-        var overview = (meta && meta.overview) || ctx.description || '';
         var loading = meta === null && !isYt;
-        var back = (meta && meta.backdrop_url)
+        meta = meta || {};
+        var overview = meta.overview || ctx.description || '';
+        var back = meta.backdrop_url
             ? '<div class="vdpg-dr-back" style="background-image:url(\'' + esc(meta.backdrop_url) + '\')"></div>' : '';
-        var genres = (meta && (meta.genres || []).slice(0, 4).join('  ·  ')) || '';
-        var cast = (meta && meta.cast || []).slice(0, 8);
+
+        // header: title logo (or text) + a meta line (year · ⭐rating · runtime · network) + tagline
+        var titleHTML = meta.logo
+            ? '<img class="vdpg-dr-logo" src="' + esc(meta.logo) + '" alt="' + esc(meta.title || d.title || '') + '">'
+            : '<div class="vdpg-dr-title">' + esc(meta.title || d.title || 'Download') + '</div>';
+        var bits = [];
+        if (meta.year || d.year) bits.push(esc(meta.year || d.year));
+        if (meta.rating) bits.push('⭐ ' + (Math.round(meta.rating * 10) / 10));
+        var rt = fmtRuntime(meta.runtime_minutes); if (rt) bits.push(rt);
+        if (meta.network || meta.studio) bits.push(esc(meta.network || meta.studio));
+        if (isYt && (ctx.channel || ctx.channel_title)) bits.push(esc(ctx.channel || ctx.channel_title));
+        if (meta.status && !isYt) bits.push(esc(meta.status));
+        var metaLine = bits.length ? '<div class="vdpg-dr-metaline">' + bits.join('  ·  ') + '</div>' : '';
+        var tagline = meta.tagline ? '<div class="vdpg-dr-tagline">' + esc(meta.tagline) + '</div>' : '';
+        var genres = (meta.genres || []).slice(0, 4).join('  ·  ');
+
+        // watch row: trailer + where-to-watch provider logos
+        var watch = '';
+        if (meta.trailer_url) watch += '<a class="vdpg-dr-btn vdpg-dr-trailer" href="' + esc(meta.trailer_url) + '" target="_blank" rel="noopener">▶ Trailer</a>';
+        var provs = meta.providers || [];
+        if (provs.length) watch += '<span class="vdpg-dr-provs"><span class="vdpg-dr-provs-t">Watch on</span>' + provs.map(function (p) {
+            return p.logo ? '<img class="vdpg-prov" src="' + esc(p.logo) + '" alt="' + esc(p.name || '') + '" title="' + esc(p.name || '') + '">'
+                : '<span class="vdpg-prov vdpg-prov-txt">' + esc(p.name || '') + '</span>';
+        }).join('') + '</span>';
+        var watchHTML = watch ? '<div class="vdpg-dr-watch">' + watch + '</div>' : '';
+
+        // cast with photos
+        var cast = (meta.cast || []).slice(0, 8);
         var castHTML = cast.length ? '<div class="vdpg-dr-st">Cast</div><div class="vdpg-dr-cast">' + cast.map(function (c) {
-            var pic = c.profile_url
-                ? '<span class="vdpg-cast-pic" style="background-image:url(\'' + esc(c.profile_url) + '\')"></span>'
+            var pic = c.photo
+                ? '<span class="vdpg-cast-pic" style="background-image:url(\'' + esc(c.photo) + '\')"></span>'
                 : '<span class="vdpg-cast-pic vdpg-cast-none">' + esc((c.name || '?').charAt(0)) + '</span>';
             return '<div class="vdpg-cast">' + pic + '<span class="vdpg-cast-nm">' + esc(c.name) +
                 '</span>' + (c.character ? '<span class="vdpg-cast-ch">' + esc(c.character) + '</span>' : '') + '</div>';
@@ -197,6 +229,7 @@
         facts += fact('Status', (STATUS[d.status] || {}).label);
         if (isYt) { facts += fact('Channel', ctx.channel || ctx.channel_title); facts += fact('Quality', d.quality_label); }
         else {
+            facts += fact(dlType(d.kind) === 'movie' ? 'Director' : 'Creator', meta.director);
             facts += fact('Quality target', d.quality_label);
             facts += fact('Release', d.release_title);
             facts += fact('Format', [d.resolution, d.source, d.codec].filter(Boolean).join(' · '));
@@ -221,8 +254,9 @@
         var syn = loading ? '<p class="vdpg-dr-syn vdpg-dr-muted">Loading…</p>'
             : (overview ? '<p class="vdpg-dr-syn">' + esc(overview) + '</p>'
                 : (isYt ? '' : '<p class="vdpg-dr-syn vdpg-dr-muted">No synopsis available.</p>'));
-        return back + '<div class="vdpg-dr-body">' + syn +
-            (genres ? '<div class="vdpg-dr-genres">' + esc(genres) + '</div>' : '') +
+        return back + '<div class="vdpg-dr-body">' +
+            '<div class="vdpg-dr-head">' + titleHTML + metaLine + tagline + '</div>' +
+            syn + (genres ? '<div class="vdpg-dr-genres">' + esc(genres) + '</div>' : '') + watchHTML +
             castHTML + '<div class="vdpg-dr-st">Download</div><div class="vdpg-dr-facts">' + facts + '</div>' +
             actions + '</div>';
     }

@@ -3806,7 +3806,20 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-dr-body { position: relative; padding: 16px 18px 18px; }
 .vdpg-dr-syn { font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.82); margin: 0 0 10px; max-width: 80ch; }
 .vdpg-dr-muted { color: rgba(255, 255, 255, 0.4); font-style: italic; }
-.vdpg-dr-genres { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vt)); }
+.vdpg-dr-genres { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vt)); margin-bottom: 2px; }
+.vdpg-dr-head { margin-bottom: 12px; }
+.vdpg-dr-logo { max-height: 54px; max-width: 62%; object-fit: contain; display: block; margin-bottom: 7px;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.55)); }
+.vdpg-dr-title { font-size: 20px; font-weight: 800; color: #fff; line-height: 1.15; margin-bottom: 5px; }
+.vdpg-dr-metaline { font-size: 12.5px; font-weight: 600; color: rgba(255, 255, 255, 0.62); }
+.vdpg-dr-tagline { font-size: 12.5px; font-style: italic; color: rgba(255, 255, 255, 0.5); margin-top: 5px; }
+.vdpg-dr-watch { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 14px 0 2px; }
+.vdpg-dr-trailer { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
+.vdpg-dr-provs { display: inline-flex; align-items: center; gap: 7px; }
+.vdpg-dr-provs-t { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.4); }
+.vdpg-prov { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); }
+.vdpg-prov-txt { display: inline-grid; place-items: center; min-width: 28px; height: 28px; padding: 0 7px; border-radius: 7px;
+    font-size: 10px; font-weight: 700; background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.8); }
 .vdpg-dr-st { font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
     color: rgba(255, 255, 255, 0.4); margin: 16px 0 9px; }
 .vdpg-dr-cast { display: flex; flex-wrap: wrap; gap: 12px; }
