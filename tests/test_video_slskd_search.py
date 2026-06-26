@@ -81,3 +81,38 @@ def test_429_sets_a_cooldown():
     nxt = _ss._reserve_search_slot()
     assert nxt >= time.monotonic() + 8                  # next search waits out the cooldown
     _reset_throttle()
+
+
+# ── availability-aware ranking (best-in-class peer/release selection) ─────────
+def test_peer_availability_rewards_slot_speed_penalizes_queue():
+    from core.video.slskd_search import peer_availability
+    good = peer_availability(2, 6_000_000, 0)        # free slot + fast + empty queue
+    stuck = peer_availability(0, 50_000, 1500)       # no slot + slow + 1500-deep queue
+    assert good > stuck
+    assert peer_availability(1, 2_000_000, 0) > peer_availability(1, 2_000_000, 60)   # queue hurts
+    assert peer_availability(1, 0, 0) > peer_availability(0, 0, 0)                    # slot helps
+    assert peer_availability(1, 6_000_000, 0) > peer_availability(1, 200_000, 0)      # speed helps
+
+
+def test_group_picks_most_downloadable_peer_not_just_fastest():
+    rel = "Movie.2014.1080p.BluRay.x264-GRP"
+    responses = [
+        {"username": "fast_stuck", "uploadSpeed": 9_000_000, "freeUploadSlots": 0,
+         "queueLength": 1500, "files": [{"filename": rel + "/m.mkv", "size": 2_000_000_000}]},
+        {"username": "free_now", "uploadSpeed": 800_000, "freeUploadSlots": 1,
+         "queueLength": 0, "files": [{"filename": rel + "/m.mkv", "size": 2_000_000_000}]},
+    ]
+    h = group_video_files(responses)[0]
+    assert h["username"] == "free_now"               # availability beats raw speed
+    assert h["queue"] == 0 and h["slots"] == 1
+
+
+def test_group_ranks_available_release_above_queued_one():
+    responses = [
+        {"username": "q", "uploadSpeed": 9_000_000, "freeUploadSlots": 0, "queueLength": 1500,
+         "files": [{"filename": "A.2020.1080p.BluRay.x264-GRP/a.mkv", "size": 5_000_000_000}]},
+        {"username": "f", "uploadSpeed": 700_000, "freeUploadSlots": 1, "queueLength": 0,
+         "files": [{"filename": "B.2020.1080p.BluRay.x264-GRP/b.mkv", "size": 2_000_000_000}]},
+    ]
+    hits = group_video_files(responses)
+    assert hits[0]["username"] == "f"                # free-slot release first, despite smaller

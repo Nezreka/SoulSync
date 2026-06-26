@@ -120,9 +120,38 @@ def _release_name(filename: str) -> str:
     return base.rsplit(".", 1)[0] if "." in base else base
 
 
+def peer_availability(free_slots: Any, upload_speed: Any, queue_length: Any) -> float:
+    """How DOWNLOADABLE a peer is right now (higher = grabs sooner). Mirrors the music
+    side's availability scoring: a free upload slot, the upload speed (tiered), and the
+    queue length (graduated penalty). A fast peer with a free slot and an empty queue beats
+    a faster one stuck behind a 1500-deep queue. Pure."""
+    try:
+        slots, speed, queue = int(free_slots or 0), int(upload_speed or 0), int(queue_length or 0)
+    except (TypeError, ValueError):
+        slots, speed, queue = 0, 0, 0
+    s = 0.05 if slots > 0 else -0.15
+    if speed >= 5_000_000:
+        s += 0.15
+    elif speed >= 1_000_000:
+        s += 0.10
+    elif speed >= 500_000:
+        s += 0.05
+    elif speed < 100_000:
+        s -= 0.05
+    if queue > 50:
+        s -= 0.25
+    elif queue > 20:
+        s -= 0.15
+    elif queue > 10:
+        s -= 0.10
+    return round(s, 4)
+
+
 def group_video_files(responses: Any) -> list:
-    """Flatten slskd responses → one hit per release folder, with a peer count and the
-    best (fastest, most-available) source. Pure — drives the unit tests."""
+    """Flatten slskd responses → one hit per release folder. The chosen source per release
+    is the most DOWNLOADABLE peer (free slot → low queue → speed), not just the fastest, and
+    hits are ranked by that availability — so we grab a free-slot/empty-queue release over a
+    high-spec one stuck behind a huge queue. Pure — drives the unit tests."""
     groups: dict = {}
     for resp in (responses if isinstance(responses, list) else []):
         if not isinstance(resp, dict):
@@ -130,6 +159,8 @@ def group_video_files(responses: Any) -> list:
         user = resp.get("username")
         speed = resp.get("uploadSpeed", 0) or 0
         slots = resp.get("freeUploadSlots", 0) or 0
+        queue = resp.get("queueLength", 0) or 0
+        avail = peer_availability(slots, speed, queue)
         for f in (resp.get("files") or []):
             fn = f.get("filename", "")
             if not _is_video(fn):
@@ -138,20 +169,23 @@ def group_video_files(responses: Any) -> list:
             g = groups.get(rel)
             if g is None:
                 g = groups[rel] = {"title": rel, "size_bytes": 0, "users": set(),
-                                   "best_speed": -1, "username": None, "slots": 0, "filename": fn}
+                                   "best": (-99.0, -1), "username": None, "slots": 0,
+                                   "queue": 0, "speed": 0, "availability": -99.0, "filename": fn}
             g["size_bytes"] = max(g["size_bytes"], f.get("size", 0) or 0)
             if user:
                 g["users"].add(user)
-            if speed > g["best_speed"]:
-                g["best_speed"] = speed
-                g["username"] = user
-                g["slots"] = slots
-                g["filename"] = fn
+            if (avail, speed) > g["best"]:          # most available, then fastest, peer wins
+                g["best"] = (avail, speed)
+                g["username"], g["slots"], g["queue"] = user, slots, queue
+                g["speed"], g["availability"], g["filename"] = speed, avail, fn
     out = []
     for g in groups.values():
         out.append({"title": g["title"], "size_bytes": g["size_bytes"], "peers": len(g["users"]),
-                    "username": g["username"], "slots": g["slots"], "filename": g["filename"]})
-    out.sort(key=lambda h: (h["peers"], h["size_bytes"]), reverse=True)
+                    "username": g["username"], "slots": g["slots"], "queue": g["queue"],
+                    "speed": g["speed"], "availability": g["availability"], "filename": g["filename"]})
+    # availability first, then more peers, then bigger; the quality profile still gates the
+    # final pick downstream (_evaluate_hits), this just orders within a quality tier.
+    out.sort(key=lambda h: (h["availability"], h["peers"], h["size_bytes"]), reverse=True)
     return out
 
 

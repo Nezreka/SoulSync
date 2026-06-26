@@ -65,11 +65,17 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
         size_gb = round((hit.get("size_bytes") or 0) / (1024 ** 3), 1)
         verdict = evaluate_release(parsed, profile, scope=scope, want_season=want_season,
                                    want_episode=want_episode, size_gb=size_gb)
-        avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
+        # Availability = how downloadable the source is (slskd: free slot/queue/speed score
+        # from group_video_files; torrents/mock: seeders/peers). Ranks within a quality tier
+        # so we grab a free-slot/empty-queue release over one stuck behind a huge queue.
+        avail = hit.get("availability")
+        if avail is None:
+            avail = hit.get("seeders") if hit.get("seeders") is not None else (hit.get("peers") or 0)
         results.append({
             "title": hit.get("title"), "size_gb": size_gb, "size_bytes": hit.get("size_bytes") or 0,
             "seeders": hit.get("seeders"), "peers": hit.get("peers"),
             "username": hit.get("username"), "slots": hit.get("slots"),
+            "queue": hit.get("queue"), "speed": hit.get("speed"),
             "filename": hit.get("filename"), "_avail": avail,
             "quality_label": verdict["quality_label"], "accepted": verdict["accepted"],
             "rejected": verdict["rejected"], "score": verdict["score"],
@@ -78,7 +84,8 @@ def _evaluate_hits(raw, profile, scope, want_season, want_episode) -> list:
             "audio": parsed.get("audio"), "group": parsed.get("group"),
             "repack": parsed.get("repack") or parsed.get("proper"),
         })
-    results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"]), reverse=True)
+    # accepted first, then quality-profile score, then availability, then bigger file.
+    results.sort(key=lambda r: (r["accepted"], r["score"], r["_avail"], r["size_bytes"]), reverse=True)
     for r in results:
         r.pop("_avail", None)
     return results[:40]
