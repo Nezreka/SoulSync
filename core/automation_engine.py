@@ -453,6 +453,7 @@ class AutomationEngine:
         self._fix_video_scan_default()
         self._fix_airing_automation_schedule()
         self._fix_deep_scan_schedules()
+        self._fix_wishlist_processor_rename()
 
     def _fix_video_scan_default(self):
         """Remove the obsolete standalone 'Scan Video Library' SYSTEM automation — it's
@@ -472,6 +473,31 @@ class AutomationEngine:
                             auto.get('id'))
         except Exception:
             logger.exception("video scan cleanup failed")
+
+    def _fix_wishlist_processor_rename(self):
+        """Migrate the wishlist processors' 'Download' → 'Process' rename so a DB seeded
+        under the old names doesn't show stale duplicates.
+
+        The movie/episode ACTIONS were renamed (``video_download_*`` → ``video_process_*``),
+        so the old seeded rows are now orphaned (dead action_type) while the new ones reseed
+        alongside them — delete the orphans. ``delete_automation`` refuses system rows, so
+        clear ``is_system`` first. The YouTube action kept its type but its label changed, so
+        rename that row in place. Idempotent — no-ops once the DB is clean."""
+        try:
+            for dead in ('video_download_movie_wishlist', 'video_download_episode_wishlist'):
+                auto = self.db.get_system_automation_by_action(dead)
+                if auto:
+                    self.db.update_automation(auto['id'], is_system=0)   # lift the delete guard
+                    self.db.delete_automation(auto['id'])
+                    logger.info("Removed orphaned '%s' system automation (renamed to process, id=%s)",
+                                auto.get('name'), auto.get('id'))
+            yt = self.db.get_system_automation_by_action('video_process_youtube_wishlist')
+            if yt and yt.get('name') == 'Auto-Download YouTube Wishlist':
+                self.db.update_automation(yt['id'], name='Auto-Process YouTube Wishlist')
+                logger.info("Renamed YouTube wishlist automation → 'Auto-Process YouTube Wishlist' (id=%s)",
+                            yt.get('id'))
+        except Exception:
+            logger.exception("wishlist processor rename migration failed")
 
     def _fix_airing_automation_schedule(self):
         """Migrate 'Auto-Wishlist Episodes Airing Today' from the old rolling 24h

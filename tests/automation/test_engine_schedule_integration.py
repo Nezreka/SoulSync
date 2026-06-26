@@ -528,3 +528,39 @@ def test_deep_scan_migration_is_idempotent_and_safe_when_absent():
     db2.get_system_automation_by_action.return_value = None
     AutomationEngine(db2)._fix_deep_scan_schedules()
     db2.update_automation.assert_not_called()
+
+
+def test_wishlist_processor_rename_removes_orphans_and_renames_youtube():
+    """The Download→Process rename: a DB seeded under the old names has orphaned
+    'Auto-Download Movie/Episode Wishlist' rows (dead action_type) — they're deleted (after
+    lifting the is_system delete-guard); the YouTube row (action_type unchanged) is renamed
+    in place, never deleted."""
+    rows = {
+        'video_download_movie_wishlist': {'id': 10, 'is_system': 1, 'name': 'Auto-Download Movie Wishlist'},
+        'video_download_episode_wishlist': {'id': 11, 'is_system': 1, 'name': 'Auto-Download Episode Wishlist'},
+        'video_process_youtube_wishlist': {'id': 12, 'is_system': 1, 'name': 'Auto-Download YouTube Wishlist'},
+    }
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    AutomationEngine(db)._fix_wishlist_processor_rename()
+
+    db.delete_automation.assert_any_call(10)
+    db.delete_automation.assert_any_call(11)
+    # is_system=0 lifted on each orphan before deleting
+    cleared = {c.args[0] for c in db.update_automation.call_args_list if c.kwargs.get('is_system') == 0}
+    assert cleared == {10, 11}
+    # youtube renamed (in place), NOT deleted
+    renamed = [c for c in db.update_automation.call_args_list if c.kwargs.get('name')]
+    assert renamed and renamed[0].args[0] == 12
+    assert renamed[0].kwargs['name'] == 'Auto-Process YouTube Wishlist'
+    assert all(c.args[0] != 12 for c in db.delete_automation.call_args_list)
+
+
+def test_wishlist_processor_rename_is_idempotent_when_clean():
+    # orphans already gone + youtube already renamed → no deletes, no rename
+    rows = {'video_process_youtube_wishlist': {'id': 12, 'is_system': 1, 'name': 'Auto-Process YouTube Wishlist'}}
+    db = MagicMock()
+    db.get_system_automation_by_action.side_effect = lambda a: rows.get(a)
+    AutomationEngine(db)._fix_wishlist_processor_rename()
+    db.delete_automation.assert_not_called()
+    assert not any(c.kwargs.get('name') for c in db.update_automation.call_args_list)
