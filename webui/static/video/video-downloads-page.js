@@ -154,12 +154,16 @@
         var lab = q('label'); if (lab.textContent !== labelTxt) lab.textContent = labelTxt;
 
         var act = q('actions');
-        // youtube videos aren't TMDB titles — the open button links to YouTube, not a show page
-        // (parseInt on a video id was opening a random library show / a broken link).
+        // youtube videos aren't TMDB titles. Open the in-app CHANNEL page (channels-as-shows)
+        // when we know the channel id; fall back to the YouTube video link otherwise. (The old
+        // open-show button ran parseInt on the video id → opened a random library show.)
+        var ytCh = dlType(d.kind) === 'youtube' ? parseCtx(d).channel_id : null;
         var openBtn = !d.media_id ? ''
             : (dlType(d.kind) === 'youtube'
-                ? '<a class="vdpg-open" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) +
-                  '" target="_blank" rel="noopener" title="Open on YouTube">' + OPEN_SVG + '</a>'
+                ? (ytCh
+                    ? '<button class="vdpg-open" type="button" data-vdpg-open-channel="' + esc(ytCh) + '" title="Open channel">' + OPEN_SVG + '</button>'
+                    : '<a class="vdpg-open" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) +
+                      '" target="_blank" rel="noopener" title="Open on YouTube">' + OPEN_SVG + '</a>')
                 : '<button class="vdpg-open" type="button" data-vdpg-open="' + esc(d.media_id) +
                   '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') +
                   '" title="Open ' + (d.kind === 'movie' ? 'movie' : 'show') + ' page">' + OPEN_SVG + '</button>');
@@ -296,6 +300,8 @@
         var btns = [];
         if (d.media_id && !isYt) btns.push('<button class="vdpg-dr-btn" type="button" data-vdpg-open="' + esc(d.media_id) +
             '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') + '">Open in library</button>');
+        var ytCh = meta.channel_id || ctx.channel_id;
+        if (isYt && ytCh) btns.push('<button class="vdpg-dr-btn" type="button" data-vdpg-open-channel="' + esc(ytCh) + '">Open channel</button>');
         if (isYt && d.media_id) btns.push('<a class="vdpg-dr-btn" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) + '" target="_blank" rel="noopener">Open on YouTube</a>');
         if (isActive(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-danger" type="button" data-vdpg-cancel="' + d.id + '">Cancel</button>');
         else if (isFail(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-retry="' + d.id + '">Retry</button>');
@@ -434,6 +440,13 @@
                 var id = op.getAttribute('data-vdpg-open');
                 document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
                     detail: { kind: kind, id: parseInt(id, 10) || id, source: op.getAttribute('data-source') || 'library' }
+                }));
+                return;
+            }
+            var och = e.target.closest('[data-vdpg-open-channel]');
+            if (och) {
+                document.dispatchEvent(new CustomEvent('soulsync:video-open-detail', {
+                    detail: { kind: 'channel', source: 'youtube', id: och.getAttribute('data-vdpg-open-channel') }
                 }));
                 return;
             }

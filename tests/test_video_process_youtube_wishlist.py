@@ -34,6 +34,13 @@ def test_videos_to_enqueue_skips_already_queued_no_cap():
     assert [v["video_id"] for v in out] == ["a", "c", "d"]   # b in flight; rest ALL kept
 
 
+def test_enqueue_ctx_carries_channel_id_for_the_drawer():
+    from core.automation.handlers.video_process_youtube_wishlist import enqueue_ctx
+    ctx = enqueue_ctx({"channel_id": "UC1", "channel_title": "Chan",
+                       "video_title": "V", "published_at": "2024-01-01"}, {})
+    assert ctx["channel_id"] == "UC1" and ctx["channel"] == "Chan"
+
+
 def test_videos_to_enqueue_drops_idless():
     assert videos_to_enqueue([{"video_title": "no id"}], []) == []
 

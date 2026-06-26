@@ -1480,7 +1480,7 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             r = conn.execute(
-                "SELECT title, thumbnail_url, duration, view_count "
+                "SELECT channel_id, title, thumbnail_url, duration, view_count "
                 "FROM youtube_channel_videos WHERE youtube_id=? LIMIT 1", (youtube_id,)).fetchone()
             return dict(r) if r else None
         finally:
