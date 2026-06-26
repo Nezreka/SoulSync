@@ -31,3 +31,22 @@ def test_sidebar_has_a_live_downloads_count():
     assert "data-video-downloads-badge" in _INDEX     # the nav badge element
     assert "function setDownloadsBadge(" in _JS
     assert "function badgePoll(" in _JS               # stays live off-page too
+
+
+def test_cards_expand_into_a_detail_drawer():
+    assert "function drawerHTML(" in _JS and "function renderDrawer(" in _JS
+    assert "_expanded" in _JS                          # open state survives re-patches
+    assert "vdpg-dr-cast" in _JS and "vdpg-dr-syn" in _JS   # cast + synopsis sections
+    assert "data-vdpg-copy" in _JS                     # copy-path action
+    # the lazy TMDB detail endpoint the drawer fetches synopsis/cast from
+    assert "/downloads/meta/" in _JS
+
+
+def test_download_meta_route_is_registered():
+    import api.video as videoapi
+    from flask import Flask
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    rules = {r.rule for r in app.url_map.iter_rules()}
+    assert "/api/video/downloads/meta/<kind>/<int:tmdb_id>" in rules
+

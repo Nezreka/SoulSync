@@ -15,6 +15,8 @@
     var URL_RETRY = '/api/video/downloads/retry';
     var _timer = null, _wired = false, _filter = 'all';
     var _cards = {};
+    var _expanded = {};   // id -> true while a card's detail drawer is open (survives re-patches)
+    var _meta = {};       // id -> TMDB detail (overview/cast) once lazily fetched (null = in flight)
 
     function esc(s) {
         return String(s == null ? '' : s)
@@ -82,11 +84,13 @@
                 '<div class="vdpg-prog" data-f="bar" style="display:none"><div class="vdpg-prog-fill" data-f="fill"></div></div>' +
             '</div>' +
             '<div class="adl-row-status" data-f="status"><span class="adl-status-dot" data-f="dot"></span><span data-f="label"></span></div>' +
-            '<div class="vdpg-rowact" data-f="actions"></div>';
+            '<div class="vdpg-rowact" data-f="actions"></div>' +
+            '<div class="vdpg-drawer" data-f="drawer" hidden></div>';
         return el;
     }
 
     function patchCard(el, d) {
+        el._d = d;   // remember the row data so the expand toggle can re-render its drawer
         var info = STATUS[d.status] || STATUS.downloading;
         var cls = info.cls, active = isActive(d.status);
         var showBar = active;   // downloading/queued/searching/importing all get a bar
@@ -160,6 +164,84 @@
                 : '';
         var actHTML = openBtn + stateBtn;
         if (act.innerHTML !== actHTML) act.innerHTML = actHTML;
+
+        renderDrawer(el, d);   // keep the expand drawer in sync (and open across re-patches)
+    }
+
+    // ── expand drawer ─────────────────────────────────────────────────────────────
+    function ytCtx(d) {
+        try { return d.search_ctx ? (typeof d.search_ctx === 'string' ? JSON.parse(d.search_ctx) : d.search_ctx) : {}; }
+        catch (e) { return {}; }
+    }
+    function fact(k, v) {
+        return v ? '<div class="vdpg-f"><span class="vdpg-fk">' + esc(k) + '</span><span class="vdpg-fv">' + esc(v) + '</span></div>' : '';
+    }
+    function drawerHTML(d, meta) {
+        var isYt = dlType(d.kind) === 'youtube', ctx = isYt ? ytCtx(d) : {};
+        var overview = (meta && meta.overview) || ctx.description || '';
+        var loading = meta === null && !isYt;
+        var back = (meta && meta.backdrop_url)
+            ? '<div class="vdpg-dr-back" style="background-image:url(\'' + esc(meta.backdrop_url) + '\')"></div>' : '';
+        var genres = (meta && (meta.genres || []).slice(0, 4).join('  ·  ')) || '';
+        var cast = (meta && meta.cast || []).slice(0, 8);
+        var castHTML = cast.length ? '<div class="vdpg-dr-st">Cast</div><div class="vdpg-dr-cast">' + cast.map(function (c) {
+            var pic = c.profile_url
+                ? '<span class="vdpg-cast-pic" style="background-image:url(\'' + esc(c.profile_url) + '\')"></span>'
+                : '<span class="vdpg-cast-pic vdpg-cast-none">' + esc((c.name || '?').charAt(0)) + '</span>';
+            return '<div class="vdpg-cast">' + pic + '<span class="vdpg-cast-nm">' + esc(c.name) +
+                '</span>' + (c.character ? '<span class="vdpg-cast-ch">' + esc(c.character) + '</span>' : '') + '</div>';
+        }).join('') + '</div>' : '';
+
+        // download facts (only the fields that exist render)
+        var facts = '';
+        facts += fact('Status', (STATUS[d.status] || {}).label);
+        if (isYt) { facts += fact('Channel', ctx.channel || ctx.channel_title); facts += fact('Quality', d.quality_label); }
+        else {
+            facts += fact('Quality target', d.quality_label);
+            facts += fact('Release', d.release_title);
+            facts += fact('Format', [d.resolution, d.source, d.codec].filter(Boolean).join(' · '));
+            facts += fact('Source', d.username ? ('👤 ' + d.username + (d.queue != null ? ('   ·   queue ' + d.queue) : '')) : '');
+        }
+        facts += fact('Size', d.size_bytes ? fmtSize(d.size_bytes) : '');
+        facts += fact('Attempts', d.attempts > 1 ? (d.attempts + 'x') : '');
+        if (d.dest_path) facts += '<div class="vdpg-f vdpg-f-wide"><span class="vdpg-fk">Path</span>' +
+            '<span class="vdpg-fv vdpg-mono">' + esc(d.dest_path) + '</span>' +
+            '<button class="vdpg-copy" type="button" data-vdpg-copy="' + esc(d.dest_path) + '" title="Copy path">⧉</button></div>';
+        if (isFail(d.status) && d.error) facts += '<div class="vdpg-f vdpg-f-wide vdpg-f-err"><span class="vdpg-fk">Error</span><span class="vdpg-fv">' + esc(d.error) + '</span></div>';
+
+        // big actions
+        var btns = [];
+        if (d.media_id && !isYt) btns.push('<button class="vdpg-dr-btn" type="button" data-vdpg-open="' + esc(d.media_id) +
+            '" data-kind="' + esc(d.kind || 'movie') + '" data-source="' + esc(d.media_source || 'library') + '">Open in library</button>');
+        if (isYt && d.media_id) btns.push('<a class="vdpg-dr-btn" href="https://www.youtube.com/watch?v=' + encodeURIComponent(d.media_id) + '" target="_blank" rel="noopener">Open on YouTube</a>');
+        if (isActive(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-danger" type="button" data-vdpg-cancel="' + d.id + '">Cancel</button>');
+        else if (isFail(d.status)) btns.push('<button class="vdpg-dr-btn vdpg-dr-accent" type="button" data-vdpg-retry="' + d.id + '">Retry</button>');
+        var actions = btns.length ? '<div class="vdpg-dr-actions">' + btns.join('') + '</div>' : '';
+
+        var syn = loading ? '<p class="vdpg-dr-syn vdpg-dr-muted">Loading…</p>'
+            : (overview ? '<p class="vdpg-dr-syn">' + esc(overview) + '</p>'
+                : (isYt ? '' : '<p class="vdpg-dr-syn vdpg-dr-muted">No synopsis available.</p>'));
+        return back + '<div class="vdpg-dr-body">' + syn +
+            (genres ? '<div class="vdpg-dr-genres">' + esc(genres) + '</div>' : '') +
+            castHTML + '<div class="vdpg-dr-st">Download</div><div class="vdpg-dr-facts">' + facts + '</div>' +
+            actions + '</div>';
+    }
+    function renderDrawer(el, d) {
+        var dr = el.querySelector('[data-f="drawer"]'); if (!dr) return;
+        var open = !!_expanded[d.id];
+        el.classList.toggle('vdpg-card-open', open);
+        dr.hidden = !open;
+        if (!open) { dr.innerHTML = ''; return; }
+        dr.innerHTML = drawerHTML(d, _meta[d.id]);
+        // lazily fetch TMDB detail for movie/TV (skip youtube + owned library re-grabs)
+        if (_meta[d.id] === undefined && d.media_id && dlType(d.kind) !== 'youtube' && d.media_source !== 'library') {
+            _meta[d.id] = null;
+            var k = dlType(d.kind) === 'movie' ? 'movie' : 'show';
+            getJSON('/api/video/downloads/meta/' + k + '/' + encodeURIComponent(d.media_id)).then(function (m) {
+                _meta[d.id] = m || {};
+                if (_expanded[d.id]) { var dr2 = el.querySelector('[data-f="drawer"]'); if (dr2) dr2.innerHTML = drawerHTML(d, _meta[d.id]); }
+            });
+        }
     }
 
     function render(list) {
@@ -260,11 +342,26 @@
                 }));
                 return;
             }
+            var cp = e.target.closest('[data-vdpg-copy]');
+            if (cp) {
+                var path = cp.getAttribute('data-vdpg-copy');
+                if (navigator.clipboard) navigator.clipboard.writeText(path).then(function () { toast('Path copied', 'success'); }, function () {});
+                else toast('Copy not supported here', 'info');
+                return;
+            }
             var c = e.target.closest('[data-vdpg-cancel]');
             if (c) { c.disabled = true; c.classList.add('adl-row-cancel-pending'); postJSON(URL_CANCEL, { id: +c.getAttribute('data-vdpg-cancel') }).then(function () { poll(); }); return; }
             var r = e.target.closest('[data-vdpg-retry]');
             if (r) { r.disabled = true; postJSON(URL_RETRY, { id: +r.getAttribute('data-vdpg-retry') }).then(function (res) {
-                if (res && res.ok) toast('Retrying', 'info'); else toast((res && res.error) || 'Retry failed', 'error'); poll(); }); }
+                if (res && res.ok) toast('Retrying', 'info'); else toast((res && res.error) || 'Retry failed', 'error'); poll(); }); return; }
+            // click anywhere on the row (but not the drawer body or a control) → toggle the detail drawer
+            if (e.target.closest('[data-f="drawer"]') || e.target.closest('button, a')) return;
+            var card = e.target.closest('.adl-row[data-dl-id]');
+            if (card && card._d) {
+                var cid = card.getAttribute('data-dl-id');
+                _expanded[cid] = !_expanded[cid];
+                renderDrawer(card, card._d);
+            }
         });
     }
 

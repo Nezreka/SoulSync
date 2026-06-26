@@ -3797,6 +3797,45 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 /* quality chip follows the type color */
 .vdpg-card .vdpg-qchip { background: rgba(var(--vt), 0.16); border-color: rgba(var(--vt), 0.36); }
 
+/* ── click-to-expand detail drawer (wraps full-width below the row) ── */
+.vdpg-card { flex-wrap: wrap; cursor: pointer; }
+.vdpg-drawer { flex: 0 0 100%; width: 100%; margin-top: 12px; position: relative; cursor: default;
+    border-top: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; overflow: hidden; background: rgba(0, 0, 0, 0.2); }
+.vdpg-dr-back { position: absolute; inset: 0; background-size: cover; background-position: center 20%; opacity: 0.16;
+    -webkit-mask-image: linear-gradient(180deg, #000, transparent 78%); mask-image: linear-gradient(180deg, #000, transparent 78%); }
+.vdpg-dr-body { position: relative; padding: 16px 18px 18px; }
+.vdpg-dr-syn { font-size: 13px; line-height: 1.55; color: rgba(255, 255, 255, 0.82); margin: 0 0 10px; max-width: 80ch; }
+.vdpg-dr-muted { color: rgba(255, 255, 255, 0.4); font-style: italic; }
+.vdpg-dr-genres { font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: rgb(var(--vt)); }
+.vdpg-dr-st { font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.4); margin: 16px 0 9px; }
+.vdpg-dr-cast { display: flex; flex-wrap: wrap; gap: 12px; }
+.vdpg-cast { width: 82px; text-align: center; }
+.vdpg-cast-pic { display: block; width: 56px; height: 56px; margin: 0 auto 5px; border-radius: 50%; background-size: cover;
+    background-position: center; background-color: rgba(255, 255, 255, 0.08); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
+.vdpg-cast-none { display: grid; place-items: center; font-size: 20px; font-weight: 800; color: rgba(255, 255, 255, 0.5); }
+.vdpg-cast-nm { display: block; font-size: 11.5px; font-weight: 700; color: #fff; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdpg-cast-ch { display: block; font-size: 10.5px; color: rgba(255, 255, 255, 0.45); line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vdpg-dr-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 26px; }
+.vdpg-f { display: flex; gap: 10px; font-size: 12.5px; min-width: 0; align-items: baseline; }
+.vdpg-f-wide { grid-column: 1 / -1; }
+.vdpg-fk { flex: 0 0 92px; color: rgba(255, 255, 255, 0.42); font-weight: 600; }
+.vdpg-fv { color: rgba(255, 255, 255, 0.88); min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.vdpg-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11.5px; word-break: break-all; }
+.vdpg-f-err .vdpg-fv { color: #f8a0a0; }
+.vdpg-copy { flex: 0 0 auto; margin-left: auto; width: 24px; height: 22px; border-radius: 6px; cursor: pointer;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.7); }
+.vdpg-copy:hover { background: rgba(var(--vt), 0.22); border-color: rgba(var(--vt), 0.5); color: #fff; }
+.vdpg-dr-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.vdpg-dr-btn { padding: 8px 16px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; text-decoration: none;
+    background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.14); color: rgba(255, 255, 255, 0.85); transition: all 0.15s; }
+.vdpg-dr-btn:hover { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
+.vdpg-dr-accent { background: rgba(var(--vt), 0.18); border-color: rgba(var(--vt), 0.5); color: #fff; }
+.vdpg-dr-danger:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
+@media (max-width: 620px) { .vdpg-dr-facts { grid-template-columns: 1fr; } }
+
 
 /* Automation Hub panes that are music-specific — emptied on the video side for now. */
 .vauto-hub-soon { padding: 36px 20px; text-align: center; font-size: 13.5px; font-weight: 600;
