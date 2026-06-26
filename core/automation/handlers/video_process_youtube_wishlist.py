@@ -91,6 +91,13 @@ def _default_start_next() -> Any:
     return start_next_queued(get_video_db)
 
 
+def _default_reap() -> int:
+    """Recover downloads orphaned by a restart (stuck 'downloading', no live worker)."""
+    from api.video import get_video_db
+    from core.video.youtube_download import requeue_orphaned_youtube
+    return requeue_orphaned_youtube(get_video_db)
+
+
 def auto_video_process_youtube_wishlist(
     config: Dict[str, Any],
     deps: AutomationDeps,
@@ -101,6 +108,7 @@ def auto_video_process_youtube_wishlist(
     running_count: Optional[Callable[[], int]] = None,
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
     start_next: Optional[Callable[[], Any]] = None,
+    reap: Optional[Callable[[], int]] = None,
 ) -> Dict[str, Any]:
     """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
 
@@ -111,6 +119,7 @@ def auto_video_process_youtube_wishlist(
     running_count = running_count or _default_running_count
     enqueue = enqueue or _default_enqueue
     start_next = start_next or _default_start_next
+    reap = reap or _default_reap
     automation_id = config.get('_automation_id')
     max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
 
@@ -124,6 +133,13 @@ def auto_video_process_youtube_wishlist(
                                  log_type='info')
             return {'status': 'completed', 'queued': 0, 'started': 0, 'running': 0,
                     'skipped': 'no_youtube_folder', '_manages_own_progress': True}
+
+        # Recover any downloads orphaned by a restart (stuck 'downloading', no worker) so
+        # they don't wedge the concurrency count — they go back to 'queued' and re-run.
+        recovered = int(reap() or 0)
+        if recovered:
+            deps.update_progress(automation_id, log_type='info',
+                                 log_line='Recovered %d stalled download(s) from a restart' % recovered)
 
         deps.update_progress(automation_id, phase='Checking the YouTube wishlist…', progress=15,
                              log_line='Queueing new videos for download', log_type='info')

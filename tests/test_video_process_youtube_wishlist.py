@@ -66,7 +66,7 @@ def _run(wanted, *, active=None, running=0, root="/yt", max_concurrent=3, start_
         {"_automation_id": "a", "max_concurrent": max_concurrent}, deps,
         youtube_root=lambda: root, fetch_wanted=lambda: wanted,
         active_ids=lambda: list(active or []), running_count=lambda: running,
-        enqueue=enqueue, start_next=start_next)
+        enqueue=enqueue, start_next=start_next, reap=lambda: 0)
     return res, enq, starts["n"], deps
 
 
@@ -130,7 +130,7 @@ def test_one_bad_enqueue_does_not_stop_the_rest():
         {"_automation_id": "x", "max_concurrent": 5}, _Deps(),
         youtube_root=lambda: "/yt", fetch_wanted=lambda: [_v("a"), _v("b")],
         active_ids=lambda: [], running_count=lambda: 0, enqueue=enqueue,
-        start_next=lambda: None)
+        start_next=lambda: None, reap=lambda: 0)
     assert res["status"] == "completed" and res["queued"] == 1   # b still queued
 
 
@@ -138,8 +138,21 @@ def test_top_level_error_is_caught():
     def boom():
         raise RuntimeError("db down")
     res = auto_video_process_youtube_wishlist({"_automation_id": "x"}, _Deps(),
-                                              youtube_root=lambda: "/yt", fetch_wanted=boom)
+                                              youtube_root=lambda: "/yt", fetch_wanted=boom,
+                                              reap=lambda: 0)
     assert res["status"] == "error" and "db down" in res["error"]
+
+
+def test_reaper_runs_and_is_reported():
+    # the drain recovers restart-orphaned downloads before pumping, and logs the count
+    deps = _Deps()
+    res = auto_video_process_youtube_wishlist(
+        {"_automation_id": "a", "max_concurrent": 3}, deps,
+        youtube_root=lambda: "/yt", fetch_wanted=lambda: [], active_ids=lambda: [],
+        running_count=lambda: 0, enqueue=lambda v, r: 1, start_next=lambda: None,
+        reap=lambda: 2)
+    assert res["status"] == "completed"
+    assert any("Recovered 2 stalled" in (p.get("log_line") or "") for p in deps.progress)
 
 
 # ── the DB queue methods ──────────────────────────────────────────────────────

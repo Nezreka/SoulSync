@@ -137,6 +137,34 @@ def test_process_failure_archives_but_keeps_the_wish():
     assert calls["unwish"] == []                         # wish kept so it can retry later
 
 
+def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
+    """After a restart no worker threads survive, so any 'downloading' YouTube row is an
+    orphan → back to 'queued'. A row whose worker is still alive (in _active_worker_ids) and
+    non-youtube / non-downloading rows are left alone."""
+    updates = []
+
+    class _DB:
+        def get_active_video_downloads(self):
+            return [
+                {"id": 1, "source": "youtube", "status": "downloading"},   # orphan → requeue
+                {"id": 2, "source": "youtube", "status": "downloading"},   # live worker → keep
+                {"id": 3, "source": "youtube", "status": "queued"},        # not downloading → keep
+                {"id": 4, "source": "soulseek", "status": "downloading"},  # not youtube → keep
+            ]
+
+        def update_video_download(self, dl_id, **kw):
+            updates.append((dl_id, kw))
+
+    ytd._active_worker_ids.clear()
+    ytd._active_worker_ids.add(2)                      # id 2 has a live worker
+    try:
+        n = ytd.requeue_orphaned_youtube(lambda: _DB())
+    finally:
+        ytd._active_worker_ids.clear()
+    assert n == 1
+    assert updates == [(1, {"status": "queued", "progress": 0})]   # only the orphan
+
+
 def test_process_passes_the_organised_dir_to_the_downloader():
     seen = {}
 
