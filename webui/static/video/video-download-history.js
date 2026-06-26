@@ -73,6 +73,7 @@
                         '<svg class="vdh-search-ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>' +
                         '<input type="text" class="vdh-search-input" data-vdh-search placeholder="Search history…" autocomplete="off" spellcheck="false">' +
                     '</div>' +
+                    '<button class="vdh-clear" type="button" data-vdh-clear title="Clear the whole download history">Clear</button>' +
                 '</div>' +
                 '<div class="vdh-body" data-vdh-body></div>' +
                 '<div class="vdh-foot" data-vdh-foot hidden>' +
@@ -86,6 +87,39 @@
             var tab = e.target.closest('[data-vdh-tab]');
             if (tab) { setTab(tab.getAttribute('data-vdh-tab')); return; }
             if (e.target.closest('[data-vdh-more]')) { state.page++; load(true); return; }
+            // Re-download: forget this grab so the scans re-add + re-grab it.
+            var redl = e.target.closest('[data-vdh-redl]');
+            if (redl) {
+                e.stopPropagation();
+                redl.disabled = true;
+                fetch('/api/video/downloads/history/' + encodeURIComponent(redl.getAttribute('data-vdh-redl')),
+                    { method: 'DELETE', headers: { Accept: 'application/json' } })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        if (d && d.success) {
+                            if (typeof showToast === 'function') showToast("Forgotten — it'll re-download on the next scan", 'success');
+                            var r2 = redl.closest('[data-vdh-row]'); if (r2) r2.remove();
+                        } else { redl.disabled = false; }
+                    }).catch(function () { redl.disabled = false; });
+                return;
+            }
+            // Clear all history (guarded — it's permanent).
+            if (e.target.closest('[data-vdh-clear]')) {
+                var go = function () {
+                    fetch('/api/video/downloads/history/clear',
+                        { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: '{}' })
+                        .then(function (r) { return r.json(); })
+                        .then(function (d) {
+                            if (typeof showToast === 'function') showToast('Cleared ' + ((d && d.removed) || 0) + ' from history', 'info');
+                            state.page = 1; load();
+                        });
+                };
+                if (typeof showConfirmDialog === 'function') {
+                    showConfirmDialog({ title: 'Clear download history', message: 'Forget the entire download history? Items still wanted may re-download.', confirmText: 'Clear', destructive: true })
+                        .then(function (ok) { if (ok) go(); });
+                } else if (window.confirm('Clear the entire download history?')) { go(); }
+                return;
+            }
             var row = e.target.closest('[data-vdh-row]');
             if (row) { row.classList.toggle('vdh-row--open'); }
         });
@@ -132,6 +166,10 @@
                 dl('Finished', fmtWhen(it.completed_at)) +
                 dl('Path', it.dest_path) +
                 (it.error ? '<div class="vdh-d vdh-d--err"><span class="vdh-d-k">Error</span><span class="vdh-d-v">' + esc(it.error) + '</span></div>' : '') +
+                '<div class="vdh-detail-act">' +
+                    '<button class="vdh-redl" type="button" data-vdh-redl="' + esc(it.id) +
+                        '" title="Forget this grab so it re-downloads on the next scan">&#8635; Re-download</button>' +
+                '</div>' +
             '</div>';
 
         return '<div class="vdh-row" data-vdh-row data-id="' + esc(it.id) + '">' +

@@ -3893,6 +3893,15 @@ body.vdh-locked { overflow: hidden; }
     transition: border-color 0.2s, box-shadow 0.2s; }
 .vdh-search:focus-within { border-color: rgba(var(--accent-rgb), 0.6); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.16); }
 .vdh-search-ic { flex: 0 0 auto; color: rgba(255, 255, 255, 0.4); }
+.vdh-clear { flex: 0 0 auto; height: 38px; padding: 0 16px; border-radius: 11px; cursor: pointer; box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.75);
+    font-size: 12.5px; font-weight: 700; transition: all 0.15s; }
+.vdh-clear:hover { background: rgba(239, 68, 68, 0.85); border-color: transparent; color: #fff; }
+.vdh-detail-act { grid-column: 1 / -1; margin-top: 8px; }
+.vdh-redl { padding: 7px 14px; border-radius: 9px; cursor: pointer; font-size: 12.5px; font-weight: 700; transition: all 0.15s;
+    background: rgba(var(--accent-rgb), 0.16); border: 1px solid rgba(var(--accent-rgb), 0.4); color: #fff; }
+.vdh-redl:hover { background: rgba(var(--accent-rgb), 0.32); }
+.vdh-redl:disabled { opacity: 0.5; cursor: default; }
 .vdh-search:focus-within .vdh-search-ic { color: rgba(var(--accent-rgb), 0.95); }
 .vdh-search-input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none;
     color: #fff; font-size: 13px; }

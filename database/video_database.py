@@ -1645,6 +1645,33 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def delete_download_history(self, history_id) -> bool:
+        """Forget one history grab — so the scans stop deduping against it and re-grab it
+        (the 'Re-download' action after you've deleted the file). Returns True if removed."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("DELETE FROM video_download_history WHERE id=?", (int(history_id),))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
+    def clear_download_history(self, kind=None) -> int:
+        """Clear the permanent history — all of it, or just one kind ('movie'|'show'|
+        'youtube'). Returns the number of rows removed."""
+        conn = self._get_connection()
+        try:
+            if kind in ("movie", "show", "youtube"):
+                cur = conn.execute("DELETE FROM video_download_history WHERE kind=?", (kind,))
+            else:
+                cur = conn.execute("DELETE FROM video_download_history")
+            conn.commit()
+            return cur.rowcount
+        finally:
+            conn.close()
+
     def latest_completed_download(self, media_type: str = "all") -> dict | None:
         """The most recently completed grab of a type — the probe target for the smart
         post-download scan. ``media_type`` ∈ movie|show|all."""

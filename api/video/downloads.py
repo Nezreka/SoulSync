@@ -148,6 +148,21 @@ def register_routes(bp):
             return jsonify({"success": False, "error": "not found"}), 404
         return jsonify({"success": True, "item": d})
 
+    @bp.route("/downloads/history/<int:history_id>", methods=["DELETE"])
+    def video_downloads_history_delete(history_id):
+        """Forget one grab — the 'Re-download' action. Removing its history row lets the
+        scans re-add + re-grab it (useful after you've deleted the file)."""
+        from . import get_video_db
+        return jsonify({"success": get_video_db().delete_download_history(history_id)})
+
+    @bp.route("/downloads/history/clear", methods=["POST"])
+    def video_downloads_history_clear():
+        """Clear the permanent history (all, or one kind via {kind})."""
+        from . import get_video_db
+        body = request.get_json(silent=True) or {}
+        n = get_video_db().clear_download_history(kind=body.get("kind"))
+        return jsonify({"success": True, "removed": n})
+
     @bp.route("/downloads/quality", methods=["GET"])
     def video_quality_profile():
         from . import get_video_db
