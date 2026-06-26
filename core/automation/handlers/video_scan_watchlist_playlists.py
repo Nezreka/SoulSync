@@ -11,7 +11,7 @@ Organisation: the playlist becomes its own "show" (playlist-as-show) — its vid
 wishlisted under the playlist's title, so the download worker files them as
 ``Playlist Name / Season YEAR / Playlist Name - DATE - Title`` (matches the ytdl-sub
 ``tv_show_name``-on-a-playlist convention). All other plumbing is shared with channels: the
-same wishlist rows, the same "Download YouTube Wishlist" drain, quality + org template.
+same wishlist rows, the same "Process YouTube Wishlist" drain, quality + org template.
 
 Edge: a video in both a followed channel AND a followed playlist is wishlisted once (dedup
 by video id); whichever scan touched it last sets its show-name. Accepted.

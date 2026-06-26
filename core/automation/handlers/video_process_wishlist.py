@@ -1,4 +1,4 @@
-"""Automation handlers: ``video_download_movie_wishlist`` / ``video_download_episode_wishlist``.
+"""Automation handlers: ``video_process_movie_wishlist`` / ``video_process_episode_wishlist``.
 
 The Soulseek counterpart of the YouTube wishlist drain — the piece that finally makes the
 people/airing scans pay off. For wished, RELEASED movies (and aired episodes) it searches
