@@ -274,6 +274,16 @@ ACTIONS: list[dict] = [
      ]},
     {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",
      "description": "For every YouTube playlist you follow, wishlist its videos you don't have yet (and anything later added to it) — mirrors the whole list. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},
+    {"type": "video_download_movie_wishlist", "label": "Download Movie Wishlist", "icon": "download", "scope": "video",
+     "description": "Auto-grab your wished, released MOVIES from Soulseek: searches each, picks the best release per your quality profile, and downloads it (the monitor finishes + organises it). Skips unreleased ('monitored') ones and any already downloading. Needs the Movie library folder + slskd set. Pair with an hourly schedule.", "available": True,
+     "config_fields": [
+         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
+     ]},
+    {"type": "video_download_episode_wishlist", "label": "Download Episode Wishlist", "icon": "download", "scope": "video",
+     "description": "Auto-grab your wished EPISODES from Soulseek: searches each, picks the best release per your quality profile, and downloads it. Fed by the 'Wishlist Today's Airings' scan. Needs the TV library folder + slskd set. Pair with an hourly schedule.", "available": True,
+     "config_fields": [
+         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous searches", "default": 3, "min": 1}
+     ]},
     {"type": "video_process_youtube_wishlist", "label": "Download YouTube Wishlist", "icon": "download", "scope": "video",
      "description": "Download wished YouTube videos (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). Queues the WHOLE wishlist — the setting only limits how many download at the same time; each finished one starts the next, so it all drains. A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads.", "available": True,
      "config_fields": [

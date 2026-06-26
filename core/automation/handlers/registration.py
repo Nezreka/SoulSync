@@ -41,6 +41,7 @@ from core.automation.handlers.video_scan_watchlist_people import auto_video_scan
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
 from core.automation.handlers.video_scan_watchlist_playlists import auto_video_scan_watchlist_playlists
+from core.automation.handlers.video_process_wishlist import auto_video_process_wishlist, is_running
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -253,6 +254,18 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_process_youtube_wishlist',
         lambda config: auto_video_process_youtube_wishlist(config, deps),
+    )
+    # Soulseek drain: auto-grab wished movies / episodes (search → pick best → download).
+    # The guard skips an hourly tick while a drain is still working (searches are slow).
+    engine.register_action_handler(
+        'video_download_movie_wishlist',
+        lambda config: auto_video_process_wishlist(config, deps, media_type='movie'),
+        lambda: is_running('movie'),
+    )
+    engine.register_action_handler(
+        'video_download_episode_wishlist',
+        lambda config: auto_video_process_wishlist(config, deps, media_type='episode'),
+        lambda: is_running('episode'),
     )
 
     # Progress + history callbacks: the engine invokes these around

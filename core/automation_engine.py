@@ -279,6 +279,27 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1500,
         'owned_by': 'video',
     },
+    # Soulseek drains: auto-grab wished movies / episodes hourly (search → pick best →
+    # download). A guard skips the tick while a drain is still working. Skip quietly until
+    # the library folder + slskd are set.
+    {
+        'name': 'Auto-Download Movie Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_download_movie_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1620,
+        'owned_by': 'video',
+    },
+    {
+        'name': 'Auto-Download Episode Wishlist',
+        'trigger_type': 'schedule',
+        'trigger_config': {'interval': 1, 'unit': 'hours'},
+        'action_type': 'video_download_episode_wishlist',
+        'action_config': {'max_concurrent': 3},
+        'initial_delay': 1740,
+        'owned_by': 'video',
+    },
 ]
 
 

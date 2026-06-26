@@ -2465,6 +2465,32 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def movie_wishlist_to_download(self) -> list:
+        """Wished movies ready to grab: only ``status='wanted'`` (released) — skips
+        'monitored' (unreleased) and anything the engine already advanced
+        (searching/downloading/downloaded/failed). Newest year first."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT tmdb_id, title, year, poster_url FROM video_wishlist "
+                "WHERE kind='movie' AND status='wanted' AND tmdb_id IS NOT NULL "
+                "ORDER BY year DESC, id DESC")]
+        finally:
+            conn.close()
+
+    def episode_wishlist_to_download(self) -> list:
+        """Wished episodes ready to grab (all of them — the airing scan only wishlists
+        episodes that have aired). Newest air date first."""
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT tmdb_id AS show_tmdb_id, title AS show_title, season_number, "
+                "episode_number, episode_title, air_date, poster_url, library_id "
+                "FROM video_wishlist WHERE kind='episode' AND tmdb_id IS NOT NULL "
+                "ORDER BY air_date DESC, id DESC")]
+        finally:
+            conn.close()
+
     def add_episodes_to_wishlist(self, show_tmdb_id, show_title, episodes, *,
                                  poster_url=None, library_id=None, server_source=None) -> int:
         """Wish for one or more episodes of a show (the show's tmdb id keys them).
