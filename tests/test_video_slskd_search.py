@@ -49,3 +49,35 @@ def test_group_skips_non_video_and_samples():
 def test_group_handles_garbage():
     assert group_video_files(None) == []
     assert group_video_files([{"nope": 1}, "junk"]) == []
+
+
+# ── search-creation rate-limit throttle (avoids slskd 429s) ──────────────────
+import core.video.slskd_search as _ss  # noqa: E402
+
+
+def _reset_throttle():
+    _ss._SEARCH_TIMES.clear()
+    _ss._COOLDOWN_UNTIL[0] = 0.0
+
+
+def test_throttle_spaces_consecutive_creations():
+    _reset_throttle()
+    t1 = _ss._reserve_search_slot()
+    t2 = _ss._reserve_search_slot()
+    assert t2 - t1 >= _ss._MIN_GAP_SECONDS - 0.01       # min gap between creations
+
+
+def test_throttle_window_cap_holds_the_overflow():
+    _reset_throttle()
+    times = [_ss._reserve_search_slot() for _ in range(_ss._MAX_PER_WINDOW + 1)]
+    # the one past the window cap waits ~a full window past the first
+    assert times[-1] >= times[0] + _ss._WINDOW_SECONDS - 0.5
+
+
+def test_429_sets_a_cooldown():
+    import time
+    _reset_throttle()
+    _ss._note_rate_limited("10")                        # Retry-After: 10s
+    nxt = _ss._reserve_search_slot()
+    assert nxt >= time.monotonic() + 8                  # next search waits out the cooldown
+    _reset_throttle()
