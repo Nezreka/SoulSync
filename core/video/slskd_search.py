@@ -30,7 +30,10 @@ def _conn():
     from config.settings import config_manager
     base = str(config_manager.get("soulseek.slskd_url", "") or "").rstrip("/")
     key = config_manager.get("soulseek.api_key", "") or ""
-    return base, ({"X-API-Key": key} if key else {})
+    headers = {"Accept": "application/json"}   # make slskd answer in JSON, not whatever default
+    if key:
+        headers["X-API-Key"] = key
+    return base, headers
 
 
 def build_query(scope: str, title: Any, *, year: Any = None, season: Any = None,
@@ -128,23 +131,38 @@ def search_timeout_ms() -> int:
 
 def start_search(query: str) -> dict:
     """Kick off a slskd search (don't wait). Returns {configured[, id][, error]}.
-    The caller polls ``poll_responses(id)`` until satisfied (like the music side)."""
+    The caller polls ``poll_responses(id)`` until satisfied (like the music side).
+
+    We generate the search id OURSELVES and pass it to slskd — it honors a client-supplied
+    ``id`` — so we never depend on parsing it back out of the POST response. Some slskd builds
+    return the id in a Location header / a non-dict body, which made us think the search
+    'didn't run' even though slskd created it (the bug behind the fast 'no results')."""
+    import uuid
     base, headers = _conn()
     if not base:
         return {"configured": False}
-    payload = {"searchText": query, "timeout": search_timeout_ms(), "filterResponses": True,
-               "minimumResponseFileCount": 1, "minimumPeerUploadSpeed": _min_speed_bytes()}
+    search_id = str(uuid.uuid4())
+    payload = {"id": search_id, "searchText": query, "timeout": search_timeout_ms(),
+               "filterResponses": True, "minimumResponseFileCount": 1,
+               "minimumPeerUploadSpeed": _min_speed_bytes()}
     try:
         r = requests.post(base + "/api/v0/searches", json=payload, headers=headers, timeout=15)
         r.raise_for_status()
-        data = r.json()
     except Exception as e:   # noqa: BLE001 - surface any slskd/network failure to the UI
         return {"configured": True, "error": str(e)}
-    sid = data.get("id") if isinstance(data, dict) else (
-        data[0].get("id") if isinstance(data, list) and data and isinstance(data[0], dict) else None)
-    if not sid:
-        return {"configured": True, "error": "slskd returned no search id"}
-    return {"configured": True, "id": sid}
+    # Prefer the id slskd echoes back if present; otherwise the one we supplied (it's honored).
+    sid = None
+    try:
+        data = r.json()
+        if isinstance(data, dict):
+            sid = data.get("id")
+        elif isinstance(data, str) and data.strip():
+            sid = data.strip().strip('"')
+        elif isinstance(data, list) and data and isinstance(data[0], dict):
+            sid = data[0].get("id")
+    except Exception:   # noqa: BLE001, S110 - non-JSON / empty body → fall back to our id
+        pass
+    return {"configured": True, "id": sid or search_id}
 
 
 def stop_search(search_id) -> None:
