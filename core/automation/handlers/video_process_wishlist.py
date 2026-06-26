@@ -133,10 +133,10 @@ def _default_search(item: Dict[str, Any], media_type: str):
                         season=ctx.get("season"), episode=ctx.get("episode"))
     res = _search_for_retry(query) or {}
     if res.get("started") is False:
-        return None                         # slskd didn't accept the search
+        return None, res.get("error")       # slskd didn't accept the search — pass the reason
     profile = load_profile(get_video_db())
     return _evaluate_hits(res.get("hits") or [], profile, ctx["scope"],
-                          ctx.get("season"), ctx.get("episode"))
+                          ctx.get("season"), ctx.get("episode")), None
 
 
 def _default_enqueue(item: Dict[str, Any], best: Dict[str, Any], candidates: List[Dict[str, Any]],
@@ -223,7 +223,9 @@ def auto_video_process_wishlist(
         lock = threading.Lock()
 
         def _one(it):
-            cands = search(it, media_type)
+            found = search(it, media_type)
+            # the seam returns (candidates, error); tolerate a bare list/None too (test fakes)
+            cands, err = found if isinstance(found, tuple) else (found, None)
             didnt_run = cands is None       # slskd not configured / errored / rate-limited
             cands = cands or []
             best = pick_best(cands)
@@ -236,7 +238,9 @@ def auto_video_process_wishlist(
             if ok:
                 msg, lt = "Grabbed '%s'" % name, 'success'
             elif didnt_run:
-                msg, lt = "Search didn't run for '%s' — slskd not responding?" % name, 'warning'
+                msg = ("Search didn't run for '%s' — slskd error: %s" % (name, err)) if err \
+                    else ("Search didn't run for '%s' — slskd not responding?" % name)
+                lt = 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'
             else:
