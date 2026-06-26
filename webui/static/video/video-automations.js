@@ -25,6 +25,29 @@
         return a && a.owned_by === 'video';
     }
 
+    // The API returns system automations newest-created-first, which jumbles them (a
+    // re-seeded row jumps to the top). Impose a logical top-to-bottom pipeline order
+    // instead. Scoped to THIS page — the music page's ordering is untouched. Unknown /
+    // future action types fall to the end, keeping their API order (stable sort).
+    var _SYS_ORDER = [
+        // Stage 1 — scans that FILL the wishlist
+        'video_scan_watchlist_people', 'video_scan_watchlist_channels',
+        'video_scan_watchlist_playlists', 'video_add_airing_episodes',
+        // Stage 2 — processors that DRAIN it (download)
+        'video_process_movie_wishlist', 'video_process_episode_wishlist', 'video_process_youtube_wishlist',
+        // Library scan / sync
+        'video_scan_server', 'video_update_database', 'video_deep_scan_tv', 'video_deep_scan_movies',
+        // Maintenance
+        'video_clean_search_history', 'video_clean_completed_downloads', 'video_full_cleanup', 'video_backup_database',
+    ];
+    function _sysOrderIndex(a) {
+        var i = _SYS_ORDER.indexOf(a && a.action_type);
+        return i === -1 ? _SYS_ORDER.length : i;
+    }
+    function sortSystem(list) {
+        return list.slice().sort(function (a, b) { return _sysOrderIndex(a) - _sysOrderIndex(b); });
+    }
+
     function renderSystem(sys) {
         var host = document.querySelector('[data-vauto-list]'); if (!host) return;
         var emptyEl = document.querySelector('[data-vauto-empty]');
@@ -71,7 +94,7 @@
     function load() {
         return getJSON('/api/automations').then(function (d) {
             var all = Array.isArray(d) ? d : (d && d.automations) || [];
-            var sys = all.filter(isVideoAutomation);
+            var sys = sortSystem(all.filter(isVideoAutomation));
             renderStats(sys);
             renderSystem(sys);
             renderHubOnce();
