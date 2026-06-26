@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import threading
 import time
 from typing import Any, Callable, Dict, Optional
@@ -137,6 +138,12 @@ def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, con
     return {"ok": True, "dest_path": dest_path, "error": None}
 
 
+def _default_move(src: str, dest: str) -> None:
+    """Move a finished staged file into the library, creating the target folders."""
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    shutil.move(src, dest)
+
+
 def process_youtube_download(
     dl: Dict[str, Any],
     *,
@@ -146,11 +153,18 @@ def process_youtube_download(
     update_row: Callable[..., Any],
     archive: Callable[[Dict[str, Any], Dict[str, Any]], Any],
     clear_wishlist: Callable[[Any], Any],
+    stage_dir: Optional[str] = None,
+    move: Callable[[str, str], Any] = _default_move,
     progress_hook: Optional[Callable] = None,
     cookie_opts: Optional[dict] = None,
     now: Optional[Callable[[], str]] = None,
 ) -> Dict[str, Any]:
     """Fulfil one queued YouTube download. PURE — all I/O injected.
+
+    Pipeline (same shape as the movie/TV lane): download into ``stage_dir`` (the shared
+    download folder) → flip to 'importing' → MOVE into the organised library path → completed.
+    When ``stage_dir`` is None it downloads straight into the library (legacy fallback, e.g.
+    no download folder configured), skipping the move.
 
     On success: row → completed (with dest_path), snapshot to history, and remove the video
     from the wishlist (it's in the library now; history is the permanent record). On
@@ -159,37 +173,53 @@ def process_youtube_download(
     now = now or (lambda: "")
     settings = settings if isinstance(settings, dict) else {}
     container = format_selection(profile)["merge_output_format"]
-    dest = plan_destination(dl, settings, container)
+    dest = plan_destination(dl, settings, container)        # the FINAL organised library path
     stem, cont = _stem_and_container(dest, container)
+    # Download target: the staging folder when set, else straight to the library. Either way
+    # do NOT write the organised DIR back to target_dir — it's the youtube ROOT, and
+    # plan_destination re-derives the channel/season folders under it; clobbering it re-nests
+    # on a re-run (the orphan reaper re-queues an interrupted download).
+    dl_dir = stage_dir if stage_dir else dest.get("dir")
+    update_row(dl.get("id"), status="downloading", progress=0, filename=dest.get("filename"))
 
-    # Record the organised filename for the Downloads page. CRITICAL: do NOT write the
-    # organised DIR back to target_dir — target_dir is the youtube ROOT, and plan_destination
-    # re-derives the channel/season folders under it. Clobbering it would re-nest on any
-    # re-run (e.g. the orphan reaper re-queues an interrupted download) →
-    # Channel/Season/Channel/Season. Leave target_dir = root so re-processing is idempotent.
-    update_row(dl.get("id"), status="downloading", progress=0,
-               filename=dest.get("filename"))
-
-    res = download(dl.get("media_id"), dest.get("dir"), stem, profile, cont,
+    res = download(dl.get("media_id"), dl_dir, stem, profile, cont,
                    progress_hook=progress_hook, cookie_opts=cookie_opts)
 
-    if res.get("ok"):
-        dest_path = res.get("dest_path") or dest.get("path")
+    if not res.get("ok"):
+        err = res.get("error") or "Download failed"
         completed = now()
-        update_row(dl.get("id"), status="completed", progress=100,
-                   dest_path=dest_path, completed_at=completed)
-        archive(dl, {"status": "completed", "dest_path": dest_path, "completed_at": completed})
-        try:
-            clear_wishlist(dl.get("media_id"))
-        except Exception:   # noqa: BLE001 - unwish is best-effort; the file is already in place
-            logger.exception("youtube download %s: unwish failed", dl.get("id"))
-        return {"status": "completed", "dest_path": dest_path}
+        update_row(dl.get("id"), status="failed", error=err, completed_at=completed)
+        archive(dl, {"status": "failed", "error": err, "completed_at": completed})
+        return {"status": "failed", "error": err}
 
-    err = res.get("error") or "Download failed"
+    staged_path = res.get("dest_path") or os.path.join(dl_dir or "", stem + "." + cont)
+    final_path = dest.get("path") or staged_path
+
+    # Staged build → post-process into the library (the visible 'importing' phase).
+    if stage_dir and staged_path and staged_path != final_path:
+        update_row(dl.get("id"), status="importing", progress=100, filename=dest.get("filename"))
+        try:
+            move(staged_path, final_path)
+        except Exception as e:   # noqa: BLE001 - downloaded fine but couldn't be placed
+            err = "Import failed: " + str(e)
+            completed = now()
+            update_row(dl.get("id"), status="import_failed", error=err, completed_at=completed)
+            archive(dl, {"status": "import_failed", "error": err, "completed_at": completed})
+            logger.exception("youtube download %s: import move failed", dl.get("id"))
+            return {"status": "import_failed", "error": err}
+        dest_path = final_path
+    else:
+        dest_path = staged_path or final_path
+
     completed = now()
-    update_row(dl.get("id"), status="failed", error=err, completed_at=completed)
-    archive(dl, {"status": "failed", "error": err, "completed_at": completed})
-    return {"status": "failed", "error": err}
+    update_row(dl.get("id"), status="completed", progress=100,
+               dest_path=dest_path, completed_at=completed)
+    archive(dl, {"status": "completed", "dest_path": dest_path, "completed_at": completed})
+    try:
+        clear_wishlist(dl.get("media_id"))
+    except Exception:   # noqa: BLE001 - unwish is best-effort; the file is already in place
+        logger.exception("youtube download %s: unwish failed", dl.get("id"))
+    return {"status": "completed", "dest_path": dest_path}
 
 
 # ── concurrency + pacing (the music side's lesson: cap concurrency AND space starts) ──
@@ -295,10 +325,18 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
 
     try:
         _pace(_DELAY_SECONDS)                  # space fetch starts to avoid yt-dlp 429s
+        # Stage into the shared download folder (a 'youtube' subfolder), then transfer to the
+        # library — same pipeline as movies/TV. Falls back to straight-to-library if no
+        # download folder is configured.
+        from config.settings import config_manager
+        dl_root = str(config_manager.get("soulseek.download_path", "") or "").strip()
+        stage_dir = os.path.join(dl_root, "youtube") if dl_root else None
+
         process_youtube_download(
             dl, profile=profile, settings=settings,
             update_row=db.update_video_download, archive=_archive,
             clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
+            stage_dir=stage_dir,
             progress_hook=_progress, cookie_opts=cookie_opts, now=_now)
     finally:
         _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row

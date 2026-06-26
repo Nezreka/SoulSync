@@ -137,6 +137,43 @@ def test_process_failure_archives_but_keeps_the_wish():
     assert calls["unwish"] == []                         # wish kept so it can retry later
 
 
+def test_process_stages_in_download_folder_then_imports_to_library():
+    # the consistent pipeline: download → staging folder → 'importing' → move → library
+    calls, update_row, archive, clear = _recorder()
+    moves = []
+    staged = "/downloads/youtube/Chan - 2024-03-15 - T.mp4"
+    res = ytd.process_youtube_download(
+        _dl(), profile=default_profile(), settings={},
+        download=lambda vid, d, *a, **k: ({"ok": True, "dest_path": staged}
+                                          if d == "/downloads/youtube" else {"ok": False, "error": "wrong dir"}),
+        update_row=update_row, archive=archive, clear_wishlist=clear,
+        stage_dir="/downloads/youtube", move=lambda s, d: moves.append((s, d)), now=lambda: "t")
+    assert res["status"] == "completed"
+    statuses = [kw.get("status") for _, kw in calls["rows"]]
+    assert statuses == ["downloading", "importing", "completed"]      # the visible phases
+    final = "/yt/Chan/Season 2024/Chan - 2024-03-15 - T.mp4"
+    assert moves == [(staged, final)]                                 # staged → organised library
+    assert res["dest_path"] == final and calls["unwish"] == ["vid1"]
+
+
+def test_process_import_failure_is_terminal_and_keeps_the_wish():
+    calls, update_row, archive, clear = _recorder()
+
+    def boom(_s, _d):
+        raise OSError("disk full")
+
+    res = ytd.process_youtube_download(
+        _dl(), profile=default_profile(), settings={},
+        download=lambda *a, **k: {"ok": True, "dest_path": "/downloads/youtube/x.mp4"},
+        update_row=update_row, archive=archive, clear_wishlist=clear,
+        stage_dir="/downloads/youtube", move=boom, now=lambda: "t")
+    assert res["status"] == "import_failed"
+    statuses = [kw.get("status") for _, kw in calls["rows"]]
+    assert statuses == ["downloading", "importing", "import_failed"]
+    assert calls["archive"][-1]["status"] == "import_failed"
+    assert calls["unwish"] == []                                      # not unwished → can retry
+
+
 def test_requeue_orphaned_youtube_recovers_only_dead_downloads():
     """After a restart no worker threads survive, so any 'downloading' YouTube row is an
     orphan → back to 'queued'. A row whose worker is still alive (in _active_worker_ids) and

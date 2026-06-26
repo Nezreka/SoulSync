@@ -1422,19 +1422,21 @@ class VideoDatabase:
         conn = self._get_connection()
         try:
             rows = conn.execute(
-                "SELECT * FROM video_downloads WHERE status IN ('queued', 'downloading', 'searching') ORDER BY id"
+                "SELECT * FROM video_downloads WHERE status IN "
+                "('queued', 'downloading', 'importing', 'searching') ORDER BY id"
             ).fetchall()
             return [dict(r) for r in rows]
         finally:
             conn.close()
 
     def count_active_youtube_downloads(self) -> int:
-        """How many YouTube downloads are ACTIVELY fetching right now (not queued) —
-        the concurrency gauge the wishlist pump checks before starting more."""
+        """How many YouTube downloads are ACTIVELY in flight right now (fetching OR importing,
+        not queued) — the concurrency gauge the wishlist pump checks before starting more.
+        Counting 'importing' too keeps the worker's slot held while it moves into the library."""
         conn = self._get_connection()
         try:
             r = conn.execute("SELECT COUNT(*) AS n FROM video_downloads "
-                             "WHERE source='youtube' AND status='downloading'").fetchone()
+                             "WHERE source='youtube' AND status IN ('downloading', 'importing')").fetchone()
             return int(r["n"]) if r else 0
         finally:
             conn.close()
