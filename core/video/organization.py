@@ -44,9 +44,9 @@ DEFAULTS = {
     "replace_existing": True,
     "transfer_mode": "copy",
     "carry_subtitles": True,
-    "save_artwork": False,
-    "write_nfo": False,
-    "download_subtitles": False,
+    "save_artwork": True,    # nfo + artwork sidecars on by default (cheap, local) — best-in-class
+    "write_nfo": True,
+    "download_subtitles": False,   # opt-in: fetches from OpenSubtitles (external, rate-limited)
     "subtitle_langs": "en",
 }
 
