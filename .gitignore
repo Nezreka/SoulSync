@@ -20,6 +20,7 @@ database/video_library.db
 database/video_library.db-shm
 database/video_library.db-wal
 database/video_library.db.backup_*
+database/*.histbak
 database/api_call_history.json
 storage/image_cache/
 logs/*.log
