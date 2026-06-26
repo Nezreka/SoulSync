@@ -228,6 +228,13 @@ def register_all(deps: AutomationDeps) -> None:
         'video_update_database',
         lambda config: auto_video_update_database(config, deps),
     )
+    # Same incremental update, but on an hourly SCHEDULE (not just after a SoulSync scan) —
+    # so manual library additions (which Plex auto-scans) show up within the hour instead of
+    # waiting for the weekly deep scan. A distinct action_type because the seeder keys on it.
+    engine.register_action_handler(
+        'video_update_database_hourly',
+        lambda config: auto_video_update_database({'mode': 'incremental', **config}, deps),
+    )
     # Sonarr-style: wishlist every episode airing today (for followed shows).
     engine.register_action_handler(
         'video_add_airing_episodes',

@@ -36,7 +36,7 @@
         // Stage 2 — processors that DRAIN it (download)
         'video_process_movie_wishlist', 'video_process_episode_wishlist', 'video_process_youtube_wishlist',
         // Library scan / sync
-        'video_scan_server', 'video_update_database', 'video_deep_scan_tv', 'video_deep_scan_movies',
+        'video_scan_server', 'video_update_database', 'video_update_database_hourly', 'video_deep_scan_tv', 'video_deep_scan_movies',
         // Maintenance
         'video_clean_search_history', 'video_clean_completed_downloads', 'video_full_cleanup', 'video_backup_database',
     ];

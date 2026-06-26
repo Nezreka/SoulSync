@@ -253,6 +253,8 @@ ACTIONS: list[dict] = [
                       {"value": "show", "label": "TV only"}],
           "default": "all"}
      ]},
+    {"type": "video_update_database_hourly", "label": "Update Video Database (Hourly)", "icon": "database", "scope": "video",
+     "description": "The same incremental server-read on an hourly schedule, so manual library additions (which Plex auto-scans) appear within the hour instead of waiting for the weekly deep scan. Pair with a 1-hour Schedule trigger.", "available": True},
     # Per-library deep-scan presets (the system 'Auto-Deep Scan TV/Movie Library' run
     # these). Scope + deep mode are baked in by the registration wrapper, so no config
     # fields — drag one in and it just deep-scans that library.
