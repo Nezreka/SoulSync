@@ -84,7 +84,8 @@ def plan_destination(dl: Dict[str, Any], settings: Dict[str, Any], container: st
 
 
 def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
-                      *, progress_hook: Optional[Callable] = None, cookie_opts: Optional[dict] = None) -> dict:
+                      *, progress_hook: Optional[Callable] = None, postprocess_hook: Optional[Callable] = None,
+                      cookie_opts: Optional[dict] = None) -> dict:
     """The yt-dlp options dict for one download: format selection from the quality profile,
     a fixed output path (dir + stem + yt-dlp's own ext), polite defaults. Pure."""
     sel = format_selection(profile)
@@ -109,6 +110,8 @@ def ydl_download_opts(profile: Any, dest_dir: str, dest_stem: str,
         opts.update(cookie_opts)
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
+    if postprocess_hook:
+        opts["postprocessor_hooks"] = [postprocess_hook]   # fires while ffmpeg merges/converts
     return opts
 
 
@@ -122,7 +125,7 @@ def _stem_and_container(dest: Dict[str, str], container: str) -> tuple:
 
 
 def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, container: str,
-                 *, ydl_factory=None, progress_hook=None, cookie_opts=None) -> Dict[str, Any]:
+                 *, ydl_factory=None, progress_hook=None, postprocess_hook=None, cookie_opts=None) -> Dict[str, Any]:
     """Run yt-dlp for ONE video into ``dest_dir/dest_stem.ext``. Returns
     ``{ok, dest_path|None, error|None}``. The yt-dlp class is injectable for tests."""
     vid = str(video_id or "").strip()
@@ -131,8 +134,8 @@ def download_one(video_id: Any, dest_dir: str, dest_stem: str, profile: Any, con
     factory = ydl_factory or (yt_dlp.YoutubeDL if yt_dlp else None)
     if factory is None:
         return {"ok": False, "dest_path": None, "error": "yt-dlp unavailable"}
-    opts = ydl_download_opts(profile, dest_dir, dest_stem,
-                             progress_hook=progress_hook, cookie_opts=cookie_opts)
+    opts = ydl_download_opts(profile, dest_dir, dest_stem, progress_hook=progress_hook,
+                             postprocess_hook=postprocess_hook, cookie_opts=cookie_opts)
     url = vid if vid.startswith("http") else "https://www.youtube.com/watch?v=" + vid
     try:
         with factory(opts) as ydl:
@@ -241,6 +244,7 @@ def process_youtube_download(
     move: Callable[[str, str], Any] = _default_move,
     sidecars: Callable[[str, str, Dict[str, Any], Dict[str, Any]], Any] = _default_sidecars,
     progress_hook: Optional[Callable] = None,
+    postprocess_hook: Optional[Callable] = None,
     cookie_opts: Optional[dict] = None,
     now: Optional[Callable[[], str]] = None,
 ) -> Dict[str, Any]:
@@ -268,7 +272,7 @@ def process_youtube_download(
     update_row(dl.get("id"), status="downloading", progress=0, filename=dest.get("filename"))
 
     res = download(dl.get("media_id"), dl_dir, stem, profile, cont,
-                   progress_hook=progress_hook, cookie_opts=cookie_opts)
+                   progress_hook=progress_hook, postprocess_hook=postprocess_hook, cookie_opts=cookie_opts)
 
     if not res.get("ok"):
         err = res.get("error") or "Download failed"
@@ -399,6 +403,16 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
         except Exception:   # noqa: BLE001, S110 - a progress glitch must not abort the download
             pass
 
+    def _postprocess(d):
+        # yt-dlp finished the bytes and is now merging audio+video / converting (ffmpeg) — flip
+        # to 'importing' so the card stops sitting on a stuck-looking 100% 'Downloading' until
+        # it (and the library move that follows) are done. Best-effort.
+        try:
+            if d.get("status") in ("started", "processing"):
+                db.update_video_download(dl_id, status="importing", progress=100)
+        except Exception:   # noqa: BLE001, S110 - a hook glitch must not abort the download
+            pass
+
     def _archive(row, upd):
         try:
             db.record_download_history({**row, **upd})
@@ -426,7 +440,7 @@ def run_youtube_download(dl_id: Any, db_provider: Callable) -> None:
             update_row=db.update_video_download, archive=_archive,
             clear_wishlist=lambda vid: db.remove_youtube_from_wishlist("video", vid),
             stage_dir=stage_dir,
-            progress_hook=_progress, cookie_opts=cookie_opts, now=_now)
+            progress_hook=_progress, postprocess_hook=_postprocess, cookie_opts=cookie_opts, now=_now)
     finally:
         _active_worker_ids.discard(dl_id)      # worker done — no longer protects this row
         start_next_queued(db_provider)         # one out, one in — drain the queue

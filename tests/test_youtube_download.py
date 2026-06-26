@@ -49,6 +49,15 @@ def test_ydl_opts_carry_format_selection_and_fixed_output():
     assert opts["noplaylist"] is True
 
 
+def test_ydl_opts_wire_the_postprocess_hook_for_the_merge_phase():
+    # the hook flips the row to 'importing' while ffmpeg merges — so it doesn't sit on 100%
+    def hook(_d):
+        return None
+    opts = ytd.ydl_download_opts(default_profile(), "/d", "stem", postprocess_hook=hook)
+    assert opts["postprocessor_hooks"] == [hook]
+    assert "postprocessor_hooks" not in ytd.ydl_download_opts(default_profile(), "/d", "stem")
+
+
 # ── download_one with an injected yt-dlp ───────────────────────────────────────
 class _FakeYDL:
     def __init__(self, opts):
