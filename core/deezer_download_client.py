@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 
 from core.download_plugins.types import AlbumResult, DownloadStatus, TrackResult
+from core.quality.source_map import quality_from_deezer, quality_tier_for_source
 from utils.logging_config import get_logger
 
 logger = get_logger("deezer_download")
@@ -92,7 +93,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         if download_path is None:
             download_path = config_manager.get('soulseek.download_path', './downloads')
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         # Engine reference is populated by set_engine() at registration
         # time. None until orchestrator wires the registry.
@@ -119,7 +123,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._authenticated = False
 
         # Quality preference
-        self._quality = config_manager.get('deezer_download.quality', 'flac')
+        self._quality = quality_tier_for_source('deezer', default='flac')
 
         # Try to authenticate on init if ARL is configured
         arl = config_manager.get('deezer_download.arl', '')
@@ -597,7 +601,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     bitrate = 128
                     quality = 'mp3'
 
-                results.append(TrackResult(
+                tr = TrackResult(
                     username='deezer_dl',
                     filename=f"{track_id}||{artist} - {title}",
                     size=est_size,
@@ -611,7 +615,10 @@ class DeezerDownloadClient(DownloadSourcePlugin):
                     title=title,
                     album=album,
                     track_number=item.get('track_position'),
-                ))
+                )
+                # Stamp CD-quality FLAC (16/44.1) so lossless ranks correctly.
+                tr.set_quality(quality_from_deezer(self._quality))
+                results.append(tr)
 
             logger.info(f"Deezer search for '{query}' returned {len(results)} results")
             return results, []

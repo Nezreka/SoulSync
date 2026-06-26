@@ -33,6 +33,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_source
 
 logger = get_logger("tidal_download_client")
 
@@ -119,7 +120,10 @@ class TidalDownloadClient(DownloadSourcePlugin):
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         logger.info(f"Tidal download client using download path: {self.download_path}")
 
@@ -455,13 +459,17 @@ class TidalDownloadClient(DownloadSourcePlugin):
             if successful_query and successful_query != query:
                 logger.info(f"Tidal fallback query succeeded: '{successful_query}' (original: '{query}')")
 
-            quality_key = config_manager.get('tidal_download.quality', 'lossless')
+            quality_key = quality_tier_for_source('tidal', default='lossless')
             quality_info = QUALITY_MAP.get(quality_key, QUALITY_MAP['lossless'])
+            # Stamp the configured tier (what will actually be downloaded) so
+            # the global ranker sees real sample_rate/bit_depth.
+            tier_quality = quality_from_tidal_tier(quality_key)
 
             track_results = []
             for track in tidal_tracks:
                 try:
                     track_result = self._tidal_to_track_result(track, quality_info)
+                    track_result.set_quality(tier_quality)
                     track_results.append(track_result)
                 except Exception as e:
                     logger.debug(f"Skipping track conversion error: {e}")
@@ -774,7 +782,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
             logger.error("Tidal session not authenticated")
             return None
 
-        quality_key = config_manager.get('tidal_download.quality', 'lossless')
+        quality_key = quality_tier_for_source('tidal', default='lossless')
         chain = ['hires', 'lossless', 'high', 'low']
         start = chain.index(quality_key) if quality_key in chain else 1
         allow_fallback = config_manager.get('tidal_download.allow_fallback', True)

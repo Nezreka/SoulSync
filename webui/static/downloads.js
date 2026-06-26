@@ -3825,7 +3825,7 @@ function processModalStatusUpdate(playlistId, data) {
                         // Distinguish quarantine outcomes from generic
                         // failures — the file is recoverable, not lost.
                         const _em = (task.error_message || '').toLowerCase();
-                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quarantin')) {
+                        if (_em.includes('integrity check failed') || _em.includes('bit depth filter') || _em.includes('verification failed') || _em.includes('quality filter') || _em.includes('audio guard') || _em.includes('silence guard') || _em.includes('quarantin')) {
                             isQuarantinedTask = true;
                             statusText = '🛡️ Quarantined';
                         } else {

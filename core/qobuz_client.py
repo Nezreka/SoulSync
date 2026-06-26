@@ -29,6 +29,7 @@ from config.settings import config_manager
 
 # Import Soulseek data structures for drop-in replacement compatibility
 from core.download_plugins.types import TrackResult, AlbumResult, DownloadStatus
+from core.quality.source_map import quality_from_qobuz, quality_tier_for_source
 
 logger = get_logger("qobuz_client")
 
@@ -119,7 +120,10 @@ class QobuzClient(DownloadSourcePlugin):
             download_path = config_manager.get('soulseek.download_path', './downloads')
 
         self.download_path = Path(download_path)
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.warning(f"Could not verify download path {self.download_path}: {e}")
 
         logger.info(f"Qobuz client using download path: {self.download_path}")
 
@@ -987,7 +991,7 @@ class QobuzClient(DownloadSourcePlugin):
                 return ([], [])
 
             # Get configured quality for display
-            quality_key = config_manager.get('qobuz.quality', 'lossless')
+            quality_key = quality_tier_for_source('qobuz', default='lossless')
             quality_info = QOBUZ_QUALITY_MAP.get(quality_key, QOBUZ_QUALITY_MAP['lossless'])
 
             track_results = []
@@ -1071,6 +1075,14 @@ class QobuzClient(DownloadSourcePlugin):
             album=album_name,
             track_number=track.get('track_number'),
         )
+
+        # Stamp real API quality so the global ranker sees actual
+        # sample_rate/bit_depth. Hi-res only when the track itself is
+        # hires-streamable; otherwise it streams as CD-quality FLAC.
+        if hires_streamable and max_bit_depth >= 24:
+            track_result.set_quality(quality_from_qobuz(max_sample_rate, max_bit_depth))
+        else:
+            track_result.set_quality(quality_from_qobuz(44.1, 16))
 
         return track_result
 
@@ -1181,7 +1193,7 @@ class QobuzClient(DownloadSourcePlugin):
 
         try:
             # Determine quality
-            quality_key = config_manager.get('qobuz.quality', 'lossless')
+            quality_key = quality_tier_for_source('qobuz', default='lossless')
             quality_info = QOBUZ_QUALITY_MAP.get(quality_key, QOBUZ_QUALITY_MAP['lossless'])
 
             # Quality fallback chain: hires_max → hires → lossless → mp3

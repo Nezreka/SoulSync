@@ -40,6 +40,15 @@ async function copyAddress(address, cryptoName) {
 
 let settingsAutoSaveTimer = null;
 
+// The "Only import AcoustID-verified tracks" toggle (under Quality Profile) is
+// meaningless when AcoustID itself is off — only show it when verification is on.
+function syncAcoustidRequireVerifiedVisibility() {
+    const group = document.getElementById('acoustid-require-verified-group');
+    const enabled = document.getElementById('acoustid-enabled');
+    if (group) group.style.display = (enabled && enabled.checked) ? '' : 'none';
+}
+window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
+
 function debouncedAutoSaveSettings() {
     // Ignore changes made while the page is programmatically populating its
     // fields on load — those aren't user edits and must not trigger a full
@@ -1078,6 +1087,10 @@ async function loadSettingsData() {
         // Populate AcoustID settings
         document.getElementById('acoustid-api-key').value = settings.acoustid?.api_key || '';
         document.getElementById('acoustid-enabled').checked = settings.acoustid?.enabled || false;
+        const _acoustidRequireVerified = document.getElementById('acoustid-require-verified');
+        if (_acoustidRequireVerified) _acoustidRequireVerified.checked = settings.acoustid?.require_verified === true;
+        // Show the "require verified" toggle (under Quality Profile) only when AcoustID is on.
+        if (typeof syncAcoustidRequireVerifiedVisibility === 'function') syncAcoustidRequireVerifiedVisibility();
 
         // Populate Last.fm settings
         document.getElementById('lastfm-api-key').value = settings.lastfm?.api_key || '';
@@ -1153,18 +1166,10 @@ async function loadSettingsData() {
         document.getElementById('max-concurrent-downloads').value = settings.download_source?.max_concurrent || '3';
         loadHybridSourceOrder(settings);
         loadArtSourceOrder(settings);
-        document.getElementById('tidal-download-quality').value = settings.tidal_download?.quality || 'lossless';
-        document.getElementById('tidal-allow-fallback').checked = settings.tidal_download?.allow_fallback !== false;
-        document.getElementById('qobuz-quality').value = settings.qobuz?.quality || 'lossless';
-        document.getElementById('qobuz-allow-fallback').checked = settings.qobuz?.allow_fallback !== false;
-        document.getElementById('hifi-download-quality').value = settings.hifi_download?.quality || 'lossless';
-        document.getElementById('hifi-allow-fallback').checked = settings.hifi_download?.allow_fallback !== false;
+        // Per-source download quality is now derived from the global Quality
+        // Profile (ranked targets) — the per-source quality selects were removed.
         loadHiFiInstances();
-        document.getElementById('deezer-download-quality').value = settings.deezer_download?.quality || 'flac';
-        document.getElementById('deezer-allow-fallback').checked = settings.deezer_download?.allow_fallback !== false;
         document.getElementById('deezer-download-arl').value = settings.deezer_download?.arl || '';
-        document.getElementById('amazon-quality').value = settings.amazon_download?.quality || 'flac';
-        document.getElementById('amazon-allow-fallback').checked = settings.amazon_download?.allow_fallback !== false;
         document.getElementById('lidarr-url').value = settings.lidarr_download?.url || '';
         document.getElementById('lidarr-api-key').value = settings.lidarr_download?.api_key || '';
         const _prowUrl = document.getElementById('prowlarr-url');
@@ -1257,6 +1262,7 @@ async function loadSettingsData() {
         document.getElementById('single-to-album-enabled').checked = settings.metadata_enhancement?.single_to_album === true;
         document.getElementById('lrclib-enabled').checked = settings.metadata_enhancement?.lrclib_enabled !== false;
         document.getElementById('replaygain-enabled').checked = settings.post_processing?.replaygain_enabled === true;
+        document.getElementById('audio-completeness-check').checked = settings.post_processing?.audio_completeness_check === true;
         document.getElementById('duration-tolerance-seconds').value = settings.post_processing?.duration_tolerance_seconds ?? 0;
         document.getElementById('retry-next-candidate').checked = settings.post_processing?.retry_next_candidate_on_mismatch !== false;
         document.getElementById('retry-exhaustive').checked = settings.post_processing?.retry_exhaustive === true;
@@ -1338,6 +1344,8 @@ async function loadSettingsData() {
         }
 
         // Populate Import settings
+        const _qualFilterEl = document.getElementById('import-quality-filter-enabled');
+        if (_qualFilterEl) _qualFilterEl.checked = settings.import?.quality_filter_enabled !== false;  // default ON
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
         if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
@@ -1868,16 +1876,16 @@ function updateDownloadSourceUI() {
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
 
-    // Quality profile is Soulseek-only (it only affects Soulseek downloads) and
-    // downloads-tab-only. Gate the WHOLE collapsible tile (#quality-profile-tile
-    // = header + body) as a unit, so it either fully shows (Soulseek active) or
-    // fully hides — never an empty expandable shell (the earlier bug came from
-    // gating only the inner #quality-profile-section).
+    // Quality profile is now a GLOBAL system — the same ranked-target list
+    // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
+    // no longer Soulseek-gated. Show the whole collapsible tile whenever the
+    // downloads tab is active (gated as a unit so there's never an empty
+    // expandable shell).
     const qualityProfileTile = document.getElementById('quality-profile-tile');
     if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
         const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileTile.style.display = (activeSources.has('soulseek') && onDownloadsTab) ? '' : 'none';
+        qualityProfileTile.style.display = onDownloadsTab ? '' : 'none';
     }
 
     if (activeSources.has('tidal')) {
@@ -1936,6 +1944,16 @@ function updateHybridSecondaryOptions() {
 // ===============================
 
 let currentQualityProfile = null;
+let qualityProfileAutoSaveTimer = null;
+
+// Save just the quality profile (not the whole settings page). Used for quality
+// target edits so reordering a target doesn't re-init every backend client.
+function debouncedSaveQualityProfile() {
+    if (window._suppressSettingsAutoSave) return;
+    if (window._settingsLoadFailed) return;
+    if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
+    qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
+}
 
 async function loadQualityProfile() {
     try {
@@ -1951,246 +1969,277 @@ async function loadQualityProfile() {
     }
 }
 
+// v3: the working copy of the ordered target list. Mirrors the DOM rows
+// and is the single source of truth that collectQualityProfileFromUI reads.
+let currentRankedTargets = [];
+
+function rtLabel(t) {
+    const fmt = (t.format || 'any').toUpperCase();
+    if (RT_LOSSLESS_FORMATS.includes(t.format)) {
+        const bd = t.bit_depth ? `${t.bit_depth}-bit` : '';
+        const sr = t.min_sample_rate ? `≥${t.min_sample_rate / 1000}kHz` : '';
+        const detail = [bd, sr].filter(Boolean).join('/');
+        return detail ? `${fmt} ${detail}` : fmt;
+    }
+    return t.min_bitrate ? `${fmt} ≥${t.min_bitrate}kbps` : fmt;
+}
+
 function populateQualityProfileUI(profile) {
     // Update preset buttons
-    document.querySelectorAll('.preset-button').forEach(btn => {
-        btn.classList.remove('active');
-    });
+    document.querySelectorAll('.preset-button').forEach(btn => btn.classList.remove('active'));
     const activePresetBtn = document.querySelector(`.preset-button[onclick*="${profile.preset}"]`);
-    if (activePresetBtn) {
-        activePresetBtn.classList.add('active');
-    }
+    if (activePresetBtn) activePresetBtn.classList.add('active');
 
-    // Populate each quality tier
-    const qualities = ['flac', 'aac', 'mp3_320', 'mp3_256', 'mp3_192'];
-    qualities.forEach(quality => {
-        const config = profile.qualities[quality];
-        if (config) {
-            // Set enabled checkbox
-            const enabledCheckbox = document.getElementById(`quality-${quality}-enabled`);
-            if (enabledCheckbox) {
-                enabledCheckbox.checked = config.enabled;
-            }
+    // The API migrates v2 → v3, so ranked_targets is always present.
+    currentRankedTargets = Array.isArray(profile.ranked_targets)
+        ? profile.ranked_targets.map(t => ({ ...t }))
+        : [];
+    renderRankedTargets();
 
-            // Set min/max sliders
-            const minSlider = document.getElementById(`${quality}-min`);
-            const maxSlider = document.getElementById(`${quality}-max`);
-            if (minSlider && maxSlider) {
-                minSlider.value = config.min_kbps;
-                maxSlider.value = config.max_kbps;
-                updateQualityRange(quality);
-            }
-
-            // Set priority display
-            const prioritySpan = document.getElementById(`priority-${quality}`);
-            if (prioritySpan) {
-                prioritySpan.textContent = `Priority: ${config.priority}`;
-            }
-
-            // Toggle sliders visibility
-            const sliders = document.getElementById(`sliders-${quality}`);
-            if (sliders) {
-                if (config.enabled) {
-                    sliders.classList.remove('disabled');
-                } else {
-                    sliders.classList.add('disabled');
-                }
-            }
-
-            // FLAC-specific: restore bit depth selector and fallback toggle
-            if (quality === 'flac') {
-                const bitDepthValue = config.bit_depth || 'any';
-                document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-                    btn.classList.toggle('active', btn.getAttribute('data-value') === bitDepthValue);
-                });
-                const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-                if (bitDepthSelector) {
-                    if (config.enabled) {
-                        bitDepthSelector.classList.remove('disabled');
-                    } else {
-                        bitDepthSelector.classList.add('disabled');
-                    }
-                }
-                // Show/hide and restore fallback toggle
-                const fallbackToggle = document.getElementById('flac-fallback-toggle');
-                if (fallbackToggle) {
-                    fallbackToggle.style.display = bitDepthValue === 'any' ? 'none' : 'block';
-                }
-                const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-                if (fallbackCb) {
-                    fallbackCb.checked = config.bit_depth_fallback !== false;
-                }
-            }
-        }
-    });
-
-    // Set fallback checkbox
     const fallbackCheckbox = document.getElementById('quality-fallback-enabled');
-    if (fallbackCheckbox) {
-        fallbackCheckbox.checked = profile.fallback_enabled;
-    }
+    if (fallbackCheckbox) fallbackCheckbox.checked = profile.fallback_enabled !== false;
+
+    const searchModeSelect = document.getElementById('quality-search-mode');
+    if (searchModeSelect) searchModeSelect.value = profile.search_mode === 'best_quality' ? 'best_quality' : 'priority';
+
+    const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
+    if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
+
+    onSearchModeChange();
 }
 
-function updateQualityRange(quality) {
-    const minSlider = document.getElementById(`${quality}-min`);
-    const maxSlider = document.getElementById(`${quality}-max`);
-    const minValue = document.getElementById(`${quality}-min-value`);
-    const maxValue = document.getElementById(`${quality}-max-value`);
-
-    if (!minSlider || !maxSlider || !minValue || !maxValue) return;
-
-    let min = parseInt(minSlider.value);
-    let max = parseInt(maxSlider.value);
-
-    // Ensure min doesn't exceed max
-    if (min > max) {
-        min = max;
-        minSlider.value = min;
-    }
-
-    // Ensure max doesn't go below min
-    if (max < min) {
-        max = min;
-        maxSlider.value = max;
-    }
-
-    minValue.textContent = `${min} kbps`;
-    maxValue.textContent = `${max} kbps`;
+// Hide the "rank-based download order" toggle when Best quality is active —
+// that mode always ranks by quality, so the toggle would be meaningless there.
+function onSearchModeChange() {
+    const mode = document.getElementById('quality-search-mode')?.value;
+    const group = document.getElementById('quality-rank-candidates-group');
+    if (group) group.style.display = mode === 'best_quality' ? 'none' : '';
 }
 
-function toggleQuality(quality) {
-    const checkbox = document.getElementById(`quality-${quality}-enabled`);
-    const sliders = document.getElementById(`sliders-${quality}`);
+// Toggle the collapsible help text below a setting's ⓘ icon. Walks forward from
+// the icon's row to the next .setting-help-body sibling, so it works whether the
+// body is the immediate next element or sits after a control (e.g. a <select>),
+// and regardless of any wrapping container.
+function toggleSettingHelp(iconEl) {
+    const row = iconEl.closest('.setting-row') || iconEl;
+    let el = row.nextElementSibling;
+    while (el && !el.classList.contains('setting-help-body')) {
+        el = el.nextElementSibling;
+    }
+    if (el) el.hidden = !el.hidden;
+}
 
-    if (checkbox && sliders) {
-        if (checkbox.checked) {
-            sliders.classList.remove('disabled');
-        } else {
-            sliders.classList.add('disabled');
-        }
+function renderRankedTargets() {
+    const list = document.getElementById('ranked-targets-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (currentRankedTargets.length === 0) {
+        list.innerHTML = '<div class="ranked-targets-empty">No targets yet — add one below. '
+            + 'With fallback off this would reject every download.</div>';
+        return;
     }
 
-    // Also toggle FLAC bit depth selector
-    if (quality === 'flac') {
-        const bitDepthSelector = document.getElementById('flac-bit-depth-selector');
-        if (bitDepthSelector && checkbox) {
-            if (checkbox.checked) {
-                bitDepthSelector.classList.remove('disabled');
-            } else {
-                bitDepthSelector.classList.add('disabled');
-            }
-        }
-    }
-
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
+    currentRankedTargets.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'ranked-target-row';
+        row.draggable = true;
+        row.dataset.index = String(i);
+        row.innerHTML = `
+            <span class="rt-handle" title="Drag to reorder">⠿</span>
+            <span class="rt-rank">${i + 1}</span>
+            <span class="rt-label">${rtLabel(t)}</span>
+            <span class="rt-spacer"></span>
+            <button type="button" class="rt-move" title="Move up" onclick="moveRankedTarget(${i}, -1)">▲</button>
+            <button type="button" class="rt-move" title="Move down" onclick="moveRankedTarget(${i}, 1)">▼</button>
+            <button type="button" class="rt-del" title="Remove" onclick="deleteRankedTarget(${i})">🗑</button>
+        `;
+        row.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', String(i));
+            row.classList.add('rt-dragging');
         });
-    }
-}
-
-function setFlacBitDepth(value) {
-    document.querySelectorAll('.bit-depth-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.getAttribute('data-value') === value);
+        row.addEventListener('dragend', () => row.classList.remove('rt-dragging'));
+        row.addEventListener('dragover', e => { e.preventDefault(); row.classList.add('rt-dragover'); });
+        row.addEventListener('dragleave', () => row.classList.remove('rt-dragover'));
+        row.addEventListener('drop', e => {
+            e.preventDefault();
+            row.classList.remove('rt-dragover');
+            const from = parseInt(e.dataTransfer.getData('text/plain'), 10);
+            if (!Number.isNaN(from) && from !== i) reorderRankedTarget(from, i);
+        });
+        list.appendChild(row);
     });
-
-    // Show/hide fallback toggle — only relevant when a specific bit depth is selected
-    const fallbackToggle = document.getElementById('flac-fallback-toggle');
-    if (fallbackToggle) {
-        fallbackToggle.style.display = value === 'any' ? 'none' : 'block';
-    }
-
-    // Mark preset as custom when manually changing
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-    }
-
-    debouncedAutoSaveSettings();
 }
 
-function setFlacBitDepthFallback(enabled) {
-    if (currentQualityProfile) {
-        currentQualityProfile.preset = 'custom';
-        document.querySelectorAll('.preset-button').forEach(btn => {
-            btn.classList.remove('active');
-        });
-    }
-    debouncedAutoSaveSettings();
+function reorderRankedTarget(from, to) {
+    const [moved] = currentRankedTargets.splice(from, 1);
+    currentRankedTargets.splice(to, 0, moved);
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
 }
 
+function moveRankedTarget(i, dir) {
+    const j = i + dir;
+    if (j < 0 || j >= currentRankedTargets.length) return;
+    [currentRankedTargets[i], currentRankedTargets[j]] = [currentRankedTargets[j], currentRankedTargets[i]];
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+function deleteRankedTarget(i) {
+    currentRankedTargets.splice(i, 1);
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+// Lossless formats take bit-depth + sample-rate constraints; lossy take a
+// minimum bitrate. Single source of truth for the add-target field toggle.
+const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav'];
+const RT_LOSSY_FORMATS = ['mp3', 'aac', 'ogg', 'opus', 'wma'];
+// "group:" selections are a UI convenience: picking one + constraints expands
+// into individual per-format targets at that slot (the backend still works
+// purely on concrete per-format targets). The user reorders/prunes after.
+const RT_GROUPS = { 'group:lossless': RT_LOSSLESS_FORMATS, 'group:lossy': RT_LOSSY_FORMATS };
+
+function rtSelectionIsLossless(val) {
+    return val === 'group:lossless' || RT_LOSSLESS_FORMATS.includes(val);
+}
+
+function onRtAddFormatChange() {
+    const lossless = rtSelectionIsLossless(document.getElementById('rt-add-format')?.value);
+    const llFields = document.querySelector('.rt-lossless-fields');
+    const lyFields = document.querySelector('.rt-lossy-fields');
+    if (llFields) llFields.style.display = lossless ? '' : 'none';
+    if (lyFields) lyFields.style.display = lossless ? 'none' : '';
+    onRtBitrateChange();   // keep the custom-bitrate field in sync
+}
+
+// Reveal the manual bitrate input only when the dropdown is on "Custom…".
+function onRtBitrateChange() {
+    const wrap = document.getElementById('rt-add-bitrate-custom-wrap');
+    if (!wrap) return;
+    const isCustom = document.getElementById('rt-add-bitrate')?.value === 'custom';
+    wrap.style.display = isCustom ? '' : 'none';
+}
+
+function addRankedTarget() {
+    const val = document.getElementById('rt-add-format')?.value || 'flac';
+
+    // Collect the constraints once; they apply to every format we add.
+    const constraints = {};
+    if (rtSelectionIsLossless(val)) {
+        const bd = document.getElementById('rt-add-bitdepth')?.value;
+        const sr = document.getElementById('rt-add-samplerate')?.value;
+        if (bd) constraints.bit_depth = parseInt(bd, 10);
+        if (sr) constraints.min_sample_rate = parseInt(sr, 10);
+    } else {
+        let br = document.getElementById('rt-add-bitrate')?.value;
+        if (br === 'custom') br = document.getElementById('rt-add-bitrate-custom')?.value;
+        if (br) constraints.min_bitrate = parseInt(br, 10);
+    }
+
+    // A group expands into one concrete target per format; a single format is
+    // just a one-element list. Skip a format that already has an identical
+    // target so re-adding a group doesn't pile up duplicates.
+    const formats = RT_GROUPS[val] || [val];
+    const sig = (t) => `${t.format}|${t.bit_depth || ''}|${t.min_sample_rate || ''}|${t.min_bitrate || ''}`;
+    const existing = new Set(currentRankedTargets.map(sig));
+    formats.forEach(fmt => {
+        const t = { format: fmt, ...constraints };
+        if (existing.has(sig(t))) return;
+        t.label = rtLabel(t);
+        currentRankedTargets.push(t);
+        existing.add(sig(t));
+    });
+    renderRankedTargets();
+    debouncedSaveQualityProfile();
+}
+
+const PRESET_LABELS = { audiophile: 'Audiophile', balanced: 'Balanced', space_saver: 'Space Saver' };
+
+// Switch to a preset. The backend restores the preset's saved edits (or factory
+// defaults if untouched) and persists it as the active profile, so there is no
+// follow-up save here and no full-page loading overlay (which caused the flicker).
 async function applyQualityPreset(presetName) {
+    // Drop any queued auto-save so a stale-target write can't land after the switch.
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
     try {
-        showLoadingOverlay(`Applying ${presetName} preset...`);
-
-        const response = await fetch(`/api/quality-profile/preset/${presetName}`, {
-            method: 'POST'
-        });
-
+        const response = await fetch(`/api/quality-profile/preset/${presetName}`, { method: 'POST' });
         const data = await response.json();
 
         if (data.success) {
             currentQualityProfile = data.profile;
-            populateQualityProfileUI(currentQualityProfile);
-            showToast(`Applied '${presetName}' preset`, 'success');
+            // Suppress the global change→auto-save listener while we programmatically
+            // set checkbox + select values — these aren't user edits.
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
         }
     } catch (error) {
         console.error('Error applying quality preset:', error);
         showToast('Failed to apply preset', 'error');
-    } finally {
-        hideLoadingOverlay();
+    }
+}
+
+// Discard the active preset's saved edits and restore its factory defaults.
+async function resetActiveQualityPreset() {
+    const presetName = currentQualityProfile?.preset;
+    if (!presetName || !(presetName in PRESET_LABELS)) {
+        showToast('No preset selected to reset', 'info');
+        return;
+    }
+    if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
+    if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
+
+    try {
+        const response = await fetch(`/api/quality-profile/preset/${presetName}/reset`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Reset '${PRESET_LABELS[presetName] || presetName}' to defaults`, 'success');
+        } else {
+            showToast(`Failed to reset preset: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error resetting quality preset:', error);
+        showToast('Failed to reset preset', 'error');
     }
 }
 
 function collectQualityProfileFromUI() {
-    const profile = {
-        version: 2,
-        preset: 'custom', // Will be overridden if a preset is active
-        qualities: {},
-        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true
-    };
-
-    const qualities = ['flac', 'aac', 'mp3_320', 'mp3_256', 'mp3_192'];
-
-    qualities.forEach((quality, index) => {
-        const enabled = document.getElementById(`quality-${quality}-enabled`)?.checked || false;
-        const minSlider = document.getElementById(`${quality}-min`);
-        const maxSlider = document.getElementById(`${quality}-max`);
-
-        // Preserve priority from the currently loaded profile instead of using array order.
-        // AAC's default is 1.5 (above MP3, below FLAC) — not index+1 — so an upgraded
-        // profile that never had an aac tier still ranks it correctly on first save.
-        const _defaultPriority = quality === 'aac' ? 1.5 : (index + 1);
-        const existingPriority = currentQualityProfile?.qualities?.[quality]?.priority ?? _defaultPriority;
-
-        profile.qualities[quality] = {
-            enabled: enabled,
-            min_kbps: parseInt(minSlider?.value || 0),
-            max_kbps: parseInt(maxSlider?.value || 99999),
-            priority: existingPriority
-        };
-
-        // Add FLAC-specific bit_depth and fallback settings
-        if (quality === 'flac') {
-            const activeBtn = document.querySelector('.bit-depth-btn.active');
-            profile.qualities[quality].bit_depth = activeBtn ? activeBtn.getAttribute('data-value') : 'any';
-            const fallbackCb = document.getElementById('flac-bit-depth-fallback');
-            profile.qualities[quality].bit_depth_fallback = fallbackCb ? fallbackCb.checked : true;
-        }
+    // v3: ordered target list. Drop empty/None fields so each target stays
+    // minimal (matches QualityTarget.to_dict on the backend).
+    const ranked_targets = currentRankedTargets.map(t => {
+        const out = { format: t.format };
+        if (t.label) out.label = t.label;
+        if (t.bit_depth) out.bit_depth = t.bit_depth;
+        if (t.min_sample_rate) out.min_sample_rate = t.min_sample_rate;
+        if (t.min_bitrate) out.min_bitrate = t.min_bitrate;
+        return out;
     });
 
-    // Check if current profile matches a preset
-    if (currentQualityProfile && currentQualityProfile.preset !== 'custom') {
-        profile.preset = currentQualityProfile.preset;
-    }
-
-    return profile;
+    return {
+        version: 3,
+        preset: (currentQualityProfile && currentQualityProfile.preset) || 'custom',
+        fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
+        search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
+        rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        ranked_targets,
+    };
 }
 
 async function saveQualityProfile() {
@@ -3029,7 +3078,8 @@ async function saveSettings(quiet = false) {
         },
         acoustid: {
             api_key: document.getElementById('acoustid-api-key').value,
-            enabled: document.getElementById('acoustid-enabled').checked
+            enabled: document.getElementById('acoustid-enabled').checked,
+            require_verified: document.getElementById('acoustid-require-verified')?.checked === true
         },
         lastfm: {
             api_key: document.getElementById('lastfm-api-key').value,
@@ -3086,25 +3136,20 @@ async function saveSettings(quiet = false) {
             usenet_download_path: document.getElementById('usenet-download-path')?.value || '',
         },
         tidal_download: {
-            quality: document.getElementById('tidal-download-quality').value || 'lossless',
-            allow_fallback: document.getElementById('tidal-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         hifi_download: {
-            quality: document.getElementById('hifi-download-quality').value || 'lossless',
-            allow_fallback: document.getElementById('hifi-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         hifi: {
             embed_tags: document.getElementById('embed-hifi').checked,
             tags: _collectServiceTags('hifi')
         },
         deezer_download: {
-            quality: document.getElementById('deezer-download-quality').value || 'flac',
             arl: document.getElementById('deezer-download-arl').value || '',
-            allow_fallback: document.getElementById('deezer-allow-fallback').checked,
         },
         amazon_download: {
-            quality: document.getElementById('amazon-quality').value || 'flac',
-            allow_fallback: document.getElementById('amazon-allow-fallback').checked,
+            // quality derived from the global Quality Profile (ranked targets); allow_fallback always true
         },
         lidarr_download: {
             url: document.getElementById('lidarr-url').value || '',
@@ -3137,10 +3182,8 @@ async function saveSettings(quiet = false) {
             // to migrate existing configs.
         },
         qobuz: {
-            quality: document.getElementById('qobuz-quality').value || 'lossless',
             embed_tags: document.getElementById('embed-qobuz').checked,
             tags: _collectServiceTags('qobuz'),
-            allow_fallback: document.getElementById('qobuz-allow-fallback').checked,
         },
         database: {
             max_workers: parseInt(document.getElementById('max-workers').value)
@@ -3204,6 +3247,7 @@ async function saveSettings(quiet = false) {
         },
         post_processing: {
             replaygain_enabled: document.getElementById('replaygain-enabled').checked,
+            audio_completeness_check: document.getElementById('audio-completeness-check').checked,
             duration_tolerance_seconds: parseFloat(document.getElementById('duration-tolerance-seconds').value) || 0,
             retry_next_candidate_on_mismatch: document.getElementById('retry-next-candidate').checked,
             retry_exhaustive: document.getElementById('retry-exhaustive').checked,
@@ -3216,6 +3260,7 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
+            quality_filter_enabled: document.getElementById('import-quality-filter-enabled')?.checked !== false,
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
             folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
             transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,

@@ -352,7 +352,7 @@ def test_first_query_success_returns_after_storing_source():
     _seed_task()
     rec = _Recorder()
 
-    def _attempt_success(task_id, candidates, track, batch_id):
+    def _attempt_success(task_id, candidates, track, batch_id, **kwargs):
         download_tasks[task_id]['filename'] = 'song.flac'
         download_tasks[task_id]['username'] = 'u1'
         return True
@@ -478,7 +478,7 @@ def test_hybrid_fallback_tries_secondary_sources():
         },
     )
 
-    def _attempt_yt_success(task_id, candidates, track, batch_id):
+    def _attempt_yt_success(task_id, candidates, track, batch_id, **kwargs):
         return True
 
     deps, _ = _build_deps(
@@ -528,7 +528,7 @@ def test_quarantine_retry_tries_cached_candidates_without_searching():
     )
     attempted = []
 
-    def _attempt(task_id, candidates, track, batch_id):
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
         attempted.append([getattr(c, 'filename', None) for c in candidates])
         return True
 
@@ -555,7 +555,7 @@ def test_quarantine_retry_skips_cached_from_exhausted_source():
     )
     attempted = []
 
-    def _attempt(task_id, candidates, track, batch_id):
+    def _attempt(task_id, candidates, track, batch_id, **kwargs):
         attempted.append([getattr(c, 'username', None) for c in candidates])
         return True
 

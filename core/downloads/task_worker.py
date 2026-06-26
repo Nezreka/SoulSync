@@ -54,6 +54,37 @@ def _cand_user_file(candidate):
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
 
 
+def _candidate_ordering():
+    """Return ``(quality_first, targets)`` for the active search mode + toggle.
+
+    The candidate walk is ordered by the user's profile quality rank
+    (best→worst) instead of confidence-first when EITHER:
+      - best-quality search mode is active (always quality-first), OR
+      - priority mode and the ``rank_candidates_by_quality`` toggle is on
+        (opt-in; default off keeps the byte-for-byte confidence-first walk).
+
+    Quality-first ordering also makes the version-mismatch force-import pick
+    the highest-quality candidate, because that fallback accepts the
+    first-tried (= best-ordered) quarantined entry.
+
+    Fails closed to confidence-first ordering on any error so a profile/DB
+    hiccup never blocks a download. See
+    docs/superpowers/specs/2026-06-14-best-quality-search-mode-design.md.
+    """
+    try:
+        from core.quality.selection import (
+            load_search_mode,
+            load_profile_targets,
+            load_rank_candidates_by_quality,
+        )
+        if load_search_mode() == 'best_quality' or load_rank_candidates_by_quality():
+            targets, _ = load_profile_targets()
+            return True, targets
+    except Exception as exc:
+        logger.debug("[Modal Worker] quality ordering unavailable: %s", exc)
+    return False, None
+
+
 def _try_cached_candidates(task_id, batch_id, track, deps):
     """Quarantine-retry fast path: attempt the already-found candidates before
     re-searching anything.
@@ -91,7 +122,10 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
         f"candidate(s) before re-searching (task {task_id})"
     )
-    return deps.attempt_download_with_candidates(task_id, remaining, track, batch_id)
+    _qf, _qt = _candidate_ordering()
+    return deps.attempt_download_with_candidates(
+        task_id, remaining, track, batch_id, quality_first=_qf, quality_targets=_qt,
+    )
 
 
 def _private_album_bundle_staging_miss_reason(batch_id: Optional[str], deps: Any) -> Optional[str]:
@@ -369,6 +403,11 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         logger.info(f"[Modal Worker] Generated {len(search_queries)} smart search queries for '{track.name}': {search_queries}")
         logger.info(f"[Modal Worker] About to start search loop for task {task_id} (track: '{track.name}')")
 
+        # Best-quality search mode: the orchestrator already pooled candidates
+        # across every source for each query, so order the candidate walk by the
+        # user's profile quality rank (best→worst). Computed once per task.
+        _best_quality, _quality_targets = _candidate_ordering()
+
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages
         all_raw_results = []  # Collect raw results across queries for candidate review modal
@@ -495,7 +534,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
                             download_tasks[task_id]['cached_candidates'] = candidates
 
                         # Try to download with these candidates
-                        success = deps.attempt_download_with_candidates(task_id, candidates, track, batch_id)
+                        success = deps.attempt_download_with_candidates(
+                            task_id, candidates, track, batch_id,
+                            quality_first=_best_quality, quality_targets=_quality_targets,
+                        )
                         if success:
                             # Download initiated successfully - let the download monitoring system handle completion
                             if batch_id:
@@ -529,7 +571,10 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # === HYBRID FALLBACK: If primary source failed, try remaining sources directly ===
         # The orchestrator's hybrid search stops at the first source with results, even if
         # those results all fail quality filtering. Try remaining sources individually.
-        if getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
+        #
+        # Best-quality mode already searched EVERY source per query (the pool), so this
+        # block would only re-search the same sources — skip it there.
+        if not _best_quality and getattr(deps.download_orchestrator, 'mode', '') == 'hybrid':
             try:
                 orch = deps.download_orchestrator
                 hybrid_order = getattr(orch, 'hybrid_order', None) or []

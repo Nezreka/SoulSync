@@ -760,7 +760,8 @@ class WebUIDownloadMonitor:
                 # used_sources keys are formatted as "{username}_{filename}", so startswith is exact.
                 is_tidal = any(s.startswith('tidal_') for s in tried_sources)
                 if is_tidal:
-                    tidal_quality = config_manager.get('tidal_download.quality', 'lossless')
+                    from core.quality.source_map import quality_tier_for_source
+                    tidal_quality = quality_tier_for_source('tidal', default='lossless')
                     allow_fb = config_manager.get('tidal_download.allow_fallback', True)
                     if tidal_quality == 'hires' and not allow_fb:
                         task['error_message'] = (

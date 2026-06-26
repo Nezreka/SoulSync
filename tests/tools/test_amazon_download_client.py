@@ -224,7 +224,10 @@ class TestSearch:
         assert t.artist == "Kendrick Lamar"
         assert t.title == "Track 0"
         assert t.album == "GNX"
-        assert t.quality == "Lossless"
+        # Quality is now stamped as a real format token (was the display
+        # label "Lossless", which broke audio_quality format derivation).
+        assert t.quality == "flac"
+        assert t.audio_quality.format == "flac"
         assert t.duration == 200_000
 
     def test_track_source_metadata(self, tmp_path):

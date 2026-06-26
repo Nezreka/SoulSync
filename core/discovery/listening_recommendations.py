@@ -46,6 +46,81 @@ def _get(row: object, attr: str):
     return getattr(row, attr, None)
 
 
+def choose_mix_fetch_source(active_source: object, active_can_fetch: bool) -> str:
+    """Pick which source to fetch the "Listening Mix" top tracks from.
+
+    The mix is a list of (artist, title) pairs acquired via Soulseek, so the fetch source need
+    NOT match the user's active metadata source. Use the active source when it can fetch top
+    tracks itself (Spotify/Deezer); otherwise fall back to Deezer, whose public ``artist/{id}/top``
+    needs no auth and is available to every user — so iTunes / Discogs / MusicBrainz users still
+    get a full mix without switching sources. Pure.
+    """
+    if str(active_source or "").lower() in ("spotify", "deezer") and active_can_fetch:
+        return str(active_source).lower()
+    return "deezer"
+
+
+def names_match(a: object, b: object) -> bool:
+    """Strict artist-name equality after stripping case + non-alphanumerics.
+
+    Used to verify a name-search result before fetching that artist's top tracks, so the
+    "Listening Mix" can never pull the WRONG artist's songs (e.g. a same-name act). Exact
+    alphanumeric match: "Tyler, The Creator" == "Tyler The Creator", but "Drake" != "Drake Bell".
+    Pure.
+    """
+    def _alnum(x: object) -> str:
+        return "".join(ch for ch in str(x or "").lower() if ch.isalnum())
+    na, nb = _alnum(a), _alnum(b)
+    return bool(na) and na == nb
+
+
+def similarity_from_rank(rank: object, max_rank: int = 10) -> float:
+    """Turn a stored ``similarity_rank`` (1 = most similar … 10 = least) into a 0–1 weight.
+
+    SoulSync stores each ``(seed → similar)`` edge with a 1–10 rank (``1`` is the closest
+    match). The ranker multiplies this into the score so a seed's *closest* matches count
+    for more than its long-tail ones. Linear decay over the documented range: rank 1 → 1.0,
+    rank 5 → 0.6, rank 10 → 0.1, with a 0.1 floor so a far match still contributes. A
+    missing/garbage rank falls back to 1.0 (treat as "no rank info, full weight"). Pure.
+    """
+    try:
+        r = int(rank)
+    except (TypeError, ValueError):
+        return 1.0
+    floor = round(1.0 / max_rank, 4)
+    if r <= 1:
+        return 1.0
+    if r >= max_rank:
+        return floor
+    return round((max_rank - r + 1) / max_rank, 4)
+
+
+def build_recency_weighted_seeds(
+    top_artists: Sequence[dict],
+    recent_play_counts: Optional[Dict[str, float]] = None,
+    *,
+    recency_factor: float = 1.5,
+) -> List[dict]:
+    """Blend lifetime + recent play counts into seed weights — "what you're into NOW".
+
+    ``weight = lifetime_plays + recency_factor × recent_plays``. An artist you've played a
+    lot *recently* outranks one you played a lot years ago, so the recommendations track
+    your current taste instead of your all-time history. ``recency_factor`` is the dial
+    (0 = pure lifetime). Returns ``[{'name', 'weight'}]`` for :func:`rank_recommended_artists`.
+    Pure — the caller supplies both play-count maps from the listening history.
+    """
+    recent = {_norm(k): _positive_float(v, 0.0) for k, v in (recent_play_counts or {}).items()}
+    out: List[dict] = []
+    for a in top_artists or ():
+        name = str(a.get("name") or "").strip()
+        if not name:
+            continue
+        lifetime = _positive_float(a.get("play_count", a.get("weight", 1.0)))
+        boost = recency_factor * recent.get(_norm(name), 0.0)
+        out.append({"name": name, "weight": lifetime + boost})
+    return out
+
+
 def group_similars_by_seed(
     seeds: Sequence[dict],
     similar_rows: Sequence,
@@ -53,14 +128,21 @@ def group_similars_by_seed(
     *,
     source_id_attr: str = "source_artist_id",
     similar_name_attr: str = "similar_artist_name",
+    rank_attr: Optional[str] = None,
 ) -> Dict[str, List[dict]]:
-    """Reshape flat ``similar_artists`` rows into ``{seed_name_lower: [{'name': similar}]}``.
+    """Reshape flat ``similar_artists`` rows into ``{seed_name_lower: [{'name', 'score'?}]}``.
 
     The stored rows key the similar artist by the SEED's source id (``source_artist_id``),
     not its name, so :func:`rank_recommended_artists` can't consume them directly. This
     resolves each row's source id to a name via ``id_to_name`` (``{source_artist_id:
     artist_name}`` for the library, built by the caller) and keeps only rows that resolve
     to one of the ``seeds``. Rows may be dataclass objects or dicts. Pure — no I/O.
+
+    ``id_to_name`` MUST be keyed by whatever id the edges actually store — for SoulSync that
+    is the artist's SOURCE id (Spotify/iTunes/Deezer/MusicBrainz), NOT the internal row id.
+    When ``rank_attr`` is given, each row's rank is converted via :func:`similarity_from_rank`
+    and carried as ``score`` so closer matches weigh more; without it every similar comes out
+    score-less (the ranker then treats similarity as 1.0 — original behavior).
     """
     seed_names = {_norm(s.get("name")) for s in seeds}
     seed_names.discard("")
@@ -72,8 +154,12 @@ def group_similars_by_seed(
         if not seed_name or seed_name not in seed_names:
             continue
         sim_name = str(_get(row, similar_name_attr) or "").strip()
-        if sim_name:
-            out.setdefault(seed_name, []).append({"name": sim_name})
+        if not sim_name:
+            continue
+        entry = {"name": sim_name}
+        if rank_attr is not None:
+            entry["score"] = similarity_from_rank(_get(row, rank_attr))
+        out.setdefault(seed_name, []).append(entry)
     return out
 
 
@@ -197,8 +283,57 @@ def aggregate_candidate_tracks(
     return out[:limit]
 
 
+def to_mix_track(track: object, source: str) -> Optional[dict]:
+    """Shape one source "top tracks" API dict into the flat dict the Discover compact
+    playlist row renders + syncs (the "Listening Mix" #913 playlist).
+
+    Spotify's ``artist_top_tracks`` and Deezer's ``get_artist_top_tracks`` both return the
+    same Spotify-shape object (``id, name, artists[], album{name,images[]}, duration_ms``).
+    This flattens that into the renderer's field names (``track_name/artist_name/album_name/
+    album_cover_url/duration_ms``), keeps the original under ``track_data_json`` for sync, and
+    sets the source-specific id field. Returns None for anything without a usable id/title so
+    the caller can filter. A ``name`` key is kept so :func:`aggregate_candidate_tracks` can
+    dedup by title. Pure — no I/O.
+    """
+    if not isinstance(track, dict):
+        return None
+    tid = track.get("id")
+    name = str(track.get("name") or "").strip()
+    if not tid or not name:
+        return None
+    artists = track.get("artists") or []
+    artist_name = ""
+    if artists and isinstance(artists[0], dict):
+        artist_name = str(artists[0].get("name") or "").strip()
+    album = track.get("album") if isinstance(track.get("album"), dict) else {}
+    album_name = str(album.get("name") or "").strip()
+    images = album.get("images") or []
+    cover = images[0].get("url") if images and isinstance(images[0], dict) else None
+    out = {
+        "track_id": str(tid),
+        "name": name,                  # for aggregate_candidate_tracks dedup
+        "track_name": name,            # for the renderer
+        "artist_name": artist_name,
+        "album_name": album_name,
+        "album_cover_url": cover,
+        "duration_ms": track.get("duration_ms") or 0,
+        "track_data_json": track,      # full payload for sync/download
+        "source": source,
+    }
+    id_field = {"spotify": "spotify_track_id", "deezer": "deezer_track_id",
+                "itunes": "itunes_track_id"}.get(source)
+    if id_field:
+        out[id_field] = str(tid)
+    return out
+
+
 __all__ = [
     "RecommendedArtist",
+    "choose_mix_fetch_source",
+    "names_match",
+    "similarity_from_rank",
+    "build_recency_weighted_seeds",
+    "to_mix_track",
     "group_similars_by_seed",
     "rank_recommended_artists",
     "aggregate_candidate_tracks",

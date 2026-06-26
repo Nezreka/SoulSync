@@ -117,6 +117,31 @@ def test_stream_processed_task_returns_early():
     assert rec.calls == []
 
 
+def test_requeued_task_bails_without_marking_failed():
+    """RACE GUARD: the monitor sets status -> 'post_processing' and submits this
+    worker. If, before the worker runs, the browser-poll post-processor
+    quarantines the file and requeues the next-best candidate (status ->
+    'searching', username/filename cleared), this worker must bail WITHOUT
+    marking failed or notifying batch completion. Otherwise it clobbers the
+    in-flight retry with a false 'missing file or source information' failure
+    while a parallel attempt imports the song."""
+    download_tasks['t1'] = {'status': 'searching', 'track_info': {}}
+    deps, rec = _build_deps()
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'searching'  # untouched
+    assert 'error_message' not in download_tasks['t1']
+    assert not any(c[0] == 'on_complete' for c in rec.calls)
+
+
+def test_queued_task_bails_without_marking_failed():
+    """Same race guard for a task another path reset to 'queued'."""
+    download_tasks['t1'] = {'status': 'queued', 'track_info': {}}
+    deps, rec = _build_deps()
+    pp.run_post_processing_worker('t1', 'b1', deps)
+    assert download_tasks['t1']['status'] == 'queued'
+    assert not any(c[0] == 'on_complete' for c in rec.calls)
+
+
 def test_missing_filename_marks_failed_and_calls_on_complete():
     download_tasks['t1'] = {'status': 'post_processing', 'username': 'u1', 'track_info': {}}
     deps, rec = _build_deps()

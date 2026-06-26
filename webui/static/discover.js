@@ -19,6 +19,7 @@ let personalizedPopularPicks = [];
 let personalizedHiddenGems = [];
 let personalizedDailyMixes = [];
 let personalizedDiscoveryShuffle = [];
+let personalizedListeningMix = [];   // #913: the "Your Listening Mix" track playlist
 let buildPlaylistSelectedArtists = [];
 
 async function loadDiscoverPage() {
@@ -27,6 +28,8 @@ async function loadDiscoverPage() {
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
+        loadPersonalizedListeningMix(),  // #913: playable track mix from those picks
         loadRecommendedArtistsSection(),
         loadYourArtists(),
         loadYourAlbums(),
@@ -676,10 +679,28 @@ async function addAllRecommendedToWatchlist(btn) {
 // machinery, so the inline carousel and the "View All" modal stay in sync.
 let _recommendedSectionCtrl = null;
 
-function _renderRecommendedMini(artist, source) {
+// "Because you listen to X, Y" — the listening-driven (#913) variant of the reason line.
+function _listeningRecommendationReason(artist) {
+    const names = (artist && artist.because) || [];
+    if (names.length === 1) return `Because you listen to ${escapeHtml(names[0])}`;
+    if (names.length === 2) return `Because you listen to ${escapeHtml(names[0])} & ${escapeHtml(names[1])}`;
+    if (names.length >= 3) {
+        const shown = names.slice(0, 2).map(escapeHtml).join(', ');
+        return `Because you listen to ${shown} +${names.length - 2} more`;
+    }
+    return 'From artists you play often';
+}
+function _listeningRecommendationReasonTitle(artist) {
+    const names = (artist && artist.because) || [];
+    return names.length ? `You listen to: ${names.join(', ')}` : '';
+}
+
+function _renderRecommendedMini(artist, source, opts) {
+    const reasonFn = (opts && opts.reasonFn) || _recommendationReason;
+    const titleFn = (opts && opts.titleFn) || _recommendationReasonTitle;
     const artistSource = artist.source || source || '';
-    const reason = _recommendationReason(artist);
-    const reasonTitle = _recommendationReasonTitle(artist);
+    const reason = reasonFn(artist);
+    const reasonTitle = titleFn(artist);
     const genreTags = (artist.genres || []).slice(0, 2).map(g =>
         `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
     ).join('');
@@ -712,7 +733,7 @@ function _renderRecommendedMini(artist, source) {
 // Progressively fill in images for the cards we actually rendered (the API
 // returns cached images only; the rest are fetched on demand — same endpoint
 // the modal uses).
-async function _enrichRecommendedCarouselCards(items, source) {
+async function _enrichRecommendedCarouselCards(items, source, carouselId) {
     const idKey = source === 'spotify' ? 'spotify_artist_id'
                 : source === 'deezer' ? 'deezer_artist_id'
                 : 'itunes_artist_id';
@@ -726,7 +747,7 @@ async function _enrichRecommendedCarouselCards(items, source) {
         });
         const data = await resp.json();
         if (!data.success || !data.artists) return;
-        const carousel = document.getElementById('recommended-artists-carousel');
+        const carousel = document.getElementById(carouselId || 'recommended-artists-carousel');
         if (!carousel) return;
         for (const [aid, info] of Object.entries(data.artists)) {
             if (!info.image_url) continue;
@@ -776,6 +797,48 @@ async function loadRecommendedArtistsSection() {
         });
     }
     return _recommendedSectionCtrl.load();
+}
+
+// #913: "Based On Your Listening" — play-weighted, consensus-ranked recommendations.
+// Mirrors loadRecommendedArtistsSection but reads the listening-driven endpoint and
+// renders a "Because you listen to X" reason. Hides itself when empty (no scan yet).
+let _listeningRecsCtrl = null;
+async function loadListeningRecommendations() {
+    if (!_listeningRecsCtrl) {
+        _listeningRecsCtrl = createDiscoverSectionController({
+            id: 'listening-recs',
+            sectionEl: '#listening-recs-section',
+            contentEl: '#listening-recs-carousel',
+            fetchUrl: '/api/discover/listening-recommendations',
+            extractItems: (data) => data.artists || [],
+            isEmpty: (items) => items.length === 0,
+            hideWhenEmpty: true,
+            renderItems: (items, data) => {
+                const source = data.source || 'spotify';
+                const shown = items.slice(0, 18);
+                return shown.map(a => _renderRecommendedMini(a, source, {
+                    reasonFn: _listeningRecommendationReason,
+                    titleFn: _listeningRecommendationReasonTitle,
+                })).join('');
+            },
+            onRendered: ({ data }) => {
+                const carousel = document.getElementById('listening-recs-carousel');
+                if (carousel && !carousel._recoWired) {
+                    carousel._recoWired = true;
+                    carousel.addEventListener('click', function (e) {
+                        const btn = e.target.closest('.recommended-card-watchlist-btn');
+                        if (btn) { e.preventDefault(); e.stopPropagation(); toggleRecommendedWatchlist(btn); }
+                    });
+                }
+                const source = (data && data.source) || 'spotify';
+                _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source, 'listening-recs-carousel');
+            },
+            loadingMessage: 'Reading your listening...',
+            emptyMessage: 'Play more music and run a watchlist scan to see picks based on your listening',
+            errorMessage: 'Failed to load listening recommendations',
+        });
+    }
+    return _listeningRecsCtrl.load();
 }
 
 function closeRecommendedArtistsModal() {
@@ -4246,6 +4309,32 @@ async function loadPersonalizedHiddenGems() {
     }
 }
 
+// #913: "Your Listening Mix" — a playable track playlist from the artists matched to your
+// listening. Mirrors loadPersonalizedHiddenGems; tracks come pre-shaped from the scan so the
+// row renders + syncs like the others. Hides when empty (no scan / no listening data yet).
+async function loadPersonalizedListeningMix() {
+    try {
+        const container = document.getElementById('personalized-listening-mix');
+        if (!container) return;
+
+        const response = await fetch('/api/discover/personalized/listening-mix');
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (!data.success || !data.tracks || data.tracks.length === 0) {
+            container.closest('.discover-section').style.display = 'none';
+            return;
+        }
+
+        personalizedListeningMix = data.tracks;
+        renderCompactPlaylist(container, data.tracks);
+        container.closest('.discover-section').style.display = 'block';
+
+    } catch (error) {
+        console.error('Error loading listening mix:', error);
+    }
+}
+
 async function loadPersonalizedDailyMixes() {
     try {
         const container = document.getElementById('daily-mixes-grid');
@@ -4300,7 +4389,6 @@ function renderCompactPlaylist(container, tracks) {
         const durationMin = Math.floor(track.duration_ms / 60000);
         const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
         const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
-        const artistEsc = (track.artist_name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
@@ -4314,7 +4402,6 @@ function renderCompactPlaylist(container, tracks) {
                 </div>
                 <div class="track-compact-album">${track.album_name}</div>
                 <div class="track-compact-duration">${duration}</div>
-                <button class="track-compact-block" onclick="event.stopPropagation(); blockDiscoveryArtist('${artistEsc}')" title="Block ${artistEsc} from discovery">✕</button>
             </div>
         `;
     });
@@ -8646,6 +8733,8 @@ async function openDownloadModalForDiscoverPlaylist(playlistType, playlistName) 
             tracks = personalizedHiddenGems;
         } else if (playlistType === 'discovery_shuffle') {
             tracks = personalizedDiscoveryShuffle;
+        } else if (playlistType === 'listening_mix') {
+            tracks = personalizedListeningMix;
         } else if (playlistType === 'build_playlist') {
             tracks = buildPlaylistTracks;
         }
@@ -8765,6 +8854,8 @@ async function startDiscoverPlaylistSync(playlistType, playlistName) {
         tracks = personalizedHiddenGems;
     } else if (playlistType === 'discovery_shuffle') {
         tracks = personalizedDiscoveryShuffle;
+    } else if (playlistType === 'listening_mix') {
+        tracks = personalizedListeningMix;
     } else if (playlistType === 'build_playlist') {
         tracks = buildPlaylistTracks;
     }

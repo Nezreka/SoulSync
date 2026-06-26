@@ -10,6 +10,7 @@ import type {
   ImportAutoImportResultsPayload,
   ImportAutoImportSettingsPayload,
   ImportAutoImportStatusPayload,
+  ImportOptionsPayload,
   ImportProcessPayload,
   ImportStagingFilesPayload,
   ImportStagingGroupsPayload,
@@ -25,7 +26,7 @@ export const IMPORT_QUERY_KEY = ['import'] as const;
 // which left the progress bar stuck at 0 and showing "Failed" while files
 // imported fine (#772). Give the import-process calls a generous bound so the
 // responses actually arrive and the bar advances. Scoped to import only.
-const IMPORT_REQUEST_TIMEOUT_MS = 300_000;  // 5 min/track
+const IMPORT_REQUEST_TIMEOUT_MS = 300_000; // 5 min/track
 
 export async function fetchImportStagingFiles(): Promise<ImportStagingFilesPayload> {
   return readJson<ImportStagingFilesPayload>(apiClient.get('import/staging/files'));
@@ -222,6 +223,45 @@ export function autoImportResultsQueryOptions() {
   return queryOptions({
     queryKey: [...IMPORT_QUERY_KEY, 'auto-import-results'],
     queryFn: fetchAutoImportResults,
+  });
+}
+
+// --- Import behaviour toggles (mirrors Settings → Import) ---
+// Both live under the `import.*` config namespace. GET reads the whole settings
+// blob; POST /api/settings partial-merges, so we only send the import keys.
+type SettingsBlob = {
+  import?: { quality_filter_enabled?: boolean; folder_artist_override?: boolean };
+};
+
+export async function fetchImportOptions(): Promise<ImportOptionsPayload> {
+  const data = await readJson<SettingsBlob>(apiClient.get('settings'));
+  const imp = data.import ?? {};
+  return {
+    // Both default ON when the key is absent (matches the backend defaults).
+    qualityFilterEnabled: imp.quality_filter_enabled !== false,
+    folderArtistOverride: imp.folder_artist_override !== false,
+  };
+}
+
+export async function saveImportOptions(
+  options: ImportOptionsPayload,
+): Promise<{ success: boolean; error?: string }> {
+  return readJson<{ success: boolean; error?: string }>(
+    apiClient.post('settings', {
+      json: {
+        import: {
+          quality_filter_enabled: options.qualityFilterEnabled,
+          folder_artist_override: options.folderArtistOverride,
+        },
+      },
+    }),
+  );
+}
+
+export function importOptionsQueryOptions() {
+  return queryOptions({
+    queryKey: [...IMPORT_QUERY_KEY, 'import-options'],
+    queryFn: fetchImportOptions,
   });
 }
 

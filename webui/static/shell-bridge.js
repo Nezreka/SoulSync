@@ -211,6 +211,11 @@ function _handleShellLinkClick(event) {
     if (!anchor || (anchor.target && anchor.target !== '_self')) return;
     if (anchor.hasAttribute('download')) return;
 
+    // In-card controls (source/watchlist badges, etc.) handle their OWN click — don't let
+    // this capture-phase handler hijack it into the surrounding card's navigation. Their
+    // bubble-phase handlers preventDefault, but that runs after capture, so we opt out here.
+    if (event.target?.closest?.('.source-card-icon, [data-no-card-nav]')) return;
+
     const href = anchor.getAttribute('href');
     if (!href || href === '#' || href.startsWith('javascript:')) return;
 
