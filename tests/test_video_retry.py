@@ -90,5 +90,6 @@ def test_search_for_retry_no_id_skips_stop(monkeypatch):
     stopped = []
     monkeypatch.setattr(ss, "start_search", lambda q: {"configured": True, "error": "boom"})
     monkeypatch.setattr(ss, "stop_search", lambda sid: stopped.append(sid))
-    assert dm._search_for_retry("x") == {"hits": [], "total_files": 0}
+    res = dm._search_for_retry("x")
+    assert res["hits"] == [] and res["started"] is False and res["error"] == "boom"
     assert stopped == []                                     # nothing started → nothing to stop

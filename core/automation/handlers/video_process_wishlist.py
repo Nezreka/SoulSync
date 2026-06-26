@@ -119,9 +119,10 @@ def _default_target_dir(media_type: str) -> str:
     return db.get_setting("tv_path") or ""
 
 
-def _default_search(item: Dict[str, Any], media_type: str) -> List[Dict[str, Any]]:
+def _default_search(item: Dict[str, Any], media_type: str):
     """A bounded blocking Soulseek search → ranked candidates (same path the retry worker +
-    manual search use). Returns [] if slskd isn't configured / nothing came back."""
+    manual search use). Returns [] for a real empty result, or **None** if the search never
+    ran (slskd not configured / errored / rate-limited) so the caller can say so."""
     from api.video.downloads import _evaluate_hits
     from core.video.download_monitor import _search_for_retry
     from core.video.quality_profile import load as load_profile
@@ -131,6 +132,8 @@ def _default_search(item: Dict[str, Any], media_type: str) -> List[Dict[str, Any
     query = build_query(ctx["scope"], ctx["title"], year=ctx.get("year"),
                         season=ctx.get("season"), episode=ctx.get("episode"))
     res = _search_for_retry(query) or {}
+    if res.get("started") is False:
+        return None                         # slskd didn't accept the search
     profile = load_profile(get_video_db())
     return _evaluate_hits(res.get("hits") or [], profile, ctx["scope"],
                           ctx.get("season"), ctx.get("episode"))
@@ -215,21 +218,25 @@ def auto_video_process_wishlist(
         searched = [0]
         noresults = [0]    # search came back empty (the source had nothing)
         rejected = [0]     # source had hits, but none passed the quality profile
+        notrun = [0]       # the search never ran (slskd didn't accept it)
         total = len(todo)
         lock = threading.Lock()
 
         def _one(it):
-            cands = search(it, media_type) or []
+            cands = search(it, media_type)
+            didnt_run = cands is None       # slskd not configured / errored / rate-limited
+            cands = cands or []
             best = pick_best(cands)
             ok = bool(best) and bool(enqueue(it, best, cands, media_type, root))
             name = it.get('title') or it.get('show_title') or '?'
             if media_type == 'episode':
                 name = "%s S%02dE%02d" % (name, int(it.get('season_number') or 0),
                                           int(it.get('episode_number') or 0))
-            # distinguish "source returned nothing" from "returned hits but all rejected"
-            # (the rejected case carries the reason on the top-ranked hit) so the log is useful.
+            # tell apart: grabbed / search-didn't-run / source-empty / hits-but-all-rejected.
             if ok:
                 msg, lt = "Grabbed '%s'" % name, 'success'
+            elif didnt_run:
+                msg, lt = "Search didn't run for '%s' — slskd not responding?" % name, 'warning'
             elif not cands:
                 msg, lt = "No search results for '%s'" % name, 'info'
             else:
@@ -239,6 +246,8 @@ def auto_video_process_wishlist(
                 searched[0] += 1
                 if ok:
                     grabbed[0] += 1
+                elif didnt_run:
+                    notrun[0] += 1
                 elif not cands:
                     noresults[0] += 1
                 else:
@@ -254,6 +263,8 @@ def auto_video_process_wishlist(
         # Headline with the WHY breakdown: it's the difference between "the source has
         # nothing" (noresults) and "it has stuff but your quality profile rejects it" (rejected).
         tail = []
+        if notrun[0]:
+            tail.append("%d search(es) didn't run (slskd?)" % notrun[0])
         if noresults[0]:
             tail.append('%d had no results' % noresults[0])
         if rejected[0]:
@@ -264,7 +275,8 @@ def auto_video_process_wishlist(
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
                              log_line=done, log_type='success' if grabbed[0] else 'info')
         return {'status': 'completed', 'searched': searched[0], 'grabbed': grabbed[0],
-                'noresults': noresults[0], 'rejected': rejected[0], '_manages_own_progress': True}
+                'noresults': noresults[0], 'rejected': rejected[0], 'notrun': notrun[0],
+                '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')
         return {'status': 'error', 'error': str(e), '_manages_own_progress': True}

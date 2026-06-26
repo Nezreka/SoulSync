@@ -136,6 +136,15 @@ def test_breakdown_distinguishes_no_results_from_quality_rejection():
     assert "none accepted — Unknown / unsupported quality" in logs   # reason surfaced
 
 
+def test_breakdown_flags_searches_that_didnt_run():
+    # a search that never ran (slskd didn't accept it) is NOT a genuine "no results"
+    items = [{"tmdb_id": 1, "title": "A"}]
+    res, enq, _, deps = _run(items, searches={("movie", "1"): None})
+    assert res["grabbed"] == 0 and res["notrun"] == 1 and res["noresults"] == 0
+    logs = " ".join(p.get("log_line") or "" for p in deps.progress)
+    assert "Search didn't run for 'A'" in logs and "slskd" in logs
+
+
 def test_missing_library_folder_is_a_quiet_skip():
     res, enq, _, deps = _run([{"tmdb_id": 1, "title": "A"}], root="")
     assert res["status"] == "completed" and res.get("skipped") == "no_folder"
