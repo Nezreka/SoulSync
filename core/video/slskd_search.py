@@ -13,10 +13,55 @@ the HTTP poll is thin I/O glue.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
 import requests
+
+# slskd rate-limits search CREATION and returns 429 when exceeded. The music side caps at
+# ~35 searches / 220s; we mirror that, plus a small min-gap between creations (the auto-grab
+# fires from a thread pool, so without it a burst — or a 429 that returns instantly — storms
+# slskd). A 429 sets a cooldown so we back off instead of hammering.
+_SEARCH_LOCK = threading.Lock()
+_SEARCH_TIMES: list = []          # reserved creation times (monotonic), pruned to the window
+_COOLDOWN_UNTIL = [0.0]
+_MAX_PER_WINDOW = 35
+_WINDOW_SECONDS = 220.0
+_MIN_GAP_SECONDS = 2.0
+
+
+def _reserve_search_slot() -> float:
+    """Reserve the next allowed search-creation time under the rate limit; returns it."""
+    with _SEARCH_LOCK:
+        now = time.monotonic()
+        while _SEARCH_TIMES and _SEARCH_TIMES[0] <= now - _WINDOW_SECONDS:
+            _SEARCH_TIMES.pop(0)
+        at = now
+        if _SEARCH_TIMES:
+            at = max(at, _SEARCH_TIMES[-1] + _MIN_GAP_SECONDS)              # space from last
+        if len(_SEARCH_TIMES) >= _MAX_PER_WINDOW:
+            at = max(at, _SEARCH_TIMES[0] + _WINDOW_SECONDS)               # window full → wait
+        at = max(at, _COOLDOWN_UNTIL[0])                                    # honor a 429 cooldown
+        _SEARCH_TIMES.append(at)
+        return at
+
+
+def _throttle_search() -> None:
+    """Block until we're allowed to create the next slskd search."""
+    wait = _reserve_search_slot() - time.monotonic()
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _note_rate_limited(retry_after: Any = None) -> None:
+    """slskd returned 429 — back off before the next search."""
+    try:
+        secs = float(retry_after) if retry_after else 30.0
+    except (TypeError, ValueError):
+        secs = 30.0
+    with _SEARCH_LOCK:
+        _COOLDOWN_UNTIL[0] = time.monotonic() + max(5.0, min(secs, 120.0))
 
 # Container extensions we treat as the actual video (everything else — subs, nfo,
 # art, samples — is ignored for quality purposes).
@@ -141,12 +186,16 @@ def start_search(query: str) -> dict:
     base, headers = _conn()
     if not base:
         return {"configured": False}
+    _throttle_search()                     # stay under slskd's search-creation rate limit
     search_id = str(uuid.uuid4())
     payload = {"id": search_id, "searchText": query, "timeout": search_timeout_ms(),
                "filterResponses": True, "minimumResponseFileCount": 1,
                "minimumPeerUploadSpeed": _min_speed_bytes()}
     try:
         r = requests.post(base + "/api/v0/searches", json=payload, headers=headers, timeout=15)
+        if r.status_code == 429:           # rate limited — back off, don't cascade
+            _note_rate_limited(r.headers.get("Retry-After"))
+            return {"configured": True, "error": "429 rate limited (backing off)"}
         r.raise_for_status()
     except Exception as e:   # noqa: BLE001 - surface any slskd/network failure to the UI
         return {"configured": True, "error": str(e)}
