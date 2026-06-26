@@ -21,6 +21,12 @@
             .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
     function toast(m, t) { if (typeof showToast === 'function') showToast(m, t); }
+    function setDownloadsBadge(n) {
+        var b = document.querySelector('[data-video-downloads-badge]');
+        if (!b) return;
+        if (n > 0) { b.textContent = n > 99 ? '99+' : n; b.classList.remove('hidden'); }
+        else { b.classList.add('hidden'); }
+    }
     function getJSON(u) {
         return fetch(u, { headers: { Accept: 'application/json' } })
             .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
@@ -31,6 +37,11 @@
     }
 
     var KIND_ICON = { movie: '🎬', show: '📺', episode: '📺', season: '📺', series: '📺', youtube: '▶️' };
+    // collapse the kinds into the three colour groups (Cinema palette in CSS): movie / tv / youtube
+    function dlType(kind) {
+        var k = (kind || '').toLowerCase();
+        return k === 'youtube' ? 'youtube' : (k === 'movie' ? 'movie' : 'tv');
+    }
     // status -> { label, cls } where cls is the music .adl-row-/.adl-status-dot class
     var STATUS = {
         downloading: { label: 'Downloading', cls: 'active' },
@@ -59,10 +70,11 @@
 
     function makeCard(d) {
         var el = document.createElement('div');
-        el.className = 'adl-row';
+        el.className = 'vdpg-card adl-row';
         el.setAttribute('data-dl-id', d.id);
         el.innerHTML =
-            '<div class="adl-row-art adl-row-art-empty vdpg-art" data-f="ic"></div>' +
+            '<div class="vdpg-artwrap"><div class="adl-row-art adl-row-art-empty vdpg-art" data-f="ic"></div>' +
+                '<span class="vdpg-tbadge" data-f="tbadge"></span></div>' +
             '<div class="adl-row-info">' +
                 '<div class="adl-row-title" data-f="name"></div>' +
                 '<div class="adl-row-meta" data-f="meta"></div>' +
@@ -77,12 +89,20 @@
     function patchCard(el, d) {
         var info = STATUS[d.status] || STATUS.downloading;
         var cls = info.cls, active = isActive(d.status);
-        var showBar = d.status === 'downloading' || d.status === 'queued';
+        var showBar = active;   // downloading/queued/searching/importing all get a bar
+        // queued/searching/importing have no real % → an indeterminate shimmer (not "frozen at 0/100")
+        var indet = d.status === 'queued' || d.status === 'searching' || d.status === 'importing';
         var pct = Math.max(0, Math.min(100, d.progress || 0));
         var q = function (f) { return el.querySelector('[data-f="' + f + '"]'); };
 
-        var want = 'adl-row adl-row-' + cls;
+        var vt = dlType(d.kind);
+        if (el.getAttribute('data-vtype') !== vt) el.setAttribute('data-vtype', vt);
+        var want = 'vdpg-card adl-row adl-row-' + cls;
         if (el.className !== want) el.className = want;
+
+        // type badge on the art corner (so you can tell movie / TV / youtube even with a poster)
+        var tb = q('tbadge');
+        if (tb) { var tbi = KIND_ICON[(d.kind || '').toLowerCase()] || '🎬'; if (tb.textContent !== tbi) tb.textContent = tbi; }
 
         // poster art tile (falls back to the kind emoji)
         var ic = q('ic');
@@ -102,6 +122,8 @@
         var ctx;
         if (d.status === 'completed' && d.dest_path) ctx = '→ ' + d.dest_path;
         else if (d.status === 'searching') ctx = 'Trying another release…';
+        else if (d.status === 'importing') ctx = 'Moving into your library…';
+        else if (d.status === 'queued') ctx = 'Waiting for a free slot…';
         else if (showBar) ctx = [fmtSize(d.size_bytes), d.username ? ('👤 ' + d.username) : '', Math.round(pct) + '%'].filter(Boolean).join('  ·  ');
         else ctx = (d.release_title && d.release_title !== (d.title || '')) ? d.release_title : fmtSize(d.size_bytes);
         var chip = d.quality_label ? '<span class="vdpg-qchip">' + esc(d.quality_label) + '</span>' : '';
@@ -115,7 +137,10 @@
 
         var bar = q('bar');
         bar.style.display = showBar ? '' : 'none';
-        if (showBar) q('fill').style.width = pct + '%';
+        if (showBar) {
+            bar.classList.toggle('vdpg-prog-indet', indet);
+            q('fill').style.width = indet ? '100%' : pct + '%';
+        }
 
         var st = q('status'); var stWant = 'adl-row-status ' + cls;
         if (st.className !== stWant) st.className = stWant;
@@ -148,6 +173,7 @@
             else if (d.status === 'completed') counts.completed++;
             else counts.failed++;
         });
+        setDownloadsBadge(counts.active);   // sidebar live count (this page's poll keeps it fresh)
         var cancelAll = document.querySelector('[data-vdpg-cancel-all]'); if (cancelAll) cancelAll.style.display = counts.active ? '' : 'none';
         var clearBtn = document.querySelector('[data-vdpg-clear]'); if (clearBtn) clearBtn.style.display = (counts.completed + counts.failed) ? '' : 'none';
         var sub = document.querySelector('[data-vdpg-sub]');
@@ -248,5 +274,22 @@
     document.addEventListener('soulsync:video-download-started', function () {
         if (document.querySelector('[data-video-subpage="video-downloads"]:not([hidden])')) setTimeout(poll, 350);
     });
+
+    // Keep the sidebar Downloads badge live even when you're NOT on the page (the on-page
+    // poll already refreshes it, so skip the fetch then). Only runs on the video side.
+    var _badgeTimer = null;
+    function badgePoll() {
+        var onVideo = document.body.getAttribute('data-side') === 'video';
+        if (onVideo && !_onPage() && !document.hidden) {
+            getJSON(URL_ACTIVE).then(function (d) {
+                if (d) setDownloadsBadge((d.downloads || []).filter(function (x) { return isActive(x.status); }).length);
+                scheduleBadgePoll();
+            });
+        } else { scheduleBadgePoll(); }
+    }
+    function scheduleBadgePoll() { if (_badgeTimer) clearTimeout(_badgeTimer); _badgeTimer = setTimeout(badgePoll, 8000); }
+    document.addEventListener('soulsync:video-wishlist-changed', function () { setTimeout(badgePoll, 200); });
+    scheduleBadgePoll();
+
     window._vdpgAnyActive = anyActive;
 })();

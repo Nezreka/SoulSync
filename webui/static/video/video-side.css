@@ -3753,6 +3753,50 @@ body[data-side="video"] #soulsync-toggle { display: none; }
 .vdpg-row-retry:disabled { opacity: 0.5 !important; pointer-events: none; }
 @media (hover: none) { .vdpg-row-retry { opacity: 1; pointer-events: auto; transform: none; } }
 
+/* ───────────────────────── Downloads — Cinema per-type theming ───────────────────
+   movie = azure · TV = violet · youtube = red. --vt is the type's RGB triplet, used for
+   the left accent bar, status pill, progress fill + quality chip. Scoped to .vdpg-card so
+   the music downloads page (.adl-row) is byte-untouched. */
+.vdpg-card[data-vtype="movie"]   { --vt: 79, 143, 247; }
+.vdpg-card[data-vtype="tv"]      { --vt: 164, 114, 245; }
+.vdpg-card[data-vtype="youtube"] { --vt: 240, 69, 75; }
+.vdpg-card { position: relative; overflow: hidden; padding-left: 16px;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease; }
+.vdpg-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: rgb(var(--vt, 255, 255, 255)); opacity: 0.9; }
+.vdpg-card:hover { transform: translateY(-1px); background: rgba(var(--vt, 255, 255, 255), 0.05);
+    box-shadow: 0 7px 24px rgba(0, 0, 0, 0.3), inset 0 0 0 1px rgba(var(--vt, 255, 255, 255), 0.14); }
+
+/* bigger poster art + a type corner badge (so the type reads even with a poster) */
+.vdpg-artwrap { position: relative; flex-shrink: 0; }
+.vdpg-card .adl-row-art { width: 50px; height: 74px; border-radius: 8px; }
+.vdpg-tbadge { position: absolute; right: -5px; bottom: -5px; width: 20px; height: 20px; border-radius: 6px;
+    display: grid; place-items: center; font-size: 11px; line-height: 1; color: #fff;
+    background: rgb(var(--vt, 90, 90, 90));
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 0 0 2px rgba(0, 0, 0, 0.4); }
+
+/* status as a colored pill */
+.vdpg-card .adl-row-status { padding: 4px 11px; border-radius: 999px; min-width: 0; gap: 6px;
+    border: 1px solid transparent; font-weight: 700; font-size: 0.72rem; }
+.vdpg-card .adl-row-status.active { color: rgb(var(--vt)); background: rgba(var(--vt), 0.14); border-color: rgba(var(--vt), 0.4); }
+.vdpg-card .adl-row-status.queued { color: rgba(255, 255, 255, 0.55); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+.vdpg-card .adl-row-status.completed { color: #2bd17e; background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.36); }
+.vdpg-card .adl-row-status.failed { color: #f87171; background: rgba(239, 68, 68, 0.14); border-color: rgba(239, 68, 68, 0.36); }
+.vdpg-card .adl-row-status.cancelled { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 255, 255, 0.1); }
+.vdpg-card .adl-row-status .adl-status-dot { width: 6px; height: 6px; background: currentColor; }
+.vdpg-card.adl-row-active .adl-row-status .adl-status-dot { animation: vdpg-pulse 1.4s ease-in-out infinite; }
+
+/* progress in the type color; queued/searching/importing get an indeterminate sweep */
+.vdpg-card .vdpg-prog-fill { background: linear-gradient(90deg, rgba(var(--vt), 0.6), rgb(var(--vt))); }
+.vdpg-card .vdpg-prog-indet .vdpg-prog-fill { width: 100% !important; transition: none;
+    background: linear-gradient(90deg, transparent, rgb(var(--vt)), transparent);
+    background-size: 38% 100%; background-repeat: no-repeat; animation: vdpg-indet 1.3s ease-in-out infinite; }
+@keyframes vdpg-indet { 0% { background-position: -40% 0; } 100% { background-position: 140% 0; } }
+@keyframes vdpg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* quality chip follows the type color */
+.vdpg-card .vdpg-qchip { background: rgba(var(--vt), 0.16); border-color: rgba(var(--vt), 0.36); }
+
 
 /* Automation Hub panes that are music-specific — emptied on the video side for now. */
 .vauto-hub-soon { padding: 36px 20px; text-align: center; font-size: 13.5px; font-weight: 600;
