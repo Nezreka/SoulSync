@@ -143,3 +143,12 @@ def test_nav_badge_uses_the_endpoint_total_not_a_partial_sum():
     assert "refreshBadge();" in sc and "refreshBadge();" in syc
     assert "state.counts.movie + state.counts.episode" not in _JS   # old partial-total math gone
     assert "/api/video/wishlist/counts" in _JS                       # the endpoint is the source
+
+
+def test_nav_badge_polls_for_server_side_wishlist_changes():
+    # a finished download removes its wishlist item server-side and fires no frontend event,
+    # so the badge must poll the count to stay honest (faster while downloads are active).
+    assert "function scheduleBadgePoll(" in _JS
+    assert "_vdpgAnyActive" in _JS                  # polls quicker while downloads run
+    assert "document.hidden" in _JS                 # paused when the tab is hidden
+    assert "scheduleBadgePoll();" in _JS            # started from init
