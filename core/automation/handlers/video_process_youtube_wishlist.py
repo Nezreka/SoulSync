@@ -1,20 +1,23 @@
 """Automation handler: ``video_process_youtube_wishlist`` action.
 
 The drain side of the YouTube fulfillment lane. The watchlist-channels scan keeps the
-wishlist fed with new uploads; THIS takes wished YouTube videos and pushes them into the
-shared ``video_downloads`` queue, spawning the yt-dlp worker per video. The worker
-(``core.video.youtube_download``) downloads → organises (channel/year/date) → archives to
-history → removes the video from the wishlist, so a completed grab leaves the wishlist and
-won't be re-queued.
+wishlist fed; THIS queues wished videos for download and keeps a few flowing at a time.
 
-Polite by default: only a small BATCH is enqueued per run (a big first-time backlog drains
-over several scheduled runs rather than spawning hundreds of yt-dlp processes at once), and
-videos already in flight (an active ``source='youtube'`` download) are skipped so re-runs
+There is NO cap on how much of the wishlist gets processed — it queues the WHOLE thing.
+The only limit is how many download SIMULTANEOUSLY (``max_concurrent``, default 3): every
+wished video becomes a ``queued`` row in the shared ``video_downloads`` table, the handler
+starts up to the limit, and each finished download starts the next (one-out-one-in, in the
+worker) so the entire queue drains in a controlled stream. This mirrors the music side's
+download worker — a concurrency cap plus a small inter-download delay (handled in the
+worker) to avoid yt-dlp 429s — but stays on the isolated video side.
+
+The worker (``core.video.youtube_download``) downloads → organises (channel/year/date) →
+archives to history → removes the video from the wishlist, so a completed grab leaves the
+wishlist and won't be re-queued; videos already queued or downloading are skipped so re-runs
 never double-grab.
 
 Shared automation side (may import ``core.video`` / ``api.video``); owns its own progress.
-All I/O is injected as seams, so the selection + batching is a pure unit-testable function;
-production lazily binds the real DB + the worker spawn.
+All I/O is injected as seams, so selection + the pump are pure unit-testable functions.
 """
 
 from __future__ import annotations
@@ -24,19 +27,21 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from core.automation.deps import AutomationDeps
 
 
-def select_to_enqueue(wanted: List[Dict[str, Any]], active_ids: Iterable, batch_size: int) -> List[Dict[str, Any]]:
-    """Which wished videos to enqueue now: skip ones already in flight, cap at the batch
-    size (0 = no cap). Pure."""
-    active = {str(x) for x in (active_ids or ()) if x}
+def videos_to_enqueue(wanted: List[Dict[str, Any]], already_ids: Iterable) -> List[Dict[str, Any]]:
+    """Wished videos not already queued or downloading. NO cap — the whole backlog is
+    queued; concurrency is bounded at start time, not here. Pure."""
+    already = {str(x) for x in (already_ids or ()) if x}
     out: List[Dict[str, Any]] = []
     for v in wanted or []:
         vid = v.get("video_id")
-        if not vid or str(vid) in active:
-            continue
-        out.append(v)
-        if batch_size and len(out) >= batch_size:
-            break
+        if vid and str(vid) not in already:
+            out.append(v)
     return out
+
+
+def slots_free(running: int, max_concurrent: int) -> int:
+    """How many new downloads may start now given how many are already fetching. Pure."""
+    return max(0, int(max_concurrent) - max(0, int(running)))
 
 
 # ── production seams ──────────────────────────────────────────────────────────
@@ -56,27 +61,34 @@ def _default_active_ids() -> List[Any]:
             if d.get("source") == "youtube" and d.get("media_id")]
 
 
+def _default_running_count() -> int:
+    from api.video import get_video_db
+    return get_video_db().count_active_youtube_downloads()
+
+
 def _default_enqueue(video: Dict[str, Any], root: str) -> Any:
-    """Create the download row + spawn the yt-dlp worker thread. Returns the row id."""
+    """Create a QUEUED download row (no thread spawned here — the pump starts it). Returns
+    the row id."""
     import json
-    import threading
     from api.video import get_video_db
     from core.video.sources import resolve_video_server
-    from core.video.youtube_download import run_youtube_download
-    db = get_video_db()
-    dl_id = db.add_video_download({
+    return get_video_db().add_video_download({
         "kind": "youtube", "source": "youtube", "media_source": "youtube",
         "title": video.get("video_title") or video.get("channel_title"),
-        "media_id": video.get("video_id"), "target_dir": root, "status": "downloading",
+        "media_id": video.get("video_id"), "target_dir": root, "status": "queued",
         "year": video.get("published_at"), "poster_url": video.get("thumbnail_url"),
         "search_ctx": json.dumps({"channel": video.get("channel_title"),
                                   "video_title": video.get("video_title"),
                                   "published_at": video.get("published_at"),
                                   "server_source": resolve_video_server()}),
     })
-    threading.Thread(target=run_youtube_download, args=(dl_id, get_video_db),
-                     daemon=True, name="yt-dl-%s" % dl_id).start()
-    return dl_id
+
+
+def _default_start_next() -> Any:
+    """Claim + start the next queued YouTube download (or None). The worker chains the rest."""
+    from api.video import get_video_db
+    from core.video.youtube_download import start_next_queued
+    return start_next_queued(get_video_db)
 
 
 def auto_video_process_youtube_wishlist(
@@ -86,17 +98,21 @@ def auto_video_process_youtube_wishlist(
     youtube_root: Optional[Callable[[], str]] = None,
     fetch_wanted: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     active_ids: Optional[Callable[[], Iterable]] = None,
+    running_count: Optional[Callable[[], int]] = None,
     enqueue: Optional[Callable[[Dict[str, Any], str], Any]] = None,
+    start_next: Optional[Callable[[], Any]] = None,
 ) -> Dict[str, Any]:
-    """Enqueue a batch of wished YouTube videos for download.
+    """Queue the whole YouTube wishlist for download and start up to ``max_concurrent`` now.
 
-    Returns ``{'status': 'completed', 'queued': int, 'remaining': int, ...}``."""
+    Returns ``{'status': 'completed', 'queued': int, 'started': int, 'running': int, ...}``."""
     youtube_root = youtube_root or _default_youtube_root
     fetch_wanted = fetch_wanted or _default_fetch_wanted
     active_ids = active_ids or _default_active_ids
+    running_count = running_count or _default_running_count
     enqueue = enqueue or _default_enqueue
+    start_next = start_next or _default_start_next
     automation_id = config.get('_automation_id')
-    batch_size = max(0, int(config.get('batch_size', 3) or 0))
+    max_concurrent = max(1, int(config.get('max_concurrent', 3) or 3))
 
     try:
         root = youtube_root()
@@ -106,39 +122,44 @@ def auto_video_process_youtube_wishlist(
                                  log_line=msg, log_type='error')
             return {'status': 'error', 'error': msg, '_manages_own_progress': True}
 
-        deps.update_progress(automation_id, phase='Checking the YouTube wishlist…', progress=10,
-                             log_line='Looking for new videos to download', log_type='info')
+        deps.update_progress(automation_id, phase='Checking the YouTube wishlist…', progress=15,
+                             log_line='Queueing new videos for download', log_type='info')
         wanted = fetch_wanted() or []
-        active = list(active_ids() or [])
-        picks = select_to_enqueue(wanted, active, batch_size)
-        if not picks:
-            note = ('All %d wished video(s) are already downloading' % len(active)) if active \
-                else 'No wished YouTube videos to download'
-            deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                                 log_line=note, log_type='info')
-            return {'status': 'completed', 'queued': 0, 'remaining': max(0, len(wanted) - len(active)),
-                    '_manages_own_progress': True}
+        already = list(active_ids() or [])
+        new = videos_to_enqueue(wanted, already)
 
         queued = 0
-        for i, v in enumerate(picks):
-            deps.update_progress(automation_id, phase='Queueing downloads…',
-                                 progress=20 + int(70 * i / max(len(picks), 1)),
-                                 log_line="Queued '%s'" % (v.get('video_title') or v.get('video_id')),
-                                 log_type='info')
+        for v in new:
             try:
                 if enqueue(v, root) is not None:
                     queued += 1
-            except Exception:   # noqa: BLE001 - one bad enqueue shouldn't stop the batch
+            except Exception:   # noqa: BLE001 - one bad enqueue shouldn't stop the rest
                 deps.update_progress(automation_id, log_type='warning',
                                      log_line="Couldn't queue '%s'" % (v.get('video_title') or v.get('video_id')))
 
-        remaining = max(0, len(wanted) - len(active) - queued)
-        done = 'Queued %d YouTube download(s)' % queued
-        if remaining:
-            done += ' · %d more waiting (drains over the next runs)' % remaining
+        # Fill the concurrency slots now; each finished download starts the next, so the
+        # whole queue drains on its own from here.
+        deps.update_progress(automation_id, phase='Starting downloads…', progress=70,
+                             log_line='Queued %d new video(s)' % queued, log_type='info')
+        started = 0
+        for _ in range(slots_free(running_count() or 0, max_concurrent)):
+            if start_next() is None:
+                break
+            started += 1
+
+        running = (running_count() or 0)
+        if queued or started:
+            done = 'Queued %d new · %d downloading now (the rest drain automatically)' % (queued, running)
+            log_type = 'success'
+        elif running:
+            done = '%d already downloading; nothing new to queue' % running
+            log_type = 'info'
+        else:
+            done = 'No wished YouTube videos to download'
+            log_type = 'info'
         deps.update_progress(automation_id, status='finished', progress=100, phase='Complete',
-                             log_line=done, log_type='success')
-        return {'status': 'completed', 'queued': queued, 'remaining': remaining,
+                             log_line=done, log_type=log_type)
+        return {'status': 'completed', 'queued': queued, 'started': started, 'running': running,
                 '_manages_own_progress': True}
     except Exception as e:  # noqa: BLE001
         deps.update_progress(automation_id, status='error', phase='Error', log_line=str(e), log_type='error')

@@ -273,9 +273,9 @@ ACTIONS: list[dict] = [
          {"key": "backfill_count", "type": "number", "label": "Always keep the last N videos from each channel", "default": 10, "min": 0}
      ]},
     {"type": "video_process_youtube_wishlist", "label": "Download YouTube Wishlist", "icon": "download", "scope": "video",
-     "description": "Grab wished YouTube videos: pushes a batch into the download queue (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads. Pair with a schedule to drain continuously.", "available": True,
+     "description": "Download wished YouTube videos (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). Queues the WHOLE wishlist — the setting only limits how many download at the same time; each finished one starts the next, so it all drains. A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads.", "available": True,
      "config_fields": [
-         {"key": "batch_size", "type": "number", "label": "Max downloads to queue per run", "default": 3, "min": 0}
+         {"key": "max_concurrent", "type": "number", "label": "Max simultaneous downloads", "default": 3, "min": 1}
      ]},
     # Video twins of the music maintenance actions. Distinct action_type (the
     # system seeder keys on action_type, so a shared key would collide with the

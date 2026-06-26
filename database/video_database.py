@@ -1428,6 +1428,37 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def count_active_youtube_downloads(self) -> int:
+        """How many YouTube downloads are ACTIVELY fetching right now (not queued) —
+        the concurrency gauge the wishlist pump checks before starting more."""
+        conn = self._get_connection()
+        try:
+            r = conn.execute("SELECT COUNT(*) AS n FROM video_downloads "
+                             "WHERE source='youtube' AND status='downloading'").fetchone()
+            return int(r["n"]) if r else 0
+        finally:
+            conn.close()
+
+    def claim_next_youtube_queued(self) -> dict | None:
+        """Atomically take the oldest QUEUED YouTube download and flip it to
+        'downloading', returning the row (or None if none are queued). The
+        ``WHERE status='queued'`` guard makes the claim race-safe — two workers finishing
+        at once can't grab the same row."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute(
+                "SELECT * FROM video_downloads WHERE source='youtube' AND status='queued' "
+                "ORDER BY id LIMIT 1").fetchone()
+            if not row:
+                return None
+            cur = conn.execute(
+                "UPDATE video_downloads SET status='downloading', updated_at=datetime('now') "
+                "WHERE id=? AND status='queued'", (row["id"],))
+            conn.commit()
+            return dict(row) if cur.rowcount else None   # rowcount 0 = lost the race
+        finally:
+            conn.close()
+
     def media_tmdb_id(self, kind: str, media_id) -> tuple:
         """(tmdb_id, imdb_id) for a library movie/show row — used to resolve sidecar /
         subtitle metadata for an owned re-grab (whose media_id is the library id, not a
