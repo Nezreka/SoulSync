@@ -3026,6 +3026,24 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    def youtube_wishlist_to_download(self, limit: int = 0) -> list:
+        """Flat list of wished YouTube videos for the fulfillment worker to grab, newest
+        upload first. Each carries what organising + the download row need: the video id,
+        its channel, the video title, thumbnail, and upload date. (A completed download
+        removes its wishlist row, so this list naturally shrinks as the queue drains.)"""
+        conn = self._get_connection()
+        try:
+            sql = ("SELECT source_id AS video_id, parent_source_id AS channel_id, "
+                   "title AS channel_title, episode_title AS video_title, "
+                   "still_url AS thumbnail_url, air_date AS published_at "
+                   "FROM video_wishlist WHERE kind='video' AND source='youtube' "
+                   "AND source_id IS NOT NULL ORDER BY air_date DESC, id DESC")
+            if limit and int(limit) > 0:
+                sql += " LIMIT %d" % int(limit)
+            return [dict(r) for r in conn.execute(sql)]
+        finally:
+            conn.close()
+
     def mark_channel_dates_enriched(self, channel_id, date_count=0, method="innertube") -> None:
         """Record that the background enricher swept this channel (skip re-sweeps).
         ``method`` tags which source produced the dates; legacy rows have NULL and
