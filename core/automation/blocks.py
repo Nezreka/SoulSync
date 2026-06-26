@@ -272,6 +272,8 @@ ACTIONS: list[dict] = [
      "config_fields": [
          {"key": "backfill_count", "type": "number", "label": "Always keep the last N videos from each channel", "default": 10, "min": 0}
      ]},
+    {"type": "video_scan_watchlist_playlists", "label": "Scan Watchlist Playlists", "icon": "list", "scope": "video",
+     "description": "For every YouTube playlist you follow, wishlist its videos you don't have yet (and anything later added to it) — mirrors the whole list. Each playlist becomes its own show in the library (playlist-as-show). Shorts excluded. Pair with a schedule.", "available": True},
     {"type": "video_process_youtube_wishlist", "label": "Download YouTube Wishlist", "icon": "download", "scope": "video",
      "description": "Download wished YouTube videos (yt-dlp), organised as a Plex 'TV by date' show (channel/year/date). Queues the WHOLE wishlist — the setting only limits how many download at the same time; each finished one starts the next, so it all drains. A completed download leaves the wishlist. Needs the YouTube library folder set on Settings → Downloads.", "available": True,
      "config_fields": [
