@@ -162,6 +162,10 @@ _COLUMN_MIGRATIONS = [
     ("video_wishlist", "still_url", "TEXT"),   # episode still thumbnail (captured at add time)
     ("video_wishlist", "season_poster_url", "TEXT"),   # the episode's season poster
     ("video_wishlist", "episode_overview", "TEXT"),    # episode synopsis
+    # rich movie detail captured at add time (backdrop, overview, genres, runtime, rating,
+    # top cast, director, release_date, + provenance) so the wishlist renders a full card
+    # without re-fetching. JSON blob; NULL on rows added before this / by lean paths.
+    ("video_wishlist", "detail_json", "TEXT"),
     # generic source bridge (YouTube channels/videos ride the existing tables)
     ("video_watchlist", "source", "TEXT NOT NULL DEFAULT 'tmdb'"),
     ("video_watchlist", "source_id", "TEXT"),
@@ -2375,26 +2379,58 @@ class VideoDatabase:
     # into episode rows (the caller supplies the explicit episodes); show/season
     # are just bulk add/remove operations over those rows.
     def add_movie_to_wishlist(self, tmdb_id, title, *, year=None, poster_url=None,
-                              library_id=None, server_source=None) -> bool:
-        """Wish for a movie. Idempotent upsert on its tmdb id."""
+                              library_id=None, server_source=None, status='wanted',
+                              detail_json=None) -> bool:
+        """Wish for a movie. Idempotent upsert on its tmdb id.
+
+        ``status`` lets the watchlist-people scan add an UPCOMING (unreleased) movie as
+        'monitored' so the wishlist engine skips it until it's out; a later scan re-adds it
+        with 'wanted' once released, which PROMOTES it. We never downgrade a status the engine
+        has already advanced (searching/downloading/downloaded/failed) and never knock a
+        'wanted' back to 'monitored'.
+
+        ``detail_json`` is a rich TMDB-detail blob (backdrop/overview/genres/cast/etc.,
+        captured at add time) so the wishlist renders a full card without re-fetching; it's
+        only filled in, never wiped, on re-add.
+        """
         if not tmdb_id or not title:
             return False
+        if isinstance(detail_json, (dict, list)):
+            import json as _json
+            detail_json = _json.dumps(detail_json)
         conn = self._get_connection()
         try:
             conn.execute(
-                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source)
-                   VALUES ('movie', ?, ?, ?, ?, ?, ?)
+                """INSERT INTO video_wishlist (kind, tmdb_id, title, poster_url, year, library_id, server_source, status, detail_json)
+                   VALUES ('movie', ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(tmdb_id) WHERE kind='movie' DO UPDATE SET
                        title=excluded.title,
                        poster_url=COALESCE(excluded.poster_url, video_wishlist.poster_url),
                        year=COALESCE(excluded.year, video_wishlist.year),
-                       library_id=COALESCE(excluded.library_id, video_wishlist.library_id)""",
-                (int(tmdb_id), title, poster_url, year, library_id, server_source))
+                       library_id=COALESCE(excluded.library_id, video_wishlist.library_id),
+                       detail_json=COALESCE(excluded.detail_json, video_wishlist.detail_json),
+                       status=CASE WHEN video_wishlist.status='monitored' AND excluded.status='wanted'
+                                   THEN 'wanted' ELSE video_wishlist.status END""",
+                (int(tmdb_id), title, poster_url, year, library_id, server_source, status, detail_json))
             conn.commit()
             return True
         except Exception:
             logger.exception("add_movie_to_wishlist failed (%s)", tmdb_id)
             return False
+        finally:
+            conn.close()
+
+    def wishlisted_movie_status(self) -> dict:
+        """{tmdb_id: status} for every movie on the wishlist. Lets the watchlist-people
+        scan skip movies it's already handled (fast re-runs) and spot 'monitored' rows
+        that are now releasable so it can promote them."""
+        conn = self._get_connection()
+        try:
+            return {int(r["tmdb_id"]): r["status"] for r in conn.execute(
+                "SELECT tmdb_id, status FROM video_wishlist WHERE kind='movie' AND tmdb_id IS NOT NULL")}
+        except Exception:
+            logger.exception("wishlisted_movie_status failed")
+            return {}
         finally:
             conn.close()
 

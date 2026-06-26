@@ -37,6 +37,8 @@ from core.automation.handlers.download_cleanup import (
 from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
+from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
+from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
 from core.automation.handlers.video_scan_library import (
     auto_video_scan_library, auto_video_scan_server, auto_video_update_database,
 )
@@ -226,6 +228,18 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_add_airing_episodes',
         lambda config: auto_video_add_airing_episodes(config, deps),
+    )
+    # Watchlist-people scan: wishlist every un-owned movie the followed people acted in or
+    # directed (back catalog + upcoming).
+    engine.register_action_handler(
+        'video_scan_watchlist_people',
+        lambda config: auto_video_scan_watchlist_people(config, deps),
+    )
+    # Watchlist-channels scan: wishlist new long-form uploads from followed YouTube
+    # channels (forward-looking + last-N safety net).
+    engine.register_action_handler(
+        'video_scan_watchlist_channels',
+        lambda config: auto_video_scan_watchlist_channels(config, deps),
     )
 
     # Progress + history callbacks: the engine invokes these around
