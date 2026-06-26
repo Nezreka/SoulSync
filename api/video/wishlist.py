@@ -51,7 +51,16 @@ def register_routes(bp):
     def video_wishlist_counts():
         from . import get_video_db
         try:
-            return jsonify({"success": True, **get_video_db().wishlist_counts()})
+            db = get_video_db()
+            counts = db.wishlist_counts()                 # {movie, show, episode, total(movie+ep)}
+            yt = db.youtube_wishlist_counts()             # {channel, video}  (its own table-shape)
+            counts["video"] = yt.get("video", 0)
+            counts["channel"] = yt.get("channel", 0)
+            # The header/sidebar badge is the WHOLE wishlist — movies + episodes + YouTube
+            # videos — so fold the YouTube count into the total (it was movies+episodes only,
+            # which is why a YouTube-only wishlist showed no badge).
+            counts["total"] = counts.get("total", 0) + counts["video"]
+            return jsonify({"success": True, **counts})
         except Exception:
             logger.exception("Failed to count video wishlist")
             return jsonify({"success": False, "error": "Failed"}), 500

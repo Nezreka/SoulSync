@@ -60,6 +60,44 @@ def test_clear_empty_tab_is_a_noop(db):
     assert db.clear_wishlist("movie") == 0
 
 
+def test_counts_endpoint_total_includes_youtube_videos(tmp_path):
+    # regression: the header/sidebar wishlist badge reads this 'total'. It used to be
+    # movies+episodes only, so a wishlist of only YouTube videos showed NO badge.
+    from flask import Flask
+    import api.video as videoapi
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    _seed(db)   # 2 movies, 2 episodes (1 show), 2 youtube videos
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        r = client.get("/api/video/wishlist/counts").get_json()
+        assert r["success"]
+        assert r["movie"] == 2 and r["episode"] == 2 and r["video"] == 2
+        assert r["total"] == 6                     # movies + episodes + YouTube videos (was 4)
+    finally:
+        videoapi._video_db = None
+
+
+def test_counts_endpoint_youtube_only_shows_a_total(tmp_path):
+    # the exact reported case: only YouTube videos wished → badge must still show a number
+    from flask import Flask
+    import api.video as videoapi
+    db = VideoDatabase(database_path=str(tmp_path / "video_library.db"))
+    db.add_videos_to_wishlist({"youtube_id": "UC1", "title": "Ch"},
+                              [{"youtube_id": "v1", "title": "A"}, {"youtube_id": "v2", "title": "B"}])
+    videoapi._video_db = db
+    app = Flask(__name__)
+    app.register_blueprint(videoapi.create_video_blueprint(), url_prefix="/api/video")
+    client = app.test_client()
+    try:
+        r = client.get("/api/video/wishlist/counts").get_json()
+        assert r["total"] == 2 and r["video"] == 2 and r["movie"] == 0
+    finally:
+        videoapi._video_db = None
+
+
 def test_clear_endpoint(tmp_path):
     from flask import Flask
     import api.video as videoapi
