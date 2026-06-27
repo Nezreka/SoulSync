@@ -38549,6 +38549,26 @@ def start_runtime_services():
         # Initialize app start time for uptime tracking
         app.start_time = time.time()
 
+        # Periodic full garbage collection (#802 / resource usage). plexapi builds large XML
+        # Element trees whose nodes reference each other in cycles; Python's generational GC
+        # parks those in gen2 and only sweeps it rarely, so they accumulate and RSS climbs
+        # (measured: ~300MB fresh -> 1.8GB after browsing every page, ~700MB of it reclaimable
+        # cyclic garbage that a full gc.collect() frees instantly). A scheduled full collect
+        # reclaims them on a cadence so RSS stays bounded instead of climbing into lock-up.
+        # A full collect on this heap is ~tens of ms; once a minute is negligible CPU.
+        def _periodic_gc(interval=60):
+            import gc
+            while True:
+                time.sleep(interval)
+                try:
+                    n = gc.collect()
+                    if n:
+                        logger.debug("periodic gc.collect() reclaimed %d cyclic objects", n)
+                except Exception:  # noqa: S110 — best-effort housekeeping, never crash the app
+                    pass
+        threading.Thread(target=_periodic_gc, daemon=True, name='periodic-gc').start()
+        logger.info("Periodic GC sweeper started (full collect every 60s)")
+
         # Register action handlers and start automation engine
         _register_automation_handlers()
         if automation_engine:
