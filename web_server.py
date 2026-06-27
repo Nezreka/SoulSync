@@ -2985,6 +2985,61 @@ def debug_memory_stop():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/debug/memory/objects')
+def debug_memory_objects():
+    """One-shot memory breakdown by live object type (plain gc — NO tracemalloc, so it
+    won't lock up a loaded app). Hit this once when RSS is high to see which type/cache
+    dominates: a big 'count' reveals accumulation (a cache that never evicts); a big
+    'mb' under bytes/str reveals blob retention. Pinpoints the leak without tracing."""
+    import gc
+    import sys
+    from collections import defaultdict
+    try:
+        gc.collect()
+        objs = gc.get_objects()
+        counts = defaultdict(int)
+        sizes = defaultdict(int)
+        biggest = []
+        for o in objs:
+            tn = type(o).__name__
+            counts[tn] += 1
+            try:
+                sz = sys.getsizeof(o)
+            except Exception:
+                sz = 0
+            sizes[tn] += sz
+            if sz > 1_000_000 and isinstance(o, (dict, list, set, frozenset, bytes, bytearray, str, tuple)):
+                try:
+                    biggest.append((sz, tn, len(o)))
+                except Exception:
+                    pass
+        biggest.sort(reverse=True)
+        rss = None
+        try:
+            import psutil
+            rss = round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 1)
+        except Exception:
+            pass
+        return jsonify({
+            'rss_mb': rss,
+            'total_objects': len(objs),
+            'top_by_size_mb': [
+                {'type': t, 'count': counts[t], 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, _ in sorted(sizes.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'top_by_count': [
+                {'type': t, 'count': c, 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, c in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'biggest_containers': [
+                {'mb': round(s / (1024 * 1024), 1), 'type': t, 'len': ln}
+                for s, t, ln in biggest[:15]
+            ],
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/activity/feed')
 def get_activity_feed():
     """Get recent activity feed for dashboard"""
