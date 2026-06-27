@@ -7533,13 +7533,13 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
-                    # Pasted-link exact match: bubble the track whose id matches
-                    # the link to the top so the user sees the exact version
-                    # first (graceful no-op if ids don't line up).
+                    # Pasted-link exact match: bubble the track whose source id
+                    # matches the link to the top so the user sees the exact version
+                    # first. Reads _source_metadata['track_id'] (TrackResult has no
+                    # top-level id) — the old getattr(t,'id') always missed (#932).
                     if src_name == link_source and link_track_id and tracks:
-                        tracks = sorted(
-                            tracks,
-                            key=lambda t: str(getattr(t, 'id', '')) != str(link_track_id))
+                        from core.downloads.track_link import bubble_linked_track_first
+                        tracks = bubble_linked_track_first(tracks, link_track_id)
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
