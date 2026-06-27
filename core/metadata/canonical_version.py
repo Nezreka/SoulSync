@@ -211,7 +211,7 @@ def pick_canonical_release(
 # core.library_reorganize._ALBUM_ID_COLUMNS — a test pins them in sync). A manual
 # match on any of these should pin/lock the canonical version (#758); a match on
 # a source the canonical tools don't read (e.g. lastfm) has no version to pin.
-CANONICAL_ALBUM_SOURCES = frozenset({'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase'})
+CANONICAL_ALBUM_SOURCES = frozenset({'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz'})
 
 
 def should_pin_manual_canonical(entity_type: str, source: str) -> bool:
