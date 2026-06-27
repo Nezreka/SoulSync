@@ -52,6 +52,14 @@ _DEFAULT_LENGTH_TOLERANCE_S = 3.0
 _LENGTH_TOLERANCE_LONG_TRACK_S = 5.0
 _LONG_TRACK_THRESHOLD_S = 600.0  # 10 minutes
 
+# A file that runs LONGER than the expected metadata is the opposite of a truncated
+# download — it's almost always a different master/version (a remaster with a longer
+# outro, an extended fade, an album cut vs the radio edit). The duration check exists to
+# catch TRUNCATION (short files) and wildly-wrong matches, so on the auto default we allow
+# more drift in the longer direction and keep the tight bound for short files. A wrong-song
+# match still trips this — it's usually off by far more than 15s. (#937)
+_LONGER_VERSION_TOLERANCE_S = 15.0
+
 # Upper bound for the user-configurable override. Anything past 60s
 # means the check is effectively off — cap defends against accidental
 # nonsense like 9999 making logs misleading. Users who genuinely want
@@ -242,18 +250,32 @@ def check_audio_integrity(
             if expected_length_s > _LONG_TRACK_THRESHOLD_S
             else _DEFAULT_LENGTH_TOLERANCE_S
         )
+        user_pinned_tolerance = False
+    else:
+        user_pinned_tolerance = True
     checks["length_tolerance_s"] = length_tolerance_s
 
-    drift_s = abs(actual_length_s - expected_length_s)
+    # Positive drift = the file runs LONGER than expected (not truncation). On the auto
+    # default, give the longer direction more room so legit longer masters/versions aren't
+    # quarantined (#937); a user-pinned tolerance is honoured symmetrically.
+    signed_drift_s = actual_length_s - expected_length_s
+    drift_s = abs(signed_drift_s)
     checks["length_drift_s"] = drift_s
+    effective_tolerance_s = length_tolerance_s
+    if signed_drift_s > 0 and not user_pinned_tolerance:
+        effective_tolerance_s = max(length_tolerance_s, _LONGER_VERSION_TOLERANCE_S)
+    checks["effective_tolerance_s"] = effective_tolerance_s
 
-    if drift_s > length_tolerance_s:
+    if drift_s > effective_tolerance_s:
+        runs_long = signed_drift_s > 0
         return IntegrityResult(
             ok=False,
             reason=f"Duration mismatch: file is {actual_length_s:.1f}s, "
                    f"expected {expected_length_s:.1f}s "
-                   f"(drift {drift_s:.1f}s > tolerance {length_tolerance_s:.1f}s) — "
-                   "likely truncated download or wrong file matched",
+                   f"(drift {drift_s:.1f}s > tolerance {effective_tolerance_s:.1f}s) — "
+                   + ("runs longer than expected — likely a different version/master or wrong file"
+                      if runs_long
+                      else "likely truncated download or wrong file matched"),
             checks=checks,
         )
 
