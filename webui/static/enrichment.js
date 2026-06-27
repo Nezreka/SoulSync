@@ -2749,7 +2749,7 @@ async function loadRepairFindings() {
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
-            quality_upgrade: 'Low Quality'
+            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip'
         };
 
         // Finding types that have an automated fix action
@@ -2770,6 +2770,7 @@ async function loadRepairFindings() {
             quality_upgrade: 'Upgrade',
             missing_discography_track: 'Add to Wishlist',
             library_retag: 'Apply Tags',
+            short_preview_track: 'Re-download',
         };
 
         container.innerHTML = items.map(f => {
