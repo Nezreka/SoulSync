@@ -260,10 +260,11 @@ function applyReduceEffects(enabled) {
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
-    // Bootstrap particles setting from localStorage
+    // Bootstrap particles setting from localStorage — OFF by default (continuous
+    // full-page canvas = real GPU cost); only on when the user explicitly enabled it.
     const particlesSaved = localStorage.getItem('soulsync-particles');
-    if (particlesSaved === 'false') {
-        window._particlesEnabled = false;
+    window._particlesEnabled = (particlesSaved === 'true');
+    if (!window._particlesEnabled) {
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
     }
