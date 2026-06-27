@@ -38549,25 +38549,39 @@ def start_runtime_services():
         # Initialize app start time for uptime tracking
         app.start_time = time.time()
 
-        # Periodic full garbage collection (#802 / resource usage). plexapi builds large XML
+        # Growth-triggered garbage collection (#802 / resource usage). plexapi builds large XML
         # Element trees whose nodes reference each other in cycles; Python's generational GC
-        # parks those in gen2 and only sweeps it rarely, so they accumulate and RSS climbs
-        # (measured: ~300MB fresh -> 1.8GB after browsing every page, ~700MB of it reclaimable
-        # cyclic garbage that a full gc.collect() frees instantly). A scheduled full collect
-        # reclaims them on a cadence so RSS stays bounded instead of climbing into lock-up.
-        # A full collect on this heap is ~tens of ms; once a minute is negligible CPU.
-        def _periodic_gc(interval=60):
+        # parks those in gen2 and sweeps it rarely, so they accumulate and RSS climbs (measured:
+        # ~300MB fresh -> 1.8-2.2GB after browsing every page, most of it reclaimable cyclic
+        # garbage a full gc.collect() frees instantly). A FIXED timer overshoots — browsing piles
+        # garbage faster than once-a-minute catches it. Instead, poll RSS cheaply and collect as
+        # soon as it has grown GROW_MB since the last sweep, so it kicks in DURING a heavy browse
+        # and caps the peak near (floor + GROW_MB) instead of letting it run to 2GB+. A backstop
+        # interval still collects slow accumulation when idle.
+        def _growth_triggered_gc():
             import gc
+            CHECK_SECONDS = 8       # cheap RSS poll cadence
+            GROW_MB = 250           # collect once RSS climbs this much since the last sweep
+            BACKSTOP_SECONDS = 120  # ...or at least this often regardless
+            try:
+                import psutil
+                proc = psutil.Process(os.getpid())
+                rss_mb = lambda: proc.memory_info().rss / (1024 * 1024)
+            except Exception:
+                rss_mb = lambda: 0.0
+            floor = rss_mb()
+            last = time.time()
             while True:
-                time.sleep(interval)
+                time.sleep(CHECK_SECONDS)
                 try:
-                    n = gc.collect()
-                    if n:
-                        logger.debug("periodic gc.collect() reclaimed %d cyclic objects", n)
+                    if (rss_mb() - floor) >= GROW_MB or (time.time() - last) >= BACKSTOP_SECONDS:
+                        gc.collect()
+                        floor = rss_mb()
+                        last = time.time()
                 except Exception:  # noqa: S110 — best-effort housekeeping, never crash the app
                     pass
-        threading.Thread(target=_periodic_gc, daemon=True, name='periodic-gc').start()
-        logger.info("Periodic GC sweeper started (full collect every 60s)")
+        threading.Thread(target=_growth_triggered_gc, daemon=True, name='gc-sweeper').start()
+        logger.info("GC sweeper started (collect on +250MB growth, backstop 120s)")
 
         # Register action handlers and start automation engine
         _register_automation_handlers()
