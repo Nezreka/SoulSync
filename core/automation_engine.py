@@ -316,6 +316,15 @@ SYSTEM_AUTOMATIONS = [
         'initial_delay': 1500,
         'owned_by': 'video',
     },
+    # YouTube retention: delete channel episodes outside each channel's keep window. No-op
+    # unless a channel opts in (cog modal → Keep); default keeps everything, so safe to seed.
+    {
+        'name': 'Auto-Clean Old YouTube Episodes',
+        'trigger_type': 'daily_time',
+        'trigger_config': {'time': '04:00'},
+        'action_type': 'video_clean_youtube_episodes',
+        'owned_by': 'video',
+    },
 ]
 
 

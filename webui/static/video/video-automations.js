@@ -35,6 +35,7 @@
         'video_scan_watchlist_playlists', 'video_refresh_airing_schedules', 'video_add_airing_episodes',
         // Stage 2 — processors that DRAIN it (download)
         'video_process_movie_wishlist', 'video_process_episode_wishlist', 'video_process_youtube_wishlist',
+        'video_clean_youtube_episodes',
         // Library scan / sync
         'video_scan_server', 'video_update_database', 'video_update_database_hourly', 'video_deep_scan_tv', 'video_deep_scan_movies',
         // Maintenance

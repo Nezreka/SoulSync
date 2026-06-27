@@ -178,6 +178,11 @@ _COLUMN_MIGRATIONS = [
     # per-video duration + approximate view count on the remembered catalog
     ("youtube_channel_videos", "duration", "TEXT"),
     ("youtube_channel_videos", "view_count", "INTEGER"),
+    # YouTube retention: owning channel + upload date (group + age episodes) and a prune
+    # marker — retention deletes the FILE but keeps the row (so the scan won't re-download it).
+    ("video_download_history", "channel_id", "TEXT"),
+    ("video_download_history", "published_at", "TEXT"),
+    ("video_download_history", "pruned_at", "TEXT"),
     # fanart.tv artwork backfill (gap-fill only; logo/backdrop/poster live already)
     ("movies", "clearart_url", "TEXT"), ("movies", "banner_url", "TEXT"),
     ("movies", "fanart_status", "TEXT"), ("movies", "fanart_attempted", "TEXT"),
@@ -1486,6 +1491,48 @@ class VideoDatabase:
         finally:
             conn.close()
 
+    # ── YouTube retention (auto-clean old channel episodes) ──────────────────────
+    def youtube_channels_with_downloads(self) -> list:
+        """Channel ids that have at least one still-on-disk (not pruned) downloaded episode —
+        the set the retention automation iterates."""
+        conn = self._get_connection()
+        try:
+            return [r["channel_id"] for r in conn.execute(
+                "SELECT DISTINCT channel_id FROM video_download_history "
+                "WHERE source='youtube' AND outcome='completed' AND channel_id IS NOT NULL "
+                "AND pruned_at IS NULL")]
+        finally:
+            conn.close()
+
+    def youtube_channel_episodes(self, channel_id) -> list:
+        """A channel's downloaded, still-on-disk episodes (newest upload first) for retention —
+        each carries the history id, file path, upload date + filename (date fallback)."""
+        if not channel_id:
+            return []
+        conn = self._get_connection()
+        try:
+            return [dict(r) for r in conn.execute(
+                "SELECT id, media_id, title, dest_path, filename, published_at, completed_at, size_bytes "
+                "FROM video_download_history WHERE source='youtube' AND outcome='completed' "
+                "AND channel_id=? AND pruned_at IS NULL ORDER BY published_at DESC, completed_at DESC",
+                (str(channel_id),))]
+        finally:
+            conn.close()
+
+    def mark_download_pruned(self, history_id, when) -> bool:
+        """Flag a history row as retention-pruned (file deleted) — kept so the scan's dedup
+        still excludes it (no re-download). Returns True if a row was updated."""
+        conn = self._get_connection()
+        try:
+            cur = conn.execute("UPDATE video_download_history SET pruned_at=? "
+                               "WHERE id=? AND pruned_at IS NULL", (when, int(history_id)))
+            conn.commit()
+            return cur.rowcount > 0
+        except (sqlite3.Error, TypeError, ValueError):
+            return False
+        finally:
+            conn.close()
+
     def media_tmdb_id(self, kind: str, media_id) -> tuple:
         """(tmdb_id, imdb_id) for a library movie/show row — used to resolve sidecar /
         subtitle metadata for an owned re-grab (whose media_id is the library id, not a
@@ -1570,13 +1617,14 @@ class VideoDatabase:
                    "failed": "failed", "cancelled": "cancelled"}.get(status, status)
         kind = row.get("kind") or "movie"
         media_type = "show" if kind == "show" else ("movie" if kind == "movie" else kind)
-        # season/episode live in the retry search_ctx JSON for episode grabs.
-        sn = en = None
+        # season/episode + (youtube) channel/upload-date live in the search_ctx JSON.
+        sn = en = channel_id = published_at = None
         ctx = row.get("search_ctx")
         if ctx:
             try:
                 ctx = json.loads(ctx) if isinstance(ctx, str) else (ctx or {})
                 sn, en = ctx.get("season"), ctx.get("episode")
+                channel_id, published_at = ctx.get("channel_id"), ctx.get("published_at")
             except (ValueError, TypeError):
                 pass
         rel, fn = row.get("release_title"), row.get("filename")
@@ -1587,15 +1635,15 @@ class VideoDatabase:
                        (download_id, kind, media_type, title, year, season_number, episode_number,
                         release_title, source, username, filename, dest_path, size_bytes,
                         quality_label, resolution, video_codec, media_id, media_source, poster_url,
-                        outcome, error, grabbed_at, completed_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        outcome, error, grabbed_at, completed_at, channel_id, published_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (row.get("id"), kind, media_type, row.get("title"), row.get("year"), sn, en,
                  rel, row.get("source"), row.get("username"), fn, row.get("dest_path"),
                  int(row.get("size_bytes") or 0), row.get("quality_label"),
                  self._parse_resolution(rel, fn, row.get("quality_label")), self._codec(rel, fn),
                  row.get("media_id"), row.get("media_source"), row.get("poster_url"),
                  outcome, row.get("error"), row.get("created_at"),
-                 row.get("completed_at")))
+                 row.get("completed_at"), channel_id, published_at))
             conn.commit()
             return cur.lastrowid or 0
         except Exception:
