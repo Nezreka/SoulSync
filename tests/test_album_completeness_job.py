@@ -1,4 +1,3 @@
-import sys
 import types
 
 
@@ -10,35 +9,10 @@ class _DummyConfigManager:
         return "plex"
 
 
-if "spotipy" not in sys.modules:
-    spotipy = types.ModuleType("spotipy")
-
-    class _DummySpotify:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    oauth2 = types.ModuleType("spotipy.oauth2")
-
-    class _DummyOAuth:
-        def __init__(self, *args, **kwargs):
-            pass
-
-    spotipy.Spotify = _DummySpotify
-    oauth2.SpotifyOAuth = _DummyOAuth
-    oauth2.SpotifyClientCredentials = _DummyOAuth
-    spotipy.oauth2 = oauth2
-    sys.modules["spotipy"] = spotipy
-    sys.modules["spotipy.oauth2"] = oauth2
-
-if "config.settings" not in sys.modules:
-    config_pkg = types.ModuleType("config")
-    settings_mod = types.ModuleType("config.settings")
-
-    settings_mod.config_manager = _DummyConfigManager()
-    config_pkg.settings = settings_mod
-    sys.modules["config"] = config_pkg
-    sys.modules["config.settings"] = settings_mod
-
+# NOTE: deliberately no sys.modules stubbing of spotipy / config.settings here. Both import
+# fine in the test env, and faking them globally (with no teardown) leaked into other files —
+# it left a config.settings with no ConfigManager, intermittently breaking
+# tests/test_config_save_retry depending on collection order.
 from core.repair_jobs.album_completeness import AlbumCompletenessJob
 import core.repair_jobs.album_completeness as album_completeness_module
 

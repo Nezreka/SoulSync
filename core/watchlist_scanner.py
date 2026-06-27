@@ -328,6 +328,22 @@ _ALBUM_QUALIFIER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A trailing "- ..." clause is stripped ONLY when EVERY token in it is an edition/format
+# qualifier (+ connectors / a year-ordinal). So "- Single", "- Acoustic Version", "- 2011
+# Remaster" collapse to the base name, but a real distinguishing subtitle ("- Nos vies en
+# Lumière", "- Live in Berlin") is kept — the bug was a blanket "- anything$" strip that
+# erased subtitles and fused different editions (Sokhi: Expedition 33 OST vs Bonus Edition).
+_DASH_QUALIFIER_WORD = (
+    r'live|acoustic|electric|instrumental|unplugged|mono|stereo|demos?|reissue|'
+    r'remix(?:es)?|edit(?:ed)?|radio|single|ep|lp|version|mix(?:es)?|sessions?|bootleg|'
+    r'covers?|original|redux|deluxe|expanded|remaster(?:ed)?|anniversary|special|'
+    r'edition|bonus|extended|explicit|clean|soundtrack|ost|score'
+)
+_TRAILING_DASH_QUALIFIER_RE = re.compile(
+    r'\s*-\s*(?:(?:' + _DASH_QUALIFIER_WORD + r'|the|a|and|&|\+|\d+(?:st|nd|rd|th)?)\b[\s\-]*)+$',
+    re.IGNORECASE,
+)
+
 
 def _normalize_album_for_match(name: str) -> str:
     """Return a canonical form of an album name suitable for fuzzy comparison.
@@ -347,8 +363,9 @@ def _normalize_album_for_match(name: str) -> str:
     # they're almost always edition or commentary noise, not part of the
     # album's identifying name.
     cleaned = re.sub(r'\s*[\(\[][^\)\]]*[\)\]]\s*', ' ', cleaned)
-    # Trailing dash-clauses ("Album - Remastered", "Album - Live")
-    cleaned = re.sub(r'\s*-\s*[^-]+$', '', cleaned)
+    # Trailing dash-clause, but ONLY when it's entirely edition/format qualifiers — a real
+    # subtitle is preserved (see _TRAILING_DASH_QUALIFIER_RE).
+    cleaned = _TRAILING_DASH_QUALIFIER_RE.sub(' ', cleaned)
     cleaned = re.sub(r'[^a-z0-9 ]+', ' ', cleaned.lower())
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
@@ -382,7 +399,7 @@ def _extract_volume_marker(normalized_name: str):
     return last.group(1) or last.group(2)
 
 
-def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 0.6) -> bool:
+def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 0.85) -> bool:
     """Return True when two album names plausibly identify the same release.
 
     Designed to swallow naming drift between metadata sources and the
@@ -406,11 +423,11 @@ def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 
         return False
     if norm_a == norm_b:
         return True
-    # After normalization the shorter name often becomes a prefix /
-    # substring of the longer one ("napoleon dynamite" ⊂ "napoleon
-    # dynamite music from the motion picture" before stripping).
-    if norm_a in norm_b or norm_b in norm_a:
-        return True
+    # No loose substring shortcut: after qualifier-stripping, a short name being a
+    # prefix of a longer one is usually a DIFFERENT edition carrying a real subtitle
+    # ("clair obscur expedition 33" ⊂ "clair obscur expedition 33 nos vies en lumiere"),
+    # not naming drift. Genuine drift collapses to an EXACT match above; everything else
+    # must clear a high overall-similarity bar.
     return SequenceMatcher(None, norm_a, norm_b).ratio() >= threshold
 
 
