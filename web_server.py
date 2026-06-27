@@ -2837,9 +2837,15 @@ def _build_system_stats():
     uptime_seconds = time.time() - start_time
     uptime = str(timedelta(seconds=int(uptime_seconds)))
 
-    # Get memory usage
+    # Get memory usage — global system %, plus SoulSync's own resident memory (RSS),
+    # so the dashboard can show "system load" and "how much RAM SoulSync itself uses".
     memory = psutil.virtual_memory()
     memory_usage = f"{memory.percent}%"
+    try:
+        _proc_rss_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        process_memory = f"{_proc_rss_mb:.0f} MB" if _proc_rss_mb < 1024 else f"{_proc_rss_mb / 1024:.1f} GB"
+    except Exception:
+        process_memory = None
 
     # Count active downloads from download_batches (batches that are currently downloading)
     active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
@@ -2917,7 +2923,8 @@ def _build_system_stats():
         'download_speed': download_speed_str,
         'active_syncs': active_syncs,
         'uptime': uptime,
-        'memory_usage': memory_usage
+        'memory_usage': memory_usage,
+        'process_memory': process_memory
     }
 
 @app.route('/api/system/stats')
