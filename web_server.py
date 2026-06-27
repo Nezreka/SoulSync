@@ -28223,22 +28223,10 @@ def start_watchlist_scan():
                 # #831 round 2: persist this run + its track ledger so the
                 # Watchlist History modal can show what every past scan did.
                 try:
-                    _state = watchlist_scan_state
-                    get_database().save_watchlist_scan_run(
-                        run_id=_state.get('scan_run_id') or datetime.now().strftime('%Y%m%d-%H%M%S'),
-                        profile_id=scan_profile_id,
-                        status='cancelled' if was_cancelled else 'completed',
-                        started_at=(_state.get('started_at').isoformat()
-                                    if _state.get('started_at') else None),
-                        completed_at=(_state.get('completed_at') or datetime.now()).isoformat()
-                                     if not isinstance(_state.get('completed_at'), str)
-                                     else _state.get('completed_at'),
-                        total_artists=(_state.get('summary') or {}).get('total_artists',
-                                                                        _state.get('total_artists', 0)),
-                        artists_scanned=(_state.get('summary') or {}).get('successful_scans', 0),
-                        tracks_found=_state.get('tracks_found_this_scan', 0),
-                        tracks_added=_state.get('tracks_added_this_scan', 0),
-                        track_events=_state.get('scan_track_events') or [],
+                    from core.watchlist.scan_history import persist_scan_run
+                    persist_scan_run(
+                        get_database(), watchlist_scan_state,
+                        profile_id=scan_profile_id, was_cancelled=was_cancelled,
                     )
                 except Exception as _hist_err:
                     logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
