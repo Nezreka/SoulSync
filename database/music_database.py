@@ -13870,6 +13870,12 @@ class MusicDatabase:
         exact-path-only heal left thousands of already-verified files showing as
         Unverified (issue #934).
 
+        A basename match is title-guarded: a shared track-number filename
+        ("01 - Intro.flac") must NOT heal a different song, so when both the
+        history row and the candidate track carry a title they have to agree
+        (alphanumeric-lowercase) — the same guard the AcoustID matcher uses. An
+        exact-path match is unambiguous and needs no guard.
+
         Upgrade-only and non-destructive: it only lifts 'unverified' rows to the
         confirmed status, never downgrades and never deletes. Returns the number
         of rows healed. Genuinely-unverified rows and orphans (no matching
@@ -13879,27 +13885,49 @@ class MusicDatabase:
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            rank = {'verified': 1, 'human_verified': 2}
-            by_path = {}
-            by_base = {}
+            # Cheap early-out: skip the tracks scan entirely when nothing is stuck.
             cursor.execute(
-                "SELECT file_path, verification_status FROM tracks "
+                "SELECT 1 FROM library_history WHERE verification_status = 'unverified' LIMIT 1")
+            if cursor.fetchone() is None:
+                return 0
+
+            def _norm(value):
+                return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+            rank = {'verified': 1, 'human_verified': 2}
+            by_path = {}   # exact path -> status (unambiguous; no title guard)
+            by_base = {}   # basename -> list of (norm_title, status)
+            cursor.execute(
+                "SELECT file_path, verification_status, title FROM tracks "
                 "WHERE verification_status IN ('verified', 'human_verified') "
                 "AND file_path IS NOT NULL AND file_path != ''")
-            for fp, st in cursor.fetchall():
+            for fp, st, ttitle in cursor.fetchall():
                 if not fp:
                     continue
-                by_path[fp] = st
+                if rank.get(st, 0) >= rank.get(by_path.get(fp), 0):
+                    by_path[fp] = st
                 base = os.path.basename(fp)
-                if base and rank.get(st, 0) >= rank.get(by_base.get(base), 0):
-                    by_base[base] = st
+                if base:
+                    by_base.setdefault(base, []).append((_norm(ttitle), st))
+
             updates = []
             cursor.execute(
-                "SELECT id, file_path FROM library_history "
+                "SELECT id, file_path, title FROM library_history "
                 "WHERE verification_status = 'unverified' "
                 "AND file_path IS NOT NULL AND file_path != ''")
-            for rid, fp in cursor.fetchall():
-                target = by_path.get(fp) or by_base.get(os.path.basename(fp or ''))
+            for rid, fp, rtitle in cursor.fetchall():
+                target = by_path.get(fp)
+                if not target:
+                    want = _norm(rtitle)
+                    best = 0
+                    for ttitle, st in by_base.get(os.path.basename(fp or ''), ()):
+                        # Title guard: require agreement only when BOTH titles are
+                        # present (legacy rows may lack one — fall back to filename).
+                        if want and ttitle and want != ttitle:
+                            continue
+                        if rank.get(st, 0) >= best:
+                            best = rank.get(st, 0)
+                            target = st
                 if target:
                     updates.append((target, rid))
             for status, rid in updates:
