@@ -3195,6 +3195,17 @@ function _renderFindingDetail(f) {
             tnHtml += _renderPlayButton(f);
             return tnHtml;
 
+        case 'short_preview_track':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album) rows.push(['Album', d.album]);
+            if (d.title) rows.push(['Title', d.title]);
+            if (d.file_duration_s != null) rows.push(['File Length', `${d.file_duration_s}s`, 'warning']);
+            if (d.expected_duration_s != null) rows.push(['Real Length', `${d.expected_duration_s}s`, 'success']);
+            if (d.original_path) rows.push(['Path', d.original_path, 'path']);
+            // Play button lets the user hear the clip and confirm it's a busted ~30s preview
+            // before approving the delete + re-download.
+            return media + _gridRows(rows) + _renderPlayButton(f);
+
         default:
             // Generic: render all detail keys
             Object.entries(d).forEach(([k, v]) => {
