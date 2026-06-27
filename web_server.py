@@ -38561,7 +38561,7 @@ def start_runtime_services():
         def _growth_triggered_gc():
             import gc
             CHECK_SECONDS = 8       # cheap RSS poll cadence
-            GROW_MB = 250           # collect once RSS climbs this much since the last sweep
+            GROW_MB = 200           # collect once RSS climbs this much since the last sweep
             BACKSTOP_SECONDS = 120  # ...or at least this often regardless
             try:
                 import psutil
@@ -38569,6 +38569,19 @@ def start_runtime_services():
                 rss_mb = lambda: proc.memory_info().rss / (1024 * 1024)
             except Exception:
                 rss_mb = lambda: 0.0
+            # glibc malloc_trim hands freed arenas back to the OS — WITHOUT it gc.collect() frees
+            # the Python objects but glibc hoards the memory, so RSS never drops and the peak still
+            # runs to 2GB+. Best-effort: absent on musl/Alpine or non-Linux, where we just skip it
+            # (gc still helps, RSS just sticks closer to the high-water mark there).
+            _trim = None
+            try:
+                import ctypes
+                import ctypes.util
+                _libc = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6')
+                if hasattr(_libc, 'malloc_trim'):
+                    _trim = _libc.malloc_trim
+            except Exception:
+                pass
             floor = rss_mb()
             last = time.time()
             while True:
@@ -38576,12 +38589,17 @@ def start_runtime_services():
                 try:
                     if (rss_mb() - floor) >= GROW_MB or (time.time() - last) >= BACKSTOP_SECONDS:
                         gc.collect()
+                        if _trim is not None:
+                            try:
+                                _trim(0)
+                            except Exception:
+                                pass
                         floor = rss_mb()
                         last = time.time()
                 except Exception:  # noqa: S110 — best-effort housekeeping, never crash the app
                     pass
         threading.Thread(target=_growth_triggered_gc, daemon=True, name='gc-sweeper').start()
-        logger.info("GC sweeper started (collect on +250MB growth, backstop 120s)")
+        logger.info("GC sweeper started (collect + malloc_trim on +200MB growth, backstop 120s)")
 
         # Register action handlers and start automation engine
         _register_automation_handlers()
