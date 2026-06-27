@@ -63351,8 +63351,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
-    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+    will-change: left, top;
+    /* No infinite scale-pulse: scaling a blur(48px) element re-rasterizes the blur every
+       frame, and with 8 cards × 2 blobs that pinned the GPU at idle (#935). The blob still
+       follows the cursor via --blob-x/y; it just doesn't breathe when nothing's happening. */
 }
 .dash-card::after {
     content: '';
@@ -63372,9 +63374,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
+    will-change: left, top;
     mix-blend-mode: screen;
-    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+    /* No infinite scale-pulse — same reason as ::before (#935). */
 }
 
 @keyframes dashBlobHaloPulse {
