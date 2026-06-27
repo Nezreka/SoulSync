@@ -1074,6 +1074,10 @@ class QobuzClient(DownloadSourcePlugin):
             title=title,
             album=album_name,
             track_number=track.get('track_number'),
+            # Stamp the Qobuz track id so a pasted-link manual search can float the
+            # exact track to the top (#932). Without this the bubble never matched
+            # and the linked track stayed buried among fuzzy lookalikes.
+            _source_metadata={'source': 'qobuz', 'track_id': str(track.get('id') or '')},
         )
 
         # Stamp real API quality so the global ranker sees actual
