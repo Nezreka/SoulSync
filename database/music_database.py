@@ -1000,6 +1000,10 @@ class MusicDatabase:
 
         self._init_manual_library_match_table()
         self._backfill_mirrored_track_source_ids()
+        # Self-heal the Unverified review queue: lift history rows stuck at
+        # 'unverified' whose file has since been verified (issue #934). Cheap,
+        # idempotent (only touches rows that need it), so it's safe every boot.
+        self.reconcile_unverified_history_from_tracks()
 
     def _backfill_mirrored_track_source_ids(self) -> int:
         """One-time, idempotent: assign a stable source_track_id to mirrored tracks
@@ -13856,6 +13860,59 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error querying unverified library history: %s", e)
             return []
+
+    def reconcile_unverified_history_from_tracks(self) -> int:
+        """Heal library_history rows stuck at 'unverified' whose underlying file
+        has since been confirmed in the tracks table (AcoustID scan PASS or a
+        human decision). Matches by exact path AND basename — the same physical
+        file keeps its filename across path-form differences (relative vs
+        absolute, library moved/reorganized, different mount), which is why an
+        exact-path-only heal left thousands of already-verified files showing as
+        Unverified (issue #934).
+
+        Upgrade-only and non-destructive: it only lifts 'unverified' rows to the
+        confirmed status, never downgrades and never deletes. Returns the number
+        of rows healed. Genuinely-unverified rows and orphans (no matching
+        track) are left untouched.
+        """
+        healed = 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            rank = {'verified': 1, 'human_verified': 2}
+            by_path = {}
+            by_base = {}
+            cursor.execute(
+                "SELECT file_path, verification_status FROM tracks "
+                "WHERE verification_status IN ('verified', 'human_verified') "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            for fp, st in cursor.fetchall():
+                if not fp:
+                    continue
+                by_path[fp] = st
+                base = os.path.basename(fp)
+                if base and rank.get(st, 0) >= rank.get(by_base.get(base), 0):
+                    by_base[base] = st
+            updates = []
+            cursor.execute(
+                "SELECT id, file_path FROM library_history "
+                "WHERE verification_status = 'unverified' "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            for rid, fp in cursor.fetchall():
+                target = by_path.get(fp) or by_base.get(os.path.basename(fp or ''))
+                if target:
+                    updates.append((target, rid))
+            for status, rid in updates:
+                cursor.execute(
+                    "UPDATE library_history SET verification_status = ? WHERE id = ?",
+                    (status, rid))
+                healed += 1
+            if healed:
+                conn.commit()
+                logger.info("Reconciled %d unverified history rows from tracks truth", healed)
+        except Exception as e:
+            logger.error("Error reconciling unverified history: %s", e)
+        return healed
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""
