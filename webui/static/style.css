@@ -69095,11 +69095,26 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .reid-footer-actions { display: flex; gap: 10px; }
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
 
-/* Firefox-only: hide the dash-card cursor-glow blobs. They're 16 large blur(48px)/blur(18px)
-   layers that Firefox re-rasterizes on every composite (a big chunk of idle dashboard GPU on
-   Firefox), purely decorative, and reduce-effects already hides them. @supports(-moz-appearance)
-   matches Firefox only — invisible to Chrome, which keeps the full cursor glow. #935 */
+/* Firefox-only performance overrides (#935). Firefox re-rasterizes blur()/backdrop-filter on
+   every composite where Chrome caches them, so the frosted-glass shell costs real idle GPU on
+   Firefox only. @supports(-moz-appearance) matches Firefox and NOT Chrome — this whole block is
+   invisible to Chrome, which keeps the full frosted look. Revert = delete this block. */
 @supports (-moz-appearance: none) {
+    /* dash-card cursor-glow blobs — 16 large blur(48px)/blur(18px) layers, purely decorative */
     .dash-card::before,
     .dash-card::after { display: none; }
+
+    /* sidebar aura orbs — two blur(28px) elements, always visible on every page */
+    .sidebar::before,
+    .sidebar::after { display: none; }
+
+    /* shell frosted-glass panels — drop the backdrop blur (each element keeps its own tint, so
+       it stays a solid/translucent panel, just not frosted). always-visible, so helps every page. */
+    .sidebar-header,
+    .header-button,
+    .watchlist-button,
+    .wishlist-button {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
 }
