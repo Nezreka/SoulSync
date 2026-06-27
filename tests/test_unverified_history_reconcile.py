@@ -63,7 +63,7 @@ class _InMemoryDB(MusicDatabase):
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(
             "CREATE TABLE tracks (id INTEGER PRIMARY KEY, file_path TEXT, "
-            "verification_status TEXT)"
+            "title TEXT, verification_status TEXT)"
         )
         self._conn.execute(
             "CREATE TABLE library_history ("
@@ -76,10 +76,10 @@ class _InMemoryDB(MusicDatabase):
     def _get_connection(self):
         return _NonClosingConn(self._conn)
 
-    def _add_track(self, tid, path, status):
+    def _add_track(self, tid, path, status, title="Song"):
         self._conn.execute(
-            "INSERT INTO tracks (id, file_path, verification_status) VALUES (?,?,?)",
-            (tid, path, status))
+            "INSERT INTO tracks (id, file_path, title, verification_status) VALUES (?,?,?,?)",
+            (tid, path, title, status))
         self._conn.commit()
 
     def _add_history(self, path, status, title="Song"):
@@ -138,3 +138,37 @@ def test_reconcile_leaves_orphans_untouched():
     healed = db.reconcile_unverified_history_from_tracks()
     assert healed == 0
     assert db._status_of(1) == "unverified"
+
+
+def test_reconcile_basename_collision_does_not_false_heal():
+    """Two different songs share the track-number filename '01 - Intro.flac'.
+    Only one is a verified track; the OTHER's stale history row must NOT inherit
+    that verified status just because the filename collides (title guard)."""
+    db = _InMemoryDB()
+    db._add_track(1, "/lib/AlbumA/01 - Intro.flac", "verified", title="Intro A")
+    # A genuinely different, still-unverified song with the same filename.
+    db._add_history("/transfer/AlbumB/01 - Intro.flac", "unverified", title="Intro B")
+    healed = db.reconcile_unverified_history_from_tracks()
+    assert healed == 0
+    assert db._status_of(1) == "unverified"
+
+
+def test_reconcile_basename_heals_when_titles_agree():
+    """Same filename, same song (path drifted) — titles agree, so it heals."""
+    db = _InMemoryDB()
+    db._add_track(1, "/lib/AlbumA/01 - Intro.flac", "verified", title="Intro")
+    db._add_history("/transfer/old/01 - Intro.flac", "unverified", title="Intro")
+    healed = db.reconcile_unverified_history_from_tracks()
+    assert healed == 1
+    assert db._status_of(1) == "verified"
+
+
+def test_reconcile_basename_heals_when_history_title_missing():
+    """Legacy history rows may have no title — fall back to filename-only match
+    (mirrors the scanner matcher's allowance) so they still heal."""
+    db = _InMemoryDB()
+    db._add_track(1, "/lib/A/01 - Song.flac", "verified", title="Whatever")
+    db._add_history("/transfer/old/01 - Song.flac", "unverified", title="")
+    healed = db.reconcile_unverified_history_from_tracks()
+    assert healed == 1
+    assert db._status_of(1) == "verified"
