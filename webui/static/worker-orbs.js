@@ -97,6 +97,24 @@
         dashboardHeader.appendChild(canvas);
         ctx = canvas.getContext('2d');
 
+        // #935: on Firefox, a header hover re-layerizes the dashboard and the engine then
+        // throttles THIS canvas's compositing to ~1fps (Chrome never does this). The old
+        // always-on dash-card blob animation incidentally kept the compositor on the fast
+        // path; once that was removed for the Chrome GPU win, the throttle showed up. Re-add
+        // that "keep-alive" cheaply: a 2px, ~invisible element running an infinite transform-
+        // only animation (compositor work, zero paint). Firefox-only via the same feature
+        // gate the CSS uses — Chrome doesn't throttle and never gets this.
+        if (window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none')) {
+            const keepAlive = document.createElement('div');
+            keepAlive.className = 'worker-orb-ff-keepalive';
+            keepAlive.setAttribute('aria-hidden', 'true');
+            keepAlive.style.cssText = 'position:absolute;top:0;left:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:0;';
+            keepAlive.animate(
+                [{ transform: 'translateX(0)' }, { transform: 'translateX(1px)' }],
+                { duration: 1500, iterations: Infinity, direction: 'alternate' });
+            dashboardHeader.appendChild(keepAlive);
+        }
+
         WORKER_DEFS.forEach((def, i) => {
             const el = headerActions.querySelector(def.container);
             if (!el) return;
