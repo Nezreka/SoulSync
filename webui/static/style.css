@@ -69094,3 +69094,12 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .reid-replace-text em { color: #7f879e; font-style: normal; font-size: 11.5px; }
 .reid-footer-actions { display: flex; gap: 10px; }
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* Firefox-only: hide the dash-card cursor-glow blobs. They're 16 large blur(48px)/blur(18px)
+   layers that Firefox re-rasterizes on every composite (a big chunk of idle dashboard GPU on
+   Firefox), purely decorative, and reduce-effects already hides them. @supports(-moz-appearance)
+   matches Firefox only — invisible to Chrome, which keeps the full cursor glow. #935 */
+@supports (-moz-appearance: none) {
+    .dash-card::before,
+    .dash-card::after { display: none; }
+}
