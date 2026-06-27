@@ -98,10 +98,34 @@ class ShortPreviewTrackJob(RepairJob):
             conn.close()
 
         total = len(rows)
+        if context.report_progress:
+            try:
+                context.report_progress(phase=f"Checking {total} short tracks for previews…", total=total)
+            except Exception:  # noqa: S110 — progress is best-effort
+                pass
+
         for i, row in enumerate(rows):
             if context.check_stop() or context.wait_if_paused():
                 break
             result.scanned += 1
+
+            title = row["title"] or "Unknown"
+            artist = row["artist_name"] or "Unknown"
+            # Live progress EVERY track — the source lookup below is a network call, so without
+            # per-track reporting the UI looks frozen at "Starting…" (the #937-follow-up report).
+            if context.update_progress:
+                try:
+                    context.update_progress(i + 1, total)
+                except Exception:  # noqa: S110 — best-effort
+                    pass
+            if context.report_progress:
+                try:
+                    context.report_progress(
+                        phase=f"Checking {i + 1}/{total} short tracks for previews…",
+                        log_line=f"{artist} — {title}", scanned=i + 1, total=total,
+                    )
+                except Exception:  # noqa: S110 — best-effort
+                    pass
 
             file_dur_s = (row["duration"] or 0) / 1000.0
             expected_dur_s = self._expected_duration_s(context, row)
@@ -109,14 +133,12 @@ class ShortPreviewTrackJob(RepairJob):
             # Can't verify the real length → never flag (a delete must be backed by evidence).
             if expected_dur_s is None or expected_dur_s <= 0:
                 result.skipped += 1
-                self._tick(context, i, total)
                 continue
 
             # Source agrees the track is short (genuine intro/skit) → leave it alone. Only a
             # source that says the real track is MUCH longer than the file marks a preview.
             if (expected_dur_s - file_dur_s) < min_drift_s:
                 result.skipped += 1
-                self._tick(context, i, total)
                 continue
 
             if context.create_finding:
@@ -155,38 +177,47 @@ class ShortPreviewTrackJob(RepairJob):
                 except Exception as exc:
                     logger.debug("create_finding failed for track %s: %s", row["id"], exc)
                     result.errors += 1
-            self._tick(context, i, total)
 
         return result
-
-    def _tick(self, context: JobContext, i: int, total: int) -> None:
-        if context.update_progress and (i + 1) % 5 == 0:
-            try:
-                context.update_progress(i + 1, total)
-            except Exception:  # noqa: S110 — progress reporting is best-effort, never fail a scan on it
-                pass
 
     def _expected_duration_s(self, context: JobContext, row: Dict[str, Any]) -> Optional[float]:
         """Canonical track length (seconds) from the track's metadata source, or None when
         no source id is usable / the lookup fails. Every metadata client exposes
         get_track_details(id) -> {... 'duration_ms': N ...} (the metadata-service contract)."""
-        candidates = [
-            (row.get("spotify_track_id"), context.spotify_client,
-             context.is_spotify_rate_limited()),
-            (row.get("itunes_track_id"), context.itunes_client, False),
-            (row.get("musicbrainz_recording_id"), context.mb_client, False),
-        ]
-        for source_id, client, rate_limited in candidates:
-            if not source_id or client is None or rate_limited:
+
+        def _dur(details) -> Optional[float]:
+            ms = (details or {}).get("duration_ms")
+            return ms / 1000.0 if ms and ms > 0 else None
+
+        # Spotify — pass allow_fallback=False. The default fallback scrapes the configured
+        # metadata source, which is slow and can BLOCK a scan loop indefinitely when the
+        # official API isn't authed (the #937-follow-up hang). Official-only is fast and
+        # returns None cleanly when unavailable, so we just move to the next source.
+        sp_id = row.get("spotify_track_id")
+        if sp_id and context.spotify_client and not context.is_spotify_rate_limited():
+            try:
+                d = _dur(context.spotify_client.get_track_details(str(sp_id), allow_fallback=False))
+                if d:
+                    return d
+            except TypeError:
+                pass  # older client without the flag — skip, don't risk the slow path
+            except Exception as exc:
+                logger.debug("spotify duration lookup failed for %s: %s", sp_id, exc)
+
+        # iTunes (public API, no auth, fast) then MusicBrainz.
+        for source_id, client in (
+            (row.get("itunes_track_id"), context.itunes_client),
+            (row.get("musicbrainz_recording_id"), context.mb_client),
+        ):
+            if not source_id or client is None:
                 continue
             getter = getattr(client, "get_track_details", None)
             if getter is None:
                 continue
             try:
-                details = getter(str(source_id))
-                ms = (details or {}).get("duration_ms")
-                if ms and ms > 0:
-                    return ms / 1000.0
+                d = _dur(getter(str(source_id)))
+                if d:
+                    return d
             except Exception as exc:
                 logger.debug("duration lookup failed for %s: %s", source_id, exc)
         return None
