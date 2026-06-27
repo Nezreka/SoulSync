@@ -38,6 +38,7 @@ from core.automation.handlers.run_script import auto_run_script
 from core.automation.handlers.search_and_download import auto_search_and_download
 from core.automation.handlers.video_auto_wishlist_airing import auto_video_add_airing_episodes
 from core.automation.handlers.video_refresh_airing_schedules import auto_video_refresh_airing_schedules
+from core.automation.handlers.video_clean_youtube import auto_video_clean_youtube_episodes
 from core.automation.handlers.video_scan_watchlist_people import auto_video_scan_watchlist_people
 from core.automation.handlers.video_scan_watchlist_channels import auto_video_scan_watchlist_channels
 from core.automation.handlers.video_process_youtube_wishlist import auto_video_process_youtube_wishlist
@@ -245,6 +246,12 @@ def register_all(deps: AutomationDeps) -> None:
     engine.register_action_handler(
         'video_refresh_airing_schedules',
         lambda config: auto_video_refresh_airing_schedules(config, deps),
+    )
+    # YouTube retention: delete channel episodes outside each channel's keep window (opt-in
+    # per channel; default keeps everything). The history row stays so it's not re-downloaded.
+    engine.register_action_handler(
+        'video_clean_youtube_episodes',
+        lambda config: auto_video_clean_youtube_episodes(config, deps),
     )
     # ── Watchlist → Wishlist pipeline ─────────────────────────────────────────
     # Stage 1 — SCANS that fill the wishlist from what you follow.

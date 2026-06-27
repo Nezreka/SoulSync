@@ -212,6 +212,9 @@ def register_routes(bp):
             out["custom_name"] = name
         if body.get("quality"):       # falsy/absent → no override (use the global default)
             out["quality"] = normalize_quality(body.get("quality"))
+        keep = str(body.get("retention") or "").strip()
+        if keep and keep != "all":    # blank/'all' → no policy (keep everything)
+            out["retention"] = keep
         db.set_channel_settings(channel_id, out)
         return jsonify({"success": True, "settings": out})
 

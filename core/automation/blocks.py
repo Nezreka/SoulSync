@@ -264,6 +264,8 @@ ACTIONS: list[dict] = [
      "description": "Full reconcile of the Movie library: re-read every movie from the server and drop ones it no longer has (a read, NOT a Plex disk-scan; never touches TV)", "available": True},
     {"type": "video_refresh_airing_schedules", "label": "Refresh Airing TV Schedules", "icon": "calendar", "scope": "video",
      "description": "Re-pull the latest TMDB episode schedules (air dates, stills) for the still-airing shows on your watchlist, so the calendar the airing automation reads is current — newly-announced or rescheduled episodes get picked up instead of being missed. Skips ended/canceled shows. Pair with a daily Schedule a couple hours before the airing run.", "available": True},
+    {"type": "video_clean_youtube_episodes", "label": "Clean Old YouTube Episodes", "icon": "trash", "scope": "video",
+     "description": "Delete downloaded YouTube channel episodes that fall outside each channel's keep window (set per channel via its cog → Keep: e.g. last 30 episodes / last 3–6 months). Removes the video + its sidecars but keeps the history record so it's never re-downloaded. No-op for channels left on 'keep everything' (the default). Playlists are excluded. Pair with a daily Schedule.", "available": True},
     {"type": "video_add_airing_episodes", "label": "Wishlist Today's Airings", "icon": "calendar", "scope": "video",
      "description": "Sonarr-style: add every episode airing today (for shows you follow) to the wishlist, skipping ones you already own. Also tidies the watchlist by dropping shows that have ended/been canceled.", "available": True,
      "config_fields": [

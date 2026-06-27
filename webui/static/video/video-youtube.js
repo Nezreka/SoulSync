@@ -214,6 +214,9 @@
             return '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + v + '</option>';
         }).join('');
     }
+    function _keepOpt(v, label, sel) {
+        return '<option value="' + v + '"' + ((sel || 'all') === v ? ' selected' : '') + '>' + label + '</option>';
+    }
 
     function _csetForm(title, s, q, dq, kind) {
         var on = !!s.quality;                         // a stored override → start enabled
@@ -235,7 +238,17 @@
                 '<label class="vyt-cset-ck"><input type="checkbox" data-cset-fps' + (b.prefer_60fps !== false ? ' checked' : '') + '> Prefer 60fps</label>' +
                 '<label class="vyt-cset-ck"><input type="checkbox" data-cset-hdr' + (b.allow_hdr ? ' checked' : '') + '> Allow HDR</label>' +
             '</div>' +
-            '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>';
+            '<div class="vyt-cset-hint">Off = use the global YouTube quality from Settings.</div>' +
+            // retention — channels only (playlists mirror the whole thing)
+            (kind === 'playlist' ? '' :
+                '<label class="vyt-cset-lbl">Keep</label>' +
+                '<select class="vyt-cset-in" data-cset-keep>' +
+                    _keepOpt('all', 'Everything', s.retention) +
+                    _keepOpt('count_30', 'Last 30 episodes', s.retention) +
+                    _keepOpt('days_90', 'Last 3 months', s.retention) +
+                    _keepOpt('days_180', 'Last 6 months', s.retention) +
+                '</select>' +
+                '<div class="vyt-cset-hint">The <strong>Auto-Clean Old YouTube Episodes</strong> automation deletes downloaded episodes outside this window (video + sidecars). The history record is kept, so they’re never re-downloaded.</div>');
     }
 
     function openChannelSettings(channelId, title, kind) {
@@ -270,6 +283,9 @@
         saveBtn.addEventListener('click', function () {
             var nameEl = body.querySelector('[data-cset-name]');
             var payload = { custom_name: (nameEl ? nameEl.value : '').trim() };
+            var keepEl = body.querySelector('[data-cset-keep]');
+            // '' for 'Everything' → dropped server-side → keep-all (clears any prior policy)
+            payload.retention = (keepEl && keepEl.value !== 'all') ? keepEl.value : '';
             var qon = body.querySelector('[data-cset-qon]');
             if (qon && qon.checked) {
                 payload.quality = {
