@@ -420,6 +420,8 @@ class _SharedMemoryDB:
                 deezer_id TEXT,
                 discogs_id TEXT,
                 soul_id TEXT,
+                canonical_source TEXT,
+                canonical_album_id TEXT,
                 track_count INTEGER,
                 api_track_count INTEGER
             );
@@ -442,13 +444,41 @@ class _SharedMemoryDB:
         )
         self._keepalive.commit()
 
-    def insert_album(self, album_id, artist_id, title, *, spotify_id=None,
-                      track_count=None, api_track_count=None):
+    def insert_album(
+        self,
+        album_id,
+        artist_id,
+        title,
+        *,
+        spotify_id=None,
+        canonical_source=None,
+        canonical_album_id=None,
+        track_count=None,
+        api_track_count=None,
+    ):
         self._keepalive.execute(
             """INSERT INTO albums
-               (id, artist_id, title, spotify_album_id, track_count, api_track_count)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (album_id, artist_id, title, spotify_id, track_count, api_track_count),
+               (
+                   id,
+                   artist_id,
+                   title,
+                   spotify_album_id,
+                   canonical_source,
+                   canonical_album_id,
+                   track_count,
+                   api_track_count
+               )
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                album_id,
+                artist_id,
+                title,
+                spotify_id,
+                canonical_source,
+                canonical_album_id,
+                track_count,
+                api_track_count,
+            ),
         )
         self._keepalive.commit()
 
@@ -541,6 +571,170 @@ def test_scan_uses_cached_api_track_count_without_expected_total_lookup(monkeypa
     assert finding['entity_id'] == 'alb-incomplete'
     assert finding['details']['expected_tracks'] == 12
     assert finding['details']['actual_tracks'] == 10
+
+
+def test_scan_uses_exact_canonical_edition_for_count_and_missing_tracks(
+    monkeypatch,
+):
+    db = _SharedMemoryDB()
+    db.insert_artist('a1', 'Test Artist')
+    db.insert_album(
+        'alb-canonical',
+        'a1',
+        'Canonical Album',
+        spotify_id='sp-other-edition',
+        canonical_source='deezer',
+        canonical_album_id='dz-canonical',
+        track_count=2,
+        api_track_count=99,
+    )
+    db.insert_tracks('alb-canonical', 2)
+
+    calls = []
+
+    def get_tracks(source, album_id):
+        calls.append((source, album_id))
+
+        if source == 'deezer' and album_id == 'dz-canonical':
+            return {
+                'items': [
+                    {
+                        'id': f'dz-{number}',
+                        'name': f'Canonical Track {number}',
+                        'track_number': number,
+                        'disc_number': 1,
+                        'artists': [],
+                    }
+                    for number in range(1, 5)
+                ],
+            }
+
+        if source == 'spotify' and album_id == 'sp-other-edition':
+            return {
+                'items': [
+                    {
+                        'id': f'sp-{number}',
+                        'name': f'Other Edition Track {number}',
+                        'track_number': number,
+                        'disc_number': 1,
+                        'artists': [],
+                    }
+                    for number in range(1, 13)
+                ],
+            }
+
+        return None
+
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_album_tracks_for_source',
+        get_tracks,
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_primary_source',
+        lambda: 'spotify',
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_source_priority',
+        lambda primary: ['spotify', 'deezer'],
+    )
+
+    findings = []
+    context = _make_job_context(
+        db,
+        create_finding=lambda **kwargs: (findings.append(kwargs) or True),
+    )
+
+    result = AlbumCompletenessJob().scan(context)
+
+    assert result.findings_created == 1
+    assert calls == [('deezer', 'dz-canonical')]
+
+    details = findings[0]['details']
+
+    assert details['primary_source'] == 'deezer'
+    assert details['primary_album_id'] == 'dz-canonical'
+    assert details['canonical_source'] == 'deezer'
+    assert details['canonical_album_id'] == 'dz-canonical'
+    assert details['expected_tracks'] == 4
+    assert details['actual_tracks'] == 2
+    assert [
+        track['track_number']
+        for track in details['missing_tracks']
+    ] == [3, 4]
+    assert all(
+        track['source'] == 'deezer'
+        for track in details['missing_tracks']
+    )
+
+
+def test_scan_does_not_fallback_when_canonical_edition_is_unavailable(
+    monkeypatch,
+):
+    db = _SharedMemoryDB()
+    db.insert_artist('a1', 'Test Artist')
+    db.insert_album(
+        'alb-unavailable-canonical',
+        'a1',
+        'Unavailable Canonical Album',
+        spotify_id='sp-other-edition',
+        canonical_source='deezer',
+        canonical_album_id='dz-unavailable',
+        track_count=2,
+        api_track_count=99,
+    )
+    db.insert_tracks('alb-unavailable-canonical', 2)
+
+    calls = []
+
+    def get_tracks(source, album_id):
+        calls.append((source, album_id))
+
+        if source == 'deezer' and album_id == 'dz-unavailable':
+            return {'items': []}
+
+        return {
+            'items': [
+                {
+                    'id': f'sp-{number}',
+                    'name': f'Other Edition Track {number}',
+                    'track_number': number,
+                    'disc_number': 1,
+                    'artists': [],
+                }
+                for number in range(1, 11)
+            ],
+        }
+
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_album_tracks_for_source',
+        get_tracks,
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_primary_source',
+        lambda: 'spotify',
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        'get_source_priority',
+        lambda primary: ['spotify', 'deezer'],
+    )
+
+    findings = []
+    context = _make_job_context(
+        db,
+        create_finding=lambda **kwargs: (findings.append(kwargs) or True),
+    )
+
+    result = AlbumCompletenessJob().scan(context)
+
+    assert result.findings_created == 0
+    assert findings == []
+    assert calls == [('deezer', 'dz-unavailable')]
 
 
 def test_scan_falls_back_to_api_and_persists_count_on_cache_miss(monkeypatch):
