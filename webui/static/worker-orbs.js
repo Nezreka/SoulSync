@@ -68,6 +68,13 @@
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
+    let intervalId = null;
+    // Firefox throttles requestAnimationFrame to ~1fps for a canvas it heuristically deems
+    // occluded — the dashboard orb canvas falls into this after the page settles (the keepalive
+    // only delays it). A setInterval-driven loop is NOT subject to that canvas-occlusion rAF
+    // throttle, so on Firefox we drive the render with a timer. Chrome keeps rAF untouched
+    // (works fine + vsync-aligned). Background tabs are still parked via onVisibility→stopLoop.
+    const _isFirefox = !!(window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none'));
     let onDashboard = false;
     let expandProgress = 0;
     let staggerTimers = [];
@@ -566,6 +573,12 @@
     })();
 
     function startLoop() {
+        if (_isFirefox) {
+            if (intervalId) return;
+            // ~60fps timer — immune to Firefox's canvas-occlusion rAF throttle.
+            intervalId = setInterval(tick, 1000 / 60);
+            return;
+        }
         if (animFrame) return;
         tick();
     }
@@ -575,10 +588,17 @@
             cancelAnimationFrame(animFrame);
             animFrame = null;
         }
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
     }
 
     function tick() {
-        animFrame = requestAnimationFrame(tick);
+        // Chrome self-schedules via rAF; Firefox is driven by the setInterval above.
+        if (!_isFirefox) {
+            animFrame = requestAnimationFrame(tick);
+        }
         if (!canvas || !ctx) return;
 
         // Yield the frame to active scrolling (orbs freeze, resume on idle).
