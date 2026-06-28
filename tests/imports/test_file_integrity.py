@@ -201,6 +201,60 @@ def test_rejects_truncated_file(tmp_path: Path) -> None:
     assert result.checks["length_drift_s"] > 3.0
 
 
+# ── #937: a file that runs LONGER than expected is a version/master difference, not
+#    truncation — it gets more leeway, while SHORTER files stay tight. ──
+
+def test_accepts_longer_master_beyond_short_tolerance(tmp_path: Path) -> None:
+    """The reported case (A-Ha remaster): file runs ~3.5s LONGER than the metadata.
+    Past the 3s short-tolerance but a remaster, not a bad download — must pass."""
+    f = tmp_path / "remaster.wav"
+    _write_minimal_wav(f, duration_s=9.0)   # 9.0s file vs 5.5s expected → +3.5s longer
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=5500)
+
+    assert result.ok is True
+    assert result.checks["length_check"] == "passed"
+    assert result.checks["effective_tolerance_s"] == pytest.approx(15.0)
+
+
+def test_shorter_file_still_tight_after_longer_loosening(tmp_path: Path) -> None:
+    """Loosening the LONGER direction must not loosen truncation detection — a file
+    3.5s SHORTER than expected is still rejected at the 3s tolerance."""
+    f = tmp_path / "short.wav"
+    _write_minimal_wav(f, duration_s=5.5)   # 5.5s vs 9.0s expected → -3.5s shorter
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=9000)
+
+    assert result.ok is False
+    assert "truncated" in result.reason.lower()
+    assert result.checks["effective_tolerance_s"] == pytest.approx(3.0)
+
+
+def test_wildly_longer_file_still_rejected(tmp_path: Path) -> None:
+    """A different/wrong song that happens to run long is still caught — +25s blows
+    past even the 15s longer-tolerance."""
+    f = tmp_path / "wronglong.wav"
+    _write_minimal_wav(f, duration_s=30.0)  # 30s vs 5s expected → +25s
+
+    result = file_integrity.check_audio_integrity(str(f), expected_duration_ms=5000)
+
+    assert result.ok is False
+    assert "longer than expected" in result.reason.lower()
+
+
+def test_user_pinned_tolerance_is_symmetric(tmp_path: Path) -> None:
+    """An explicit user tolerance is honoured in BOTH directions — the longer-direction
+    loosening only applies to the auto default, not a value the user pinned."""
+    f = tmp_path / "long.wav"
+    _write_minimal_wav(f, duration_s=9.0)   # +4s longer
+
+    result = file_integrity.check_audio_integrity(
+        str(f), expected_duration_ms=5000, length_tolerance_s=2.0)
+
+    assert result.ok is False
+    assert result.checks["effective_tolerance_s"] == pytest.approx(2.0)
+
+
 def test_rejects_wrong_file_substituted(tmp_path: Path) -> None:
     """A 10-second clip masquerading as a 3-minute album track. slskd
     matched on a similar filename but the actual content is a snippet."""

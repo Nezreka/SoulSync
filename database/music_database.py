@@ -1000,6 +1000,10 @@ class MusicDatabase:
 
         self._init_manual_library_match_table()
         self._backfill_mirrored_track_source_ids()
+        # Self-heal the Unverified review queue: lift history rows stuck at
+        # 'unverified' whose file has since been verified (issue #934). Cheap,
+        # idempotent (only touches rows that need it), so it's safe every boot.
+        self.reconcile_unverified_history_from_tracks()
 
     def _backfill_mirrored_track_source_ids(self) -> int:
         """One-time, idempotent: assign a stable source_track_id to mirrored tracks
@@ -1171,6 +1175,13 @@ class MusicDatabase:
             if track_cols and 'year' not in track_cols:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN year INTEGER")
                 logger.info("Repaired missing year column on tracks table (#910)")
+            # #927 — multi-disc fix: the scan now writes a real disc_number, but the column
+            # was only ever added by a separate migration that doesn't run on fresh installs,
+            # so the new INSERT/UPDATE would hard-fail with "no column named disc_number".
+            # Same shape as the year repair above: additive, defaults to 1, ensured on every DB.
+            if track_cols and 'disc_number' not in track_cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN disc_number INTEGER DEFAULT 1")
+                logger.info("Repaired missing disc_number column on tracks table (#927)")
 
             cursor.execute("PRAGMA table_info(albums)")
             album_cols = {c[1] for c in cursor.fetchall()}
@@ -6635,6 +6646,19 @@ class MusicDatabase:
                 track_id = str(track_obj.ratingKey)
                 title = track_obj.title
                 track_number = getattr(track_obj, 'trackNumber', None)
+                # Multi-disc: capture the disc number so multi-disc albums don't all
+                # collapse onto disc 1 (which mis-files disc-2+ tracks and flags them
+                # "missing"). Jellyfin/Navidrome wrappers set .discNumber; plexapi's Track
+                # exposes .parentIndex. Floor to >=1 — a missing/0 disc is disc 1.
+                _raw_disc = getattr(track_obj, 'discNumber', None)
+                if _raw_disc is None:
+                    _raw_disc = getattr(track_obj, 'parentIndex', None)
+                try:
+                    disc_number = int(_raw_disc)
+                    if disc_number < 1:
+                        disc_number = 1
+                except (TypeError, ValueError):
+                    disc_number = 1
                 duration = getattr(track_obj, 'duration', None)
                 
                 # Get file path and media info (Plex-specific, Jellyfin may not have these)
@@ -6726,9 +6750,9 @@ class MusicDatabase:
                 if is_new_track:
                     cursor.execute("""
                         INSERT INTO tracks
-                        (id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    """, (track_id, album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
+                        (id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, musicbrainz_recording_id, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (track_id, album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid))
                 else:
                     # Update server-provided fields only — preserves spotify_track_id, deezer_id,
                     # isrc, bpm, and all other enrichment data. file_size uses
@@ -6737,7 +6761,7 @@ class MusicDatabase:
                     # an existing value.
                     cursor.execute("""
                         UPDATE tracks
-                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?,
+                        SET album_id = ?, artist_id = ?, title = ?, track_number = ?, disc_number = ?,
                             duration = ?, file_path = ?, bitrate = ?,
                             file_size = COALESCE(?, file_size),
                             server_source = ?,
@@ -6745,7 +6769,7 @@ class MusicDatabase:
                             musicbrainz_recording_id = COALESCE(?, musicbrainz_recording_id),
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = ?
-                    """, (album_id, artist_id, title, track_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
+                    """, (album_id, artist_id, title, track_number, disc_number, duration, file_path, bitrate, file_size, server_source, track_artist, mbid, track_id))
 
                 conn.commit()
 
@@ -13141,6 +13165,73 @@ class MusicDatabase:
             logger.error(f"Error getting discovery pool stats: {e}")
             return {'matched': 0, 'failed': 0}
 
+    # Wing It Pool: two states on a mirrored track's extra_data. Both key off wing_it_fallback,
+    # which is set by the wing-it stub and SURVIVES a manual fix (update_mirrored_track_extra_data
+    # merges rather than replaces), so the only difference is the manual_match flag:
+    #   needs attention : wing_it_fallback=true AND NOT manual_match  (unverified guess)
+    #   resolved        : wing_it_fallback=true AND manual_match=true (user fixed it — incl. fixes
+    #                     made before this feature existed, since the flag was never wiped)
+    _WING_IT_ATTENTION = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
+                          "AND mpt.extra_data NOT LIKE '%\"manual_match\": true%'")
+    _WING_IT_RESOLVED = ("mpt.extra_data LIKE '%\"wing_it_fallback\": true%' "
+                         "AND mpt.extra_data LIKE '%\"manual_match\": true%'")
+
+    def get_wing_it_pool(self, profile_id: int = None, playlist_id: int = None,
+                         resolved: bool = False) -> list:
+        """Get Wing It tracks — the unverified guesses (default) or the ones you've resolved.
+
+        Wing-it tracks are persisted on extra_data with ``wing_it_fallback: true`` (a best-effort
+        stub when a track couldn't match a metadata source). They count as 'discovered', so the
+        Discovery Pool hides them — this is the only surface that lists them. ``resolved=True``
+        returns the ones a manual match has since fixed (carrying the ``was_wing_it`` marker).
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            where = self._WING_IT_RESOLVED if resolved else self._WING_IT_ATTENTION
+            query = f"""
+                SELECT mpt.id, mpt.track_name, mpt.artist_name, mpt.album_name,
+                       mpt.playlist_id, mp.name as playlist_name, mpt.extra_data
+                FROM mirrored_playlist_tracks mpt
+                JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id
+                WHERE {where}
+            """
+            params = []
+            if playlist_id:
+                query += " AND mpt.playlist_id = ?"
+                params.append(playlist_id)
+            elif profile_id:
+                query += " AND mp.profile_id = ?"
+                params.append(profile_id)
+            query += " ORDER BY mp.name, mpt.track_name"
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error getting wing it pool: {e}")
+            return []
+
+    def get_wing_it_pool_stats(self, profile_id: int = None) -> dict:
+        """Counts for both Wing It states: unverified (``wing_it``) + resolved (``matched``)."""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            def _count(where):
+                q = (f"SELECT COUNT(*) as cnt FROM mirrored_playlist_tracks mpt "
+                     f"JOIN mirrored_playlists mp ON mpt.playlist_id = mp.id WHERE {where}")
+                params = []
+                if profile_id:
+                    q += " AND mp.profile_id = ?"
+                    params.append(profile_id)
+                cursor.execute(q, params)
+                return cursor.fetchone()['cnt']
+
+            return {'wing_it': _count(self._WING_IT_ATTENTION),
+                    'matched': _count(self._WING_IT_RESOLVED)}
+        except Exception as e:
+            logger.error(f"Error getting wing it pool stats: {e}")
+            return {'wing_it': 0, 'matched': 0}
+
     # ==================== Retag Tool Methods ====================
 
     def add_retag_group(self, group_type: str, artist_name: str, album_name: str,
@@ -13708,6 +13799,28 @@ class MusicDatabase:
             logger.debug(f"Error deleting history rows: {e}")
             return 0
 
+    def clear_completed_download_history(self) -> int:
+        """Delete the persisted completed-download history shown on the Downloads
+        page (every event_type='download' row). This also clears the verification
+        review queue, since those unverified/force_imported rows ARE download-history
+        rows — that's intended: 'Clear Completed' empties the list. It only removes
+        HISTORY rows; the actual files and their `tracks` entries are untouched, so
+        nothing in the library is lost — only the 'needs verification' review flags.
+        Returns the number of rows removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM library_history WHERE event_type = 'download'")
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error("Error clearing completed download history: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def delete_track_by_file_path(self, file_path):
         """Delete a library track row whose stored path matches. Returns count."""
         if not file_path:
@@ -13769,6 +13882,107 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error querying unverified library history: %s", e)
             return []
+
+    def reconcile_unverified_history_from_tracks(self) -> int:
+        """Heal library_history rows stuck at 'unverified' whose underlying file
+        has since been confirmed in the tracks table (AcoustID scan PASS or a
+        human decision). Matches by exact path AND basename — the same physical
+        file keeps its filename across path-form differences (relative vs
+        absolute, library moved/reorganized, different mount), which is why an
+        exact-path-only heal left thousands of already-verified files showing as
+        Unverified (issue #934).
+
+        A basename match is title-guarded: a shared track-number filename
+        ("01 - Intro.flac") must NOT heal a different song. When both the history
+        row and the candidate track carry a title they have to agree
+        (alphanumeric-lowercase) — the same guard the AcoustID matcher uses. When
+        a title is missing on either side we can't tell which file the basename
+        refers to, so we only heal if that basename is unambiguous (a single
+        verified candidate). An exact-path match needs no guard.
+
+        Upgrade-only and non-destructive: it only lifts 'unverified' rows to the
+        confirmed status, never downgrades and never deletes. Returns the number
+        of rows healed. Genuinely-unverified rows and orphans (no matching
+        track) are left untouched.
+        """
+        healed = 0
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            def _norm(value):
+                return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+            # Load the stuck rows first. Cheap early-out when nothing is stuck —
+            # and their paths/basenames scope the tracks scan below, so the
+            # lookup dicts stay proportional to the (small) review queue instead
+            # of the whole library.
+            cursor.execute(
+                "SELECT id, file_path, title FROM library_history "
+                "WHERE verification_status = 'unverified' "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            stuck_rows = cursor.fetchall()
+            if not stuck_rows:
+                return 0
+            needed_paths = {fp for _, fp, _ in stuck_rows if fp}
+            needed_bases = {os.path.basename(fp) for _, fp, _ in stuck_rows if fp}
+
+            rank = {'verified': 1, 'human_verified': 2}
+            by_path = {}   # exact path -> status (unambiguous; no title guard)
+            by_base = {}   # basename -> list of (norm_title, status)
+            cursor.execute(
+                "SELECT file_path, verification_status, title FROM tracks "
+                "WHERE verification_status IN ('verified', 'human_verified') "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            for fp, st, ttitle in cursor.fetchall():
+                if not fp:
+                    continue
+                base = os.path.basename(fp)
+                # Skip verified tracks that can't possibly match a queued row.
+                if fp not in needed_paths and base not in needed_bases:
+                    continue
+                if rank.get(st, 0) >= rank.get(by_path.get(fp), 0):
+                    by_path[fp] = st
+                if base:
+                    by_base.setdefault(base, []).append((_norm(ttitle), st))
+
+            updates = []
+            for rid, fp, rtitle in stuck_rows:
+                target = by_path.get(fp)
+                if not target:
+                    want = _norm(rtitle)
+                    candidates = by_base.get(os.path.basename(fp or ''), ())
+                    best = 0
+                    for ttitle, st in candidates:
+                        if want and ttitle:
+                            # Both titled: must agree.
+                            if want != ttitle:
+                                continue
+                        elif len(candidates) > 1:
+                            # Title missing on a side AND the basename collides
+                            # across verified files — can't tell which one this
+                            # row is, so don't risk healing the wrong song.
+                            continue
+                        if rank.get(st, 0) >= best:
+                            best = rank.get(st, 0)
+                            target = st
+                if target:
+                    updates.append((target, rid))
+            for status, rid in updates:
+                cursor.execute(
+                    "UPDATE library_history SET verification_status = ? WHERE id = ?",
+                    (status, rid))
+                healed += 1
+            if healed:
+                conn.commit()
+                logger.info("Reconciled %d unverified history rows from tracks truth", healed)
+        except Exception as e:
+            logger.error("Error reconciling unverified history: %s", e)
+        finally:
+            if conn:
+                conn.close()
+        return healed
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""

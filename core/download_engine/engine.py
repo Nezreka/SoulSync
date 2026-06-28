@@ -480,7 +480,7 @@ class DownloadEngine:
             return_exceptions=True,
         )
 
-        for (source_name, _), result in zip(to_search, results):
+        for (source_name, _), result in zip(to_search, results, strict=True):
             if isinstance(result, Exception):
                 logger.warning(f"{source_name} search failed: {result}")
                 contributions.append(f"{source_name}=error")

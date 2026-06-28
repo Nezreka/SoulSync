@@ -2749,7 +2749,7 @@ async function loadRepairFindings() {
             missing_lyrics: 'Missing Lyrics', expired_download: 'Expired',
             missing_replaygain: 'No ReplayGain', empty_folder: 'Empty Folder',
             missing_lossy_copy: 'No Lossy Copy', library_retag: 'Re-tag',
-            quality_upgrade: 'Low Quality'
+            quality_upgrade: 'Low Quality', short_preview_track: 'Preview Clip'
         };
 
         // Finding types that have an automated fix action
@@ -2770,6 +2770,7 @@ async function loadRepairFindings() {
             quality_upgrade: 'Upgrade',
             missing_discography_track: 'Add to Wishlist',
             library_retag: 'Apply Tags',
+            short_preview_track: 'Re-download',
         };
 
         container.innerHTML = items.map(f => {
@@ -3193,6 +3194,17 @@ function _renderFindingDetail(f) {
             }
             tnHtml += _renderPlayButton(f);
             return tnHtml;
+
+        case 'short_preview_track':
+            if (d.artist) rows.push(['Artist', d.artist]);
+            if (d.album) rows.push(['Album', d.album]);
+            if (d.title) rows.push(['Title', d.title]);
+            if (d.file_duration_s != null) rows.push(['File Length', `${d.file_duration_s}s`, 'warning']);
+            if (d.expected_duration_s != null) rows.push(['Real Length', `${d.expected_duration_s}s`, 'success']);
+            if (d.original_path) rows.push(['Path', d.original_path, 'path']);
+            // Play button lets the user hear the clip and confirm it's a busted ~30s preview
+            // before approving the delete + re-download.
+            return media + _gridRows(rows) + _renderPlayButton(f);
 
         default:
             // Generic: render all detail keys

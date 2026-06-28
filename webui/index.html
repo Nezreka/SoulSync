@@ -2048,6 +2048,7 @@
                             <div class="playlist-header">
                                 <h3>Mirrored Playlists</h3>
                                 <button class="pool-trigger-btn" onclick="openDiscoveryPoolModal()" title="View matched and failed discovery tracks">Discovery Pool</button>
+                                <button class="pool-trigger-btn" onclick="openWingItPoolModal()" title="Review tracks Wing It auto-matched on a best-effort guess — verify or re-match them">Wing It Pool</button>
                                 <button class="refresh-button mirrored" id="mirrored-refresh-btn">Update list</button>
                             </div>
                             <div class="playlist-scroll-container" id="mirrored-playlist-container">
@@ -6411,10 +6412,10 @@
                                 </div>
                                 <div class="form-group">
                                     <label class="checkbox-label">
-                                        <input type="checkbox" id="particles-enabled" checked>
+                                        <input type="checkbox" id="particles-enabled">
                                         Background Particles
                                     </label>
-                                    <small class="settings-hint">Animated particle effects behind each page. Disable to reduce GPU usage.</small>
+                                    <small class="settings-hint">Animated particle effects behind each page. Off by default — enable for the eye candy (uses GPU).</small>
                                 </div>
                                 <div class="form-group">
                                     <label class="checkbox-label">
