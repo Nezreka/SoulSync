@@ -40,14 +40,30 @@ async function copyAddress(address, cryptoName) {
 
 let settingsAutoSaveTimer = null;
 
-// The "Only import AcoustID-verified tracks" toggle (under Quality Profile) is
-// meaningless when AcoustID itself is off — only show it when verification is on.
+// The "Only import AcoustID-verified tracks" toggle lives in Audio Verification
+// and is always shown (its help notes it needs AcoustID enabled), so users can
+// always find it. Kept as a no-op for any existing callers.
 function syncAcoustidRequireVerifiedVisibility() {
     const group = document.getElementById('acoustid-require-verified-group');
-    const enabled = document.getElementById('acoustid-enabled');
-    if (group) group.style.display = (enabled && enabled.checked) ? '' : 'none';
+    if (group) group.style.display = '';
 }
 window.syncAcoustidRequireVerifiedVisibility = syncAcoustidRequireVerifiedVisibility;
+
+// Retry Logic: the two numeric rows are only meaningful when their parent toggle
+// is on — hide them otherwise. "Retries per query" needs Exhaustive retry;
+// "Minimum matching mismatches" needs the version-mismatch fallback.
+function syncRetryConditionalRows() {
+    const pairs = [
+        ['retry-exhaustive', 'retries-per-query-row'],
+        ['accept-version-mismatch-fallback', 'version-mismatch-min-count-row'],
+    ];
+    for (const [toggleId, rowId] of pairs) {
+        const toggle = document.getElementById(toggleId);
+        const row = document.getElementById(rowId);
+        if (row) row.style.display = (toggle && toggle.checked) ? '' : 'none';
+    }
+}
+window.syncRetryConditionalRows = syncRetryConditionalRows;
 
 function debouncedAutoSaveSettings() {
     // Ignore changes made while the page is programmatically populating its
@@ -417,6 +433,11 @@ function switchSettingsTab(tab) {
     if (tab === 'advanced' && typeof loadDbMaintenanceInfo === 'function') {
         try { loadDbMaintenanceInfo(); } catch (e) { }
     }
+    // First time the Downloads tab is shown, auto-probe source status so the
+    // dots reflect real connection state without a manual "Test all sources".
+    if (tab === 'downloads' && typeof autoTestSourcesOnce === 'function') {
+        autoTestSourcesOnce();
+    }
     // Initialize live log viewer when switching to Logs tab
     if (tab === 'logs') {
         _logViewerInit();
@@ -659,6 +680,126 @@ const ALBUM_LEVEL_HYBRID_SOURCES = new Set(['soulseek', 'torrent', 'usenet']);
 let _hybridSourceOrder = ['soulseek', 'youtube'];
 let _hybridSourceEnabled = { soulseek: true, youtube: true, tidal: false, qobuz: false, hifi: false, deezer_dl: false, amazon: false, lidarr: false, soundcloud: false, torrent: false, usenet: false };
 let _hybridVisualOrder = null; // Full visual order including disabled sources
+// In hybrid mode, only one source's config panel is shown at a time (clicked
+// open from its row), so the long per-source config blocks don't all stack up.
+let _expandedHybridSource = null;
+
+function toggleHybridSourceConfig(srcId) {
+    _expandedHybridSource = (_expandedHybridSource === srcId) ? null : srcId;
+    buildHybridSourceList();
+    updateDownloadSourceUI();
+    // Bring the freshly opened config panel into view.
+    if (_expandedHybridSource) {
+        const map = {
+            soulseek: 'soulseek-settings-container', youtube: 'youtube-settings-container',
+            tidal: 'tidal-download-settings-container', qobuz: 'qobuz-settings-container',
+            hifi: 'hifi-download-settings-container', deezer_dl: 'deezer-download-settings-container',
+            amazon: 'amazon-download-settings-container', lidarr: 'lidarr-download-settings-container',
+            soundcloud: 'soundcloud-download-settings-container', torrent: 'prowlarr-source-redirect',
+            usenet: 'prowlarr-source-redirect',
+        };
+        const el = document.getElementById(map[_expandedHybridSource]);
+        if (el) setTimeout(() => el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 60);
+    }
+}
+
+// ── Per-source live connection status (shown as a dot in the hybrid list and
+// driven by the "Test all sources" button). srcId -> 'unknown'|'testing'|'ok'|'fail'|'na'
+let _hybridSourceStatus = {};
+
+async function _ssJson(url, opts) {
+    const r = await fetch(url, opts);
+    return await r.json();
+}
+function _ssTestConn(service) {
+    return _ssJson(API.testConnection || '/api/test-connection', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service })
+    }).then(j => !!j.success);
+}
+// Each probe returns a boolean (connected/ok). Endpoints mirror the per-source
+// "Test Connection" buttons so the results match what those buttons would show.
+const HYBRID_SOURCE_PROBE = {
+    soulseek:   () => _ssTestConn('soulseek'),
+    tidal:      () => _ssTestConn('tidal'),
+    qobuz:      () => _ssJson('/api/qobuz/auth/status').then(j => j.authenticated === true),
+    hifi:       () => _ssJson('/api/hifi/status').then(j => j.available === true),
+    deezer_dl:  () => _ssJson('/api/deezer-download/test').then(j => j.success === true),
+    amazon:     () => _ssJson('/api/amazon/test-connection').then(j => j.connected === true),
+    lidarr:     () => _ssTestConn('lidarr'),
+    soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
+    torrent:    () => _ssTestConn('torrent_client'),
+    usenet:     () => _ssTestConn('usenet_client'),
+    youtube:    () => Promise.resolve(true),  // no auth required
+};
+// Configured metadata / server connections that support a generic test.
+const CONNECTION_TEST_SERVICES = ['spotify', 'server', 'tidal', 'qobuz', 'lastfm', 'genius', 'listenbrainz', 'acoustid', 'discogs'];
+
+async function testAllSources(opts = {}) {
+    const silent = opts.silent === true;          // no toast / no connection sweep (used for auto-run on load)
+    const btn = document.getElementById('test-all-sources-btn');
+    if (btn && !silent) { btn.disabled = true; btn.dataset._label = btn.textContent; btn.textContent = 'Testing…'; }
+
+    // Which download sources to test: the enabled hybrid sources, or the single
+    // selected source in non-hybrid mode.
+    const mode = document.getElementById('download-source-mode')?.value;
+    const sources = new Set();
+    if (mode === 'hybrid') {
+        (typeof getHybridOrder === 'function' ? getHybridOrder() : []).forEach(s => sources.add(s));
+    } else if (mode) {
+        sources.add(mode);
+    }
+    if (sources.size === 0) sources.add('soulseek');
+
+    // Torrent/Usenet downloads go through Prowlarr — its connection must be
+    // established first or those source tests fail. Probe Prowlarr up front.
+    if (sources.has('torrent') || sources.has('usenet')) {
+        try { await _ssTestConn('prowlarr'); } catch (e) { /* surfaced via the per-source test below */ }
+    }
+
+    for (const id of sources) _hybridSourceStatus[id] = 'testing';
+    buildHybridSourceList();
+
+    let ok = 0, fail = 0;
+    for (const id of sources) {
+        const probe = HYBRID_SOURCE_PROBE[id];
+        if (!probe) { _hybridSourceStatus[id] = 'na'; continue; }
+        try { const good = await probe(); _hybridSourceStatus[id] = good ? 'ok' : 'fail'; good ? ok++ : fail++; }
+        catch (e) { _hybridSourceStatus[id] = 'fail'; fail++; }
+        buildHybridSourceList();
+    }
+
+    // Also test the metadata / server connections the user has configured
+    // (skipped on the silent auto-run to keep page load light).
+    let connOk = 0, connFail = 0;
+    if (!silent) {
+        try {
+            const cfg = await _ssJson('/api/settings/config-status');
+            for (const svc of CONNECTION_TEST_SERVICES) {
+                const configured = svc === 'server' ? true : (cfg && cfg[svc] && cfg[svc].configured);
+                if (!configured) continue;
+                try { const good = await _ssTestConn(svc); good ? connOk++ : connFail++; } catch (e) { connFail++; }
+            }
+        } catch (e) { /* config-status unavailable — skip connection sweep */ }
+    }
+
+    if (btn && !silent) { btn.disabled = false; btn.textContent = btn.dataset._label || 'Test all sources'; }
+    if (!silent) {
+        const parts = [`sources ${ok}✓${fail ? ' / ' + fail + '✗' : ''}`];
+        if (connOk || connFail) parts.push(`connections ${connOk}✓${connFail ? ' / ' + connFail + '✗' : ''}`);
+        showToast('Tested ' + parts.join(', '), (fail || connFail) ? 'error' : 'success');
+    }
+}
+window.testAllSources = testAllSources;
+
+// Auto-populate the source status dots once after the page settles, so they
+// reflect real state after a restart without the user having to click Test.
+let _sourcesAutoTested = false;
+function autoTestSourcesOnce() {
+    if (_sourcesAutoTested) return;
+    _sourcesAutoTested = true;
+    setTimeout(() => { try { testAllSources({ silent: true }); } catch (e) { } }, 1200);
+}
 
 function buildHybridSourceList() {
     const container = document.getElementById('hybrid-source-list');
@@ -689,11 +830,16 @@ function buildHybridSourceList() {
         const sourceLevelBadge = `<span class="hybrid-source-badge hybrid-source-badge-${sourceLevelClass}" title="${sourceLevelTitle}">${sourceLevel}</span>`;
 
         const item = document.createElement('div');
-        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}`;
+        const isExpanded = enabled && _expandedHybridSource === srcId;
+        item.className = `hybrid-source-item${enabled ? '' : ' disabled'}${isExpanded ? ' config-open' : ''}`;
         item.draggable = true;
         item.dataset.sourceId = srcId;
 
+        // The name + a config chevron open this source's settings panel inline
+        // (only one at a time), so the long config blocks don't all stack up.
+        const clickConfig = enabled ? `onclick="toggleHybridSourceConfig('${srcId}')"` : '';
         item.innerHTML = `
+            <span class="hybrid-source-handle" title="Drag to reorder">⠿</span>
             <span class="hybrid-source-arrows">
                 <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', -1)" title="Move up">▲</button>
                 <button class="hybrid-arrow-btn" onclick="moveHybridSource('${srcId}', 1)" title="Move down">▼</button>
@@ -702,9 +848,11 @@ function buildHybridSourceList() {
                 ? `<img class="hybrid-source-icon" src="${src.icon}" alt="${src.name}" onerror="this.outerHTML='<span class=\\'hybrid-source-icon emoji-icon\\'>${src.emoji}</span>'">`
                 : `<span class="hybrid-source-icon emoji-icon">${src.emoji}</span>`
             }
-            <span class="hybrid-source-name">${src.name}</span>
+            <span class="hybrid-source-name" ${clickConfig} style="${enabled ? 'cursor:pointer;' : ''}">${src.name}</span>
             ${sourceLevelBadge}
             <span class="hybrid-source-priority">${priorityNum}</span>
+            <span class="hybrid-source-status hss-${_hybridSourceStatus[srcId] || 'unknown'}" title="${({ unknown: 'Not tested yet', testing: 'Testing…', ok: 'Connected', fail: 'Connection failed', na: 'No connection test for this source' })[_hybridSourceStatus[srcId] || 'unknown']}"></span>
+            ${enabled ? `<button class="hybrid-source-config-btn" ${clickConfig} title="Configure ${src.name}">⚙</button>` : ''}
             <label class="hybrid-source-toggle">
                 <input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleHybridSource('${srcId}', this.checked)">
                 <span class="toggle-track"></span>
@@ -718,10 +866,15 @@ function buildHybridSourceList() {
             e.dataTransfer.setData('text/plain', srcId);
             item.classList.add('dragging');
         });
-        item.addEventListener('dragend', () => item.classList.remove('dragging'));
-        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            container.querySelectorAll('.hybrid-source-item').forEach(el => el.classList.remove('drag-over'));
+        });
+        item.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; item.classList.add('drag-over'); });
+        item.addEventListener('dragleave', () => item.classList.remove('drag-over'));
         item.addEventListener('drop', (e) => {
             e.preventDefault();
+            item.classList.remove('drag-over');
             const draggedId = e.dataTransfer.getData('text/plain');
             if (draggedId && draggedId !== srcId) _reorderHybridSource(draggedId, srcId);
         });
@@ -768,6 +921,8 @@ function _reorderHybridSource(draggedId, targetId) {
 
 function toggleHybridSource(srcId, enabled) {
     _hybridSourceEnabled[srcId] = enabled;
+    // If the source we just disabled had its config panel open, close it.
+    if (!enabled && _expandedHybridSource === srcId) _expandedHybridSource = null;
     // Rebuild enabled order from visual order so priority matches position
     if (_hybridVisualOrder) {
         _hybridSourceOrder = _hybridVisualOrder.filter(id => _hybridSourceEnabled[id] !== false);
@@ -1269,6 +1424,7 @@ async function loadSettingsData() {
         document.getElementById('retries-per-query').value = settings.post_processing?.retries_per_query ?? 5;
         document.getElementById('accept-version-mismatch-fallback').checked = settings.post_processing?.accept_version_mismatch_fallback === true;
         document.getElementById('version-mismatch-min-count').value = settings.post_processing?.version_mismatch_min_count ?? 2;
+        if (typeof syncRetryConditionalRows === 'function') syncRetryConditionalRows();
         // Load service master toggles
         document.getElementById('embed-spotify').checked = settings.spotify?.embed_tags !== false;
         document.getElementById('embed-itunes').checked = settings.itunes?.embed_tags !== false;
@@ -1861,20 +2017,42 @@ function updateDownloadSourceUI() {
         activeSources.add(mode);
     }
 
-    soulseekContainer.style.display = activeSources.has('soulseek') ? 'block' : 'none';
-    tidalContainer.style.display = activeSources.has('tidal') ? 'block' : 'none';
-    qobuzContainer.style.display = activeSources.has('qobuz') ? 'block' : 'none';
-    youtubeContainer.style.display = activeSources.has('youtube') ? 'block' : 'none';
-    hifiContainer.style.display = activeSources.has('hifi') ? 'block' : 'none';
-    if (deezerDlContainer) deezerDlContainer.style.display = activeSources.has('deezer_dl') ? 'block' : 'none';
-    if (amazonContainer) amazonContainer.style.display = activeSources.has('amazon') ? 'block' : 'none';
-    if (lidarrContainer) lidarrContainer.style.display = activeSources.has('lidarr') ? 'block' : 'none';
-    if (soundcloudContainer) soundcloudContainer.style.display = activeSources.has('soundcloud') ? 'block' : 'none';
+    // In single-source mode the one config block is shown directly. In hybrid
+    // mode there can be many active sources, so we only reveal the one the user
+    // clicked open in the priority list (accordion-style) — no endless stack.
+    const isHybrid = mode === 'hybrid';
+    const showCfg = (src) => activeSources.has(src) && (!isHybrid || _expandedHybridSource === src);
+
+    soulseekContainer.style.display = showCfg('soulseek') ? 'block' : 'none';
+    tidalContainer.style.display = showCfg('tidal') ? 'block' : 'none';
+    qobuzContainer.style.display = showCfg('qobuz') ? 'block' : 'none';
+    youtubeContainer.style.display = showCfg('youtube') ? 'block' : 'none';
+    hifiContainer.style.display = showCfg('hifi') ? 'block' : 'none';
+    if (deezerDlContainer) deezerDlContainer.style.display = showCfg('deezer_dl') ? 'block' : 'none';
+    if (amazonContainer) amazonContainer.style.display = showCfg('amazon') ? 'block' : 'none';
+    if (lidarrContainer) lidarrContainer.style.display = showCfg('lidarr') ? 'block' : 'none';
+    if (soundcloudContainer) soundcloudContainer.style.display = showCfg('soundcloud') ? 'block' : 'none';
     const prowlarrRedirect = document.getElementById('prowlarr-source-redirect');
     if (prowlarrRedirect) {
-        const showProwlarr = activeSources.has('torrent') || activeSources.has('usenet');
+        const showProwlarr = showCfg('torrent') || showCfg('usenet');
         prowlarrRedirect.style.display = showProwlarr ? 'block' : 'none';
     }
+
+    // Indexers & Downloaders section: only relevant when a torrent or usenet
+    // source is actually selected. Hide the whole intro + Prowlarr/Torrent/Usenet
+    // tiles otherwise (Soulseek/HiFi-only users never see them). The two client
+    // tiles are gated individually on their own source. Selection-based (not the
+    // hybrid expand state) — the tiles are full config sections, not accordion
+    // panels. Tab-gated so it never leaks onto another tab.
+    const onDownloadsTab = document.querySelector('.stg-tab.active')?.dataset.tab === 'downloads';
+    const torrentActive = activeSources.has('torrent');
+    const usenetActive = activeSources.has('usenet');
+    const indSection = document.getElementById('indexers-downloaders-section');
+    if (indSection) indSection.style.display = (onDownloadsTab && (torrentActive || usenetActive)) ? '' : 'none';
+    const torrentTile = document.getElementById('torrent-tile');
+    if (torrentTile) torrentTile.style.display = torrentActive ? '' : 'none';
+    const usenetTile = document.getElementById('usenet-tile');
+    if (usenetTile) usenetTile.style.display = usenetActive ? '' : 'none';
 
     // Quality profile is now a GLOBAL system — the same ranked-target list
     // drives every source (Soulseek, Tidal, Qobuz, HiFi, Deezer, …), so it is
@@ -1884,23 +2062,25 @@ function updateDownloadSourceUI() {
     const qualityProfileTile = document.getElementById('quality-profile-tile');
     if (qualityProfileTile) {
         const activeTab = document.querySelector('.stg-tab.active');
-        const onDownloadsTab = activeTab && activeTab.dataset.tab === 'downloads';
-        qualityProfileTile.style.display = onDownloadsTab ? '' : 'none';
+        const onQualityTab = activeTab && activeTab.dataset.tab === 'quality';
+        qualityProfileTile.style.display = onQualityTab ? '' : 'none';
     }
 
-    if (activeSources.has('tidal')) {
+    // Only auto-probe a source's live status when its config panel is visible
+    // (always in single-source mode; only the opened one in hybrid mode).
+    if (showCfg('tidal')) {
         checkTidalDownloadAuthStatus();
     }
-    if (activeSources.has('qobuz')) {
+    if (showCfg('qobuz')) {
         checkQobuzAuthStatus();
     }
-    if (activeSources.has('hifi')) {
+    if (showCfg('hifi')) {
         testHiFiConnection();
     }
-    if (activeSources.has('amazon')) {
+    if (showCfg('amazon')) {
         testAmazonConnection();
     }
-    if (activeSources.has('soundcloud')) {
+    if (showCfg('soundcloud')) {
         testSoundcloudConnection();
     }
 }
@@ -2021,12 +2201,30 @@ function onSearchModeChange() {
 // body is the immediate next element or sits after a control (e.g. a <select>),
 // and regardless of any wrapping container.
 function toggleSettingHelp(iconEl) {
+    // Locate the help body to toggle. Search order:
+    //  1) the next .setting-help-body sibling after the icon's row (icon + body
+    //     both inside the same .form-group / .setting-row),
+    //  2) the element right after the enclosing .form-group (help wall that sits
+    //     as a sibling just below the group — the common always-visible case).
     const row = iconEl.closest('.setting-row') || iconEl;
     let el = row.nextElementSibling;
     while (el && !el.classList.contains('setting-help-body')) {
         el = el.nextElementSibling;
     }
-    if (el) el.hidden = !el.hidden;
+    if (!el) {
+        const fg = iconEl.closest('.form-group');
+        let sib = fg ? fg.nextElementSibling : null;
+        // Only accept an immediately-following help body — never reach across
+        // into the next setting/group.
+        if (sib && sib.classList.contains('setting-help-body')) el = sib;
+    }
+    if (el) {
+        el.hidden = !el.hidden;
+        // Reflect open state on the icon itself (filled badge) so it's clear
+        // which help panel is currently revealed.
+        const icon = iconEl.classList.contains('info-icon') ? iconEl : row.querySelector('.info-icon');
+        if (icon) icon.classList.toggle('open', !el.hidden);
+    }
 }
 
 function renderRankedTargets() {
