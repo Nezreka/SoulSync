@@ -7,12 +7,19 @@
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json', v=static_v) }}">
-    <meta name="theme-color" content="#1db954">
+    <meta name="theme-color" content="{{ initial_accent_color }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
+    <style id="soulsync-initial-appearance">
+        :root {
+            --accent-rgb: {{ initial_accent_rgb }};
+            --accent-light-rgb: {{ initial_accent_light_rgb }};
+            --accent-neon-rgb: {{ initial_accent_neon_rgb }};
+        }
+    </style>
     {{ vite_assets('head')|safe }}
 </head>
 
