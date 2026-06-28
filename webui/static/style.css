@@ -60380,14 +60380,21 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 }
 .blacklist-entry-remove:hover { background: rgba(239, 83, 80, 0.12); color: #ef5350; }
 
-/* ── Reduce Visual Effects ── Full performance mode: disables GPU-heavy
-   properties and halts decorative animation globally. */
+/* ── Reduce Visual Effects ── Performance mode. Kills the GPU-EXPENSIVE
+   properties only — the actual lag (esp. Firefox) is backdrop-filter / box-shadow /
+   filter re-rasterizing every frame. Because !important author declarations outrank
+   animation + transition declarations in the cascade, any keyframe/transition that
+   tries to set these is forced to none even while it runs — so the expensive part is
+   neutralized without freezing the motion itself.
+
+   We deliberately do NOT blanket `animation: none` / `transition-duration: 0s`:
+   that froze every functional loading spinner (the dash-header worker-service
+   spinners read as BROKEN, stuck mid-rotation) and killed cheap transform/colour
+   feedback (e.g. the Quick Actions hover). Transform- and opacity-only motion is
+   composited for ~free, so it stays — a spinner that spins, just without glow. */
 body.reduce-effects *,
 body.reduce-effects *::before,
 body.reduce-effects *::after {
-    animation: none !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     box-shadow: none !important;
