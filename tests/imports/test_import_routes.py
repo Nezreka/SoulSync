@@ -1,6 +1,8 @@
 import os
 from concurrent.futures import Future
 
+import pytest
+
 import core.imports.routes as import_routes
 from core.imports.routes import (
     ImportRouteRuntime,
@@ -15,6 +17,15 @@ from core.imports.routes import (
     staging_hints,
     staging_suggestions,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_staging_scan_cache():
+    # The shared staging scan is cached at module level; clear it between tests so
+    # one test's scan can't satisfy another within the TTL.
+    import_routes.invalidate_staging_scan_cache()
+    yield
+    import_routes.invalidate_staging_scan_cache()
 
 
 class _FakeLogger:
@@ -181,14 +192,21 @@ def test_staging_hints_prefers_tag_queries_then_folder_queries(tmp_path):
     _touch(tmp_path / "Folder_Album" / "02.mp3")
     _touch(tmp_path / "Loose" / "track.flac")
 
-    def _read_tags(file_path):
-        if file_path.endswith("01.mp3") or file_path.endswith("02.mp3"):
-            return {"album": ["Tagged Album"], "artist": ["Tagged Artist"]}
-        return {}
+    def _empty(artist="", album="", track_number=0):
+        return {"title": "", "artist": artist, "albumartist": "",
+                "album": album, "track_number": track_number, "disc_number": 1}
+
+    # hints now derives from the shared staging scan (read_staging_file_metadata),
+    # the same reader files/groups use — not a separate read_tags pass.
+    metadata = {
+        os.path.join("Folder_Album", "01.mp3"): _empty(artist="Tagged Artist", album="Tagged Album", track_number=1),
+        os.path.join("Folder_Album", "02.mp3"): _empty(artist="Tagged Artist", album="Tagged Album", track_number=2),
+        os.path.join("Loose", "track.flac"): _empty(),
+    }
 
     runtime = ImportRouteRuntime(
         get_staging_path=lambda: str(tmp_path),
-        read_tags=_read_tags,
+        read_staging_file_metadata=_metadata_for(metadata),
         logger=_FakeLogger(),
     )
 
@@ -606,3 +624,31 @@ def test_singles_process_requires_files():
 
     assert status == 400
     assert payload == {"success": False, "error": "No files provided"}
+
+
+def test_staging_scan_is_shared_across_files_groups_hints(tmp_path):
+    """#935: opening Import fires files+groups+hints together; they must share ONE
+    staging scan (one walk + one tag read per file), not re-read every file 3×."""
+    _touch(tmp_path / "Album" / "01.mp3")
+    _touch(tmp_path / "Album" / "02.mp3")
+
+    reads = []
+
+    def _meta(full_path, rel_path):
+        reads.append(rel_path)
+        return {"title": "T", "artist": "Artist", "albumartist": "Artist",
+                "album": "Album", "track_number": 1, "disc_number": 1}
+
+    runtime = ImportRouteRuntime(
+        get_staging_path=lambda: str(tmp_path),
+        read_staging_file_metadata=_meta,
+        logger=_FakeLogger(),
+    )
+
+    # All three page-open endpoints, back to back (within the cache TTL).
+    staging_files(runtime)
+    staging_groups(runtime)
+    staging_hints(runtime)
+
+    # 2 files × ONE shared scan = 2 reads — not 6 (which is 2 files × 3 endpoints).
+    assert sorted(reads) == [os.path.join("Album", "01.mp3"), os.path.join("Album", "02.mp3")]
