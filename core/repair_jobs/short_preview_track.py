@@ -28,6 +28,25 @@ from utils.logging_config import get_logger
 logger = get_logger("repair_jobs.short_preview")
 
 
+def _art_from_details(details: Dict[str, Any]) -> Optional[str]:
+    """Pull a renderable album-art URL out of a get_track_details() response. The cleaned dict
+    doesn't carry images, but raw_data does: Spotify → raw_data.album.images[0].url, iTunes →
+    raw_data.artworkUrl100 (upscaled). Returns None if neither is present."""
+    raw = (details or {}).get("raw_data") or {}
+    album = raw.get("album")
+    if isinstance(album, dict):
+        images = album.get("images")
+        if isinstance(images, list) and images and isinstance(images[0], dict) and images[0].get("url"):
+            return images[0]["url"]
+    art = raw.get("artworkUrl100") or raw.get("artworkUrl60") or raw.get("artworkUrl30")
+    if art:
+        # iTunes serves tiny thumbnails by default; bump to a usable size.
+        for small in ("100x100bb", "60x60bb", "30x30bb"):
+            art = art.replace(small, "600x600bb")
+        return art
+    return None
+
+
 @register_job
 class ShortPreviewTrackJob(RepairJob):
     job_id = "short_preview_track"
@@ -128,12 +147,16 @@ class ShortPreviewTrackJob(RepairJob):
                     pass
 
             file_dur_s = (row["duration"] or 0) / 1000.0
-            expected_dur_s = self._expected_duration_s(context, row)
+            source = self._lookup_source(context, row)
 
             # Can't verify the real length → never flag (a delete must be backed by evidence).
-            if expected_dur_s is None or expected_dur_s <= 0:
+            if source is None:
                 result.skipped += 1
                 continue
+            expected_dur_s = source["duration_s"]
+            # Prefer the source's album art (a renderable CDN url) over the library thumb, which
+            # is often empty/non-renderable for un-enriched HiFi previews → art-less wishlist orb.
+            album_image = source.get("album_image") or row["album_thumb"]
 
             # Source agrees the track is short (genuine intro/skit) → leave it alone. Only a
             # source that says the real track is MUCH longer than the file marks a preview.
@@ -163,7 +186,7 @@ class ShortPreviewTrackJob(RepairJob):
                             "title": row["title"],
                             "artist": row["artist_name"],
                             "album": row["album_title"],
-                            "album_thumb_url": row["album_thumb"],
+                            "album_thumb_url": album_image,
                             "artist_thumb_url": row["artist_thumb"],
                             "file_duration_s": round(file_dur_s, 1),
                             "expected_duration_s": round(expected_dur_s, 1),
@@ -180,14 +203,18 @@ class ShortPreviewTrackJob(RepairJob):
 
         return result
 
-    def _expected_duration_s(self, context: JobContext, row: Dict[str, Any]) -> Optional[float]:
-        """Canonical track length (seconds) from the track's metadata source, or None when
-        no source id is usable / the lookup fails. Every metadata client exposes
-        get_track_details(id) -> {... 'duration_ms': N ...} (the metadata-service contract)."""
+    def _lookup_source(self, context: JobContext, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Look the track up at its metadata source: returns {'duration_s', 'album_image'} or
+        None when no source id is usable / the lookup fails. The SAME lookup that confirms the
+        real length also carries the album art (in raw_data), which we capture so the re-wishlist
+        isn't art-less when the library album thumb is missing (the #937-follow-up: HiFi previews
+        on un-enriched albums). Every metadata client exposes get_track_details(id)."""
 
-        def _dur(details) -> Optional[float]:
+        def _build(details) -> Optional[Dict[str, Any]]:
             ms = (details or {}).get("duration_ms")
-            return ms / 1000.0 if ms and ms > 0 else None
+            if not ms or ms <= 0:
+                return None
+            return {"duration_s": ms / 1000.0, "album_image": _art_from_details(details)}
 
         # Spotify — pass allow_fallback=False. The default fallback scrapes the configured
         # metadata source, which is slow and can BLOCK a scan loop indefinitely when the
@@ -196,13 +223,13 @@ class ShortPreviewTrackJob(RepairJob):
         sp_id = row.get("spotify_track_id")
         if sp_id and context.spotify_client and not context.is_spotify_rate_limited():
             try:
-                d = _dur(context.spotify_client.get_track_details(str(sp_id), allow_fallback=False))
-                if d:
-                    return d
+                r = _build(context.spotify_client.get_track_details(str(sp_id), allow_fallback=False))
+                if r:
+                    return r
             except TypeError:
                 pass  # older client without the flag — skip, don't risk the slow path
             except Exception as exc:
-                logger.debug("spotify duration lookup failed for %s: %s", sp_id, exc)
+                logger.debug("spotify lookup failed for %s: %s", sp_id, exc)
 
         # iTunes (public API, no auth, fast) then MusicBrainz.
         for source_id, client in (
@@ -215,11 +242,11 @@ class ShortPreviewTrackJob(RepairJob):
             if getter is None:
                 continue
             try:
-                d = _dur(getter(str(source_id)))
-                if d:
-                    return d
+                r = _build(getter(str(source_id)))
+                if r:
+                    return r
             except Exception as exc:
-                logger.debug("duration lookup failed for %s: %s", source_id, exc)
+                logger.debug("lookup failed for %s: %s", source_id, exc)
         return None
 
     def estimate_scope(self, context: JobContext) -> int:
