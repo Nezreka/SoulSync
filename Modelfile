@@ -1,2 +1,0 @@
-FROM qwen2.5-coder:7b
-PARAMETER num_ctx 16384
