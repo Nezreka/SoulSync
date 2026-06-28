@@ -303,6 +303,77 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
+def _valid_hex_color(value, fallback='#1db954'):
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'#[0-9a-fA-F]{6}', value) else fallback
+
+
+def _hex_to_rgb(hex_color):
+    color = _valid_hex_color(hex_color)
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _rgb_to_hsl(r, g, b):
+    rn, gn, bn = r / 255, g / 255, b / 255
+    max_c = max(rn, gn, bn)
+    min_c = min(rn, gn, bn)
+    lightness = (max_c + min_c) / 2
+    if max_c == min_c:
+        return 0, 0, lightness
+
+    delta = max_c - min_c
+    saturation = delta / (2 - max_c - min_c) if lightness > 0.5 else delta / (max_c + min_c)
+    if max_c == rn:
+        hue = ((gn - bn) / delta + (6 if gn < bn else 0)) / 6
+    elif max_c == gn:
+        hue = ((bn - rn) / delta + 2) / 6
+    else:
+        hue = ((rn - gn) / delta + 4) / 6
+    return hue, saturation, lightness
+
+
+def _hsl_to_rgb(hue, saturation, lightness):
+    if saturation == 0:
+        value = round(lightness * 255)
+        return value, value, value
+
+    def hue_to_rgb(p, q, t):
+        if t < 0:
+            t += 1
+        if t > 1:
+            t -= 1
+        if t < 1 / 6:
+            return p + (q - p) * 6 * t
+        if t < 1 / 2:
+            return q
+        if t < 2 / 3:
+            return p + (q - p) * (2 / 3 - t) * 6
+        return p
+
+    q = lightness * (1 + saturation) if lightness < 0.5 else lightness + saturation - lightness * saturation
+    p = 2 * lightness - q
+    return (
+        round(hue_to_rgb(p, q, hue + 1 / 3) * 255),
+        round(hue_to_rgb(p, q, hue) * 255),
+        round(hue_to_rgb(p, q, hue - 1 / 3) * 255),
+    )
+
+
+def _initial_appearance_context():
+    preset = config_manager.get('ui_appearance.accent_preset', '#1db954')
+    custom = config_manager.get('ui_appearance.accent_color', '#1db954')
+    accent = _valid_hex_color(custom if preset == 'custom' else preset)
+    r, g, b = _hex_to_rgb(accent)
+    hue, saturation, lightness = _rgb_to_hsl(r, g, b)
+    light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
+    neon = _hsl_to_rgb(hue, min(saturation + 0.1, 1.0), min(lightness + 0.30, 0.95))
+    return {
+        'initial_accent_color': accent,
+        'initial_accent_rgb': f'{r}, {g}, {b}',
+        'initial_accent_light_rgb': f'{light[0]}, {light[1]}, {light[2]}',
+        'initial_accent_neon_rgb': f'{neon[0]}, {neon[1]}, {neon[2]}',
+    }
+
 
 @app.context_processor
 def _inject_static_cache_bust():
@@ -319,7 +390,7 @@ def _inject_static_cache_bust():
                 static_v = str(max(mtimes))
         except Exception:
             static_v = _STATIC_CACHE_BUST
-    return {'static_v': static_v}
+    return {'static_v': static_v, **_initial_appearance_context()}
 
 
 @app.context_processor
