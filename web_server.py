@@ -363,6 +363,9 @@ def _initial_appearance_context():
     preset = config_manager.get('ui_appearance.accent_preset', '#1db954')
     custom = config_manager.get('ui_appearance.accent_color', '#1db954')
     accent = _valid_hex_color(custom if preset == 'custom' else preset)
+    particles_enabled = config_manager.get('ui_appearance.particles_enabled', False) is True
+    worker_orbs_enabled = config_manager.get('ui_appearance.worker_orbs_enabled', True) is not False
+    reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
     r, g, b = _hex_to_rgb(accent)
     hue, saturation, lightness = _rgb_to_hsl(r, g, b)
     light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
@@ -372,6 +375,9 @@ def _initial_appearance_context():
         'initial_accent_rgb': f'{r}, {g}, {b}',
         'initial_accent_light_rgb': f'{light[0]}, {light[1]}, {light[2]}',
         'initial_accent_neon_rgb': f'{neon[0]}, {neon[1]}, {neon[2]}',
+        'initial_particles_enabled': particles_enabled,
+        'initial_worker_orbs_enabled': worker_orbs_enabled,
+        'initial_reduce_effects': reduce_effects,
     }
 
 
