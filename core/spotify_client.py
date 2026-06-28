@@ -17,9 +17,16 @@ logger = get_logger("spotify_client")
 def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Normalize Spotify OAuth config before building an auth manager.
 
-    Spotify rejects values that include surrounding whitespace, quotes, or
-    newline characters. The settings UI can paste values that carry such
-    formatting, so we trim them before sending them to Spotify.
+    Spotify rejects values that include surrounding whitespace or quotes, and the
+    settings UI can paste values carrying such formatting, so we trim those — they
+    can never be part of a real credential.
+
+    We deliberately do NOT strip a trailing slash from ``redirect_uri``: Spotify
+    matches the redirect URI EXACTLY against the app's dashboard registration, and
+    a trailing slash is a legitimate part of a URI. Stripping it would silently
+    break anyone who registered ``…/callback/`` (we'd send ``…/callback`` →
+    "INVALID_CLIENT: Invalid redirect URI"). So the value is preserved verbatim
+    apart from the unambiguous whitespace/quote garbage (#942 follow-up).
     """
     if not isinstance(config, dict):
         return {}
@@ -28,10 +35,7 @@ def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str
     for key in ("client_id", "client_secret", "redirect_uri"):
         value = config.get(key, "")
         if isinstance(value, str):
-            value = value.strip().strip('"').strip("'")
-            if key == "redirect_uri":
-                value = value.rstrip("/")
-            normalized[key] = value
+            normalized[key] = value.strip().strip('"').strip("'")
         else:
             normalized[key] = value
     return normalized
