@@ -1000,6 +1000,10 @@ class MusicDatabase:
 
         self._init_manual_library_match_table()
         self._backfill_mirrored_track_source_ids()
+        # Self-heal the Unverified review queue: lift history rows stuck at
+        # 'unverified' whose file has since been verified (issue #934). Cheap,
+        # idempotent (only touches rows that need it), so it's safe every boot.
+        self.reconcile_unverified_history_from_tracks()
 
     def _backfill_mirrored_track_source_ids(self) -> int:
         """One-time, idempotent: assign a stable source_track_id to mirrored tracks
@@ -13856,6 +13860,87 @@ class MusicDatabase:
         except Exception as e:
             logger.error("Error querying unverified library history: %s", e)
             return []
+
+    def reconcile_unverified_history_from_tracks(self) -> int:
+        """Heal library_history rows stuck at 'unverified' whose underlying file
+        has since been confirmed in the tracks table (AcoustID scan PASS or a
+        human decision). Matches by exact path AND basename — the same physical
+        file keeps its filename across path-form differences (relative vs
+        absolute, library moved/reorganized, different mount), which is why an
+        exact-path-only heal left thousands of already-verified files showing as
+        Unverified (issue #934).
+
+        A basename match is title-guarded: a shared track-number filename
+        ("01 - Intro.flac") must NOT heal a different song, so when both the
+        history row and the candidate track carry a title they have to agree
+        (alphanumeric-lowercase) — the same guard the AcoustID matcher uses. An
+        exact-path match is unambiguous and needs no guard.
+
+        Upgrade-only and non-destructive: it only lifts 'unverified' rows to the
+        confirmed status, never downgrades and never deletes. Returns the number
+        of rows healed. Genuinely-unverified rows and orphans (no matching
+        track) are left untouched.
+        """
+        healed = 0
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # Cheap early-out: skip the tracks scan entirely when nothing is stuck.
+            cursor.execute(
+                "SELECT 1 FROM library_history WHERE verification_status = 'unverified' LIMIT 1")
+            if cursor.fetchone() is None:
+                return 0
+
+            def _norm(value):
+                return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+            rank = {'verified': 1, 'human_verified': 2}
+            by_path = {}   # exact path -> status (unambiguous; no title guard)
+            by_base = {}   # basename -> list of (norm_title, status)
+            cursor.execute(
+                "SELECT file_path, verification_status, title FROM tracks "
+                "WHERE verification_status IN ('verified', 'human_verified') "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            for fp, st, ttitle in cursor.fetchall():
+                if not fp:
+                    continue
+                if rank.get(st, 0) >= rank.get(by_path.get(fp), 0):
+                    by_path[fp] = st
+                base = os.path.basename(fp)
+                if base:
+                    by_base.setdefault(base, []).append((_norm(ttitle), st))
+
+            updates = []
+            cursor.execute(
+                "SELECT id, file_path, title FROM library_history "
+                "WHERE verification_status = 'unverified' "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            for rid, fp, rtitle in cursor.fetchall():
+                target = by_path.get(fp)
+                if not target:
+                    want = _norm(rtitle)
+                    best = 0
+                    for ttitle, st in by_base.get(os.path.basename(fp or ''), ()):
+                        # Title guard: require agreement only when BOTH titles are
+                        # present (legacy rows may lack one — fall back to filename).
+                        if want and ttitle and want != ttitle:
+                            continue
+                        if rank.get(st, 0) >= best:
+                            best = rank.get(st, 0)
+                            target = st
+                if target:
+                    updates.append((target, rid))
+            for status, rid in updates:
+                cursor.execute(
+                    "UPDATE library_history SET verification_status = ? WHERE id = ?",
+                    (status, rid))
+                healed += 1
+            if healed:
+                conn.commit()
+                logger.info("Reconciled %d unverified history rows from tracks truth", healed)
+        except Exception as e:
+            logger.error("Error reconciling unverified history: %s", e)
+        return healed
 
     def get_library_history_stats(self):
         """Return counts per event_type and per download_source."""
