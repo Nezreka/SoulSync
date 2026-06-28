@@ -353,6 +353,138 @@ def test_shared_id_without_track_match_stays_independent(
     ]
 
 
+def test_excluded_canonical_sibling_reports_only_its_missing_tracks(
+    monkeypatch,
+):
+    """A second row pinned to the SAME canonical edition whose tracks fail the
+    strict fragment match is still evaluated against that edition — but it must
+    report only the tracks it does NOT own, not the whole tracklist. Regression
+    for the excluded-sibling bug (it previously flagged every canonical track as
+    missing, including the ones the row already had)."""
+    db = _SharedMemoryDB()
+    db.insert_artist("artist-1", "Artist")
+    # Anchor: complete, titles match the canonical edition.
+    db.insert_album(
+        "anchor",
+        "artist-1",
+        "Album",
+        canonical_source="deezer",
+        canonical_album_id="canonical-release",
+    )
+    for number in range(1, 6):
+        db.insert_track("anchor", number, f"Canonical Track {number}")
+
+    # Sibling: same canonical pair, owns tracks 1-3 by NUMBER but with blank
+    # titles → fails the strict fragment match → excluded from the anchor group.
+    db.insert_album(
+        "sibling",
+        "artist-1",
+        "Album",
+        canonical_source="deezer",
+        canonical_album_id="canonical-release",
+    )
+    for number in range(1, 4):
+        db.insert_track("sibling", number, "")
+
+    monkeypatch.setattr(
+        album_completeness_module,
+        "get_album_tracks_for_source",
+        lambda source, album_id: _canonical_tracks(5),
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        "get_primary_source",
+        lambda: "deezer",
+    )
+    monkeypatch.setattr(
+        album_completeness_module,
+        "get_source_priority",
+        lambda primary: ["deezer"],
+    )
+
+    findings = []
+    AlbumCompletenessJob().scan(_context(db, findings))
+
+    sibling_finding = next(
+        f for f in findings if f["entity_id"] == "sibling"
+    )
+    details = sibling_finding["details"]
+    # Owns tracks 1-3 (by number) → "3 of 5", and only 2 missing (4 & 5),
+    # NOT the full 5 — and the count stays internally consistent.
+    assert details["actual_tracks"] == 3
+    assert details["expected_tracks"] == 5
+    missing_numbers = sorted(
+        t["track_number"] for t in details["missing_tracks"]
+    )
+    assert missing_numbers == [4, 5]
+
+
+def test_candidate_matching_two_canonical_groups_stays_independent():
+    """A candidate whose shared ID resolves to MORE THAN ONE canonical group is
+    ambiguous and must not be fused into either. Locks the `len(matches) == 1`
+    rule the one-pass grouping relies on. (`_build_candidate_groups` is pure, so
+    drive it directly with album dicts.)"""
+    def _album(album_id, order, **extra):
+        base = {
+            'album_id': album_id, 'artist_id': 'artist-1',
+            'album_title': album_id, 'actual_count': 1, '_scan_order': order,
+            'spotify_album_id': '', 'itunes_album_id': '', 'deezer_album_id': '',
+            'discogs_album_id': '', 'hydrabase_album_id': '',
+            'musicbrainz_album_id': '', 'canonical_source': '',
+            'canonical_album_id': '',
+        }
+        base.update(extra)
+        return base
+
+    # Two distinct canonical editions (same artist) that share spotify-X, plus a
+    # candidate that also carries spotify-X → it resolves to BOTH groups.
+    albums = [
+        _album('anchor-a', 0, spotify_album_id='shared-X',
+               canonical_source='deezer', canonical_album_id='canonical-a'),
+        _album('anchor-b', 1, spotify_album_id='shared-X',
+               canonical_source='deezer', canonical_album_id='canonical-b'),
+        _album('candidate', 2, spotify_album_id='shared-X'),
+    ]
+
+    groups = AlbumCompletenessJob()._build_candidate_groups(albums)
+    candidate_groups = [
+        g for g in groups
+        if any(m['album_id'] == 'candidate' for m in g['members'])
+    ]
+    # Candidate is its OWN singleton group, never fused into A or B.
+    assert len(candidate_groups) == 1
+    assert [m['album_id'] for m in candidate_groups[0]['members']] == [
+        'candidate'
+    ]
+
+
+def test_unambiguous_candidate_joins_its_single_group():
+    """The complement: a candidate that resolves to exactly one canonical group
+    joins it (the one-pass path produces the same membership as before)."""
+    def _album(album_id, order, **extra):
+        base = {
+            'album_id': album_id, 'artist_id': 'artist-1',
+            'album_title': album_id, 'actual_count': 1, '_scan_order': order,
+            'spotify_album_id': '', 'itunes_album_id': '', 'deezer_album_id': '',
+            'discogs_album_id': '', 'hydrabase_album_id': '',
+            'musicbrainz_album_id': '', 'canonical_source': '',
+            'canonical_album_id': '',
+        }
+        base.update(extra)
+        return base
+
+    albums = [
+        _album('anchor', 0, spotify_album_id='shared-X',
+               canonical_source='deezer', canonical_album_id='canonical-a'),
+        _album('candidate', 1, spotify_album_id='shared-X'),
+    ]
+    groups = AlbumCompletenessJob()._build_candidate_groups(albums)
+    assert len(groups) == 1
+    assert sorted(m['album_id'] for m in groups[0]['members']) == [
+        'anchor', 'candidate'
+    ]
+
+
 def test_fragment_grouping_never_crosses_artist_boundary(
     monkeypatch,
 ):

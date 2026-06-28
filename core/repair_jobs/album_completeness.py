@@ -435,6 +435,13 @@ class AlbumCompletenessJob(RepairJob):
         work_items = []
 
         for group in groups:
+            # This prep phase front-loads the canonical API lookups + track
+            # matching, so honour Stop/Pause here too — otherwise a stop would
+            # be ignored until every group is processed.
+            check_stop = getattr(context, 'check_stop', None)
+            if callable(check_stop) and check_stop():
+                break
+
             anchor = group['anchor']
             members = group['members']
             canonical_source = anchor.get('canonical_source') or ''
@@ -462,18 +469,12 @@ class AlbumCompletenessJob(RepairJob):
                         [],
                     )
 
-                    anchor_reference, _ = self._match_tracks(
+                    # The anchor's persisted disc/track slots remain
+                    # authoritative even when titles or durations drift.
+                    anchor_reference = self._owned_reference_for_tracks(
                         canonical_items,
                         anchor_tracks,
                         str(canonical_source),
-                    )
-                    # The anchor's persisted disc/track slots remain
-                    # authoritative even when titles or durations drift.
-                    anchor_reference.update(
-                        self._reference_slots_for_local_tracks(
-                            canonical_items,
-                            anchor_tracks,
-                        )
                     )
 
                     included = [anchor]
@@ -537,20 +538,43 @@ class AlbumCompletenessJob(RepairJob):
                     })
 
                     for member in excluded:
-                        work_items.append(
-                            self._independent_work_item(
-                                member,
-                                canonical_items=(
-                                    canonical_items
-                                    if self._same_canonical_pair(
-                                        member,
-                                        canonical_source,
-                                        canonical_album_id,
-                                    )
-                                    else None
-                                ),
+                        # An excluded member that is itself pinned to this
+                        # canonical edition is still evaluated against it (no
+                        # fallback). It must report only the tracks it *doesn't*
+                        # own — compute its own owned slots from its local
+                        # tracks, exactly like the anchor, instead of leaving
+                        # the set empty (which would flag the whole tracklist as
+                        # missing, including tracks the row already has).
+                        if self._same_canonical_pair(
+                            member,
+                            canonical_source,
+                            canonical_album_id,
+                        ):
+                            member_tracks = local_by_album.get(
+                                str(member['album_id']),
+                                [],
                             )
-                        )
+                            member_owned = (
+                                self._owned_reference_for_tracks(
+                                    canonical_items,
+                                    member_tracks,
+                                    str(canonical_source),
+                                )
+                            )
+                            work_items.append(
+                                self._independent_work_item(
+                                    member,
+                                    canonical_items=canonical_items,
+                                    owned_reference_indexes=member_owned,
+                                    effective_actual_count=len(
+                                        member_owned
+                                    ),
+                                )
+                            )
+                        else:
+                            work_items.append(
+                                self._independent_work_item(member)
+                            )
                     continue
 
                 # The canonical lookup was attempted and returned no usable
@@ -581,7 +605,13 @@ class AlbumCompletenessJob(RepairJob):
         work_items.sort(key=lambda item: item['_scan_order'])
         return work_items
 
-    def _independent_work_item(self, row, canonical_items=None):
+    def _independent_work_item(
+        self,
+        row,
+        canonical_items=None,
+        owned_reference_indexes=None,
+        effective_actual_count=None,
+    ):
         item = {
             'row': row,
             'related_album_ids': [row['album_id']],
@@ -589,6 +619,10 @@ class AlbumCompletenessJob(RepairJob):
         }
         if canonical_items is not None:
             item['canonical_items'] = canonical_items
+        if owned_reference_indexes is not None:
+            item['owned_reference_indexes'] = owned_reference_indexes
+        if effective_actual_count is not None:
+            item['effective_actual_count'] = effective_actual_count
         return item
 
     def _same_canonical_pair(
@@ -651,9 +685,37 @@ class AlbumCompletenessJob(RepairJob):
                     )
                 ].add(key)
 
+        # Assign each non-canonical row to a group in ONE pass over the albums
+        # (O(N)), instead of rescanning every album for every group (O(G*N),
+        # which degrades badly once many editions are pinned). A row joins a
+        # group only when its stored IDs resolve to exactly one canonical group
+        # — identical to the old `matches == {key}` rule, just computed once.
         assigned_candidate_ids = set()
-        groups = []
+        candidates_by_group = defaultdict(list)
+        for row in albums:
+            row_id = str(row['album_id'])
+            if row_id in canonical_row_ids:
+                continue
 
+            artist_id = str(row.get('artist_id') or '')
+            matches = set()
+            for source, source_id in (
+                self._source_ids_from_row(row).items()
+            ):
+                if source_id:
+                    matches.update(
+                        alias_to_groups.get(
+                            (artist_id, source, str(source_id)),
+                            set(),
+                        )
+                    )
+
+            if len(matches) == 1:
+                (key,) = tuple(matches)
+                candidates_by_group[key].append(row)
+                assigned_candidate_ids.add(row_id)
+
+        groups = []
         for key, anchor_rows in canonical_groups.items():
             anchor = max(
                 anchor_rows,
@@ -663,36 +725,7 @@ class AlbumCompletenessJob(RepairJob):
                     -int(row.get('_scan_order') or 0),
                 ),
             )
-            members = list(anchor_rows)
-
-            for row in albums:
-                row_id = str(row['album_id'])
-                if (
-                    row_id in canonical_row_ids
-                    or row_id in assigned_candidate_ids
-                ):
-                    continue
-
-                artist_id = str(row.get('artist_id') or '')
-                matches = set()
-                for source, source_id in (
-                    self._source_ids_from_row(row).items()
-                ):
-                    if source_id:
-                        matches.update(
-                            alias_to_groups.get(
-                                (
-                                    artist_id,
-                                    source,
-                                    str(source_id),
-                                ),
-                                set(),
-                            )
-                        )
-
-                if matches == {key}:
-                    members.append(row)
-                    assigned_candidate_ids.add(row_id)
+            members = list(anchor_rows) + candidates_by_group.get(key, [])
 
             groups.append({
                 'anchor': anchor,
@@ -889,6 +922,29 @@ class AlbumCompletenessJob(RepairJob):
             if len(indexes) == 1:
                 matched.add(indexes[0])
         return matched
+
+    def _owned_reference_for_tracks(
+        self,
+        reference_items,
+        local_tracks,
+        reference_source,
+    ):
+        """Reference indexes a set of local tracks owns: fuzzy one-to-one
+        matches plus the persisted disc/track slots (authoritative even when
+        titles or durations drift). Used for the anchor and for any excluded
+        sibling that is still evaluated against this canonical edition."""
+        owned, _ = self._match_tracks(
+            reference_items,
+            local_tracks,
+            reference_source,
+        )
+        owned.update(
+            self._reference_slots_for_local_tracks(
+                reference_items,
+                local_tracks,
+            )
+        )
+        return owned
 
     def _track_match_score(
         self,
