@@ -1548,8 +1548,14 @@ async function loadSettingsData() {
         if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
         applyParticlesSetting(particlesEnabled);
 
-        // Worker orbs toggle
-        const workerOrbsEnabled = settings.ui_appearance?.worker_orbs_enabled !== false; // default true
+        // Worker orbs toggle. When the user hasn't saved a preference, reflect the
+        // server-decided browser-aware default (window._workerOrbsEnabled — OFF on
+        // Firefox for perf) so saving settings doesn't silently flip a first-time
+        // Firefox user's orbs back on. An explicit saved config value always wins.
+        const _orbsCfg = settings.ui_appearance?.worker_orbs_enabled;
+        const workerOrbsEnabled = (_orbsCfg === undefined || _orbsCfg === null)
+            ? (window._workerOrbsEnabled !== false)
+            : (_orbsCfg !== false);
         const workerOrbsCheckbox = document.getElementById('worker-orbs-enabled');
         if (workerOrbsCheckbox) workerOrbsCheckbox.checked = workerOrbsEnabled;
         applyWorkerOrbsSetting(workerOrbsEnabled);

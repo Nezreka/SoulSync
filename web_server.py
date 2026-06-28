@@ -84,6 +84,7 @@ if not pp_logger.handlers:
     pp_logger.propagate = False
 from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
 from core.plex_client import PlexClient
+from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
@@ -359,12 +360,32 @@ def _hsl_to_rgb(hue, saturation, lightness):
     )
 
 
+def _request_is_firefox() -> bool:
+    """Whether the current request's browser is Firefox (UA-based). Used ONLY to pick a
+    performance-friendly default; an explicit saved setting always wins. Safe outside a
+    request context (returns False)."""
+    try:
+        from flask import has_request_context, request
+        if not has_request_context():
+            return False
+        return is_firefox_user_agent(request.headers.get('User-Agent'))
+    except Exception:
+        return False
+
+
 def _initial_appearance_context():
     preset = config_manager.get('ui_appearance.accent_preset', '#1db954')
     custom = config_manager.get('ui_appearance.accent_color', '#1db954')
     accent = _valid_hex_color(custom if preset == 'custom' else preset)
     particles_enabled = config_manager.get('ui_appearance.particles_enabled', False) is True
-    worker_orbs_enabled = config_manager.get('ui_appearance.worker_orbs_enabled', True) is not False
+    # Worker orbs: explicit choice wins; unset → OFF on Firefox (the blurred orb canvas
+    # is the main remaining Firefox lag source), ON elsewhere. config default None so we
+    # can tell "unset" from an explicit False. (#kettui — single source: the server
+    # decides, the client consumes the injected value below.)
+    worker_orbs_enabled = resolve_worker_orbs_default(
+        config_manager.get('ui_appearance.worker_orbs_enabled', None),
+        _request_is_firefox(),
+    )
     reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
     r, g, b = _hex_to_rgb(accent)
     hue, saturation, lightness = _rgb_to_hsl(r, g, b)
