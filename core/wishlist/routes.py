@@ -8,6 +8,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
+from core.metadata import normalize_image_url
+from core.metadata.artwork import is_internal_image_host
 from core.wishlist.reporting import build_wishlist_stats_payload
 from core.wishlist.selection import prepare_wishlist_tracks_for_display
 from core.wishlist.service import get_wishlist_service
@@ -210,6 +212,74 @@ def set_wishlist_cycle(runtime: WishlistRouteRuntime, cycle: str) -> tuple[Dict[
         return {"error": str(exc)}, 500
 
 
+def _needs_image_fix(url: str | None) -> bool:
+    """True when an image URL won't render in the browser as-is — a media-server RELATIVE
+    path (/library/.., /Items/.., /rest/..) or an internal/localhost host. Spotify/iTunes CDN
+    URLs render directly and are left untouched, so already-working items never change."""
+    if not url or not isinstance(url, str):
+        return False
+    if url.startswith('/') and not url.startswith('//'):
+        return True
+    if url.startswith('http://') or url.startswith('https://'):
+        return is_internal_image_host(url)
+    return False
+
+
+def _enrich_wishlist_images(tracks: list[dict[str, Any]], db: Any) -> dict[str, str]:
+    """Make wishlist art browser-renderable using the library data we already have.
+
+    The library stores album/artist art as media-server RELATIVE paths (e.g. Plex
+    /library/metadata/..) which don't render in a browser <img>. Normal wishlist items carry
+    Spotify CDN URLs (fine), but library-sourced items — re-downloads and preview-clip
+    re-fetches — carry the relative path, so their art comes up blank. We fix two things here,
+    on read, so it also repairs items already sitting in the wishlist:
+
+      1. Normalize each track's album.images[*].url that needs it (relative/internal only —
+         CDN URLs are left as-is to avoid regressing items that already render).
+      2. Build an artist-name -> normalized library photo map so the nebula can show artist
+         photos for non-watchlist artists (it otherwise only has watchlisted-artist photos).
+    """
+    artist_names: set[str] = set()
+    for track in tracks:
+        sd = track.get('spotify_data')
+        if isinstance(sd, dict):
+            album = sd.get('album')
+            if isinstance(album, dict):
+                images = album.get('images')
+                if isinstance(images, list):
+                    for img in images:
+                        if isinstance(img, dict) and _needs_image_fix(img.get('url')):
+                            fixed = normalize_image_url(img['url'])
+                            if fixed:
+                                img['url'] = fixed
+        name = track.get('artist_name')
+        if name and name != 'Unknown Artist':
+            artist_names.add(name)
+
+    artist_images: dict[str, str] = {}
+    if not artist_names:
+        return artist_images
+    try:
+        conn = db._get_connection()
+        try:
+            placeholders = ','.join('?' * len(artist_names))
+            rows = conn.execute(
+                f"SELECT name, thumb_url FROM artists "
+                f"WHERE name IN ({placeholders}) AND thumb_url IS NOT NULL AND thumb_url != ''",
+                list(artist_names),
+            ).fetchall()
+        finally:
+            conn.close()
+        for row in rows:
+            name, thumb = row[0], row[1]
+            fixed = normalize_image_url(thumb) if _needs_image_fix(thumb) else thumb
+            if name and fixed:
+                artist_images[name.lower()] = fixed
+    except Exception as exc:  # noqa: BLE001 — art is cosmetic, never fail the tracks endpoint
+        logger.debug("Could not build wishlist artist-image map: %s", exc)
+    return artist_images
+
+
 def get_wishlist_tracks(
     runtime: WishlistRouteRuntime,
     *,
@@ -242,6 +312,9 @@ def get_wishlist_tracks(
                 prepared["duplicates_found"],
             )
 
+        # Make library-sourced art renderable + supply artist photos (see _enrich_wishlist_images).
+        artist_images = _enrich_wishlist_images(prepared["tracks"], db)
+
         if category:
             runtime.logger.info(
                 "Wishlist filter: %s/%s tracks in '%s' category (limit: %s)",
@@ -250,9 +323,18 @@ def get_wishlist_tracks(
                 category,
                 limit or "none",
             )
-            return {"tracks": prepared["tracks"], "category": category, "total": prepared["total"]}, 200
+            return {
+                "tracks": prepared["tracks"],
+                "category": category,
+                "total": prepared["total"],
+                "artist_images": artist_images,
+            }, 200
 
-        return {"tracks": prepared["tracks"], "total": prepared["total"]}, 200
+        return {
+            "tracks": prepared["tracks"],
+            "total": prepared["total"],
+            "artist_images": artist_images,
+        }, 200
     except Exception as exc:
         runtime.logger.error("Error getting wishlist tracks: %s", exc)
         return {"error": str(exc)}, 500
