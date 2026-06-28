@@ -4692,11 +4692,13 @@ def _profile_spotify_oauth(profile_id_int):
     chooser so a user can't silently inherit whatever Spotify session is active
     in their browser (e.g. the admin's). Returns None if no app creds exist."""
     from spotipy.oauth2 import SpotifyOAuth
+    from core.spotify_client import normalize_spotify_oauth_config
     creds = (get_database().get_profile_spotify(profile_id_int) or {})
-    cfg = config_manager.get_spotify_config()
-    client_id = creds.get('client_id') or cfg.get('client_id')
-    client_secret = creds.get('client_secret') or cfg.get('client_secret')
-    redirect_uri = creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
+    cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+    profile_creds = normalize_spotify_oauth_config(creds)
+    client_id = profile_creds.get('client_id') or cfg.get('client_id')
+    client_secret = profile_creds.get('client_secret') or cfg.get('client_secret')
+    redirect_uri = profile_creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
     if not client_id or not client_secret:
         return None
     return SpotifyOAuth(
@@ -5095,7 +5097,7 @@ def spotify_callback():
             pass
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
@@ -5125,7 +5127,7 @@ def spotify_callback():
                     raise Exception("Failed to exchange authorization code for access token")
 
         # Global callback (admin)
-        config = config_manager.get_spotify_config()
+        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
@@ -35879,9 +35881,10 @@ def start_oauth_callback_servers():
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
+                        from core.spotify_client import normalize_spotify_oauth_config
 
                         # Get Spotify config
-                        config = config_manager.get_spotify_config()
+                        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 

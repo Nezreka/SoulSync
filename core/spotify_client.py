@@ -13,6 +13,30 @@ from core.metadata.cache import get_metadata_cache
 
 logger = get_logger("spotify_client")
 
+
+def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Normalize Spotify OAuth config before building an auth manager.
+
+    Spotify rejects values that include surrounding whitespace, quotes, or
+    newline characters. The settings UI can paste values that carry such
+    formatting, so we trim them before sending them to Spotify.
+    """
+    if not isinstance(config, dict):
+        return {}
+
+    normalized = {}
+    for key in ("client_id", "client_secret", "redirect_uri"):
+        value = config.get(key, "")
+        if isinstance(value, str):
+            value = value.strip().strip('"').strip("'")
+            if key == "redirect_uri":
+                value = value.rstrip("/")
+            normalized[key] = value
+        else:
+            normalized[key] = value
+    return normalized
+
+
 def _upgrade_spotify_image_url(url: str) -> str:
     """Upgrade a Spotify CDN image URL to the highest available resolution.
 
@@ -697,7 +721,7 @@ class SpotifyClient:
         self._setup_client()
     
     def _setup_client(self):
-        config = config_manager.get_spotify_config()
+        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         
         if not config.get('client_id') or not config.get('client_secret'):
             logger.warning("Spotify credentials not configured")
