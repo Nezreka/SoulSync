@@ -68,6 +68,13 @@
     let errorHeat = 0;           // 0..1 aggregate "stress" — bumps on real worker errors, decays over time
     let state = 'idle';
     let animFrame = null;
+    let intervalId = null;
+    // Firefox throttles requestAnimationFrame to ~1fps for a canvas it heuristically deems
+    // occluded — the dashboard orb canvas falls into this after the page settles (the keepalive
+    // only delays it). A setInterval-driven loop is NOT subject to that canvas-occlusion rAF
+    // throttle, so on Firefox we drive the render with a timer. Chrome keeps rAF untouched
+    // (works fine + vsync-aligned). Background tabs are still parked via onVisibility→stopLoop.
+    const _isFirefox = !!(window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none'));
     let onDashboard = false;
     let expandProgress = 0;
     let staggerTimers = [];
@@ -96,6 +103,24 @@
         canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;';
         dashboardHeader.appendChild(canvas);
         ctx = canvas.getContext('2d');
+
+        // #935: on Firefox, a header hover re-layerizes the dashboard and the engine then
+        // throttles THIS canvas's compositing to ~1fps (Chrome never does this). The old
+        // always-on dash-card blob animation incidentally kept the compositor on the fast
+        // path; once that was removed for the Chrome GPU win, the throttle showed up. Re-add
+        // that "keep-alive" cheaply: a 2px, ~invisible element running an infinite transform-
+        // only animation (compositor work, zero paint). Firefox-only via the same feature
+        // gate the CSS uses — Chrome doesn't throttle and never gets this.
+        if (window.CSS && CSS.supports && CSS.supports('-moz-appearance', 'none')) {
+            const keepAlive = document.createElement('div');
+            keepAlive.className = 'worker-orb-ff-keepalive';
+            keepAlive.setAttribute('aria-hidden', 'true');
+            keepAlive.style.cssText = 'position:absolute;top:0;left:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:0;';
+            keepAlive.animate(
+                [{ transform: 'translateX(0)' }, { transform: 'translateX(1px)' }],
+                { duration: 1500, iterations: Infinity, direction: 'alternate' });
+            dashboardHeader.appendChild(keepAlive);
+        }
 
         WORKER_DEFS.forEach((def, i) => {
             const el = headerActions.querySelector(def.container);
@@ -548,6 +573,12 @@
     })();
 
     function startLoop() {
+        if (_isFirefox) {
+            if (intervalId) return;
+            // ~60fps timer — immune to Firefox's canvas-occlusion rAF throttle.
+            intervalId = setInterval(tick, 1000 / 60);
+            return;
+        }
         if (animFrame) return;
         tick();
     }
@@ -557,10 +588,17 @@
             cancelAnimationFrame(animFrame);
             animFrame = null;
         }
+        if (intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+        }
     }
 
     function tick() {
-        animFrame = requestAnimationFrame(tick);
+        // Chrome self-schedules via rAF; Firefox is driven by the setInterval above.
+        if (!_isFirefox) {
+            animFrame = requestAnimationFrame(tick);
+        }
         if (!canvas || !ctx) return;
 
         // Yield the frame to active scrolling (orbs freeze, resume on idle).

@@ -1387,7 +1387,7 @@ async function loadSettingsData() {
         sidebarVisualizerType = vizType;
 
         // Background particles toggle
-        const particlesEnabled = settings.ui_appearance?.particles_enabled !== false; // default true
+        const particlesEnabled = settings.ui_appearance?.particles_enabled === true; // default OFF (GPU cost)
         const particlesCheckbox = document.getElementById('particles-enabled');
         if (particlesCheckbox) particlesCheckbox.checked = particlesEnabled;
         applyParticlesSetting(particlesEnabled);

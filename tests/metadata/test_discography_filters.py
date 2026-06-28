@@ -301,6 +301,37 @@ class TestTrackAlreadyOwned:
         track_already_owned(db, 'Track', 'Artist', 'Album X', 'plex')
         assert db.calls[0]['album'] == 'Album X'
 
+    def test_candidate_tracks_threaded_to_batched_path(self):
+        """The discography endpoint pre-fetches the artist's owned tracks once
+        and passes them so check_track_exists scores in-memory instead of firing
+        per-track fuzzy SQL — the fix for ~15-30s/track on a large library."""
+        owned = [SimpleNamespace(title='Owned')]
+        db = _FakeDB((object(), 0.9))
+        track_already_owned(
+            db, 'Owned', 'Artist', 'Album', 'plex', candidate_tracks=owned,
+        )
+        # The pre-fetched candidates must reach check_track_exists verbatim.
+        assert db.calls[0]['candidate_tracks'] is owned
+
+    def test_empty_candidate_list_still_uses_batched_path(self):
+        """Owns-nothing case: an EMPTY list (not None) must be forwarded so the
+        check takes the fast in-memory path (scores against zero candidates →
+        instant 'not owned') instead of falling back to the slow per-track SQL."""
+        db = _FakeDB((None, 0.0))
+        result = track_already_owned(
+            db, 'Anything', 'Artist', 'Album', 'plex', candidate_tracks=[],
+        )
+        assert result is False
+        # [] is forwarded (not coerced to None) — that's what keeps it fast.
+        assert db.calls[0]['candidate_tracks'] == []
+
+    def test_default_omits_candidate_tracks_for_legacy_callers(self):
+        """Callers that don't pre-fetch get None → check_track_exists keeps its
+        original per-track-SQL behaviour. No other caller is forced to change."""
+        db = _FakeDB((object(), 0.9))
+        track_already_owned(db, 'Track', 'Artist', 'Album', 'plex')
+        assert db.calls[0]['candidate_tracks'] is None
+
     def test_passes_server_source_to_check(self):
         """Active media server scopes the lookup so the skip check
         only fires on tracks the user can actually see in their

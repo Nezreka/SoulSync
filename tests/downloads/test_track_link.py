@@ -78,3 +78,47 @@ def test_payload_non_dict_or_empty():
     assert q('tidal', None) is None
     assert q('tidal', {}) is None
     assert q('qobuz', 'garbage') is None
+
+
+# ── bubble the pasted-link track to the top (#932) ──
+
+from types import SimpleNamespace
+
+from core.downloads.track_link import linked_track_id, bubble_linked_track_first
+
+
+def _result(track_id=None):
+    """Mimic a TrackResult: NO top-level `id`, the source id lives in
+    _source_metadata['track_id'] (or absent entirely)."""
+    meta = {'source': 'qobuz', 'track_id': track_id} if track_id is not None else None
+    return SimpleNamespace(_source_metadata=meta, title='t')
+
+
+def test_linked_track_id_reads_source_metadata():
+    assert linked_track_id(_result('296427754')) == '296427754'
+
+
+def test_linked_track_id_empty_when_absent():
+    # the exact #932 trap: there is no top-level `id`, so getattr(t,'id') would miss.
+    r = _result()
+    assert not hasattr(r, 'id')
+    assert linked_track_id(r) == ''
+
+
+def test_bubble_floats_exact_track_to_top():
+    fuzzy_a, exact, fuzzy_b = _result('111'), _result('296427754'), _result('222')
+    out = bubble_linked_track_first([fuzzy_a, exact, fuzzy_b], '296427754')
+    assert out[0] is exact                      # exact track surfaced first
+    assert out[1:] == [fuzzy_a, fuzzy_b]         # stable order for the rest
+
+
+def test_bubble_handles_int_vs_str_id():
+    out = bubble_linked_track_first([_result('999'), _result('296427754')], 296427754)
+    assert linked_track_id(out[0]) == '296427754'
+
+
+def test_bubble_noop_when_nothing_matches_or_empty():
+    a, b = _result('1'), _result('2')
+    assert bubble_linked_track_first([a, b], '296427754') == [a, b]   # unchanged
+    assert bubble_linked_track_first([], '296427754') == []
+    assert bubble_linked_track_first([a, b], '') == [a, b]

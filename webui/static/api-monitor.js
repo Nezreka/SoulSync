@@ -893,7 +893,9 @@ async function fetchAndUpdateSystemStats() {
         updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
         updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
         updateStatCard('uptime-card', data.uptime, 'Application runtime');
-        updateStatCard('memory-card', data.memory_usage, 'Current usage');
+        // system memory % headline + SoulSync's own RSS in the subtitle (#935 follow-up)
+        updateStatCard('memory-card', data.memory_usage,
+            data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
 
     } catch (error) {
         console.warn('Could not fetch system stats:', error);
@@ -1403,8 +1405,16 @@ async function initializeWishlistPage() {
             fetch('/api/watchlist/artists').then(r => r.json()).catch(() => ({ success: false })),
         ]);
 
-        // Build artist name → image URL map from watchlist
+        // Build artist name → image URL map. Library photos (from the wishlist endpoint, covering
+        // every wishlist artist) seed it first; curated watchlist photos override where present.
         const _artistImageMap = new Map();
+        for (const res of [albumRes, singleRes]) {
+            if (res && res.artist_images) {
+                for (const [name, url] of Object.entries(res.artist_images)) {
+                    if (name && url) _artistImageMap.set(name.toLowerCase(), url);
+                }
+            }
+        }
         if (watchlistRes.success && watchlistRes.artists) {
             for (const wa of watchlistRes.artists) {
                 if (wa.artist_name && wa.image_url) _artistImageMap.set(wa.artist_name.toLowerCase(), wa.image_url);

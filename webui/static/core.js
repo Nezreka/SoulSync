@@ -687,7 +687,10 @@ function handleDashboardStats(data) {
     updateStatCard('download-speed-card', data.download_speed, 'Combined speed');
     updateStatCard('active-syncs-card', data.active_syncs, 'Playlists syncing');
     updateStatCard('uptime-card', data.uptime, 'Application runtime');
-    updateStatCard('memory-card', data.memory_usage, 'Current usage');
+    // Headline is system memory %; subtitle shows SoulSync's own RSS so users can see the
+    // app's actual footprint (falls back to the generic label on older backends).
+    updateStatCard('memory-card', data.memory_usage,
+        data.process_memory ? `SoulSync · ${data.process_memory}` : 'Current usage');
 }
 
 function handleDashboardActivity(data) {

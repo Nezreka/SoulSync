@@ -142,18 +142,21 @@ body.reduce-effects .sidebar::after {
     display: none !important;
 }
 
+/* translate + opacity only — NO scale(). The orbs are blur(28px); scaling a blurred
+   element re-rasterizes the blur every frame, but translating it just moves the cached
+   layer on the compositor (free). Same drifting glow, no per-frame re-blur (#935). */
 @keyframes sidebar-orb-1 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
-    25% { transform: translate(30px, 80px) scale(1.2); opacity: 1; }
-    50% { transform: translate(-10px, 180px) scale(0.9); opacity: 0.6; }
-    75% { transform: translate(20px, 50px) scale(1.15); opacity: 0.9; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.5; }
+    25% { transform: translate(30px, 80px); opacity: 1; }
+    50% { transform: translate(-10px, 180px); opacity: 0.6; }
+    75% { transform: translate(20px, 50px); opacity: 0.9; }
 }
 
 @keyframes sidebar-orb-2 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
-    30% { transform: translate(-20px, -100px) scale(1.25); opacity: 0.4; }
-    60% { transform: translate(30px, -50px) scale(0.85); opacity: 1; }
-    80% { transform: translate(-10px, 40px) scale(1.1); opacity: 0.5; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.6; }
+    30% { transform: translate(-20px, -100px); opacity: 0.4; }
+    60% { transform: translate(30px, -50px); opacity: 1; }
+    80% { transform: translate(-10px, 40px); opacity: 0.5; }
 }
 
 .sidebar > * {
@@ -63351,8 +63354,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
-    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+    will-change: left, top;
+    /* No infinite scale-pulse: scaling a blur(48px) element re-rasterizes the blur every
+       frame, and with 8 cards × 2 blobs that pinned the GPU at idle (#935). The blob still
+       follows the cursor via --blob-x/y; it just doesn't breathe when nothing's happening. */
 }
 .dash-card::after {
     content: '';
@@ -63372,9 +63377,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
+    will-change: left, top;
     mix-blend-mode: screen;
-    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+    /* No infinite scale-pulse — same reason as ::before (#935). */
 }
 
 @keyframes dashBlobHaloPulse {
@@ -69089,3 +69094,27 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .reid-replace-text em { color: #7f879e; font-style: normal; font-size: 11.5px; }
 .reid-footer-actions { display: flex; gap: 10px; }
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* Firefox-only performance overrides (#935). Firefox re-rasterizes blur()/backdrop-filter on
+   every composite where Chrome caches them, so the frosted-glass shell costs real idle GPU on
+   Firefox only. @supports(-moz-appearance) matches Firefox and NOT Chrome — this whole block is
+   invisible to Chrome, which keeps the full frosted look. Revert = delete this block. */
+@supports (-moz-appearance: none) {
+    /* dash-card cursor-glow blobs — 16 large blur(48px)/blur(18px) layers, purely decorative */
+    .dash-card::before,
+    .dash-card::after { display: none; }
+
+    /* sidebar aura orbs — two blur(28px) elements, always visible on every page */
+    .sidebar::before,
+    .sidebar::after { display: none; }
+
+    /* shell frosted-glass panels — drop the backdrop blur (each element keeps its own tint, so
+       it stays a solid/translucent panel, just not frosted). always-visible, so helps every page. */
+    .sidebar-header,
+    .header-button,
+    .watchlist-button,
+    .wishlist-button {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+}
