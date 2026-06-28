@@ -360,6 +360,22 @@ def probe_audio_quality(file_path: str):
                 sample_rate=getattr(audio.info, 'sample_rate', None),
             )
 
+        if ext in ('dsf', 'dff'):
+            # DSD (DSD Stream File / DSDIFF) — 1-bit hi-res lossless (#939). mutagen
+            # reads .dsf (rate/bitrate/bit_depth); .dff has no mutagen reader, so it
+            # still classifies as the lossless 'dsf' tier just without measured detail.
+            sr = bd = br = None
+            if ext == 'dsf':
+                try:
+                    from mutagen.dsf import DSF
+                    info = DSF(file_path).info
+                    sr = getattr(info, 'sample_rate', None)
+                    bd = getattr(info, 'bits_per_sample', None)
+                    br = info.bitrate // 1000 if getattr(info, 'bitrate', None) else None
+                except Exception:  # noqa: S110 — unreadable DSF still classifies lossless, just without measured detail
+                    pass
+            return AudioQuality(format='dsf', bitrate=br, sample_rate=sr, bit_depth=bd)
+
         return None
     except Exception as e:
         logger.debug("probe_audio_quality failed for %s: %s", file_path, e)

@@ -30,6 +30,7 @@ from core.quality.source_map import (
     ("aiff", "wav"), ("aif", "wav"),   # PCM → wav tier
     ("wma", "wma"),
     ("alac", "alac"),
+    ("dsf", "dsf"), (".dsf", "dsf"), ("dff", "dsf"),   # DSD → dsf tier (#939)
     ("xyz", "unknown"), ("", "unknown"), (None, "unknown"),
 ])
 def test_format_from_extension(ext, fmt):

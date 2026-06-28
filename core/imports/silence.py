@@ -18,6 +18,7 @@ run, so a tooling problem never blocks a legitimate import.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from typing import Optional
@@ -157,6 +158,14 @@ def measured_duration_from_astats(astats_stderr: str, sample_rate: int) -> Optio
     return int(m.group(1)) / float(sample_rate)
 
 
+def is_dsd_path(file_path: str) -> bool:
+    """True for DSD audio (.dsf / .dff). The decoded-samples truncation check is
+    invalid for DSD: ffmpeg decodes DSD to PCM at a different rate than the DSD
+    container's 2.8 MHz, so samples ÷ container-sample-rate massively under-counts
+    and would falsely report the file as truncated (#939)."""
+    return os.path.splitext(str(file_path or ''))[1].lower() in ('.dsf', '.dff')
+
+
 def incomplete_audio_reason(
     measured_s: Optional[float],
     container_s: Optional[float],
@@ -267,11 +276,14 @@ def detect_broken_audio(
 
     stderr = proc.stderr.decode("utf-8", errors="replace") if proc.stderr else ""
 
-    # Truncation check first (real audio far shorter than the container).
-    measured_s = measured_duration_from_astats(stderr, sample_rate)
-    reason = incomplete_audio_reason(measured_s, container_s, min_ratio=min_ratio)
-    if reason:
-        return reason
+    # Truncation check first (real audio far shorter than the container) — but
+    # NOT for DSD: the astats sample-count ÷ DSD-rate math is invalid there and
+    # would always false-positive (#939). Silence detection below still applies.
+    if not is_dsd_path(file_path):
+        measured_s = measured_duration_from_astats(stderr, sample_rate)
+        reason = incomplete_audio_reason(measured_s, container_s, min_ratio=min_ratio)
+        if reason:
+            return reason
 
     # Then silence-padding (mostly-silent file).
     return is_mostly_silent_reason(stderr, container_s, threshold=threshold)
