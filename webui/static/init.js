@@ -274,6 +274,34 @@ function applyReduceEffects(enabled) {
     }
 })();
 
+async function bootstrapServerAppearanceSettings() {
+    try {
+        const response = await fetch('/api/settings', { credentials: 'same-origin' });
+        const settings = await response.json();
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) return;
+
+        const appearance = settings.ui_appearance || {};
+        const preset = appearance.accent_preset || '#1db954';
+        const custom = appearance.accent_color || '#1db954';
+        const accent = preset === 'custom' ? custom : preset;
+        applyAccentColor(accent);
+
+        if (Object.prototype.hasOwnProperty.call(appearance, 'particles_enabled')) {
+            applyParticlesSetting(appearance.particles_enabled !== false);
+        }
+        if (Object.prototype.hasOwnProperty.call(appearance, 'worker_orbs_enabled')) {
+            applyWorkerOrbsSetting(appearance.worker_orbs_enabled !== false);
+        }
+        if (localStorage.getItem('soulsync-reduce-effects') === null) {
+            applyReduceEffects(appearance.reduce_effects === true);
+        }
+    } catch (error) {
+        console.warn('Could not bootstrap appearance settings:', error);
+    }
+}
+
+bootstrapServerAppearanceSettings();
+
 // ── Profile System ─────────────────────────────────────────────
 let currentProfile = null;
 const PROFILE_CONTEXT_CHANGED_EVENT = 'ss:webui-profile-context-changed';
