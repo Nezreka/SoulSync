@@ -55420,9 +55420,44 @@ tr.tag-diff-same {
     padding-bottom: 10vh;
 }
 
-/* Tab bar centered */
-#settings-page .stg-tabbar {
+/* Tab bar + save action sit on one control row. */
+#settings-page .settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px;
+    width: 100%;
+    max-width: 920px;
     margin: 0 auto 28px;
+    padding: 0 2px;
+}
+
+#settings-page .stg-tabbar {
+    display: flex;
+    flex: 0 1 auto;
+    margin: 0;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-nav-row .header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: auto;
+    margin: 0 0 0 auto;
+    margin-top: 0;
+}
+
+#settings-page .settings-nav-row .save-button {
+    padding: 8px 16px;
+    border-radius: 9px;
+    font-size: 0.84em;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* Columns become single centered column */
@@ -55459,38 +55494,38 @@ tr.tag-diff-same {
     min-width: 0;
 }
 
-/* ── Compact settings header — single row, no wasted vertical space ── */
+/* ── Settings local title — quiet, far-left, no dashboard banner ── */
 #settings-page .dashboard-header.settings-header-compact {
     flex-direction: row;
     align-items: center;
-    padding: 12px 24px;
-    margin-bottom: 16px;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    margin: 0 0 12px;
     position: relative;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
 }
-/* Centre the Save button in the header regardless of the title width. */
-#settings-page .settings-header-compact .header-actions {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    margin: 0;
+#settings-page .dashboard-header.settings-header-compact::after,
+#settings-page .settings-header-compact .dashboard-header-sweep {
+    display: none;
+}
+#settings-page .settings-header-compact .header-text {
+    min-width: 0;
 }
 #settings-page .settings-header-compact .header-title {
-    font-size: 1.15em;
+    font-size: 1.42em;
     margin: 0;
+    line-height: 1.1;
+    color: rgba(255, 255, 255, 0.88);
 }
 #settings-page .settings-header-compact .page-header-icon {
-    width: 26px;
-    height: 26px;
-}
-#settings-page .settings-header-compact .header-actions {
-    margin-left: auto;
-}
-#settings-page .settings-header-compact .header-actions .save-button {
-    padding: 9px 22px;
-    border-radius: 10px;
-    font-size: 0.9em;
-    font-weight: 600;
+    width: 32px;
+    height: 32px;
+    opacity: 0.86;
 }
 
 /* Checkbox/label rows that carry an ⓘ icon span the full width so the help
@@ -56560,11 +56595,20 @@ tr.tag-diff-same {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+    #settings-page .settings-nav-row {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 0 8px;
+    }
+    #settings-page .settings-nav-row .header-actions {
+        margin-left: auto;
+    }
     /* Tab bar scrolls horizontally */
     #settings-page .stg-tabbar {
         width: 100%;
+        flex: 1 1 100%;
         border-radius: 0;
-        margin-bottom: 16px;
         justify-content: flex-start;
     }
     .stg-tab { padding: 8px 14px; font-size: 0.8em; }
