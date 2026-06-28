@@ -55442,6 +55442,23 @@ tr.tag-diff-same {
     max-width: 100%;
 }
 
+#settings-page .settings-group[data-stg="logs"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-header,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-terminal,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-status {
+    width: 100%;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-controls,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-actions {
+    min-width: 0;
+}
+
 /* ── Compact settings header — single row, no wasted vertical space ── */
 #settings-page .dashboard-header.settings-header-compact {
     flex-direction: row;
