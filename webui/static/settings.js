@@ -2094,7 +2094,7 @@ function deleteRankedTarget(i) {
 
 // Lossless formats take bit-depth + sample-rate constraints; lossy take a
 // minimum bitrate. Single source of truth for the add-target field toggle.
-const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav'];
+const RT_LOSSLESS_FORMATS = ['flac', 'alac', 'wav', 'dsf'];
 const RT_LOSSY_FORMATS = ['mp3', 'aac', 'ogg', 'opus', 'wma'];
 // "group:" selections are a UI convenience: picking one + constraints expands
 // into individual per-format targets at that slot (the backend still works
