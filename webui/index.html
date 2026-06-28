@@ -20,10 +20,15 @@
             --accent-neon-rgb: {{ initial_accent_neon_rgb }};
         }
     </style>
+    <script>
+        window._particlesEnabled = {{ initial_particles_enabled|tojson }};
+        window._workerOrbsEnabled = {{ initial_worker_orbs_enabled|tojson }};
+        window._reduceEffectsActive = {{ initial_reduce_effects|tojson }};
+    </script>
     {{ vite_assets('head')|safe }}
 </head>
 
-<body>
+<body{% if initial_reduce_effects %} class="reduce-effects"{% endif %}>
     <!-- Setup Wizard Overlay -->
     <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
         <div class="setup-wizard-container">
@@ -354,7 +359,7 @@
         <!-- Main Content Area -->
         <div class="main-content">
             <!-- Global particle canvas for page background animations -->
-            <canvas id="page-particles-canvas"></canvas>
+            <canvas id="page-particles-canvas"{% if not initial_particles_enabled or initial_reduce_effects %} style="display: none;"{% endif %}></canvas>
             <div id="webui-react-root" class="page" data-react-app="router"></div>
 
             <!-- Dashboard Page -->

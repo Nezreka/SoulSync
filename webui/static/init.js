@@ -254,16 +254,28 @@ function applyReduceEffects(enabled) {
         }
     }
 
-    if (localStorage.getItem('soulsync-reduce-effects') === '1') {
+    const reduceEffectsSaved = localStorage.getItem('soulsync-reduce-effects');
+    if (reduceEffectsSaved === '1') {
         document.body.classList.add('reduce-effects');
         window._reduceEffectsActive = true;
+    } else if (reduceEffectsSaved === '0') {
+        document.body.classList.remove('reduce-effects');
+        window._reduceEffectsActive = false;
+    } else if (window._reduceEffectsActive) {
+        document.body.classList.add('reduce-effects');
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
     // Bootstrap particles setting from localStorage — OFF by default (continuous
     // full-page canvas = real GPU cost); only on when the user explicitly enabled it.
     const particlesSaved = localStorage.getItem('soulsync-particles');
-    window._particlesEnabled = (particlesSaved === 'true');
+    if (particlesSaved === 'true') {
+        window._particlesEnabled = true;
+    } else if (particlesSaved === 'false') {
+        window._particlesEnabled = false;
+    } else if (typeof window._particlesEnabled !== 'boolean') {
+        window._particlesEnabled = false;
+    }
     if (!window._particlesEnabled) {
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
@@ -272,6 +284,10 @@ function applyReduceEffects(enabled) {
     const workerOrbsSaved = localStorage.getItem('soulsync-worker-orbs');
     if (workerOrbsSaved === 'false') {
         window._workerOrbsEnabled = false;
+    } else if (workerOrbsSaved === 'true') {
+        window._workerOrbsEnabled = true;
+    } else if (typeof window._workerOrbsEnabled !== 'boolean') {
+        window._workerOrbsEnabled = true;
     }
 })();
 
