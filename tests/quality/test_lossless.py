@@ -119,3 +119,45 @@ def test_regression_m4a_alac_to_aac_would_overwrite_and_is_blocked():
     out = src                                                     # AAC target → .m4a
     assert is_lossless_audio_path(src, probe_codec=lambda _p: 'alac') is True
     assert lossy_output_would_overwrite_source(src, out) is True   # → callers skip
+
+
+# ── cross-language drift guard: the frontend lossless lists must match the backend ──
+# (#941's root cause: a format added to the quality profile but not the lossy-copy
+#  side. The lists are physically separate by choice — runtime-fetching a yearly-
+#  changing set isn't worth the coupling — so a test makes the drift impossible to
+#  ship silently instead.)
+
+import re
+from pathlib import Path
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+_SETTINGS_JS = _ROOT / "webui" / "static" / "settings.js"
+_INDEX_HTML = _ROOT / "webui" / "index.html"
+
+
+def _js_array(text, name):
+    m = re.search(rf"{name}\s*=\s*\[([^\]]*)\]", text)
+    assert m, f"{name} not found"
+    return set(re.findall(r"'([^']+)'", m.group(1)))
+
+
+def test_frontend_rt_lossless_formats_matches_backend():
+    js = _SETTINGS_JS.read_text(encoding="utf-8")
+    frontend = _js_array(js, "RT_LOSSLESS_FORMATS")
+    assert frontend == set(LOSSLESS_FORMATS), (
+        f"settings.js RT_LOSSLESS_FORMATS {frontend} != backend LOSSLESS_FORMATS "
+        f"{set(LOSSLESS_FORMATS)} — add the new format to BOTH"
+    )
+
+
+def test_quality_profile_dropdown_offers_every_lossless_format():
+    html = _INDEX_HTML.read_text(encoding="utf-8")
+    m = re.search(r'<optgroup label="Lossless">(.*?)</optgroup>', html, re.DOTALL)
+    assert m, "Lossless optgroup not found in index.html"
+    # concrete per-format option values (skip the 'group:lossless' convenience entry)
+    option_values = {v for v in re.findall(r'value="([^"]+)"', m.group(1))
+                     if not v.startswith("group:")}
+    assert set(LOSSLESS_FORMATS) <= option_values, (
+        f"index.html lossless dropdown {option_values} is missing "
+        f"{set(LOSSLESS_FORMATS) - option_values}"
+    )
