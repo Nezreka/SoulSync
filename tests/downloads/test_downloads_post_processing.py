@@ -170,7 +170,12 @@ def test_file_not_found_after_retries_marks_failed(monkeypatch):
     deps, rec = _build_deps()
     pp.run_post_processing_worker('t1', 'b1', deps)
     assert download_tasks['t1']['status'] == 'failed'
-    assert 'File not found on disk' in download_tasks['t1']['error_message']
+    # Actionable failure: names the folder searched + the two real causes, so a
+    # standalone user with a path mismatch can self-diagnose (Discord: Shdjfgatdif).
+    msg = download_tasks['t1']['error_message']
+    assert './downloads' in msg                    # the folder we actually searched
+    assert "download path doesn't match slskd" in msg   # the config-mismatch hint
+    assert 'song.flac' in msg                       # the file slskd reported
     assert ('on_complete', ('b1', 't1', False), {}) in rec.calls
 
 
