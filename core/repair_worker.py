@@ -1247,8 +1247,10 @@ class RepairWorker:
                            or row['deezer_id']
                            or f"preview_redl_{entity_id}")
 
+            # Prefer the finding's stored art (the scan captures the metadata source's CDN image)
+            # over the library album thumb, which is often empty for un-enriched HiFi previews.
             album_images = []
-            album_thumb = row['album_thumb'] or details.get('album_thumb_url')
+            album_thumb = details.get('album_thumb_url') or row['album_thumb']
             if album_thumb:
                 album_images = [{'url': album_thumb}]
 
@@ -3530,7 +3532,7 @@ class RepairWorker:
                              'incomplete_album', 'path_mismatch',
                              'missing_lossy_copy', 'missing_replaygain', 'empty_folder',
                              'missing_discography_track', 'acoustid_mismatch',
-                             'quality_upgrade')
+                             'quality_upgrade', 'short_preview_track')
             placeholders = ','.join(['?'] * len(fixable_types))
             where_parts = [f"finding_type IN ({placeholders})", "status = 'pending'"]
             params = list(fixable_types)

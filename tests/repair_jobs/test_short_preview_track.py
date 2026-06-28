@@ -124,6 +124,54 @@ def test_fix_deletes_file_removes_row_and_wishlists(tmp_path: Path):
     assert remaining == 0                                        # DB row dropped → track missing again
 
 
+# ── album art capture (so the re-wishlisted item isn't art-less) ──
+
+def test_scan_captures_source_album_art_into_finding(tmp_path: Path):
+    """The duration lookup's raw_data carries the source CDN album art — capture it so the
+    re-wishlist isn't art-less when the library thumb is empty (the reported bug)."""
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    _track(db, 1, 28_000, '/m/p.flac', spotify_id='sp_long')
+
+    class _SpWithArt:
+        def get_track_details(self, track_id, **_):
+            return {'duration_ms': 200_000,
+                    'raw_data': {'album': {'images': [{'url': 'https://cdn/cover.jpg'}]}}}
+
+    findings = []
+    ShortPreviewTrackJob().scan(_ctx(db, findings, _SpWithArt()))
+    assert len(findings) == 1
+    assert findings[0]['details']['album_thumb_url'] == 'https://cdn/cover.jpg'
+
+
+def test_art_from_itunes_artwork_is_upscaled():
+    from core.repair_jobs.short_preview_track import _art_from_details
+    d = {'raw_data': {'artworkUrl100': 'https://is1.mzstatic.com/a/100x100bb.jpg'}}
+    assert _art_from_details(d) == 'https://is1.mzstatic.com/a/600x600bb.jpg'
+
+
+def test_fix_uses_finding_art_for_wishlist_payload(tmp_path: Path):
+    db = MusicDatabase(str(tmp_path / 'm.db'))
+    _seed(db)
+    preview = tmp_path / 'preview.flac'
+    preview.write_bytes(b'fake audio')
+    _track(db, 1, 28_000, str(preview), spotify_id='sp1')
+
+    captured = {}
+    db.add_to_wishlist = lambda spotify_track_data, **kw: captured.update(
+        {'data': spotify_track_data}) or True
+
+    w = RepairWorker.__new__(RepairWorker)
+    w.db = db
+    w.transfer_folder = str(tmp_path)
+    w._config_manager = None
+
+    w._fix_short_preview_track('track', '1', str(preview),
+                               {'expected_duration_s': 200.0,
+                                'album_thumb_url': 'https://cdn/art.jpg'})
+    assert captured['data']['album']['images'] == [{'url': 'https://cdn/art.jpg'}]
+
+
 def test_fix_missing_file_still_wishlists_and_drops_row(tmp_path: Path):
     """If the preview file is already gone, still re-wishlist + drop the row (idempotent-ish)."""
     db = MusicDatabase(str(tmp_path / 'm.db'))
