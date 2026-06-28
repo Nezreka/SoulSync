@@ -1,38 +1,44 @@
-# soulsync 2.7.8 — `dev` → `main`
+# soulsync 2.8.0 — `dev` → `main`
 
-a feature patch on top of 2.7.7 — playlists can now be put back in order on the server, you can re-wishlist a missed track straight from sync history, plus a couple of reported fixes.
+mostly a quality + reliability release. the headline is a big cleanup of the **Unverified review queue** (it stops inflating and self-heals), a new **Preview Clip Cleanup** tool, smarter **Album Completeness** for split/fragmented albums, and a real pass on **dashboard performance** (especially Firefox/Zen). plus a pile of reported fixes.
 
 ---
 
 ## what's new
 
-### align playlists — server order, not just contents
-the server-playlist editor only ever cared about *which* tracks were on the server, never their order — and it rendered the server column in the source's order, so a playlist with the right tracks in the wrong sequence read as "in sync" when it wasn't. now it tells the truth:
-- an **"out of order"** badge appears when the tracks match but the sequence differs (relative order, so missing/extra tracks don't false-flag it), and a **read-only view** shows the server's *actual* order with cover art.
-- a new **"Align playlists"** action reorders the server playlist to match the source — **Plex** (in-place via moveItem), **Navidrome** (ordered rewrite), and **Jellyfin** (Move endpoint), all of which preserve the playlist's identity/poster. two choices for server-only extras: **mirror source** (drop them) or **keep extras** (park them at the end). it's order-only — it never adds the missing tracks (that's a normal sync's job) and never touches metadata, just reshuffles ids already on the server.
+### Preview Clip Cleanup (new Tools job)
+the HiFi source sometimes hands back a ~30-second **preview clip** instead of the full song, and it lands looking like a normal track. the new job scans your short tracks, checks how long each one *should* be from its metadata source, and flags the previews. approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version. each finding has a **▶ Play** button + a file-length-vs-real-length readout so you can confirm it's busted before approving. conservative by design — genuine short tracks and anything it can't verify are left alone.
 
-### re-add to wishlist from sync history
-in the dashboard's **Recent Syncs → details**, the "→ Wishlist" status on an unmatched track is now a button — click it to re-add that exact track to the wishlist with the **same context the sync used** (source playlist, cover art, everything), so it's indistinguishable from the original auto-add. the re-add and the live sync now build the *identical* payload from one shared path, so the cover and album/single classification carry through. wing-it fallback stubs (tracks that couldn't be resolved to real metadata) are correctly shown as **"Unmatched"** and aren't re-addable — matching what the sync itself does.
+### the Unverified queue stops inflating + self-heals (#934)
+big one for anyone who saw thousands of "unverified" rows. the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck as "unverified" (a frozen import-time path that stopped matching once the file moved). now:
+- scans no longer duplicate rows and heal on the spot, and
+- a one-time **reconcile** on startup clears the existing backlog from your library's truth — no re-scan needed, including human-verified files a scan skips, and
+- a **🧹 Clean orphaned** button removes dead rows whose file is genuinely gone (with a safety gate that refuses to run if your library looks offline).
+the Unverified review rows also got the nicer Quarantine-style cards (artwork, inline details). *(thanks @nick2000713 for #938.)*
 
-### fixes
-- **import search said "Deezer" for Spotify Free users (#922)** — manual album-import told no-auth Spotify users that Deezer was their primary source. the functional source legitimately downgrades to a working fallback (the free path has no album-name search), but the *label* should name what you configured. now it reads "Spotify."
-- **iTunes albums >50 tracks could still truncate (#918 follow-up)** — the limit=200 fix only helped fresh fetches; albums cached at 50 before the fix kept serving 50 from the persistent cache. now a cached tracklist shorter than the album's known track count self-heals on next load.
+### Album Completeness handles split albums (#936, #929, #931)
+a physical album split across multiple library rows used to show every fragment as falsely "incomplete." it now groups the validated fragments into one logical album and emits a single correct finding — grouping by a shared id **and** validating at the track level, so unrelated rows never get fused. also recognizes MusicBrainz as a readable album source. *(thanks @ragnarlotus.)*
 
-### under the hood
-- `.gitignore` now covers **all** `database/*.db` (+ wal/shm/backup), not just `music_library` — so the video db and any future db can't be committed by accident.
-
----
-
-## a brief recap of what came before
-2.7.7 was a fix-heavy patch — the metadata-parity fix so downloads tag + path right without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep (#905/#908–#912/#914/#916–#918). 2.7.6 exported playlists TO listenbrainz + youtube liked-music sync; 2.7.5 matching & artwork accuracy; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.
+### Clear Completed is back on the Downloads page
+since completed downloads now persist across restart, the **Clear Completed** button had gone missing for them. it's back — it clears the live list *and* the persisted history so the page actually empties and stays empty (your files are untouched).
 
 ---
 
-## tests
-additive + scoped — the new write paths are their own routes that don't touch the normal sync. new seam/regression suites for the order-status detection (incl. the reported "moved to #2" case + missing/extra false-flag guards), the pure align-rewrite planner (mirror vs keep-extras, never-injects-a-foreign-track, stale-data rejection), the sync re-add payload (a direct parity assertion that the re-add == the live-sync payload, plus the wing-it skip), and the `get_primary_source_label` fix (#922). iTunes self-heal proven against the real persistent-cache shape. relevant suites green; `ruff check` clean.
+## fixes
 
-## post-merge
-- [ ] tag `v2.7.8` on `main`
-- [ ] docker-publish with `version_tag: 2.7.8`
-- [ ] discord announce (auto-fired by the workflow)
-- [ ] reply on #922 and the #918 follow-up
+- **pasted YouTube cookies threw `unsupported browser: "custom"` (Docker)** — the client passed the "Paste cookies.txt" mode through as a browser name instead of using the cookies file. now it loads the pasted `cookies.txt` correctly — the only auth path that works on a headless/Docker box. *(thanks HellRa1SeR.)*
+- **longer remasters quarantined as "truncated" (#937)** — the duration check was symmetric, so a remaster running a few seconds *longer* than the metadata got rejected like a truncated download. it's asymmetric now: short files stay strict, longer versions get room. *(thanks @diegocade1.)*
+- **"Add to Wishlist" from an artist discography was painfully slow** — ~15–30s *per track* on a large library, because the per-track library-ownership check fell through to a full-table fuzzy scan. it now matches in-memory against the artist's tracks once — effectively instant.
+- **wishlist art was blank for re-downloads / preview re-fetches** — library-sourced items stored a relative media-server path that doesn't render in a browser. they're normalized on read now, so album + artist art show up (fixes already-saved items too).
+- **watchlist didn't record automatic scans (#933)** + **watchlist fused different editions of an album as one.**
+- **manual search:** a pasted Qobuz/Tidal track now floats to the top of results (#932).
+- **Popular Picks came up empty on Deezer** — a popularity-threshold scale mismatch.
+
+---
+
+## performance + UI
+
+- **dashboard GPU usage, especially on Firefox/Zen (#935)** — frosted-glass blur, cursor-glow blobs, and the worker-orb animation were repainting every frame. trimmed the worst offenders, made the orb loop hold a steady framerate on Firefox instead of dropping to ~1fps, and set **Background Particles OFF by default**. the dashboard system-memory tile now also shows SoulSync's own RAM.
+- **bounded memory growth (#802)** — browsing every page used to climb RSS into the GBs (plexapi's XML trees deferring GC) and could lock the app up. a lightweight sweeper now collects + hands memory back to the OS as it grows, so it sawtooths and settles instead of climbing.
+
+---

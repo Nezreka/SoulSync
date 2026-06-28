@@ -142,18 +142,21 @@ body.reduce-effects .sidebar::after {
     display: none !important;
 }
 
+/* translate + opacity only — NO scale(). The orbs are blur(28px); scaling a blurred
+   element re-rasterizes the blur every frame, but translating it just moves the cached
+   layer on the compositor (free). Same drifting glow, no per-frame re-blur (#935). */
 @keyframes sidebar-orb-1 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.5; }
-    25% { transform: translate(30px, 80px) scale(1.2); opacity: 1; }
-    50% { transform: translate(-10px, 180px) scale(0.9); opacity: 0.6; }
-    75% { transform: translate(20px, 50px) scale(1.15); opacity: 0.9; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.5; }
+    25% { transform: translate(30px, 80px); opacity: 1; }
+    50% { transform: translate(-10px, 180px); opacity: 0.6; }
+    75% { transform: translate(20px, 50px); opacity: 0.9; }
 }
 
 @keyframes sidebar-orb-2 {
-    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.6; }
-    30% { transform: translate(-20px, -100px) scale(1.25); opacity: 0.4; }
-    60% { transform: translate(30px, -50px) scale(0.85); opacity: 1; }
-    80% { transform: translate(-10px, 40px) scale(1.1); opacity: 0.5; }
+    0%, 100% { transform: translate(0, 0); opacity: 0.6; }
+    30% { transform: translate(-20px, -100px); opacity: 0.4; }
+    60% { transform: translate(30px, -50px); opacity: 1; }
+    80% { transform: translate(-10px, 40px); opacity: 0.5; }
 }
 
 .sidebar > * {
@@ -12249,6 +12252,171 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .auto-sync-scheduled-timing small {
     background: rgba(255, 255, 255, 0.05);
     color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Hourly board: interval LANES (horizontal rows — Concept 1) ───────────── */
+.auto-sync-lanes {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.auto-sync-lane {
+    display: flex;
+    align-items: stretch;
+    gap: 12px;
+    padding: 11px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.025);
+    transition: border-color 0.22s ease, background 0.22s ease,
+                box-shadow 0.22s ease, transform 0.18s ease;
+}
+
+.auto-sync-lane.empty {
+    background: transparent;
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.auto-sync-lane.filled {
+    border-color: rgba(var(--accent-rgb), 0.22);
+    background:
+        linear-gradient(100deg, rgba(var(--accent-rgb), 0.07), rgba(var(--accent-rgb), 0.012) 55%),
+        rgba(255, 255, 255, 0.02);
+}
+
+.auto-sync-lane:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.auto-sync-lane.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.65);
+    border-style: solid;
+    background: rgba(var(--accent-rgb), 0.1);
+    box-shadow:
+        inset 0 0 0 1px rgba(var(--accent-rgb), 0.35),
+        0 10px 30px rgba(var(--accent-rgb), 0.16);
+    transform: translateY(-1px);
+}
+
+.auto-sync-lane-badge {
+    position: relative;
+    flex: 0 0 86px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 14px 4px 4px;
+    border-right: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.auto-sync-lane-badge b {
+    font-size: 21px;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.auto-sync-lane.filled .auto-sync-lane-badge b {
+    background: linear-gradient(160deg, rgb(var(--accent-rgb)), rgba(var(--accent-rgb), 0.6));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.auto-sync-lane-badge span {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    white-space: nowrap;
+}
+
+.auto-sync-lane-count {
+    position: absolute;
+    top: 0;
+    right: 10px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    display: grid;
+    place-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    font-style: normal;
+    border-radius: 999px;
+    color: #fff;
+    background: rgba(var(--accent-rgb), 0.9);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.35);
+}
+
+.auto-sync-lane-track {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.auto-sync-lane-hint {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 2px;
+    color: rgba(255, 255, 255, 0.32);
+    font-size: 12.5px;
+    font-weight: 500;
+}
+
+.auto-sync-lane-hint-ic {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    font-size: 15px;
+    line-height: 1;
+}
+
+.auto-sync-lane.drag-over .auto-sync-lane-hint { color: rgb(var(--accent-rgb)); }
+.auto-sync-lane.drag-over .auto-sync-lane-hint-ic {
+    border-style: solid;
+    border-color: rgba(var(--accent-rgb), 0.6);
+    color: rgb(var(--accent-rgb));
+}
+
+/* Scheduled cards flow horizontally inside a lane (override the column full-width) */
+.auto-sync-lane .auto-sync-scheduled-card {
+    width: auto;
+    min-width: 212px;
+    max-width: 264px;
+    margin-bottom: 0;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    animation: autoSyncPop 0.24s ease both;
+}
+
+.auto-sync-lane .auto-sync-scheduled-card:hover {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.36);
+}
+
+@keyframes autoSyncPop {
+    from { opacity: 0; transform: translateY(5px) scale(0.97); }
+    to { opacity: 1; transform: none; }
 }
 
 .auto-sync-board {
@@ -63177,8 +63345,10 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
-    animation: dashBlobHaloPulse 5.5s ease-in-out infinite;
+    will-change: left, top;
+    /* No infinite scale-pulse: scaling a blur(48px) element re-rasterizes the blur every
+       frame, and with 8 cards × 2 blobs that pinned the GPU at idle (#935). The blob still
+       follows the cursor via --blob-x/y; it just doesn't breathe when nothing's happening. */
 }
 .dash-card::after {
     content: '';
@@ -63198,9 +63368,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
     opacity: 1;
     pointer-events: none;
     z-index: 0;
-    will-change: left, top, transform, opacity;
+    will-change: left, top;
     mix-blend-mode: screen;
-    animation: dashBlobCorePulse 3.7s ease-in-out infinite;
+    /* No infinite scale-pulse — same reason as ::before (#935). */
 }
 
 @keyframes dashBlobHaloPulse {
@@ -68925,4 +69095,28 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 }
 #settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper > .settings-subcard {
     margin: 0 !important;
+}
+
+/* Firefox-only performance overrides (#935). Firefox re-rasterizes blur()/backdrop-filter on
+   every composite where Chrome caches them, so the frosted-glass shell costs real idle GPU on
+   Firefox only. @supports(-moz-appearance) matches Firefox and NOT Chrome — this whole block is
+   invisible to Chrome, which keeps the full frosted look. Revert = delete this block. */
+@supports (-moz-appearance: none) {
+    /* dash-card cursor-glow blobs — 16 large blur(48px)/blur(18px) layers, purely decorative */
+    .dash-card::before,
+    .dash-card::after { display: none; }
+
+    /* sidebar aura orbs — two blur(28px) elements, always visible on every page */
+    .sidebar::before,
+    .sidebar::after { display: none; }
+
+    /* shell frosted-glass panels — drop the backdrop blur (each element keeps its own tint, so
+       it stays a solid/translucent panel, just not frosted). always-visible, so helps every page. */
+    .sidebar-header,
+    .header-button,
+    .watchlist-button,
+    .wishlist-button {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
 }

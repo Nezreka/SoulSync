@@ -3404,13 +3404,20 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.7.8': [
-        { date: 'June 2026 — 2.7.8 release' },
-        { title: 'Align playlists — fix the order on the server', desc: 'the server-playlist editor only cared about WHICH tracks were on the server, never their order — and it drew the server column in the source\'s order, so a right-tracks-wrong-sequence playlist read as "in sync" when it wasn\'t. now an "out of order" badge appears when the tracks match but the sequence differs (relative order, so missing/extra don\'t false-flag), with a read-only view of the server\'s ACTUAL order. and a new "Align playlists" action reorders the server to match the source — Plex, Navidrome and Jellyfin, all preserving the playlist\'s identity/poster. order-only: never adds missing tracks, never touches metadata.', page: 'sync' },
-        { title: 'Re-add to wishlist from sync history', desc: 'in Recent Syncs → details, the "→ Wishlist" status on an unmatched track is now a button — click it to re-add that exact track with the SAME context the sync used (source playlist, cover art, everything). the re-add and the live sync build the identical payload from one shared path, so the cover and album/single classification carry through. wing-it stubs (couldn\'t be resolved) show as "Unmatched" and aren\'t re-addable, matching the sync.', page: 'dashboard' },
-        { title: 'Import search said "Deezer" for Spotify Free (#922)', desc: 'manual album-import told no-auth Spotify users that Deezer was their primary source. the functional source legitimately falls back (the free path has no album-name search), but the label should name what you configured — now it reads "Spotify".', page: 'import' },
-        { title: 'iTunes albums over 50 still truncating (#918 follow-up)', desc: 'the limit=200 fix only helped fresh fetches; albums cached at 50 before it kept serving 50 from the persistent cache. now a cached tracklist shorter than the album\'s known track count self-heals on next load.', page: 'library' },
-        { title: 'Earlier versions', desc: '2.7.7 was fix-heavy — downloads tag + path right without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep (#905/#908–#912/#914/#916–#918). 2.7.6 exported playlists TO listenbrainz + youtube liked-music sync; 2.7.5 matching & artwork accuracy; 2.7.4 re-identify; 2.7.3 the Quality Upgrade Finder; 2.7.2 playlist-folder mirroring; 2.7.1 download verification; 2.7.0 made multi-user real.' },
+    '2.8.0': [
+        { date: 'June 2026 — 2.8.0 release' },
+        { title: 'Preview Clip Cleanup (new Tools job)', desc: 'the HiFi source sometimes returns a ~30s preview clip instead of the full song, landing as a normal track. the new job scans your short tracks, checks how long each should be from its metadata source, and flags the previews. approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version. each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm before approving.', page: 'downloads' },
+        { title: 'Unverified queue stops inflating + self-heals (#934)', desc: 'the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck "unverified". now scans don\'t duplicate rows, a one-time reconcile on startup clears the existing backlog from your library truth (no re-scan), and a 🧹 Clean orphaned button removes dead rows whose file is gone. unverified review rows also got the Quarantine-style cards. (thanks @nick2000713 for #938.)', page: 'downloads' },
+        { title: 'Album Completeness handles split albums (#936)', desc: 'an album split across multiple library rows used to show every fragment as falsely "incomplete". it now groups the validated fragments into one logical album and emits one correct finding — grouping by shared id AND validating at the track level, so unrelated rows never fuse. also recognizes MusicBrainz as a readable source. (thanks @ragnarlotus.)', page: 'library' },
+        { title: 'Clear Completed is back on Downloads', desc: 'completed downloads now persist across restart, which had hidden the Clear Completed button for them. it\'s back, and clears the live list AND the persisted history so the page actually empties and stays empty (your files are untouched).', page: 'downloads' },
+        { title: 'Pasted YouTube cookies fixed (#Docker)', desc: 'pasting cookies threw `unsupported browser: "custom"` — the client passed the "Paste cookies.txt" mode through as a browser name instead of loading the file. now it uses the pasted cookies.txt, the only auth path that works on a headless/Docker box. (thanks HellRa1SeR.)', page: 'settings' },
+        { title: 'Longer remasters no longer quarantined (#937)', desc: 'the duration check was symmetric, so a remaster running a few seconds LONGER than the metadata got rejected like a truncated download. it\'s asymmetric now — short files stay strict, longer versions get room. (thanks @diegocade1.)', page: 'downloads' },
+        { title: '"Add to Wishlist" from a discography is instant now', desc: 'it was ~15–30s PER TRACK on a large library — the per-track ownership check fell through to a full-table fuzzy scan. it now matches in-memory against the artist\'s tracks once.', page: 'library' },
+        { title: 'Wishlist art renders for re-downloads', desc: 'library-sourced wishlist items (re-downloads, preview re-fetches) stored a relative media-server path that doesn\'t render in a browser. they\'re normalized on read now, so album + artist art show up — fixes already-saved items too.', page: 'downloads' },
+        { title: 'More fixes', desc: 'watchlist now records automatic scans (#933) and no longer fuses different editions of an album; a pasted Qobuz/Tidal track floats to the top of manual search (#932); Popular Picks no longer comes up empty on Deezer.', page: 'search' },
+        { title: 'Dashboard performance, esp. Firefox/Zen (#935)', desc: 'frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame. trimmed the worst offenders, kept the orb framerate steady on Firefox (was dropping to ~1fps), and set Background Particles OFF by default. the system-memory tile now also shows SoulSync\'s own RAM.', page: 'dashboard' },
+        { title: 'Bounded memory growth (#802)', desc: 'browsing every page used to climb RSS into the GBs (plexapi XML trees deferring garbage collection) and could lock the app up. a lightweight sweeper now collects + hands memory back to the OS as it grows, so it sawtooths and settles instead of climbing.', page: 'dashboard' },
+        { title: 'Earlier versions', desc: '2.7.9 brought best-quality downloads + a ranked quality profile, the quarantine-into-Downloads consolidation, Discover "Based On Your Listening" + Listening Mix, the Wing It Pool, the Auto-Sync redesign, and the multi-disc fix (#927). 2.7.8 added Align Playlists; 2.7.3 the Quality Upgrade Finder; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3441,47 +3448,77 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Align playlists — fix the order on the server",
-        description: "the headline — the server-playlist editor can now put a playlist back in the SOURCE's order, not just sync which tracks are on it.",
+        title: "The Unverified queue, finally under control",
+        description: "the headline cleanup — review-queue rows stop piling up and the existing backlog clears itself.",
         features: [
-            "an \"out of order\" badge when the tracks match but the sequence differs (relative order, so missing/extra tracks don't false-flag it), plus a read-only view of the server's ACTUAL order with cover art",
-            "a new \"Align playlists\" action reorders the server to match the source — Plex, Navidrome and Jellyfin, all preserving the playlist's identity/poster",
-            "two choices for server-only extras (mirror source = drop them, or keep extras at the end); order-only — never adds missing tracks, never touches metadata",
+            "#934 — the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck \"unverified\" (a frozen import-time path that stopped matching once the file moved)",
+            "scans no longer duplicate rows + heal on the spot; a one-time reconcile on startup clears the existing backlog from your library's truth — no re-scan, including human-verified files a scan skips",
+            "a 🧹 Clean orphaned button removes dead rows whose file is genuinely gone, with a safety gate that refuses to run if your library looks offline",
+            "Unverified review rows got the nicer Quarantine-style cards (artwork + inline details). thanks @nick2000713 for #938",
         ],
     },
     {
-        title: "Re-add to wishlist from sync history",
-        description: "in Recent Syncs → details, re-wishlist a track the sync couldn't place — with the exact same context.",
+        title: "Preview Clip Cleanup (new Tools job)",
+        description: "find the ~30s preview clips the HiFi source sometimes hands back instead of the full song.",
         features: [
-            "the \"→ Wishlist\" status on an unmatched track is now a button; click it to re-add that exact track with the SAME context the sync used (source playlist, cover art, everything)",
-            "the re-add and the live sync build the identical payload from one shared path, so the cover and album/single classification carry through",
-            "wing-it stubs (couldn't be resolved to real metadata) show as \"Unmatched\" and aren't re-addable, matching what the sync does",
+            "scans your short tracks, checks how long each should be from its metadata source, and flags the previews — conservative, so genuine short tracks and anything it can't verify are left alone",
+            "approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version",
+            "each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm it's busted before approving",
+        ],
+    },
+    {
+        title: "Album Completeness handles split albums",
+        description: "a physical album split across multiple library rows no longer reports false \"incomplete\".",
+        features: [
+            "#936 — fragments are grouped into one logical album and emit a single correct finding, instead of each row looking incomplete on its own",
+            "safe by design: it groups by a shared id AND validates at the track level, so a stale id can never fuse two unrelated albums; also recognizes MusicBrainz as a readable album source. thanks @ragnarlotus",
         ],
     },
     {
         title: "Recent fixes",
-        description: "a couple of reported fixes.",
+        description: "reported bugs squashed this cycle.",
         features: [
-            "#922 — manual import told Spotify Free users their primary source was \"Deezer\"; the search legitimately falls back (the free path can't search albums by name), but the label now reads \"Spotify\"",
-            "#918 follow-up — iTunes albums over 50 tracks could still show 50 from a stale cache; a cached tracklist shorter than the album's known track count now self-heals on next load",
+            "pasted YouTube cookies threw `unsupported browser: \"custom\"` on Docker — now it loads the pasted cookies.txt (the only auth path on a headless box). thanks HellRa1SeR",
+            "#937 — a remaster running a few seconds LONGER than the metadata got quarantined like a truncated download; the duration check is asymmetric now. thanks @diegocade1",
+            "\"Add to Wishlist\" from a discography went from ~15–30s PER TRACK to instant (the ownership check was doing a full-table fuzzy scan per track)",
+            "wishlist art now renders for re-downloads/preview re-fetches (relative media-server paths are normalized on read); Clear Completed is back on the Downloads page and clears the persisted history too",
+            "watchlist records automatic scans (#933) + stops fusing different editions; pasted Qobuz/Tidal floats to the top of manual search (#932); Popular Picks no longer empty on Deezer",
         ],
     },
     {
-        title: "Earlier in 2.7.7",
-        description: "2.7.7 was fix-heavy — downloads tag + path right the first time without a manual reorganize (#915), the listening-recs foundation (#913), jellyfin atomic writes, and a big reported-issue sweep.",
+        title: "Performance — dashboard + memory",
+        description: "lower idle cost and no more runaway RAM.",
         features: [
-            "#915 — post-processing + redownload now pull the full album from your PRIMARY metadata source, so the $year, real release date and album type land right the first time",
-            "#913 — listening-driven recommendations: ranks artists you'd love but don't own, scored by consensus from your top-played",
-            "#905/#908/#911/#918/#916/#914/#917/#910/#909/#912 — navidrome playlists doubling, youtube ~100 cap, wrong redownload edition, iTunes 50-track truncation, multi-disc shown missing, and the rest of the batch",
+            "#935 — frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame, hammering the GPU (worst on Firefox/Zen). trimmed them, kept the orb framerate steady on Firefox, and set Background Particles OFF by default",
+            "#802 — browsing every page used to climb RSS into the GBs (plexapi XML trees deferring GC) and could lock up; a lightweight sweeper now collects + returns memory to the OS as it grows, so it settles instead of climbing",
+            "the dashboard system-memory tile now also shows SoulSync's own RAM",
         ],
     },
     {
-        title: "Earlier in 2.7.6 / 2.7.5",
-        description: "2.7.6 went the OTHER way with playlists — exporting them TO listenbrainz (#903) — plus youtube liked-music sync (#902), a deep-scan data-loss guard (#904), and dashboard perf. before that, 2.7.5 was a fix-heavy cycle — matching & artwork accuracy plus a few quality-of-life features.",
+        title: "Earlier in 2.7.9",
+        description: "2.7.9 was a big features release.",
         features: [
-            "special-edition cover art (a \"Gustave Edition\" uses its OWN cover), deezer track numbers, and the \"The\" duplicate fix",
-            "HiFi 30-second previews disguised as full songs are caught and rejected (#895)",
-            "import M3U / M3U8 playlists (#893), name files inside playlist folders, find & add remembered, ignore-list management (#897), Unraid template fixes (#899)",
+            "best-quality downloads + a ranked-target quality profile (drag to order every format; pools candidates across every source and grabs the best copy that meets your profile)",
+            "quarantine folded into the Downloads page; Discover \"Based On Your Listening\" + a playable \"Your Listening Mix\"; the Wing It Pool; the horizontal-lane Auto-Sync redesign",
+            "#927 — multi-disc albums no longer show disc-2 tracks as \"missing\" (the scan now reads the real disc number; re-scan once to backfill)",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.8",
+        description: "2.7.8 was about playlist order + a couple of reported fixes.",
+        features: [
+            "Align playlists — reorder the server playlist to match the source (Plex/Navidrome/Jellyfin), with an \"out of order\" badge; order-only, never adds missing tracks",
+            "re-add a missed track to the wishlist straight from Recent Syncs → details, with the exact same context the sync used",
+            "#922 — import label said \"Deezer\" for Spotify Free users (now reads \"Spotify\"); #918 — iTunes albums over 50 tracks self-heal from a stale 50-track cache",
+        ],
+    },
+    {
+        title: "Earlier in 2.7.7 / 2.7.6 / 2.7.5",
+        description: "2.7.7 was fix-heavy (downloads tag + path right the first time #915, the listening-recs foundation #913, a big reported-issue sweep). 2.7.6 exported playlists TO listenbrainz (#903) + youtube liked-music sync (#902); 2.7.5 was matching & artwork accuracy plus quality-of-life features.",
+        features: [
+            "#915 — post-processing + redownload pull the full album from your PRIMARY metadata source, so $year / release date / album type land right the first time",
+            "HiFi 30-second previews disguised as full songs are caught and rejected (#895); special-edition cover art, deezer track numbers, the \"The\" duplicate fix",
+            "import M3U / M3U8 playlists (#893), ignore-list management (#897), Unraid template fixes (#899), and the rest of the #905–#918 batch",
         ],
     },
     {
