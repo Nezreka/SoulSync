@@ -167,6 +167,7 @@ def track_already_owned(
     album_name: str,
     server_source: Optional[str],
     confidence_threshold: float = 0.7,
+    candidate_tracks: Optional[List[Any]] = None,
 ) -> bool:
     """Return True if the track is already in the user's library.
 
@@ -186,6 +187,15 @@ def track_already_owned(
     original deleted) matches just fine — track_name + artist + album
     don't change with format.
 
+    ``candidate_tracks`` (when not None) is the artist's library tracks,
+    pre-fetched ONCE by the caller, so the check scores in-memory instead
+    of firing per-track fuzzy SQL scans against the whole library. Pass an
+    empty list for an artist the user owns nothing of — it still routes
+    through the fast in-memory path (scores against zero candidates →
+    instant "not owned") rather than the slow per-track search. None
+    preserves the original per-track-SQL behaviour for callers that don't
+    pre-fetch.
+
     Returns False on any exception so a transient DB hiccup doesn't
     silently nuke a discography fetch — a redundant wishlist add is
     much cheaper to recover from than a missed track.
@@ -198,6 +208,7 @@ def track_already_owned(
             confidence_threshold=confidence_threshold,
             server_source=server_source,
             album=album_name or None,
+            candidate_tracks=candidate_tracks,
         )
     except Exception:
         return False
