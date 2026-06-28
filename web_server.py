@@ -3011,14 +3011,14 @@ def debug_memory_objects():
             if sz > 1_000_000 and isinstance(o, (dict, list, set, frozenset, bytes, bytearray, str, tuple)):
                 try:
                     biggest.append((sz, tn, len(o)))
-                except Exception:
+                except Exception:  # noqa: S110 — debug stat, len() on an exotic obj is non-fatal
                     pass
         biggest.sort(reverse=True)
         rss = None
         try:
             import psutil
             rss = round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 1)
-        except Exception:
+        except Exception:  # noqa: S110 — psutil optional; rss stays None in the debug payload
             pass
         return jsonify({
             'rss_mb': rss,
@@ -38649,7 +38649,7 @@ def start_runtime_services():
                 _libc = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6')
                 if hasattr(_libc, 'malloc_trim'):
                     _trim = _libc.malloc_trim
-            except Exception:
+            except Exception:  # noqa: S110 — malloc_trim absent on musl/non-Linux; just skip it
                 pass
             floor = rss_mb()
             last = time.time()
@@ -38661,7 +38661,7 @@ def start_runtime_services():
                         if _trim is not None:
                             try:
                                 _trim(0)
-                            except Exception:
+                            except Exception:  # noqa: S110 — best-effort OS reclaim, never fatal
                                 pass
                         floor = rss_mb()
                         last = time.time()
