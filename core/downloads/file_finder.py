@@ -77,7 +77,16 @@ def _normalize_for_finding(text: str) -> str:
         return ""
     text = unidecode(text).lower()
     text = re.sub(r'[._/]', ' ', text)
-    text = re.sub(r'[\[\(].*?[\]\)]', '', text)
+    # Strip ONLY balanced bracket pairs (tags like "[FLAC]", "(Remastered 2016)").
+    # The old combined pattern r'[\[\(].*?[\]\)]' allowed MISMATCHED delimiters, so a
+    # lone unbalanced '[' — slskd reports "[34 - You & Me (Flume Remix)" but saves the
+    # file as "34 - You & Me (Flume Remix)" — matched from that '[' all the way to the
+    # next ')', eating the entire title and collapsing the search target to "flac". The
+    # file then scored 0.40 against the real on-disk name and was reported "not found"
+    # despite sitting right there. Per-delimiter pairs can't over-consume; a stray
+    # unbalanced bracket simply survives to the alphanumeric strip below.
+    text = re.sub(r'\[[^\]]*\]', '', text)
+    text = re.sub(r'\([^)]*\)', '', text)
     text = re.sub(r'[^a-z0-9\s-]', '', text)
     return ' '.join(text.split()).strip()
 
