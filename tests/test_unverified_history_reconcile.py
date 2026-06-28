@@ -172,3 +172,20 @@ def test_reconcile_basename_heals_when_history_title_missing():
     healed = db.reconcile_unverified_history_from_tracks()
     assert healed == 1
     assert db._status_of(1) == "verified"
+
+
+def test_reconcile_titleless_row_does_not_heal_on_basename_collision():
+    """Follow-up hardening (#938 review): a title-less history row must NOT heal
+    via filename when that basename collides across MORE THAN ONE verified track —
+    we can't tell which song it is, so healing would risk marking a genuinely
+    unverified import 'verified'. Unique-basename title-less heal still works
+    (see test_reconcile_basename_heals_when_history_title_missing)."""
+    db = _InMemoryDB()
+    # Two DIFFERENT verified songs that happen to share the generic filename.
+    db._add_track(1, "/lib/AlbumA/01 - Intro.flac", "verified", title="Intro A")
+    db._add_track(2, "/lib/AlbumB/01 - Intro.flac", "verified", title="Intro B")
+    # A stale, title-less history row with that same basename.
+    db._add_history("/transfer/X/01 - Intro.flac", "unverified", title="")
+    healed = db.reconcile_unverified_history_from_tracks()
+    assert healed == 0
+    assert db._status_of(1) == "unverified"

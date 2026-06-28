@@ -8236,8 +8236,14 @@ def clean_orphan_verification_items():
     try:
         from core.downloads.orphan_history import find_orphan_history_ids
         db = get_database()
+        # get_library_history_unverified() returns unverified + force_imported rows.
+        # Check ALL of them so the mount-down gate sees the true count, but only
+        # DELETE 'unverified' orphans — 'force_imported' is a deliberate user
+        # decision (accepted a version mismatch) and stays for human approval.
         rows = db.get_library_history_unverified() or []
-        result = find_orphan_history_ids(rows, _resolve_history_audio_path)
+        result = find_orphan_history_ids(
+            rows, _resolve_history_audio_path,
+            deletable=lambda r: r.get('verification_status') == 'unverified')
         if result['suspicious']:
             return jsonify({
                 "success": False,
