@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.7.9"
+_SOULSYNC_BASE_VERSION = "2.8.0"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -2837,9 +2837,15 @@ def _build_system_stats():
     uptime_seconds = time.time() - start_time
     uptime = str(timedelta(seconds=int(uptime_seconds)))
 
-    # Get memory usage
+    # Get memory usage — global system %, plus SoulSync's own resident memory (RSS),
+    # so the dashboard can show "system load" and "how much RAM SoulSync itself uses".
     memory = psutil.virtual_memory()
     memory_usage = f"{memory.percent}%"
+    try:
+        _proc_rss_mb = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        process_memory = f"{_proc_rss_mb:.0f} MB" if _proc_rss_mb < 1024 else f"{_proc_rss_mb / 1024:.1f} GB"
+    except Exception:
+        process_memory = None
 
     # Count active downloads from download_batches (batches that are currently downloading)
     active_downloads = len([batch_id for batch_id, batch_data in download_batches.items()
@@ -2917,7 +2923,8 @@ def _build_system_stats():
         'download_speed': download_speed_str,
         'active_syncs': active_syncs,
         'uptime': uptime,
-        'memory_usage': memory_usage
+        'memory_usage': memory_usage,
+        'process_memory': process_memory
     }
 
 @app.route('/api/system/stats')
@@ -2974,6 +2981,61 @@ def debug_memory_stop():
     try:
         from core.diagnostics.memory_tracker import stop_tracking
         return jsonify(stop_tracking())
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/debug/memory/objects')
+def debug_memory_objects():
+    """One-shot memory breakdown by live object type (plain gc — NO tracemalloc, so it
+    won't lock up a loaded app). Hit this once when RSS is high to see which type/cache
+    dominates: a big 'count' reveals accumulation (a cache that never evicts); a big
+    'mb' under bytes/str reveals blob retention. Pinpoints the leak without tracing."""
+    import gc
+    import sys
+    from collections import defaultdict
+    try:
+        gc.collect()
+        objs = gc.get_objects()
+        counts = defaultdict(int)
+        sizes = defaultdict(int)
+        biggest = []
+        for o in objs:
+            tn = type(o).__name__
+            counts[tn] += 1
+            try:
+                sz = sys.getsizeof(o)
+            except Exception:
+                sz = 0
+            sizes[tn] += sz
+            if sz > 1_000_000 and isinstance(o, (dict, list, set, frozenset, bytes, bytearray, str, tuple)):
+                try:
+                    biggest.append((sz, tn, len(o)))
+                except Exception:  # noqa: S110 — debug stat, len() on an exotic obj is non-fatal
+                    pass
+        biggest.sort(reverse=True)
+        rss = None
+        try:
+            import psutil
+            rss = round(psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024), 1)
+        except Exception:  # noqa: S110 — psutil optional; rss stays None in the debug payload
+            pass
+        return jsonify({
+            'rss_mb': rss,
+            'total_objects': len(objs),
+            'top_by_size_mb': [
+                {'type': t, 'count': counts[t], 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, _ in sorted(sizes.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'top_by_count': [
+                {'type': t, 'count': c, 'mb': round(sizes[t] / (1024 * 1024), 1)}
+                for t, c in sorted(counts.items(), key=lambda x: x[1], reverse=True)[:20]
+            ],
+            'biggest_containers': [
+                {'mb': round(s / (1024 * 1024), 1), 'type': t, 'len': ln}
+                for s, t, ln in biggest[:15]
+            ],
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -7533,13 +7595,13 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
-                    # Pasted-link exact match: bubble the track whose id matches
-                    # the link to the top so the user sees the exact version
-                    # first (graceful no-op if ids don't line up).
+                    # Pasted-link exact match: bubble the track whose source id
+                    # matches the link to the top so the user sees the exact version
+                    # first. Reads _source_metadata['track_id'] (TrackResult has no
+                    # top-level id) — the old getattr(t,'id') always missed (#932).
                     if src_name == link_source and link_track_id and tracks:
-                        tracks = sorted(
-                            tracks,
-                            key=lambda t: str(getattr(t, 'id', '')) != str(link_track_id))
+                        from core.downloads.track_link import bubble_linked_track_first
+                        tracks = bubble_linked_track_first(tracks, link_track_id)
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
@@ -8155,6 +8217,46 @@ def delete_verification_item(history_id):
         return jsonify({"success": True, "file_deleted": file_deleted})
     except Exception as e:
         logger.error(f"[Verification] Delete failed for {history_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/verification/clean-orphans', methods=['POST'])
+@admin_only
+def clean_orphan_verification_items():
+    """Remove dead review-queue rows whose file no longer exists anywhere
+    (deleted / replaced / re-downloaded elsewhere). These are append-only
+    library_history rows that can never be healed — there's no file left to
+    confirm — so they linger in the Unverified list forever (#934).
+
+    User-initiated only, never automatic: it does a filesystem check, which
+    would mass-false-positive if the library mount were down. The pure helper
+    flags that signature (every reviewed file unreachable) and we refuse. Only
+    history ROWS are deleted — the files are already gone; this never removes a
+    file. Admin-only: it mutates shared review state."""
+    try:
+        from core.downloads.orphan_history import find_orphan_history_ids
+        db = get_database()
+        # get_library_history_unverified() returns unverified + force_imported rows.
+        # Check ALL of them so the mount-down gate sees the true count, but only
+        # DELETE 'unverified' orphans — 'force_imported' is a deliberate user
+        # decision (accepted a version mismatch) and stays for human approval.
+        rows = db.get_library_history_unverified() or []
+        result = find_orphan_history_ids(
+            rows, _resolve_history_audio_path,
+            deletable=lambda r: r.get('verification_status') == 'unverified')
+        if result['suspicious']:
+            return jsonify({
+                "success": False,
+                "error": "Every reviewed file is unreachable — your library may be "
+                         "offline right now. Nothing was removed.",
+            }), 409
+        orphan_ids = result['orphan_ids']
+        removed = db.delete_library_history_rows(orphan_ids) if orphan_ids else 0
+        logger.info("[Verification] Cleaned %d orphaned review rows (checked %d)",
+                    removed, result['checked'])
+        return jsonify({"success": True, "removed": removed, "checked": result['checked']})
+    except Exception as e:
+        logger.error(f"[Verification] Clean orphans failed: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -9652,6 +9754,27 @@ def download_discography(artist_id):
         except Exception as e:
             logger.debug("active media server lookup failed: %s", e)
 
+        # Pre-fetch the artist's owned library tracks ONCE so the per-track
+        # ownership check scores in-memory instead of firing fuzzy SQL scans
+        # against the whole library for every track (which, on a large library
+        # and an artist the user owns nothing of, was ~15-30s PER TRACK — every
+        # title/artist variation fell through to a full-table fuzzy fallback).
+        # Same batched path the discography backfill job + completion-stream use.
+        # Crucially we pass an empty list (not None) when nothing is owned, so the
+        # owns-nothing case still takes the fast in-memory path → instant.
+        owned_candidate_tracks = []
+        try:
+            cand_albums = db.get_candidate_albums_for_artist(
+                artist_name, server_source=active_server
+            )
+            if cand_albums:
+                owned_candidate_tracks = db.get_candidate_tracks_for_albums(
+                    [a.id for a in cand_albums]
+                ) or []
+        except Exception as _cand_err:
+            logger.debug("Discography: candidate pre-fetch failed for %s: %s", artist_name, _cand_err)
+            owned_candidate_tracks = []
+
         total_added = 0
         total_skipped = 0
         total_skipped_artist = 0
@@ -9741,7 +9864,8 @@ def download_discography(artist_id):
                         # Same library-ownership check the discography
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
-                        if track_already_owned(db, track_name, hint_artist, album_name, active_server):
+                        if track_already_owned(db, track_name, hint_artist, album_name, active_server,
+                                               candidate_tracks=owned_candidate_tracks):
                             skipped_owned += 1
                             continue
 
@@ -18978,10 +19102,17 @@ def get_batch_history():
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
 def clear_completed_downloads():
-    """Remove completed/failed/cancelled tasks from the download tracker."""
+    """Clear completed/failed downloads from the Downloads page: the live
+    session tasks AND the persisted download-history tail (so the list actually
+    empties and stays empty across restart). Rows still awaiting verification
+    (unverified / force_imported) are preserved — they belong to the review
+    queue, not this cleanup."""
     try:
         cleared = _downloads_cancel.clear_completed_local()
-        return jsonify({'success': True, 'cleared': cleared})
+        history_cleared = get_database().clear_completed_download_history()
+        return jsonify({'success': True, 'cleared': cleared,
+                        'history_cleared': history_cleared,
+                        'total_cleared': cleared + history_cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -28223,22 +28354,10 @@ def start_watchlist_scan():
                 # #831 round 2: persist this run + its track ledger so the
                 # Watchlist History modal can show what every past scan did.
                 try:
-                    _state = watchlist_scan_state
-                    get_database().save_watchlist_scan_run(
-                        run_id=_state.get('scan_run_id') or datetime.now().strftime('%Y%m%d-%H%M%S'),
-                        profile_id=scan_profile_id,
-                        status='cancelled' if was_cancelled else 'completed',
-                        started_at=(_state.get('started_at').isoformat()
-                                    if _state.get('started_at') else None),
-                        completed_at=(_state.get('completed_at') or datetime.now()).isoformat()
-                                     if not isinstance(_state.get('completed_at'), str)
-                                     else _state.get('completed_at'),
-                        total_artists=(_state.get('summary') or {}).get('total_artists',
-                                                                        _state.get('total_artists', 0)),
-                        artists_scanned=(_state.get('summary') or {}).get('successful_scans', 0),
-                        tracks_found=_state.get('tracks_found_this_scan', 0),
-                        tracks_added=_state.get('tracks_added_this_scan', 0),
-                        track_events=_state.get('scan_track_events') or [],
+                    from core.watchlist.scan_history import persist_scan_run
+                    persist_scan_run(
+                        get_database(), watchlist_scan_state,
+                        profile_id=scan_profile_id, was_cancelled=was_cancelled,
                     )
                 except Exception as _hist_err:
                     logger.error(f"Failed to persist watchlist scan run: {_hist_err}")
@@ -38498,6 +38617,58 @@ def start_runtime_services():
 
         # Initialize app start time for uptime tracking
         app.start_time = time.time()
+
+        # Growth-triggered garbage collection (#802 / resource usage). plexapi builds large XML
+        # Element trees whose nodes reference each other in cycles; Python's generational GC
+        # parks those in gen2 and sweeps it rarely, so they accumulate and RSS climbs (measured:
+        # ~300MB fresh -> 1.8-2.2GB after browsing every page, most of it reclaimable cyclic
+        # garbage a full gc.collect() frees instantly). A FIXED timer overshoots — browsing piles
+        # garbage faster than once-a-minute catches it. Instead, poll RSS cheaply and collect as
+        # soon as it has grown GROW_MB since the last sweep, so it kicks in DURING a heavy browse
+        # and caps the peak near (floor + GROW_MB) instead of letting it run to 2GB+. A backstop
+        # interval still collects slow accumulation when idle.
+        def _growth_triggered_gc():
+            import gc
+            CHECK_SECONDS = 8       # cheap RSS poll cadence
+            GROW_MB = 200           # collect once RSS climbs this much since the last sweep
+            BACKSTOP_SECONDS = 120  # ...or at least this often regardless
+            try:
+                import psutil
+                proc = psutil.Process(os.getpid())
+                rss_mb = lambda: proc.memory_info().rss / (1024 * 1024)
+            except Exception:
+                rss_mb = lambda: 0.0
+            # glibc malloc_trim hands freed arenas back to the OS — WITHOUT it gc.collect() frees
+            # the Python objects but glibc hoards the memory, so RSS never drops and the peak still
+            # runs to 2GB+. Best-effort: absent on musl/Alpine or non-Linux, where we just skip it
+            # (gc still helps, RSS just sticks closer to the high-water mark there).
+            _trim = None
+            try:
+                import ctypes
+                import ctypes.util
+                _libc = ctypes.CDLL(ctypes.util.find_library('c') or 'libc.so.6')
+                if hasattr(_libc, 'malloc_trim'):
+                    _trim = _libc.malloc_trim
+            except Exception:  # noqa: S110 — malloc_trim absent on musl/non-Linux; just skip it
+                pass
+            floor = rss_mb()
+            last = time.time()
+            while True:
+                time.sleep(CHECK_SECONDS)
+                try:
+                    if (rss_mb() - floor) >= GROW_MB or (time.time() - last) >= BACKSTOP_SECONDS:
+                        gc.collect()
+                        if _trim is not None:
+                            try:
+                                _trim(0)
+                            except Exception:  # noqa: S110 — best-effort OS reclaim, never fatal
+                                pass
+                        floor = rss_mb()
+                        last = time.time()
+                except Exception:  # noqa: S110 — best-effort housekeeping, never crash the app
+                    pass
+        threading.Thread(target=_growth_triggered_gc, daemon=True, name='gc-sweeper').start()
+        logger.info("GC sweeper started (collect + malloc_trim on +200MB growth, backstop 120s)")
 
         # Register action handlers and start automation engine
         _register_automation_handlers()

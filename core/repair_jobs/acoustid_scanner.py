@@ -389,14 +389,43 @@ class AcoustIDScannerJob(RepairJob):
             cur.execute(
                 "UPDATE tracks SET verification_status = ? WHERE id = ?",
                 (status, track_id))
-            matched = 0
+            exp = expected or {}
+            # Find the canonical history row for this file. The stored path is frozen at
+            # import time while the file has since moved (media-server import / reorganize),
+            # so an exact-path match alone misses it — then the status never lands and a
+            # duplicate row gets inserted every scan (#934). Match exact path first, then
+            # filename guarded by title, and HEAL the row's path so future scans match cleanly.
+            from core.downloads.history_match import pick_history_row, like_filename_filter
+            current = fpath or db_path
+            basename = os.path.basename(current) if current else ''
+            clauses, params = [], []
             for p in {p for p in (fpath, db_path) if p}:
+                clauses.append("file_path = ?")
+                params.append(p)
+            if basename:
+                clauses.append("file_path LIKE ? ESCAPE '\\'")
+                params.append(like_filename_filter(basename))
+            row_id = None
+            if clauses:
                 cur.execute(
-                    "UPDATE library_history SET verification_status = ? WHERE file_path = ?",
-                    (status, p))
-                matched += max(getattr(cur, 'rowcount', 0) or 0, 0)
-            if status == 'unverified' and matched == 0:
-                exp = expected or {}
+                    "SELECT id, file_path, title, download_source FROM library_history WHERE "
+                    + " OR ".join(clauses),
+                    params)
+                row_id = pick_history_row(
+                    cur.fetchall(),
+                    current_paths=(fpath, db_path),
+                    basename=basename, title=exp.get('title') or '')
+            if row_id is not None:
+                cur.execute(
+                    "UPDATE library_history SET verification_status = ?, file_path = ? WHERE id = ?",
+                    (status, current, row_id))
+                # Drop synthetic scan-created duplicates for this exact file (the #934
+                # leftovers). Exact path → collision-free; never touches a real download row.
+                cur.execute(
+                    "DELETE FROM library_history WHERE id != ? AND download_source = 'acoustid_scan' "
+                    "AND file_path = ?",
+                    (row_id, current))
+            elif status == 'unverified':
                 cur.execute(
                     """INSERT INTO library_history
                        (event_type, title, artist_name, album_name, file_path,

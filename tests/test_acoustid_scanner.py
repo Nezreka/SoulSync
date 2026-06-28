@@ -4,8 +4,9 @@ from core.repair_jobs.acoustid_scanner import AcoustIDScannerJob
 
 
 class _FakeCursor:
-    def __init__(self, rows):
+    def __init__(self, rows, lib_rows=None):
         self._rows = rows
+        self._lib_rows = lib_rows or []
         self.executed = []
 
     def execute(self, query, params=None):
@@ -13,6 +14,10 @@ class _FakeCursor:
         return self
 
     def fetchall(self):
+        # The #934 history-match SELECT gets its own (id, file_path, title, source)
+        # rows; the tracks scan query gets the track rows.
+        if self.executed and 'FROM library_history' in self.executed[-1][0]:
+            return self._lib_rows
         return self._rows
 
     def fetchone(self):
@@ -20,8 +25,8 @@ class _FakeCursor:
 
 
 class _FakeConnection:
-    def __init__(self, rows):
-        self._cursor = _FakeCursor(rows)
+    def __init__(self, rows, lib_rows=None):
+        self._cursor = _FakeCursor(rows, lib_rows)
 
     def cursor(self):
         return self._cursor
@@ -107,12 +112,13 @@ def test_scan_handles_mixed_track_id_types(monkeypatch):
 # and finds the primary artist at 100%, suppressing the false flag.
 
 
-def _make_finding_capturing_context(track_row, captured):
+def _make_finding_capturing_context(track_row, captured, lib_rows=None):
     """Context that captures any create_finding calls into the
     `captured` list. Tests assert against this list to verify whether
     the scanner created a finding (false positive) or correctly
-    skipped (multi-value match resolved)."""
-    conn = _FakeConnection([track_row])
+    skipped (multi-value match resolved). ``lib_rows`` seeds the
+    library_history match SELECT (#934)."""
+    conn = _FakeConnection([track_row], lib_rows)
     config_manager = SimpleNamespace(
         get=lambda key, default=None: default,
         set=lambda *args, **kwargs: None,
@@ -887,9 +893,10 @@ def test_human_verified_files_are_never_scanned(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_artist):
+def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_artist, lib_rows=None):
     """Drive one _scan_file call and return (status_updates, tag_writes) where
-    status_updates is the list of (query, params) UPDATEs the scanner ran."""
+    status_updates is the list of (query, params) UPDATEs the scanner ran.
+    ``lib_rows`` seeds the library_history match SELECT (#934)."""
     import core.repair_jobs.acoustid_scanner as scanner_mod
     monkeypatch.setattr(scanner_mod, "_resolve_expected_artist_aliases",
                         lambda name: [], raising=False)
@@ -905,7 +912,7 @@ def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_arti
     context = _make_finding_capturing_context(
         track_row=("9", "Call Your Name", expected_artist,
                    "/music/cyn.flac", 1, "Album", None, None),
-        captured=captured)
+        captured=captured, lib_rows=lib_rows)
     fake = SimpleNamespace(fingerprint_and_lookup=lambda f: {
         'best_score': 0.97,
         'recordings': [{'title': 'Call Your Name', 'artist': aid_artist}]})
@@ -920,29 +927,32 @@ def _run_persistence_scan(monkeypatch, *, file_status, aid_artist, expected_arti
 
 
 def test_scan_pass_backfills_verified_status(monkeypatch):
-    # Untagged file + clean fingerprint PASS → the scan backfills 'verified'
-    # into the tag, the tracks row AND library_history (review-queue feed).
+    # Clean fingerprint PASS → the scan backfills 'verified' into the tag, the tracks
+    # row AND the file's library_history row. The history row's path drifted since
+    # download (file moved), so the scan heals it by id (#934) rather than missing it.
     updates, tag_writes, captured = _run_persistence_scan(
         monkeypatch, file_status=None,
-        aid_artist='Sawano Hiroyuki', expected_artist='Sawano Hiroyuki')
+        aid_artist='Sawano Hiroyuki', expected_artist='Sawano Hiroyuki',
+        lib_rows=[(1, '/downloads/old/cyn.flac', 'Call Your Name', 'soulseek')])
     assert captured == []
     assert tag_writes == [('/music/cyn.flac', 'verified')]
     assert any('tracks' in q and p == ('verified', '9') for q, p in updates)
-    assert any('library_history' in q and p == ('verified', '/music/cyn.flac')
+    # healed by id, status set + path refreshed to the file's current location.
+    assert any('library_history' in q and p == ('verified', '/music/cyn.flac', 1)
                for q, p in updates)
 
 
 def test_scan_skip_marks_untagged_file_unverified(monkeypatch):
     # Title matches but the artist is ambiguous (cover/collab band?) → SKIP.
-    # An untagged file gets 'unverified' so it surfaces in the Downloads-page
-    # review queue instead of silently passing or being deleted.
+    # An untagged file SoulSync never downloaded (no history row) gets a fresh
+    # 'unverified' row INSERTed so it surfaces in the Downloads-page review queue.
     updates, tag_writes, captured = _run_persistence_scan(
         monkeypatch, file_status=None,
-        aid_artist='Mantilla', expected_artist='Metallica')
+        aid_artist='Mantilla', expected_artist='Metallica')  # no lib_rows → no existing row
     assert captured == []
     assert tag_writes == [('/music/cyn.flac', 'unverified')]
     assert any('tracks' in q and p == ('unverified', '9') for q, p in updates)
-    assert any('library_history' in q and p == ('unverified', '/music/cyn.flac')
+    assert any('INSERT INTO library_history' in q and p[-1] == 'unverified'
                for q, p in updates)
 
 

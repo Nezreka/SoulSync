@@ -2760,6 +2760,84 @@ async function verifDelete(hid, btn) {
     } catch (e) { showToast && showToast('Delete failed', 'error'); }
     if (btn) btn.disabled = false;
 }
+
+// ---- Unverified review rows (Quarantine-style cards) ----
+// The Unverified sub-view used to piggyback on the generic download row and
+// open a modal on click. These give it the same card design the Quarantine
+// sub-view got — row click expands an inline detail panel in place — minus the
+// grouping (each unverified import is its own track, nothing to group).
+let _verifUnvData = [];
+const _verifUnvOpenDetails = new Set();
+
+function _verifUnvKey(dl) {
+    return verifHistoryId(dl) || dl.task_id || '';
+}
+
+function _verifUnvDetailRows(dl) {
+    const reason = dl.verification_status === 'force_imported'
+        ? 'Accepted as the best available candidate after the retry budget was exhausted (version-mismatch fallback). A library AcoustID scan reports these as informational.'
+        : 'AcoustID could not hard-confirm this file (ambiguous / cross-script metadata / no fingerprint match). Imported, but not verified.';
+    const source = dl.batch_source || dl.batch_name || '';
+    return [
+        `<div><span class="verif-detail-label">Why flagged:</span> ${_adlEsc(reason)}</div>`,
+        source ? `<div><span class="verif-detail-label">Download source:</span> ${_adlEsc(source)}</div>` : '',
+        dl.quality ? `<div><span class="verif-detail-label">Quality:</span> ${_adlEsc(dl.quality)}</div>` : '',
+        dl.file_path ? `<div><span class="verif-detail-label">File:</span> ${_adlEsc(dl.file_path)}</div>` : '',
+        dl.created_at ? `<div><span class="verif-detail-label">Downloaded:</span> ${_adlEsc(dl.created_at)}</div>` : '',
+    ].filter(Boolean).join('');
+}
+
+function _verifUnverifiedRowHtml(dl, idx) {
+    const hid = verifHistoryId(dl);
+    const title = _adlEsc(dl.title || 'Unknown Track');
+    const meta = [_adlEsc(dl.artist || ''), _adlEsc(dl.album || '')].filter(Boolean).join(' · ');
+    const source = _adlEsc(dl.batch_source || dl.batch_name || '');
+    const timeAgo = _verifTimeAgo(dl.created_at);
+    const artHtml = dl.artwork
+        ? `<img class="adl-row-art" src="${_adlEsc(dl.artwork)}" alt="" onerror="this.style.display='none'">`
+        : '<div class="adl-row-art adl-row-art-empty"></div>';
+    const detailsOpen = _verifUnvOpenDetails.has(_verifUnvKey(dl));
+    const actions = hid ? `
+        <button class="verif-act verif-act-play" onclick="verifPlay('${hid}')" title="Play the downloaded file in the media player">▶</button>
+        <button class="verif-act" onclick="verifCompare('${hid}', this)" title="Find this track on Soulseek/streaming sources and play it in the media player — compare against your file">⇆</button>
+        <button class="verif-act" onclick="verifAudit('${hid}')" title="Open the full audit trail for this download (lifecycle, embedded tags, lyrics)">🔍</button>
+        <button class="verif-act verif-act-ok" onclick="verifApprove('${hid}', this)" title="Approve: mark as human-verified (tag + DB). The AcoustID scanner will skip it.">✔</button>
+        <button class="verif-act verif-act-del" onclick="verifDelete('${hid}', this)" title="Wrong file: delete it from disk and remove this entry">🗑</button>` : '';
+    return `<div class="adl-row adl-row-completed verif-quar-row" data-task-id="${_adlEsc(dl.task_id || '')}" onclick="verifUnvInspect(${idx})" title="Click to show/hide details (why it was flagged, source, quality, file)">
+        ${artHtml}
+        <div class="adl-row-info">
+            <div class="adl-row-title">${title}</div>
+            ${meta ? `<div class="adl-row-meta">${meta}</div>` : ''}
+            ${source ? `<div class="adl-row-batch">${source}</div>` : ''}
+            <div class="verif-quar-details" id="verif-unv-details-${idx}" style="display:${detailsOpen ? '' : 'none'}">${_verifUnvDetailRows(dl)}</div>
+        </div>
+        <div class="verif-actions" onclick="event.stopPropagation()">
+            ${_verifReasonBadge(dl)}
+            ${dl.quality ? `<span class="adl-quality-chip" title="Audio quality of the downloaded file (read from the file itself)">${_adlEsc(dl.quality)}</span>` : ''}
+            ${timeAgo ? `<span class="verif-time">${timeAgo}</span>` : ''}
+            ${actions}
+        </div>
+    </div>`;
+}
+
+function _verifUnverifiedRows(items) {
+    _verifUnvData = items;
+    if (!items.length) return '';
+    return items.map((dl, idx) => _verifUnverifiedRowHtml(dl, idx)).join('');
+}
+
+function verifUnvInspect(idx) {
+    // Open-state lives in a Set keyed by the row's stable id (not the DOM) so it
+    // survives the 2 s polling re-render — same pattern as verifQuarInspect.
+    const dl = _verifUnvData[idx];
+    if (!dl) return;
+    const key = _verifUnvKey(dl);
+    if (_verifUnvOpenDetails.has(key)) _verifUnvOpenDetails.delete(key);
+    else _verifUnvOpenDetails.add(key);
+    const el = document.getElementById(`verif-unv-details-${idx}`);
+    if (el) el.style.display = _verifUnvOpenDetails.has(key) ? '' : 'none';
+}
+
 // ---- Quarantine sub-view inside the ⚠ filter ----
 // The review queue covers BOTH kinds of suspect files: imported-but-
 // unconfirmed (unverified/force_imported) and not-imported-at-all
@@ -3106,6 +3184,31 @@ async function verifDeleteAll(btn) {
     _adlFetch();
 }
 
+async function verifCleanOrphans(btn) {
+    // Removes review entries whose file is GONE (deleted / replaced / re-downloaded
+    // elsewhere) — dead log rows that can never be healed. Server-side it does a
+    // filesystem check and refuses if the whole library looks offline. Removes log
+    // rows only, never a file.
+    if (!await showConfirmDialog({
+        title: 'Clean orphaned entries',
+        message: 'Remove review entries whose file no longer exists on disk (deleted, replaced, or re-downloaded elsewhere)? This removes only the stale log rows — it never deletes a file. It checks the filesystem first and refuses if your library looks offline.',
+        confirmText: 'Clean up',
+        cancelText: 'Cancel',
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/verification/clean-orphans', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            showToast && showToast(`Removed ${d.removed} orphaned entr${d.removed === 1 ? 'y' : 'ies'} (checked ${d.checked})`, 'success');
+            _adlFetch();
+        } else {
+            showToast && showToast(d.error || 'Clean-up failed', 'error');
+        }
+    } catch (e) { showToast && showToast('Clean-up failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
 async function verifQuarApproveAll(btn) {
     const entries = _verifQuarEntries.filter(q => q.has_full_context);
     if (!entries.length) {
@@ -3204,8 +3307,12 @@ function _adlRender() {
     // (review banner injected below when this filter is active)
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
+    // Clear-completed clears live completed tasks AND the persisted download-history
+    // tail (including unverified review-queue rows), so count every completed/failed
+    // row — otherwise the button vanishes after a restart when the list is all
+    // persisted completed rows.
     const completedN = _adlData.filter(d =>
-        [...completedStatuses, ...failedStatuses].includes(d.status) && !d.is_persistent_history
+        [...completedStatuses, ...failedStatuses].includes(d.status)
     ).length;
 
     if (countEl) {
@@ -3266,6 +3373,7 @@ function _adlRender() {
             ? `<button class="adl-filter-banner-clear" onclick="verifQuarApproveAll(this)" title="Approve + re-import every quarantined file (marked human-verified)">✔ Approve all</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifQuarClearAll(this)" title="Permanently delete every quarantined file">🗑 Clear all</button>`
             : `<button class="adl-filter-banner-clear" onclick="verifApproveAll(this)" title="Mark every listed entry as human-verified">✔ Approve all</button>
+               <button class="adl-filter-banner-clear" onclick="verifCleanOrphans(this)" title="Remove dead entries whose file no longer exists (deleted / replaced). Removes log rows only — never a file.">🧹 Clean orphaned</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifDeleteAll(this)" title="Delete every listed file from disk and remove its entry">🗑 Delete all</button>`;
         // Without an AcoustID key nothing ever gets a verification status —
         // hide the pointless Unverified pill and show quarantine only.
@@ -3290,6 +3398,18 @@ function _adlRender() {
         list.innerHTML = qEmptyHtml + qhtml;
         const qNewEmpty = document.getElementById('adl-empty');
         if (qNewEmpty) qNewEmpty.style.display = qhtml ? 'none' : '';
+        return;
+    }
+
+    // Unverified review sub-view: render the Quarantine-style cards (inline
+    // expandable details), not the generic download rows.
+    if (_adlFilter === 'unverified' && _verifSubView === 'unverified') {
+        const uhtml = _verifUnverifiedRows(filtered);
+        const uEmptyEl = document.getElementById('adl-empty');
+        const uEmptyHtml = uEmptyEl ? uEmptyEl.outerHTML : '';
+        list.innerHTML = uEmptyHtml + uhtml;
+        const uNewEmpty = document.getElementById('adl-empty');
+        if (uNewEmpty) uNewEmpty.style.display = uhtml ? 'none' : '';
         return;
     }
 
@@ -3495,11 +3615,23 @@ function _adlBundleProgressText(bundle) {
 }
 
 async function adlClearCompleted() {
+    // This now also deletes the persisted completed-download history, so confirm.
+    if (typeof showConfirmDialog === 'function') {
+        const ok = await showConfirmDialog({
+            title: 'Clear Completed',
+            message: 'Remove ALL completed and failed downloads from the list and history? '
+                   + 'This also clears unverified items from the verification queue. '
+                   + 'Your files stay in the library — only the download-history rows are removed.',
+            confirmText: 'Clear', destructive: true,
+        });
+        if (!ok) return;
+    }
     try {
         const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
         const data = await resp.json();
         if (data.success) {
-            if (typeof showToast === 'function') showToast(`Cleared ${data.cleared} downloads`, 'success');
+            const n = data.total_cleared != null ? data.total_cleared : data.cleared;
+            if (typeof showToast === 'function') showToast(`Cleared ${n} downloads`, 'success');
             _adlFetch();
         }
     } catch (e) {
