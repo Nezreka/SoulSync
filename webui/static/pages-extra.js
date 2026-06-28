@@ -3184,6 +3184,31 @@ async function verifDeleteAll(btn) {
     _adlFetch();
 }
 
+async function verifCleanOrphans(btn) {
+    // Removes review entries whose file is GONE (deleted / replaced / re-downloaded
+    // elsewhere) — dead log rows that can never be healed. Server-side it does a
+    // filesystem check and refuses if the whole library looks offline. Removes log
+    // rows only, never a file.
+    if (!await showConfirmDialog({
+        title: 'Clean orphaned entries',
+        message: 'Remove review entries whose file no longer exists on disk (deleted, replaced, or re-downloaded elsewhere)? This removes only the stale log rows — it never deletes a file. It checks the filesystem first and refuses if your library looks offline.',
+        confirmText: 'Clean up',
+        cancelText: 'Cancel',
+    })) return;
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch('/api/verification/clean-orphans', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) {
+            showToast && showToast(`Removed ${d.removed} orphaned entr${d.removed === 1 ? 'y' : 'ies'} (checked ${d.checked})`, 'success');
+            _adlFetch();
+        } else {
+            showToast && showToast(d.error || 'Clean-up failed', 'error');
+        }
+    } catch (e) { showToast && showToast('Clean-up failed', 'error'); }
+    if (btn) btn.disabled = false;
+}
+
 async function verifQuarApproveAll(btn) {
     const entries = _verifQuarEntries.filter(q => q.has_full_context);
     if (!entries.length) {
@@ -3344,6 +3369,7 @@ function _adlRender() {
             ? `<button class="adl-filter-banner-clear" onclick="verifQuarApproveAll(this)" title="Approve + re-import every quarantined file (marked human-verified)">✔ Approve all</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifQuarClearAll(this)" title="Permanently delete every quarantined file">🗑 Clear all</button>`
             : `<button class="adl-filter-banner-clear" onclick="verifApproveAll(this)" title="Mark every listed entry as human-verified">✔ Approve all</button>
+               <button class="adl-filter-banner-clear" onclick="verifCleanOrphans(this)" title="Remove dead entries whose file no longer exists (deleted / replaced). Removes log rows only — never a file.">🧹 Clean orphaned</button>
                <button class="adl-filter-banner-clear verif-bulk-danger" onclick="verifDeleteAll(this)" title="Delete every listed file from disk and remove its entry">🗑 Delete all</button>`;
         // Without an AcoustID key nothing ever gets a verification status —
         // hide the pointless Unverified pill and show quarantine only.
