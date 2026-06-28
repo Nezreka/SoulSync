@@ -1405,8 +1405,16 @@ async function initializeWishlistPage() {
             fetch('/api/watchlist/artists').then(r => r.json()).catch(() => ({ success: false })),
         ]);
 
-        // Build artist name → image URL map from watchlist
+        // Build artist name → image URL map. Library photos (from the wishlist endpoint, covering
+        // every wishlist artist) seed it first; curated watchlist photos override where present.
         const _artistImageMap = new Map();
+        for (const res of [albumRes, singleRes]) {
+            if (res && res.artist_images) {
+                for (const [name, url] of Object.entries(res.artist_images)) {
+                    if (name && url) _artistImageMap.set(name.toLowerCase(), url);
+                }
+            }
+        }
         if (watchlistRes.success && watchlistRes.artists) {
             for (const wa of watchlistRes.artists) {
                 if (wa.artist_name && wa.image_url) _artistImageMap.set(wa.artist_name.toLowerCase(), wa.image_url);
