@@ -8220,6 +8220,40 @@ def delete_verification_item(history_id):
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/verification/clean-orphans', methods=['POST'])
+@admin_only
+def clean_orphan_verification_items():
+    """Remove dead review-queue rows whose file no longer exists anywhere
+    (deleted / replaced / re-downloaded elsewhere). These are append-only
+    library_history rows that can never be healed — there's no file left to
+    confirm — so they linger in the Unverified list forever (#934).
+
+    User-initiated only, never automatic: it does a filesystem check, which
+    would mass-false-positive if the library mount were down. The pure helper
+    flags that signature (every reviewed file unreachable) and we refuse. Only
+    history ROWS are deleted — the files are already gone; this never removes a
+    file. Admin-only: it mutates shared review state."""
+    try:
+        from core.downloads.orphan_history import find_orphan_history_ids
+        db = get_database()
+        rows = db.get_library_history_unverified() or []
+        result = find_orphan_history_ids(rows, _resolve_history_audio_path)
+        if result['suspicious']:
+            return jsonify({
+                "success": False,
+                "error": "Every reviewed file is unreachable — your library may be "
+                         "offline right now. Nothing was removed.",
+            }), 409
+        orphan_ids = result['orphan_ids']
+        removed = db.delete_library_history_rows(orphan_ids) if orphan_ids else 0
+        logger.info("[Verification] Cleaned %d orphaned review rows (checked %d)",
+                    removed, result['checked'])
+        return jsonify({"success": True, "removed": removed, "checked": result['checked']})
+    except Exception as e:
+        logger.error(f"[Verification] Clean orphans failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/quarantine/<entry_id>/recover', methods=['POST'])
 def recover_quarantine_item(entry_id):
     """Fallback for legacy thin sidecars: move file into Staging so the user
