@@ -230,14 +230,19 @@ def get_spotify_client_for_profile(profile_id: Optional[int] = None):
             return client
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
         import spotipy
 
+        normalized_creds = normalize_spotify_oauth_config({
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+        })
         auth_manager = SpotifyOAuth(
-            client_id=client_id,
-            client_secret=client_secret,
-            redirect_uri=redirect_uri,
+            client_id=normalized_creds.get("client_id", client_id),
+            client_secret=normalized_creds.get("client_secret", client_secret),
+            redirect_uri=normalized_creds.get("redirect_uri", redirect_uri),
             scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
             cache_path=cache_path,
             state=f"profile_{profile_id}",
