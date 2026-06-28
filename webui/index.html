@@ -5190,18 +5190,19 @@
                                     <div class="setting-row">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="import-quality-filter-enabled" checked>
-                                            Only import tracks that meet your quality profile
+                                            Quality profile check on import
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="setting-help-body" hidden>
-                                        On by default. SoulSync always probes each downloaded file's real audio quality; this
-                                        toggle decides what to do with the result. <strong>On</strong> — files that don't meet your
-                                        quality profile are quarantined instead of imported (the same gate the download pipeline
-                                        uses; fallback/downsample settings still apply). <strong>Off</strong> — everything is
-                                        imported regardless of quality. Either way, the library <em>Quality Upgrade Scanner</em>
-                                        still flags below-profile tracks so you can act on them later.
+                                        On by default. SoulSync probes each imported file's real audio quality and compares it
+                                        with your Quality Profile. <strong>On</strong> — files that don't meet your profile are
+                                        quarantined instead of imported (fallback/downsample settings still apply).
+                                        <strong>Off</strong> — files are imported regardless of format, bitrate, bit depth, or
+                                        sample rate. This does <strong>not</strong> skip AcoustID; fingerprint verification is a
+                                        separate setting below. Either way, the library <em>Quality Upgrade Scanner</em> still
+                                        flags below-profile tracks so you can act on them later.
                                     </div>
                                 </div>
                                 <div class="form-group">
@@ -5298,17 +5299,18 @@
                                     <div class="setting-row">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="acoustid-require-verified">
-                                            Only import AcoustID-verified tracks (reject "could not confirm")
+                                            Only allow AcoustID-verified tracks for imports and downloads
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="setting-help-body" hidden>
-                                        When <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
+                                        Applies to both <strong>imports</strong> and <strong>downloads</strong>. When
+                                        <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
                                         (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
-                                        <strong>quarantined</strong> instead of imported. Downloads then try the next
-                                        candidate; imports just quarantine (no candidate to retry). Only a clean AcoustID
-                                        <strong>pass</strong> is kept.
+                                        <strong>quarantined</strong> instead of being allowed into the library. Downloads then
+                                        try the next candidate; imports just quarantine (no candidate to retry). Only a clean
+                                        AcoustID <strong>pass</strong> is kept.
                                         <br><br>
                                         ⚠️ <strong>Use with care.</strong> AcoustID "could not confirm" is <em>common</em>
                                         for perfectly good tracks — anything not in its fingerprint database: new/obscure

@@ -40,7 +40,7 @@ async function copyAddress(address, cryptoName) {
 
 let settingsAutoSaveTimer = null;
 
-// The "Only import AcoustID-verified tracks" toggle lives in Audio Verification
+// The "Only allow AcoustID-verified tracks" toggle lives in Audio Verification
 // and is always shown (its help notes it needs AcoustID enabled), so users can
 // always find it. Kept as a no-op for any existing callers.
 function syncAcoustidRequireVerifiedVisibility() {
