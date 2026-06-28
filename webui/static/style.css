@@ -55517,14 +55517,14 @@ tr.tag-diff-same {
     min-width: 0;
 }
 #settings-page .settings-header-compact .header-title {
-    font-size: 1.42em;
+    font-size: 1.82em;
     margin: 0;
     line-height: 1.1;
     color: rgba(255, 255, 255, 0.88);
 }
 #settings-page .settings-header-compact .page-header-icon {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     opacity: 0.86;
 }
 
