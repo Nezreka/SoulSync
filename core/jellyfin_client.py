@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from utils.logging_config import get_logger
 from config.settings import config_manager
+from core.library.bulk_paginate import paginate_all_items
 
 # Shared dataclasses live in the neutral media_server package — every
 # server client used to define a near-identical XTrackInfo /
@@ -512,12 +513,8 @@ class JellyfinClient(MediaServerClient):
         try:
             # SIMPLIFIED APPROACH: Fetch all tracks, then all albums separately (robust and fast)
             logger.info("Fetching all tracks in bulk...")
-            all_tracks = []
-            start_index = 0
-            limit = 10000
-            consecutive_failures = 0
-            
-            while True:
+
+            def _fetch_tracks_page(start_index, limit):
                 params = {
                     'ParentId': self.music_library_id,
                     'IncludeItemTypes': 'Audio',
@@ -528,41 +525,19 @@ class JellyfinClient(MediaServerClient):
                     'StartIndex': start_index,
                     'Limit': limit
                 }
-                
                 response = self._make_request(f'/Users/{self.user_id}/Items', params)
-                
-                if not response:
-                    consecutive_failures += 1
-                    # Wait before retrying — the server may still be processing the timed-out request
-                    time.sleep(5)
-                    if limit > 1000:
-                        limit = limit // 2
-                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"Track fetch failed - reducing batch size to {limit}")
-                        continue
-                    elif consecutive_failures >= 2:
-                        logger.warning("Multiple track fetch failures at minimum batch size - stopping")
-                        break
-                    else:
-                        logger.warning("Track fetch failed at minimum batch size - retrying once")
-                        continue
+                return response.get('Items', []) if response else None  # None = failed page
 
-                consecutive_failures = 0
-                batch_tracks = response.get('Items', [])
-                if not batch_tracks:
-                    break
-                    
-                all_tracks.extend(batch_tracks)
-                
-                if len(batch_tracks) < limit:
-                    break
-                    
-                start_index += limit
-                progress_msg = f"Fetched {len(all_tracks)} tracks so far..."
-                logger.info(f"   {progress_msg} (batch size: {limit})")
-                if self._progress_callback:
-                    self._progress_callback(progress_msg)
-            
+            # Page in modest chunks so progress is reported every page — a single
+            # huge silent request used to trip the 300s no-progress watchdog on
+            # slow servers even though it was alive (see bulk_paginate docstring).
+            all_tracks = paginate_all_items(
+                _fetch_tracks_page,
+                report_progress=self._progress_callback,
+                label="tracks",
+                on_retry_wait=lambda: time.sleep(5),
+            )
+
             # Group tracks by album ID for instant lookup
             self._track_cache = {}
             for track_data in all_tracks:
@@ -578,12 +553,8 @@ class JellyfinClient(MediaServerClient):
             
             # STEP 2: Fetch all albums in bulk (same proven pattern)
             logger.info("Fetching all albums in bulk...")
-            all_albums = []
-            start_index = 0
-            limit = 10000
-            consecutive_failures = 0
-            
-            while True:
+
+            def _fetch_albums_page(start_index, limit):
                 params = {
                     'ParentId': self.music_library_id,
                     'IncludeItemTypes': 'MusicAlbum',
@@ -594,41 +565,16 @@ class JellyfinClient(MediaServerClient):
                     'StartIndex': start_index,
                     'Limit': limit
                 }
-                
                 response = self._make_request(f'/Users/{self.user_id}/Items', params)
-                
-                if not response:
-                    consecutive_failures += 1
-                    # Wait before retrying — the server may still be processing the timed-out request
-                    time.sleep(5)
-                    if limit > 1000:
-                        limit = limit // 2
-                        consecutive_failures = 0  # Reset — give the smaller batch a fair chance
-                        logger.warning(f"Album fetch failed - reducing batch size to {limit}")
-                        continue
-                    elif consecutive_failures >= 2:
-                        logger.warning("Multiple album fetch failures at minimum batch size - stopping")
-                        break
-                    else:
-                        logger.warning("Album fetch failed at minimum batch size - retrying once")
-                        continue
+                return response.get('Items', []) if response else None  # None = failed page
 
-                consecutive_failures = 0
-                batch_albums = response.get('Items', [])
-                if not batch_albums:
-                    break
-                    
-                all_albums.extend(batch_albums)
-                
-                if len(batch_albums) < limit:
-                    break
-                    
-                start_index += limit
-                progress_msg = f"Fetched {len(all_albums)} albums so far..."
-                logger.info(f"   {progress_msg} (batch size: {limit})")
-                if self._progress_callback:
-                    self._progress_callback(progress_msg)
-            
+            all_albums = paginate_all_items(
+                _fetch_albums_page,
+                report_progress=self._progress_callback,
+                label="albums",
+                on_retry_wait=lambda: time.sleep(5),
+            )
+
             # Group albums by artist ID for instant lookup
             self._album_cache = {}
             for album_data in all_albums:
