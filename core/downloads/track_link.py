@@ -38,6 +38,23 @@ def bubble_linked_track_first(tracks: List[Any], link_track_id: str) -> List[Any
     target = str(link_track_id)
     return sorted(tracks, key=lambda t: linked_track_id(t) != target)
 
+
+def inject_linked_track_first(
+    tracks: List[Any], linked_result: Any, link_track_id: str
+) -> List[Any]:
+    """Put the EXACT linked track first.
+
+    When ``linked_result`` is the track fetched directly by id, prepend it and
+    drop any search duplicate of it — so an obscure track a text search never
+    surfaced is still present and downloadable (#932). When it's None (the source
+    can't fetch one), fall back to bubbling a matching search result. Pure."""
+    if not link_track_id:
+        return tracks
+    target = str(link_track_id)
+    if linked_result is not None:
+        return [linked_result] + [t for t in tracks if linked_track_id(t) != target]
+    return bubble_linked_track_first(tracks, target)
+
 # host substring → download source id. Only ID-downloadable streaming sources.
 _HOSTS = (
     ('tidal.com', 'tidal'),
