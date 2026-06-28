@@ -19102,10 +19102,17 @@ def get_batch_history():
 
 @app.route('/api/downloads/clear-completed', methods=['POST'])
 def clear_completed_downloads():
-    """Remove completed/failed/cancelled tasks from the download tracker."""
+    """Clear completed/failed downloads from the Downloads page: the live
+    session tasks AND the persisted download-history tail (so the list actually
+    empties and stays empty across restart). Rows still awaiting verification
+    (unverified / force_imported) are preserved — they belong to the review
+    queue, not this cleanup."""
     try:
         cleared = _downloads_cancel.clear_completed_local()
-        return jsonify({'success': True, 'cleared': cleared})
+        history_cleared = get_database().clear_completed_download_history()
+        return jsonify({'success': True, 'cleared': cleared,
+                        'history_cleared': history_cleared,
+                        'total_cleared': cleared + history_cleared})
     except Exception as e:
         logger.error(f"Error clearing completed downloads: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

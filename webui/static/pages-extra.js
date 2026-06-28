@@ -3307,8 +3307,12 @@ function _adlRender() {
     // (review banner injected below when this filter is active)
     else if (_adlFilter === 'failed') filtered = filtered.filter(d => failedStatuses.includes(d.status));
 
+    // Clear-completed clears live completed tasks AND the persisted download-history
+    // tail (including unverified review-queue rows), so count every completed/failed
+    // row — otherwise the button vanishes after a restart when the list is all
+    // persisted completed rows.
     const completedN = _adlData.filter(d =>
-        [...completedStatuses, ...failedStatuses].includes(d.status) && !d.is_persistent_history
+        [...completedStatuses, ...failedStatuses].includes(d.status)
     ).length;
 
     if (countEl) {
@@ -3611,11 +3615,23 @@ function _adlBundleProgressText(bundle) {
 }
 
 async function adlClearCompleted() {
+    // This now also deletes the persisted completed-download history, so confirm.
+    if (typeof showConfirmDialog === 'function') {
+        const ok = await showConfirmDialog({
+            title: 'Clear Completed',
+            message: 'Remove ALL completed and failed downloads from the list and history? '
+                   + 'This also clears unverified items from the verification queue. '
+                   + 'Your files stay in the library — only the download-history rows are removed.',
+            confirmText: 'Clear', destructive: true,
+        });
+        if (!ok) return;
+    }
     try {
         const resp = await fetch('/api/downloads/clear-completed', { method: 'POST' });
         const data = await resp.json();
         if (data.success) {
-            if (typeof showToast === 'function') showToast(`Cleared ${data.cleared} downloads`, 'success');
+            const n = data.total_cleared != null ? data.total_cleared : data.cleared;
+            if (typeof showToast === 'function') showToast(`Cleared ${n} downloads`, 'success');
             _adlFetch();
         }
     } catch (e) {

@@ -13799,6 +13799,28 @@ class MusicDatabase:
             logger.debug(f"Error deleting history rows: {e}")
             return 0
 
+    def clear_completed_download_history(self) -> int:
+        """Delete the persisted completed-download history shown on the Downloads
+        page (every event_type='download' row). This also clears the verification
+        review queue, since those unverified/force_imported rows ARE download-history
+        rows — that's intended: 'Clear Completed' empties the list. It only removes
+        HISTORY rows; the actual files and their `tracks` entries are untouched, so
+        nothing in the library is lost — only the 'needs verification' review flags.
+        Returns the number of rows removed."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM library_history WHERE event_type = 'download'")
+            conn.commit()
+            return cursor.rowcount
+        except Exception as e:
+            logger.error("Error clearing completed download history: %s", e)
+            return 0
+        finally:
+            if conn:
+                conn.close()
+
     def delete_track_by_file_path(self, file_path):
         """Delete a library track row whose stored path matches. Returns count."""
         if not file_path:
