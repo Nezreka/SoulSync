@@ -7506,6 +7506,7 @@ def manual_search_for_task(task_id):
         link = parse_download_track_link(query)
         link_source = None
         link_track_id = None
+        linked_result = None  # the EXACT track fetched by id, injected into results
         # A pasted SoundCloud link can't be turned into an "artist title" query
         # and searched — unlisted/private tracks aren't searchable. Instead force
         # the SoundCloud source and keep the URL as the query; the SoundCloud
@@ -7535,6 +7536,18 @@ def manual_search_for_task(task_id):
             query = clean_q
             source = _src
             link_source, link_track_id = _src, _tid
+            # Fetch the EXACT linked track as a downloadable result to inject —
+            # a text search for an obscure track's name often doesn't surface it
+            # at all, so we can't rely on it being in the search results (#932).
+            # Defensive: only sources that expose get_track_result (Qobuz today);
+            # others fall back to the bubble path below — never worse than before.
+            _link_client = download_orchestrator.client(_src) if download_orchestrator else None
+            if _link_client is not None and hasattr(_link_client, 'get_track_result'):
+                try:
+                    linked_result = _link_client.get_track_result(_tid)
+                except Exception as _lr_err:
+                    logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
+                                 _src, _tid, _lr_err)
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -7595,13 +7608,15 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
-                    # Pasted-link exact match: bubble the track whose source id
-                    # matches the link to the top so the user sees the exact version
-                    # first. Reads _source_metadata['track_id'] (TrackResult has no
-                    # top-level id) — the old getattr(t,'id') always missed (#932).
-                    if src_name == link_source and link_track_id and tracks:
-                        from core.downloads.track_link import bubble_linked_track_first
-                        tracks = bubble_linked_track_first(tracks, link_track_id)
+                    # Pasted-link exact match (#932): the linked source's search may
+                    # not surface an obscure linked track at all, so INJECT the exact
+                    # track (fetched by id) at the top and drop any search duplicate of
+                    # it. If we couldn't fetch it (source has no get_track_result, or it
+                    # failed), fall back to bubbling a matching search result — never
+                    # worse than before.
+                    if src_name == link_source and link_track_id:
+                        from core.downloads.track_link import inject_linked_track_first
+                        tracks = inject_linked_track_first(tracks, linked_result, link_track_id)
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
