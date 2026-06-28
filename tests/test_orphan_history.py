@@ -47,3 +47,41 @@ def test_some_present_is_never_suspicious():
     out = find_orphan_history_ids(rows, _resolve)
     assert out['suspicious'] is False         # at least one file exists -> library is up
     assert 99 not in out['orphan_ids']
+
+
+def _status_rows(*specs):
+    # specs: (id, file_path, exists?, verification_status)
+    return [{'id': i, 'file_path': p, '_exists': e, 'verification_status': s}
+            for i, p, e, s in specs]
+
+
+def _deletable_unverified(row):
+    return row.get('verification_status') == 'unverified'
+
+
+def test_deletable_protects_rows_from_orphan_ids():
+    """force_imported rows must never be swept, even when their file is gone."""
+    rows = _status_rows(
+        (1, '/a.flac', False, 'unverified'),
+        (2, '/b.flac', False, 'force_imported'),   # gone, but protected
+    )
+    out = find_orphan_history_ids(rows, _resolve, deletable=_deletable_unverified)
+    assert out['orphan_ids'] == [1]                # only the unverified orphan
+    assert 2 not in out['orphan_ids']
+
+
+def test_protected_rows_still_count_toward_mount_down_gate():
+    """Regression guard (#938 follow-up): protecting rows must NOT shrink the
+    safety gate. A few unverified + many force_imported, ALL unreachable (mount
+    outage) must still read 'suspicious' so nothing is deleted — even though only
+    the unverified ones would otherwise be deletable."""
+    rows = _status_rows(
+        (1, '/a.flac', False, 'unverified'),
+        (2, '/b.flac', False, 'unverified'),
+        *[(i, f'/x{i}.flac', False, 'force_imported') for i in range(3, 8)],
+    )
+    out = find_orphan_history_ids(rows, _resolve, deletable=_deletable_unverified)
+    assert out['checked'] == 7                      # all rows counted
+    assert out['suspicious'] is True                # gate fires on all-missing → refuse
+    # (caller refuses on suspicious, so orphan_ids is moot — but it's only the unverified)
+    assert set(out['orphan_ids']) == {1, 2}

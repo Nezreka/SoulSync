@@ -13871,10 +13871,12 @@ class MusicDatabase:
         Unverified (issue #934).
 
         A basename match is title-guarded: a shared track-number filename
-        ("01 - Intro.flac") must NOT heal a different song, so when both the
-        history row and the candidate track carry a title they have to agree
-        (alphanumeric-lowercase) — the same guard the AcoustID matcher uses. An
-        exact-path match is unambiguous and needs no guard.
+        ("01 - Intro.flac") must NOT heal a different song. When both the history
+        row and the candidate track carry a title they have to agree
+        (alphanumeric-lowercase) — the same guard the AcoustID matcher uses. When
+        a title is missing on either side we can't tell which file the basename
+        refers to, so we only heal if that basename is unambiguous (a single
+        verified candidate). An exact-path match needs no guard.
 
         Upgrade-only and non-destructive: it only lifts 'unverified' rows to the
         confirmed status, never downgrades and never deletes. Returns the number
@@ -13882,17 +13884,27 @@ class MusicDatabase:
         track) are left untouched.
         """
         healed = 0
+        conn = None
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
-            # Cheap early-out: skip the tracks scan entirely when nothing is stuck.
-            cursor.execute(
-                "SELECT 1 FROM library_history WHERE verification_status = 'unverified' LIMIT 1")
-            if cursor.fetchone() is None:
-                return 0
 
             def _norm(value):
                 return ''.join(ch for ch in str(value or '').lower() if ch.isalnum())
+
+            # Load the stuck rows first. Cheap early-out when nothing is stuck —
+            # and their paths/basenames scope the tracks scan below, so the
+            # lookup dicts stay proportional to the (small) review queue instead
+            # of the whole library.
+            cursor.execute(
+                "SELECT id, file_path, title FROM library_history "
+                "WHERE verification_status = 'unverified' "
+                "AND file_path IS NOT NULL AND file_path != ''")
+            stuck_rows = cursor.fetchall()
+            if not stuck_rows:
+                return 0
+            needed_paths = {fp for _, fp, _ in stuck_rows if fp}
+            needed_bases = {os.path.basename(fp) for _, fp, _ in stuck_rows if fp}
 
             rank = {'verified': 1, 'human_verified': 2}
             by_path = {}   # exact path -> status (unambiguous; no title guard)
@@ -13904,26 +13916,31 @@ class MusicDatabase:
             for fp, st, ttitle in cursor.fetchall():
                 if not fp:
                     continue
+                base = os.path.basename(fp)
+                # Skip verified tracks that can't possibly match a queued row.
+                if fp not in needed_paths and base not in needed_bases:
+                    continue
                 if rank.get(st, 0) >= rank.get(by_path.get(fp), 0):
                     by_path[fp] = st
-                base = os.path.basename(fp)
                 if base:
                     by_base.setdefault(base, []).append((_norm(ttitle), st))
 
             updates = []
-            cursor.execute(
-                "SELECT id, file_path, title FROM library_history "
-                "WHERE verification_status = 'unverified' "
-                "AND file_path IS NOT NULL AND file_path != ''")
-            for rid, fp, rtitle in cursor.fetchall():
+            for rid, fp, rtitle in stuck_rows:
                 target = by_path.get(fp)
                 if not target:
                     want = _norm(rtitle)
+                    candidates = by_base.get(os.path.basename(fp or ''), ())
                     best = 0
-                    for ttitle, st in by_base.get(os.path.basename(fp or ''), ()):
-                        # Title guard: require agreement only when BOTH titles are
-                        # present (legacy rows may lack one — fall back to filename).
-                        if want and ttitle and want != ttitle:
+                    for ttitle, st in candidates:
+                        if want and ttitle:
+                            # Both titled: must agree.
+                            if want != ttitle:
+                                continue
+                        elif len(candidates) > 1:
+                            # Title missing on a side AND the basename collides
+                            # across verified files — can't tell which one this
+                            # row is, so don't risk healing the wrong song.
                             continue
                         if rank.get(st, 0) >= best:
                             best = rank.get(st, 0)
@@ -13940,6 +13957,9 @@ class MusicDatabase:
                 logger.info("Reconciled %d unverified history rows from tracks truth", healed)
         except Exception as e:
             logger.error("Error reconciling unverified history: %s", e)
+        finally:
+            if conn:
+                conn.close()
         return healed
 
     def get_library_history_stats(self):
