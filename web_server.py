@@ -9714,6 +9714,27 @@ def download_discography(artist_id):
         except Exception as e:
             logger.debug("active media server lookup failed: %s", e)
 
+        # Pre-fetch the artist's owned library tracks ONCE so the per-track
+        # ownership check scores in-memory instead of firing fuzzy SQL scans
+        # against the whole library for every track (which, on a large library
+        # and an artist the user owns nothing of, was ~15-30s PER TRACK — every
+        # title/artist variation fell through to a full-table fuzzy fallback).
+        # Same batched path the discography backfill job + completion-stream use.
+        # Crucially we pass an empty list (not None) when nothing is owned, so the
+        # owns-nothing case still takes the fast in-memory path → instant.
+        owned_candidate_tracks = []
+        try:
+            cand_albums = db.get_candidate_albums_for_artist(
+                artist_name, server_source=active_server
+            )
+            if cand_albums:
+                owned_candidate_tracks = db.get_candidate_tracks_for_albums(
+                    [a.id for a in cand_albums]
+                ) or []
+        except Exception as _cand_err:
+            logger.debug("Discography: candidate pre-fetch failed for %s: %s", artist_name, _cand_err)
+            owned_candidate_tracks = []
+
         total_added = 0
         total_skipped = 0
         total_skipped_artist = 0
@@ -9803,7 +9824,8 @@ def download_discography(artist_id):
                         # Same library-ownership check the discography
                         # backfill repair job uses. Format-agnostic so
                         # Blasphemy mode (FLAC→MP3) doesn't false-miss.
-                        if track_already_owned(db, track_name, hint_artist, album_name, active_server):
+                        if track_already_owned(db, track_name, hint_artist, album_name, active_server,
+                                               candidate_tracks=owned_candidate_tracks):
                             skipped_owned += 1
                             continue
 
