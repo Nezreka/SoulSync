@@ -56092,6 +56092,13 @@ tr.tag-diff-same {
 #settings-page .info-icon {
     /* Single clean circle with a centred "i" (was the ⓘ glyph, which carried
        its own inner circle → a double-circle that read as off-centre). */
+    /* It's a role="button" with a text "i" inside — without these, hovering the
+       glyph gives the I-beam text caret on Windows (Linux happened to resolve a
+       pointer). Force the button hand + make the glyph non-selectable so the
+       cursor is the same on every platform. */
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
