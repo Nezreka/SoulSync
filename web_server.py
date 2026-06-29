@@ -21612,17 +21612,13 @@ def search_spotify_tracks():
         legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        # Build Spotify field-filtered query
-        if track_q or artist_q:
-            parts = []
-            if track_q:
-                parts.append(f'track:{track_q}')
-            if artist_q:
-                parts.append(f'artist:{artist_q}')
-            query = ' '.join(parts)
-        elif legacy_query:
-            query = legacy_query
-        else:
+        # Plain combined query — NOT field-scoped (`track:X artist:Y`). That Spotify
+        # syntax leaks to non-Spotify sources when search falls back (Deezer aborted
+        # the connection on it); the iTunes/Deezer endpoints already dropped it for the
+        # same reason, and the rerank below recovers precision. (Pool-fix "no results".)
+        from core.metadata.relevance import build_combined_search_query
+        query = build_combined_search_query(track_q, artist_q, legacy_query)
+        if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
         if use_hydrabase:

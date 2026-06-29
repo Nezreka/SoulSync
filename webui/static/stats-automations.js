@@ -1860,9 +1860,17 @@ async function searchPoolFix() {
         if (artistVal) params.set('artist', artistVal);
         params.set('limit', '20');
         const res = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
-        const data = await res.json();
-        const tracks = data.tracks || [];
+        const data = await res.json().catch(() => ({}));
 
+        // Surface the real failure instead of masking every error (auth, 500, an
+        // upstream connection abort) as a bland "No results found".
+        if (!res.ok || data.error) {
+            const msg = data.error || res.statusText || `request failed (${res.status})`;
+            resultsContainer.innerHTML = `<div class="pool-fix-empty">Search error: ${_esc(msg)}</div>`;
+            return;
+        }
+
+        const tracks = data.tracks || [];
         if (tracks.length === 0) {
             resultsContainer.innerHTML = '<div class="pool-fix-empty">No results found</div>';
             return;
