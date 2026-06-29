@@ -110,3 +110,21 @@ def test_backfill_on_wires_search_fn(monkeypatch):
                            _FakeClient({'success': True, 'playlist_id': 'p', 'added': 1}),
                            _fake_resolver(['sx'], seen))
     assert seen['search_id_fn'] == 'SEARCH_FN'
+
+
+def test_spotify_backfill_search_disables_cross_service_fallback(monkeypatch):
+    """REGRESSION: Spotify's search_tracks falls back to iTunes/Deezer (non-Spotify ids) under
+    rate-limit/free. The backfill MUST disable that or it pushes wrong ids into the Spotify
+    playlist. Assert the search is invoked with allow_fallback=False."""
+    seen = {}
+
+    class _FakeSpotify:
+        def search_tracks(self, q, limit=10, allow_fallback=True):
+            seen['allow_fallback'] = allow_fallback
+            return []
+
+    monkeypatch.setattr(ws, 'get_spotify_client', lambda: _FakeSpotify())
+    fn = ws._build_service_search_id_fn('spotify')
+    assert fn is not None
+    fn('Kendrick Lamar', 'Not Like Us')   # drives the search
+    assert seen['allow_fallback'] is False
