@@ -1,43 +1,21 @@
-# soulsync 2.8.1 — `dev` → `main`
+# soulsync 2.8.2 — `dev` → `main`
 
-a feature + reliability release. the headline is **export a mirrored playlist back to Spotify or Deezer** — same one-click flow as the listenbrainz export, now pointed at the streaming services. plus a **rename-only mode** for Library Reorganize, broader lossless handling, a pile of download fixes, and the reduce-visual-effects pass refined so it stops freezing functional motion.
+a stability + performance release. the headline is **Spotify reliability** (the Docker boot hang and the "logged out / re-auth won't stick" issues are fixed), a big **performance** win that explains the "slow after update" reports, and **large-library imports** that no longer time out the import page.
 
 ---
 
 ## what's new
 
-### 🎧 Export playlists to Spotify & Deezer (#945)
-the mirrored-playlist export modal now has **Sync to Spotify** and **Sync to Deezer** next to the listenbrainz / jspf options. it builds a playlist in your account from the tracks soulsync already has the service IDs for:
+### 🎧 Spotify reliability
+- **Docker boot hang fixed (#949 — thanks HellRa1SeR)** — with Spotify set as your primary metadata source, an unreachable Spotify API could block the gunicorn worker during startup, so the container bound port 8008 but never actually served the Web UI. provider auth probes are now deferred during boot (and capped with a timeout), so startup can't hang on a slow Spotify. same guard added for Qobuz / Deezer / Tidal.
+- **"re-auth didn't stick" fixed** — the OAuth callback wrote your token to one cache while the app read another, so re-authenticating could silently fail validation (and trip an `Address already in use` on the callback port). unified on one token store — re-auth takes effect now.
+- **Sync to Spotify works** — exporting a mirrored playlist to Spotify now asks for playlist-write permission **once**, on-demand, the first time you use it. your normal Spotify login is untouched, so upgrading never forces a re-auth.
 
-- resolves each track from what's already on hand first — the **discovery cache**, then your library's stored IDs — so for an already-discovered playlist it's instant and uses **zero API calls**
-- re-exporting **updates the same playlist in place** instead of spawning duplicates
-- an optional **"match missing tracks"** toggle does a confident live search for the stragglers — and only adds a match it's sure about (a wrong-artist or karaoke version is left out, never guessed)
-- service buttons grey out + point you to Settings when that service isn't connected
-- spotify needs a one-time reconnect to grant playlist-write access
+### ⚡ Performance — the "slow after update" fix
+- **Password-manager autofill storm fixed (#948 — thanks @nick2000713)** — the real cause of the post-update lag wasn't SoulSync rendering, it was browser password managers (Bitwarden / 1Password / etc.) rebuilding their autofill overlay on **every** DOM change — and SoulSync mutates the DOM constantly (live status, progress bars, countdowns). non-credential fields are now marked so managers skip them (your login fields are left alone). the reporter measured **~110× less main-thread blocking** and ~20 → ~96 FPS.
+- **Max Performance mode (new)** — Settings → Appearance. one switch kills the worker orbs, particles, all blur/shadows, and every animation/transition, and greys out the individual effect toggles so it's clearly in charge. for software-rendered / no-GPU setups (Docker, remote desktop) where even simple animations cost real CPU.
 
-### 🏷️ Library Reorganize — Rename only (#875)
-a lighter reorganize action: it just **renames your files** to your current naming scheme — no re-tagging, no quality/AcoustID re-check, no copy-to-staging. much faster on a NAS, won't fail on post-processing reasons, and only touches files whose path actually changes (which also fixes the "2 of 14 previewed but everything got modified" album-splitting). pick it from the new **Action** dropdown in the reorganize modal.
-
-### 💿 Lossless handling
-- lossy-copy now works for **all lossless formats**, not just FLAC (#941)
-- **DSD** (`.dsf` / `.dff`) is recognized as lossless and no longer false-flagged as "truncated" (#939)
-
-### 🐛 Download + search fixes
-- a download with an unbalanced bracket in its name no longer false-fails as "file not found"
-- a file we couldn't quarantine is left in place for retry instead of deleted
-- the Identify search for single imports defaults to "artist - title" (with the dash)
-- "file not found" failures now say what actually happened instead of an opaque error
-- pasted Qobuz/Tidal links **inject the exact track** into manual search instead of hoping text-search surfaces it (#932)
-- the Wing It pool "Fix Match" search works again (it was returning "no results" for everything)
-
-### ⚡ Visual effects + scan reliability
-- **Reduce visual effects** no longer freezes functional motion (spinners, progress) — it only kills the expensive GPU stuff (blur, shadows, glow)
-- worker orbs default **OFF on Firefox** for new users, and run at ~30fps under reduce-effects
-- jellyfin library scans page the bulk fetch so the no-progress watchdog can't false-stall a big library
-
-### 🔧 Under the hood
-- settings page cleanup (#943 — thanks @nick2000713)
-- spotify oauth credential normalization + redirect-uri handling (#942 — thanks HellRa1SeR)
-- security: npm audit fixes for vite / undici / @babel (#944 — thanks HellRa1SeR)
+### 📥 Large-library imports no longer time out (#947 — thanks @ramonskie)
+- dropping a whole library into your staging folder used to make the import page scan every file synchronously and blow past the request timeout — so the page never loaded, and every reload re-timed-out. the scan now runs in the **background** with a live **"Scanning N of M…"** progress, and the page fills in automatically when it's done. (auto-import remains the hands-off path for the actual matching.)
 
 enjoy 🎶

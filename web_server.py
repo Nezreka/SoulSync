@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.1"
+_SOULSYNC_BASE_VERSION = "2.8.2"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -177,6 +177,7 @@ from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
 from core.imports.routes import staging_groups as _import_staging_groups
 from core.imports.routes import staging_hints as _import_staging_hints
+from core.imports.routes import staging_scan_status as _import_staging_scan_status
 from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
@@ -387,6 +388,7 @@ def _initial_appearance_context():
         _request_is_firefox(),
     )
     reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
+    max_performance = config_manager.get('ui_appearance.max_performance', False) is True
     r, g, b = _hex_to_rgb(accent)
     hue, saturation, lightness = _rgb_to_hsl(r, g, b)
     light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
@@ -399,6 +401,7 @@ def _initial_appearance_context():
         'initial_particles_enabled': particles_enabled,
         'initial_worker_orbs_enabled': worker_orbs_enabled,
         'initial_reduce_effects': reduce_effects,
+        'initial_max_performance': max_performance,
     }
 
 
@@ -4940,6 +4943,38 @@ def auth_spotify():
         logger.error(f"Error starting Spotify auth: {e}")
         return f"<h1>Spotify Authentication Error</h1><p>{str(e)}</p>", 500
 
+
+@app.route('/auth/spotify/export')
+def auth_spotify_export():
+    """On-demand authorization for Spotify playlist EXPORT (#945).
+
+    Requests the export scope (the normal read scope + playlist-modify) so the user can write
+    a playlist to their Spotify — WITHOUT changing the global login scope, so no existing
+    token is invalidated. Spotify returns a superset token; the normal /callback exchanges and
+    stores it unchanged (read ⊆ read+write keeps the standard auth check happy). show_dialog
+    forces the consent screen so the new write permission is actually granted."""
+    try:
+        from spotipy.oauth2 import SpotifyOAuth
+        from core.spotify_client import normalize_spotify_oauth_config, SPOTIFY_EXPORT_SCOPE
+        from core.spotify_token_cache import DatabaseTokenCache
+        cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+        if not cfg.get('client_id') or not cfg.get('client_secret'):
+            return "<h1>Spotify not configured</h1><p>Add your Spotify app credentials in Settings first.</p>", 400
+        auth_manager = SpotifyOAuth(
+            client_id=cfg['client_id'],
+            client_secret=cfg['client_secret'],
+            redirect_uri=cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
+            scope=SPOTIFY_EXPORT_SCOPE,
+            cache_handler=DatabaseTokenCache(config_manager),
+            show_dialog=True,
+        )
+        add_activity_item("", "Spotify Export Auth", "Requesting permission to create playlists", "Now")
+        return redirect(auth_manager.get_authorize_url())
+    except Exception as e:
+        logger.error(f"Error starting Spotify export auth: {e}")
+        return f"<h1>Spotify Export Authorization Error</h1><p>{str(e)}</p>", 500
+
+
 @app.route('/auth/tidal')
 def auth_tidal():
     """
@@ -5229,12 +5264,16 @@ def spotify_callback():
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
+        # Write the freshly-exchanged token to the SAME store the client reads
+        # (DatabaseTokenCache), not the legacy file — otherwise a re-auth never reaches the
+        # client and "validation failed" even though the exchange succeeded.
+        from core.spotify_token_cache import DatabaseTokenCache
         auth_manager = SpotifyOAuth(
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
             scope=SPOTIFY_OAUTH_SCOPE,
-            cache_path='config/.spotify_cache'
+            cache_handler=DatabaseTokenCache(config_manager)
         )
 
         token_info = auth_manager.get_access_token(auth_code)
@@ -27916,6 +27955,15 @@ def start_playlist_export_service(playlist_id, service):
         service = (service or '').lower()
         if service not in ('spotify', 'deezer'):
             return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        # Spotify export needs the write scope, which the normal login doesn't request. If the
+        # current token doesn't carry it, tell the UI to send the user through the one-time
+        # on-demand export-auth (instead of starting a job that would 403). #945.
+        if service == 'spotify' and not (spotify_client and spotify_client.has_write_scope()):
+            return jsonify({
+                "success": False, "needs_auth": True,
+                "auth_url": "/auth/spotify/export",
+                "error": "Spotify needs permission to create playlists",
+            }), 200
         body = request.get_json(silent=True) or {}
         backfill = bool(body.get('backfill'))
         db = get_database()
@@ -36111,13 +36159,17 @@ def start_oauth_callback_servers():
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-                        # Create auth manager and exchange code for token
+                        # Create auth manager and exchange code for token. Use the SAME store
+                        # the client reads (DatabaseTokenCache), not the legacy file — a re-auth
+                        # written to the file never reaches the DB-backed client, so it would
+                        # report "validation failed" despite a successful exchange.
+                        from core.spotify_token_cache import DatabaseTokenCache
                         auth_manager = SpotifyOAuth(
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
                             scope=SPOTIFY_OAUTH_SCOPE,
-                            cache_path='config/.spotify_cache'
+                            cache_handler=DatabaseTokenCache(config_manager)
                         )
 
                         # Extract the authorization code and exchange it for tokens
@@ -36483,11 +36535,13 @@ except Exception as e:
 # they explicitly want background Spotify enrichment.
 spotify_enrichment_worker = None
 try:
-    from core.metadata_service import get_primary_source as _get_primary_source
+    from core.metadata_service import get_configured_primary_source
     from database.music_database import MusicDatabase
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
-    _primary = _get_primary_source()
+    # Use configured source only — get_primary_source() probes Spotify auth and can
+    # block gunicorn worker boot indefinitely when the API is unreachable.
+    _primary = get_configured_primary_source()
     _user_paused = config_manager.get('spotify_enrichment_paused', False)
     if _user_paused or _primary != 'spotify':
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
@@ -37646,6 +37700,12 @@ def import_staging_files():
 @app.route('/api/import/staging/groups', methods=['GET'])
 def import_staging_groups():
     payload, status = _import_staging_groups(_build_import_route_runtime())
+    return jsonify(payload), status
+
+
+@app.route('/api/import/staging/scan-status', methods=['GET'])
+def import_staging_scan_status():
+    payload, status = _import_staging_scan_status(_build_import_route_runtime())
     return jsonify(payload), status
 
 
@@ -38965,6 +39025,11 @@ def start_runtime_services():
         logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
 
         _runtime_started = True
+
+
+# Module import is complete — provider clients may now perform network probes.
+from core.boot_phase import mark_boot_complete
+mark_boot_complete()
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)
