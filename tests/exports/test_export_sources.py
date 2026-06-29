@@ -117,3 +117,55 @@ def test_db_service_track_id_real_sql_executes(tmp_path, monkeypatch):
     assert es.db_service_track_id("Kendrick Lamar", "Not Like Us", "spotify") == "spid-NLU"
     assert es.db_service_track_id("kendrick lamar", "not like us", "deezer") == "dz-NLU"  # case-insensitive
     assert es.db_service_track_id("Kendrick Lamar", "Unknown Song", "spotify") is None
+
+
+# ── discovery-cache resolution (#945: use the already-discovered IDs, no API call) ──
+
+import json as _json
+from core.exports.export_sources import (
+    service_id_from_extra_data,
+    resolve_service_track_ids,
+)
+
+
+def _extra(service, tid, discovered=True, provider=None):
+    return {'extra_data': _json.dumps({'discovered': discovered,
+                                       'provider': provider or service,
+                                       'matched_data': {'id': tid}})}
+
+
+def test_extra_data_id_when_discovered_to_that_service():
+    assert service_id_from_extra_data(_extra('deezer', 111), 'deezer') == '111'
+    # dict (not str) extra_data also works
+    raw = {'extra_data': {'discovered': True, 'provider': 'spotify', 'matched_data': {'id': 'spX'}}}
+    assert service_id_from_extra_data(raw, 'spotify') == 'spX'
+
+
+def test_extra_data_provider_must_match_service():
+    # discovered to Spotify, exporting to Deezer → don't reuse the (wrong-service) id
+    assert service_id_from_extra_data(_extra('spotify', 111), 'deezer') is None
+
+
+def test_extra_data_wing_it_fallback_is_not_trusted():
+    track = _extra('deezer', 111, provider='wing_it_fallback')
+    assert service_id_from_extra_data(track, 'deezer') is None
+
+
+def test_extra_data_misc_none_cases():
+    assert service_id_from_extra_data({}, 'deezer') is None                       # no extra_data
+    assert service_id_from_extra_data({'extra_data': 'not json{'}, 'deezer') is None  # bad json
+    assert service_id_from_extra_data(_extra('deezer', 111, discovered=False), 'deezer') is None
+
+
+def test_resolve_waterfall_cache_then_library_then_unmatched():
+    tracks = [
+        _extra('deezer', 111) | {'artist_name': 'A', 'track_name': 'Cached'},   # cache hit
+        {'artist_name': 'A', 'track_name': 'InLib'},                            # library hit (db_fn)
+        {'artist_name': 'A', 'track_name': 'Nowhere'},                          # unmatched
+    ]
+    db_fn = lambda a, t, s: 'lib-222' if t == 'InLib' else None
+    out = resolve_service_track_ids(tracks, 'deezer', db_fn=db_fn)
+    ids = [r['service_track_id'] for r in out['resolved']]
+    assert ids == ['111', 'lib-222', None]
+    s = out['stats']
+    assert s == {'total': 3, 'resolved': 2, 'unmatched': 1, 'from_cache': 1, 'from_library': 1}

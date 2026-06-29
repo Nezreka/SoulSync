@@ -16,8 +16,9 @@ writes a fresh non-cache hit back to the cache so the next export of the same so
 
 from __future__ import annotations
 
+import json
 import threading
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -119,6 +120,89 @@ def build_service_resolve_fn(service: str) -> Callable[[str, str], Tuple[Optiona
         tid = db_service_track_id(artist, title, service)
         return (tid, "library" if tid else None)
     return resolve_fn
+
+
+def service_id_from_extra_data(track: Any, service: str) -> Optional[str]:
+    """The target-service track ID the DISCOVERY step already resolved for this mirrored
+    track, read from its ``extra_data`` blob (#945 — Boulder: "all 50 are discovered to
+    Deezer already, it's not using any of that"). This is free (no API call) and reliable
+    (it's the same id used to mirror the track).
+
+    Only trusted when the track was discovered ON the export's target service — a
+    Deezer-discovered track carries a Deezer id under ``matched_data['id']``, and its
+    ``provider`` is the service name. A ``wing_it_fallback`` provider (the low-confidence
+    guess path) deliberately does NOT match here, so those fall through to the library/
+    none path rather than risk a wrong track in the exported playlist."""
+    raw = track.get("extra_data") if isinstance(track, dict) else None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("discovered"):
+        return None
+    if str(data.get("provider") or "").lower() != str(service or "").lower():
+        return None
+    matched = data.get("matched_data")
+    tid = matched.get("id") if isinstance(matched, dict) else None
+    return str(tid) if tid else None
+
+
+def _track_field(track: Dict[str, Any], *names: str) -> str:
+    for n in names:
+        v = track.get(n)
+        if v:
+            return str(v)
+    return ""
+
+
+def resolve_service_track_ids(
+    tracks: List[Dict[str, Any]],
+    service: str,
+    *,
+    db_fn: Optional[Callable[[str, str, str], Optional[str]]] = None,
+    on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Resolve a mirrored playlist's tracks to target-service track IDs for export.
+
+    Waterfall per track: the discovery cache (``extra_data`` — free + already confidently
+    matched) → the library track's stored service id. A track with neither is reported
+    unmatched (caller skips it — never a guessed/wrong id). Returns
+    ``{"resolved": [{artist, title, album, service_track_id}], "stats": {...}}`` with
+    ``from_cache`` / ``from_library`` / ``unmatched`` tallies for the status display.
+    """
+    db_fn = db_fn or db_service_track_id
+    total = len(tracks or [])
+    resolved: List[Dict[str, Any]] = []
+    stats: Dict[str, Any] = {
+        "total": total, "resolved": 0, "unmatched": 0, "from_cache": 0, "from_library": 0,
+    }
+    for i, t in enumerate(tracks or []):
+        if not isinstance(t, dict):
+            t = {}
+        artist = _track_field(t, "artist", "artist_name", "creator")
+        title = _track_field(t, "title", "track_name", "name")
+        album = _track_field(t, "album", "album_name", "release_name")
+
+        tid = service_id_from_extra_data(t, service)
+        if tid:
+            stats["from_cache"] += 1
+        else:
+            tid = db_fn(artist, title, service)
+            if tid:
+                stats["from_library"] += 1
+
+        resolved.append({"artist": artist, "title": title, "album": album,
+                         "service_track_id": tid or None})
+        stats["resolved" if tid else "unmatched"] += 1
+        if on_progress is not None:
+            try:
+                on_progress(i + 1, total, stats)
+            except Exception:  # noqa: S110 — a progress error must never fail the export
+                pass
+
+    return {"resolved": resolved, "stats": stats}
 
 
 def file_recording_mbid(artist: str, title: str) -> Optional[str]:
