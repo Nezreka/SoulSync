@@ -21,6 +21,7 @@ def test_metadata_source_label_maps_known_sources():
     assert registry.get_metadata_source_label("discogs") == "Discogs"
     assert registry.get_metadata_source_label("hydrabase") == "Hydrabase"
     assert registry.get_metadata_source_label("musicbrainz") == "MusicBrainz"
+    assert registry.get_metadata_source_label("jiosaavn") == "JioSaavn"
 
 
 def test_musicbrainz_is_first_class_metadata_client():
@@ -29,6 +30,15 @@ def test_musicbrainz_is_first_class_metadata_client():
     assert registry.get_client_for_source(
         "musicbrainz",
         musicbrainz_client_factory=lambda: client,
+    ) is client
+
+
+def test_jiosaavn_is_first_class_metadata_client():
+    registry.clear_cached_metadata_clients()
+    client = object()
+    assert registry.get_client_for_source(
+        "jiosaavn",
+        jiosaavn_client_factory=lambda: client,
     ) is client
 
 

@@ -323,6 +323,7 @@ def test_fanout_lists_alternate_sources_excluding_primary():
     assert 'spotify' in alts
     assert 'youtube_videos' in alts
     assert 'musicbrainz' in alts
+    assert 'jiosaavn' in alts
 
 
 def test_fanout_omits_spotify_alternate_when_unauthed():
