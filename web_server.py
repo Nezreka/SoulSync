@@ -29565,6 +29565,28 @@ def get_discover_similar_artists():
                 artist_data["because"] = because
             result_artists.append(artist_data)
 
+        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
+        # Derive a score from the SQL signals (occurrence primary, similarity a minor tiebreak); at
+        # level 0 apply_adventurousness returns the list unchanged, so the featured-rotation order is
+        # fully preserved. Fail-soft. The frontend shows the top slice, so the obscure ones surface.
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
+        if _adv_level > 0 and result_artists:
+            try:
+                for a in result_artists:
+                    _oc = float(a.get('occurrence_count') or 0)
+                    _rank = min(float(a.get('similarity_rank') or 10), 10.0)
+                    a['_adv_score'] = _oc + (10.0 - _rank) * 0.1
+                from core.discovery.listening_recommendations import apply_adventurousness
+                result_artists = apply_adventurousness(
+                    result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                for a in result_artists:
+                    a.pop('_adv_score', None)
+            except Exception as _adv_err:
+                logger.debug(f"similar-artists adventurousness re-rank skipped: {_adv_err}")
+
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
             f"{active_source} after excluding {active_server} library artists"
