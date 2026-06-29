@@ -520,10 +520,14 @@ class TidalClient:
         
         return True
     
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """Check if client is authenticated, refreshing expired tokens if possible"""
-        if self.access_token and time.time() < self.token_expires_at:
-            return True
+        from core.boot_phase import is_boot_phase
+
+        if is_boot_phase():
+            if self.access_token and time.time() < self.token_expires_at:
+                return True
+            return bool(self.access_token and self.refresh_token)
 
         # Backoff: if refresh recently failed, don't retry for 5 minutes
         if hasattr(self, '_refresh_failed_at') and self._refresh_failed_at:

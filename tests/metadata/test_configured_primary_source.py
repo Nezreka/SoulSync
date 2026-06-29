@@ -2,7 +2,12 @@
 
 from unittest.mock import MagicMock, patch
 
+from core.boot_phase import mark_boot_complete
 from core.metadata import registry
+
+
+def setup_function():
+    mark_boot_complete()
 
 
 def test_get_configured_primary_source_reads_config_without_auth_probe(monkeypatch):
