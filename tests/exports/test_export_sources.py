@@ -88,3 +88,32 @@ def test_build_service_resolve_fn_returns_id_and_source(monkeypatch):
     fn = build_service_resolve_fn('spotify')
     assert fn('Artist', 'Hit') == ('spid-99', 'library')
     assert fn('Artist', 'Miss') == (None, None)
+
+
+def test_db_service_track_id_real_sql_executes(tmp_path, monkeypatch):
+    """Run the ACTUAL query against a real (temp) tracks/artists schema — the broad
+    except→None in db_service_track_id would otherwise mask a column/join typo as
+    'no match' for every track (#945 verification)."""
+    import sqlite3
+    import types
+    import core.exports.export_sources as es
+
+    dbfile = tmp_path / "lib.db"
+    con = sqlite3.connect(str(dbfile))
+    con.executescript(
+        "CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT);"
+        "CREATE TABLE tracks (id TEXT, artist_id TEXT, title TEXT, "
+        "spotify_track_id TEXT, deezer_id TEXT);"
+        "INSERT INTO artists VALUES ('a1','Kendrick Lamar');"
+        "INSERT INTO tracks VALUES ('t1','a1','Not Like Us','spid-NLU','dz-NLU');"
+    )
+    con.commit()
+    con.close()
+
+    # fresh connection per call (db_service_track_id closes it in finally)
+    fake_db = types.SimpleNamespace(_get_connection=lambda: sqlite3.connect(str(dbfile)))
+    monkeypatch.setattr("database.music_database.get_database", lambda: fake_db)
+
+    assert es.db_service_track_id("Kendrick Lamar", "Not Like Us", "spotify") == "spid-NLU"
+    assert es.db_service_track_id("kendrick lamar", "not like us", "deezer") == "dz-NLU"  # case-insensitive
+    assert es.db_service_track_id("Kendrick Lamar", "Unknown Song", "spotify") is None
