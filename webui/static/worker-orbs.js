@@ -1057,7 +1057,12 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        return window._workerOrbsEnabled !== false && !window._reduceEffectsActive;
+        // The worker-orbs toggle controls the orbs on its own — reduce-effects no
+        // longer force-kills them. The orb glow is canvas radial gradients, NOT a CSS
+        // blur(28px) (that's the sidebar aura orbs + frosted glass, which reduce-effects
+        // still kills), so the per-frame cost is moderate, not the blur-rasterize lag.
+        // If real telemetry says otherwise, revert by re-adding `&& !window._reduceEffectsActive`.
+        return window._workerOrbsEnabled !== false;
     }
 
     // ── Real telemetry → pulses ──
