@@ -233,6 +233,55 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.is_available)
 
+    # ─── Playlist export (#945) ──────────────────────────────────
+    #
+    # UNOFFICIAL: rides the private gw-light gateway with the ARL session already used
+    # for downloads. Deezer shut their public developer API, so this is the only write
+    # path — and it's fragile by nature (breaks when Deezer changes internals).
+
+    def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
+                                  public=False, description=""):
+        """Create a Deezer playlist (or append to an existing one) from a mirrored
+        playlist's tracks. ``track_ids`` are stored ``deezer_id`` values per library track.
+        ``existing_id`` set → add to that playlist (idempotent re-export reuses the stored
+        target); unset → create a new one. Returns
+        ``{success, playlist_id, url, added, error}``."""
+        if not self._authenticated:
+            return {"success": False, "error": "Deezer is not connected (ARL)"}
+        song_ids = [str(t) for t in (track_ids or []) if t]
+        if not song_ids:
+            return {"success": False, "error": "No matching Deezer tracks to export"}
+        try:
+            songs = [[sid, i] for i, sid in enumerate(song_ids)]
+            if existing_id:
+                res = self._gw_call("playlist.addSongs",
+                                    {"playlist_id": int(existing_id), "songs": songs})
+                if res is None:
+                    return {"success": False, "error": "Deezer rejected the playlist update"}
+                playlist_id = existing_id
+            else:
+                res = self._gw_call("playlist.create", {
+                    "title": name, "description": description,
+                    "is_public": bool(public), "songs": songs,
+                })
+                if res is None:
+                    return {"success": False, "error": "Deezer rejected the playlist create"}
+                # gw 'playlist.create' returns the new playlist id (int) as `results`.
+                if isinstance(res, dict):
+                    playlist_id = res.get("PLAYLIST_ID") or res.get("id")
+                else:
+                    playlist_id = res
+                if not playlist_id:
+                    return {"success": False, "error": "Deezer did not return a playlist id"}
+            return {
+                "success": True,
+                "playlist_id": str(playlist_id),
+                "url": f"https://www.deezer.com/playlist/{playlist_id}",
+                "added": len(song_ids),
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def reconnect(self, arl: str = None) -> bool:
         """Re-authenticate with a new or existing ARL."""
         if arl is None:
