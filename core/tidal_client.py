@@ -529,6 +529,12 @@ class TidalClient:
                 return True
             return bool(self.access_token and self.refresh_token)
 
+        # Token still valid — no refresh needed. (Restored: #949 moved this short-circuit
+        # into the boot-phase branch only, so every post-boot call fell through to the
+        # refresh below — a constant silent-refresh loop on a perfectly valid token.)
+        if self.access_token and time.time() < self.token_expires_at:
+            return True
+
         # Backoff: if refresh recently failed, don't retry for 5 minutes
         if hasattr(self, '_refresh_failed_at') and self._refresh_failed_at:
             if time.time() - self._refresh_failed_at < 300:
