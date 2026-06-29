@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.discovery.listening_recommendations import (
     aggregate_candidate_tracks,
+    apply_adventurousness,
     build_recency_weighted_seeds,
     choose_mix_fetch_source,
     names_match,
@@ -314,3 +315,40 @@ def test_rank_threading_changes_winner_within_a_seed():
     ranked = rank_recommended_artists(seeds, grouped)
     assert [r.name for r in ranked] == ["Close", "Far"]
     assert ranked[0].score > ranked[1].score
+
+
+# ── apply_adventurousness (aurral-style popularity-penalty re-rank) ───────────
+def test_adventurousness_zero_is_noop_but_copies():
+    items = [{"name": "A", "score": 5.0, "popularity": 90},
+             {"name": "B", "score": 4.0, "popularity": 10}]
+    out = apply_adventurousness(items, 0.0)
+    assert [i["name"] for i in out] == ["A", "B"]   # order unchanged
+    assert out == items                              # same content
+    assert out is not items                          # but a fresh list (additive)
+
+
+def test_adventurousness_demotes_the_popular_one():
+    # Same score; at full adventurousness the obscure pick (pop 10) overtakes the giant (pop 95).
+    items = [{"name": "Giant", "score": 5.0, "popularity": 95},
+             {"name": "Obscure", "score": 5.0, "popularity": 10}]
+    assert [i["name"] for i in apply_adventurousness(items, 1.0)] == ["Obscure", "Giant"]
+
+
+def test_adventurousness_penalty_is_proportional_not_absolute():
+    # A much stronger score still wins despite being more popular — the penalty scales the score.
+    items = [{"name": "StrongPopular", "score": 10.0, "popularity": 80},
+             {"name": "WeakObscure", "score": 1.0, "popularity": 0}]
+    assert apply_adventurousness(items, 0.5)[0]["name"] == "StrongPopular"
+
+
+def test_adventurousness_missing_popularity_is_unpenalized():
+    items = [{"name": "Popular", "score": 5.0, "popularity": 100},
+             {"name": "NoPop", "score": 5.0}]
+    assert apply_adventurousness(items, 1.0)[0]["name"] == "NoPop"
+
+
+def test_adventurousness_clamps_level():
+    items = [{"name": "A", "score": 5.0, "popularity": 100},
+             {"name": "B", "score": 5.0, "popularity": 0}]
+    assert [i["name"] for i in apply_adventurousness(items, 5.0)] == ["B", "A"]    # >1 clamps to 1
+    assert [i["name"] for i in apply_adventurousness(items, -2.0)] == ["A", "B"]   # <0 clamps to 0 (no-op)

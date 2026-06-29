@@ -39,6 +39,14 @@ def _positive_float(value: object, default: float = 1.0) -> float:
     return f if f > 0 else default
 
 
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    """Plain float coercion that keeps 0 / negatives (unlike _positive_float) — popularity can be 0."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _get(row: object, attr: str):
     """Read a field from a dataclass row or a dict row."""
     if isinstance(row, dict):
@@ -232,6 +240,46 @@ def rank_recommended_artists(
         ))
     out.sort(key=lambda r: (-r.score, -r.seed_count, r.name.lower()))
     return out[:limit]
+
+
+# ── Adventurousness re-rank (aurral-style popularity penalty) ────────────────────────────────
+# Both Discover rec rows already EXCLUDE what you own / watch, so "novelty" is baked in; the lever we
+# were missing is a POPULARITY PENALTY. At higher adventurousness, globally-popular candidates are
+# pushed down so the obscure / non-obvious picks surface. Pure + reusable across both rec rows.
+_MAX_POP_PENALTY = 0.7  # at level 1.0 a popularity-100 candidate loses 70% of its score
+
+
+def apply_adventurousness(
+    items: Sequence[dict],
+    level: object,
+    *,
+    score_key: str = "score",
+    pop_key: str = "popularity",
+    tiebreak_key: str = "seed_count",
+) -> List[dict]:
+    """Re-rank ``items`` (dicts with a numeric score + an optional 0–100 popularity) by an
+    adventurousness-scaled popularity penalty. Returns a NEW list, most-adventurous first.
+
+    ``level`` is clamped to 0..1. At ``level <= 0`` the input order is returned **unchanged** (a
+    copy), so the feature is fully additive / no-regression. Items missing a popularity are never
+    penalised. Adjusted score = ``score × (1 − level × MAX_POP_PENALTY × popularity/100)``.
+    """
+    lvl = max(0.0, min(1.0, _coerce_float(level, 0.0)))
+    if lvl <= 0.0:
+        return list(items)
+
+    def _adjusted(it: object) -> float:
+        score = _coerce_float(_get(it, score_key), 0.0)
+        pop = _get(it, pop_key)
+        if pop is None:
+            return score
+        pop_norm = max(0.0, min(1.0, _coerce_float(pop, 0.0) / 100.0))
+        return score * (1.0 - lvl * _MAX_POP_PENALTY * pop_norm)
+
+    return sorted(
+        items,
+        key=lambda it: (-_adjusted(it), -_coerce_float(_get(it, tiebreak_key), 0.0), _norm(_get(it, "name"))),
+    )
 
 
 def aggregate_candidate_tracks(
