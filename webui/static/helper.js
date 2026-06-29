@@ -3406,7 +3406,7 @@ const WHATS_NEW = {
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
     '2.8.1': [
         { date: 'June 2026 — 2.8.1 release' },
-        { title: 'Export playlists to Deezer (#945)', desc: 'the mirrored-playlist export modal now has Sync to Deezer next to the ListenBrainz/JSPF options. it builds a Deezer playlist in your account from the IDs soulsync already has — the discovery cache first, then your library — so an already-discovered playlist exports instantly with zero API calls. re-exporting updates the same playlist instead of duplicating it, and an optional "match missing tracks" toggle confidently searches Deezer for the stragglers (a wrong-artist or karaoke version is left out, never guessed). (Spotify export is coming in a follow-up.)', page: 'playlists' },
+        { title: 'Export playlists to Spotify & Deezer (#945)', desc: 'the mirrored-playlist export modal now has Sync to Spotify and Sync to Deezer next to the ListenBrainz/JSPF options. it builds a playlist in your account from the IDs soulsync already has — the discovery cache first, then your library — so an already-discovered playlist exports instantly with zero API calls. re-exporting updates the same playlist instead of duplicating it, and an optional "match missing tracks" toggle confidently searches for the stragglers (a wrong-artist or karaoke version is left out, never guessed). the first Spotify export asks permission to create playlists — just that once, and your normal login is untouched.', page: 'playlists' },
         { title: 'Library Reorganize — Rename only (#875)', desc: 'a lighter reorganize action that just renames your files to your current naming scheme — no re-tagging, no quality/AcoustID re-check, no copy-to-staging. much faster on a NAS, won\'t fail on post-processing, and only touches files whose path actually changes (which also fixes the "2 of 14 previewed but everything got modified" album-splitting). pick it from the new Action dropdown. (thanks @tsoulard / @Tacobell444.)', page: 'library' },
         { title: 'Broader lossless handling (#941, #939)', desc: 'lossy-copy now works for all lossless formats, not just FLAC; and DSD (.dsf/.dff) is recognized as lossless instead of being false-flagged as "truncated".', page: 'downloads' },
         { title: 'Download + search fixes', desc: 'an unbalanced bracket in a filename no longer false-fails as "file not found"; a file we couldn\'t quarantine is left for retry instead of deleted; the Identify search defaults to "artist - title"; "file not found" errors are actionable now; pasted Qobuz/Tidal links inject the exact track into manual search (#932); and the Wing It pool "Fix Match" search works again.', page: 'downloads' },
@@ -3443,14 +3443,14 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Export playlists to Deezer",
-        description: "send a mirrored playlist back to your Deezer account — the same one-click export, now pointed at Deezer.",
+        title: "Export playlists to Spotify & Deezer",
+        description: "send a mirrored playlist back to your streaming account — the same one-click export, now pointed at Spotify and Deezer.",
         features: [
-            "#945 — Sync to Deezer sits next to the ListenBrainz/JSPF options in the export modal; it builds a Deezer playlist in your account",
+            "#945 — Sync to Spotify / Sync to Deezer sit next to the ListenBrainz/JSPF options in the export modal; each builds a playlist in your account",
             "resolves IDs from what's already on hand first — the discovery cache, then your library — so an already-discovered playlist exports instantly with zero API calls",
             "re-exporting updates the same playlist in place instead of spawning duplicates",
-            "an optional \"match missing tracks\" toggle confidently searches Deezer for the stragglers — a wrong-artist or karaoke version is left out, never guessed in",
-            "Spotify export is wired up but waiting on an on-demand write-permission flow, so it's hidden for now",
+            "an optional \"match missing tracks\" toggle confidently searches for the stragglers — a wrong-artist or karaoke version is left out, never guessed in",
+            "the first Spotify export asks permission to create playlists (just that once) — your normal Spotify login is untouched, so upgrading never disrupts anyone",
         ],
     },
     {

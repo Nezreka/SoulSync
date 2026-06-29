@@ -4940,6 +4940,38 @@ def auth_spotify():
         logger.error(f"Error starting Spotify auth: {e}")
         return f"<h1>Spotify Authentication Error</h1><p>{str(e)}</p>", 500
 
+
+@app.route('/auth/spotify/export')
+def auth_spotify_export():
+    """On-demand authorization for Spotify playlist EXPORT (#945).
+
+    Requests the export scope (the normal read scope + playlist-modify) so the user can write
+    a playlist to their Spotify — WITHOUT changing the global login scope, so no existing
+    token is invalidated. Spotify returns a superset token; the normal /callback exchanges and
+    stores it unchanged (read ⊆ read+write keeps the standard auth check happy). show_dialog
+    forces the consent screen so the new write permission is actually granted."""
+    try:
+        from spotipy.oauth2 import SpotifyOAuth
+        from core.spotify_client import normalize_spotify_oauth_config, SPOTIFY_EXPORT_SCOPE
+        from core.spotify_token_cache import DatabaseTokenCache
+        cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+        if not cfg.get('client_id') or not cfg.get('client_secret'):
+            return "<h1>Spotify not configured</h1><p>Add your Spotify app credentials in Settings first.</p>", 400
+        auth_manager = SpotifyOAuth(
+            client_id=cfg['client_id'],
+            client_secret=cfg['client_secret'],
+            redirect_uri=cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback'),
+            scope=SPOTIFY_EXPORT_SCOPE,
+            cache_handler=DatabaseTokenCache(config_manager),
+            show_dialog=True,
+        )
+        add_activity_item("", "Spotify Export Auth", "Requesting permission to create playlists", "Now")
+        return redirect(auth_manager.get_authorize_url())
+    except Exception as e:
+        logger.error(f"Error starting Spotify export auth: {e}")
+        return f"<h1>Spotify Export Authorization Error</h1><p>{str(e)}</p>", 500
+
+
 @app.route('/auth/tidal')
 def auth_tidal():
     """
@@ -27920,6 +27952,15 @@ def start_playlist_export_service(playlist_id, service):
         service = (service or '').lower()
         if service not in ('spotify', 'deezer'):
             return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        # Spotify export needs the write scope, which the normal login doesn't request. If the
+        # current token doesn't carry it, tell the UI to send the user through the one-time
+        # on-demand export-auth (instead of starting a job that would 403). #945.
+        if service == 'spotify' and not (spotify_client and spotify_client.has_write_scope()):
+            return jsonify({
+                "success": False, "needs_auth": True,
+                "auth_url": "/auth/spotify/export",
+                "error": "Spotify needs permission to create playlists",
+            }), 200
         body = request.get_json(silent=True) or {}
         backfill = bool(body.get('backfill'))
         db = get_database()

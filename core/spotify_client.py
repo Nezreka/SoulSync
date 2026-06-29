@@ -30,6 +30,16 @@ SPOTIFY_OAUTH_SCOPE = (
     "playlist-read-collaborative user-read-email user-follow-read"
 )
 
+# The export scope = the normal login scope PLUS playlist write. Requested ONLY by the
+# on-demand export-auth route (/auth/spotify/export) when a user chooses to export a playlist
+# to Spotify — NEVER by the normal login. That's the whole safety property: the global scope
+# above is unchanged, so no existing token is invalidated. The token Spotify returns from the
+# export flow is a SUPERSET of the read scope, so it still passes the normal auth check
+# (read ⊆ read+write) — one account, one token, just with write added for the opt-in user.
+SPOTIFY_EXPORT_SCOPE = (
+    SPOTIFY_OAUTH_SCOPE + " playlist-modify-public playlist-modify-private"
+)
+
 
 def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Normalize Spotify OAuth config before building an auth manager.
@@ -1152,6 +1162,19 @@ class SpotifyClient:
                  logger.info(f"Returning {len(playlists)} playlists fetched before error.")
                  return playlists
             return []
+
+    def has_write_scope(self) -> bool:
+        """True when the cached Spotify token carries playlist-modify (the export write scope).
+        The export endpoint uses this to decide whether to run, or to first send the user
+        through the on-demand export-auth flow. Fail-safe: any error → False (not authorized)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, "cache_handler", None)
+            token = cache_handler.get_cached_token() if cache_handler else None
+            return "playlist-modify" in ((token or {}).get("scope") or "")
+        except Exception:
+            return False
 
     def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
                                   public=False, description=""):
