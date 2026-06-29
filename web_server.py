@@ -29604,6 +29604,31 @@ def get_discover_similar_artists():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route('/api/discover/adventurousness', methods=['GET', 'POST'])
+def discover_adventurousness():
+    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
+    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
+    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            try:
+                v = float(data.get('value'))
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "value must be a number"}), 400
+            v = max(0.0, min(1.0, v))
+            config_manager.set('discover.adventurousness', v)
+            return jsonify({"success": True, "value": v})
+        try:
+            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            v = 0.3
+        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+    except Exception as e:
+        logger.error(f"adventurousness endpoint error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
