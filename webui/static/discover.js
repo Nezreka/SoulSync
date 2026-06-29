@@ -1788,11 +1788,7 @@ async function loadDiscoverReleaseRadar() {
             contentEl: '#release-radar-playlist',
             fetchUrl: '/api/discover/release-radar',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverReleaseRadarTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverReleaseRadarTracks = items; return ''; },
             loadingMessage: 'Loading release radar...',
             emptyMessage: 'No new releases available',
             errorMessage: 'Failed to load release radar',
@@ -1800,7 +1796,16 @@ async function loadDiscoverReleaseRadar() {
             showErrorToast: true,
         });
     }
-    return _releaseRadarCtrl.load();
+    await _releaseRadarCtrl.load();
+    const c = document.querySelector('#release-radar-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverReleaseRadarTracks && discoverReleaseRadarTracks.length) {
+        _upsertMixCard({
+            key: 'release_radar', title: 'Fresh Tape',
+            subtitle: 'New releases from artists you follow',
+            tracks: discoverReleaseRadarTracks, syncKey: 'release_radar',
+        });
+    }
 }
 
 let _weeklyCtrl = null;
@@ -1812,11 +1817,7 @@ async function loadDiscoverWeekly() {
             contentEl: '#discovery-weekly-playlist',
             fetchUrl: '/api/discover/weekly',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverWeeklyTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverWeeklyTracks = items; return ''; },
             loadingMessage: 'Curating your discovery playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load discovery weekly',
@@ -1824,7 +1825,16 @@ async function loadDiscoverWeekly() {
             showErrorToast: true,
         });
     }
-    return _weeklyCtrl.load();
+    await _weeklyCtrl.load();
+    const c = document.querySelector('#discovery-weekly-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverWeeklyTracks && discoverWeeklyTracks.length) {
+        _upsertMixCard({
+            key: 'discovery_weekly', title: 'The Archives',
+            subtitle: 'A weekly dig through artists across your library',
+            tracks: discoverWeeklyTracks, syncKey: 'discovery_weekly',
+        });
+    }
 }
 
 // ===============================
@@ -4050,23 +4060,6 @@ async function loadSeasonalPlaylist(seasonData) {
     const playlistContainer = document.getElementById('seasonal-playlist');
     if (!playlistContainer) return;
 
-    // Show seasonal playlist section
-    const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
-    if (seasonalPlaylistSection) {
-        seasonalPlaylistSection.style.display = 'block';
-    }
-
-    // Update header
-    const playlistTitle = document.getElementById('seasonal-playlist-title');
-    const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
-
-    if (playlistTitle) {
-        playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
-    }
-    if (playlistSubtitle) {
-        playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
-    }
-
     // Re-create the controller when the season key changes so the
     // fetchUrl always points at the active season's endpoint.
     if (!_seasonalPlaylistCtrl || _seasonalPlaylistCtrlKey !== currentSeasonKey) {
@@ -4075,11 +4068,7 @@ async function loadSeasonalPlaylist(seasonData) {
             contentEl: '#seasonal-playlist',
             fetchUrl: `/api/discover/seasonal/${currentSeasonKey}/playlist`,
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverSeasonalTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverSeasonalTracks = items; return ''; },
             loadingMessage: 'Loading playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load playlist',
@@ -4088,7 +4077,16 @@ async function loadSeasonalPlaylist(seasonData) {
         });
         _seasonalPlaylistCtrlKey = currentSeasonKey;
     }
-    return _seasonalPlaylistCtrl.load();
+    await _seasonalPlaylistCtrl.load();
+    _collapseOldMixSection(playlistContainer);
+    if (discoverSeasonalTracks && discoverSeasonalTracks.length) {
+        _upsertMixCard({
+            key: 'seasonal_playlist',
+            title: `${seasonData.icon} ${seasonData.name} Mix`,
+            subtitle: `Curated playlist for ${seasonData.name.toLowerCase()}`,
+            tracks: discoverSeasonalTracks, syncKey: 'seasonal_playlist',
+        });
+    }
 }
 
 function hideSeasonalSections() {
@@ -4364,31 +4362,16 @@ async function loadPersonalizedDailyMixes() {
         }
 
         personalizedDailyMixes = data.mixes;
-
-        // Render Daily Mix cards
-        let html = '';
+        // Fold each daily mix into the unified "Your Mixes" shelf (#discover redesign).
+        // (Their old open action was a no-op stub; opening to the track list is an upgrade.)
         data.mixes.forEach((mix, index) => {
-            const coverUrl = mix.tracks && mix.tracks.length > 0 ?
-                (mix.tracks[0].album_cover_url || '/static/placeholder-album.png') :
-                '/static/placeholder-album.png';
-
-            html += `
-                <div class="discover-playlist-card" onclick="openDailyMix(${index})">
-                    <div class="discover-playlist-cover">
-                        <img src="${coverUrl}" alt="${mix.name}" loading="lazy">
-                        <div class="playlist-play-overlay">▶</div>
-                    </div>
-                    <div class="discover-playlist-info">
-                        <h4 class="discover-playlist-name">${mix.name}</h4>
-                        <p class="discover-playlist-description">${mix.description}</p>
-                        <p class="discover-playlist-count">${mix.track_count} tracks</p>
-                    </div>
-                </div>
-            `;
+            _upsertMixCard({
+                key: `daily_mix_${index}`, title: mix.name,
+                subtitle: mix.description || 'Daily Mix',
+                tracks: mix.tracks || [],
+            });
         });
-
-        container.innerHTML = html;
-        container.closest('.discover-section').style.display = 'block';
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading daily mixes:', error);
