@@ -35107,6 +35107,13 @@ div.artist-hero-badge {
 .discover-grid .ya-card { width: 100%; }
 /* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
 .discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
+/* Genre cards: no cover art — square gradient tile with the genre emoji centered. */
+.discover-grid .discover-genre-card.ya-card { aspect-ratio: 1; }
+.discover-genre-card .genre-card-art {
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.38), rgba(var(--accent-rgb),0.07));
+}
+.discover-genre-card .genre-icon-large { font-size: 46px; line-height: 1; }
 /* Secondary line under the title (album → artist). */
 .ya-card-sub {
     font-size: 11px; font-weight: 500;
