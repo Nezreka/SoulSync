@@ -55,8 +55,49 @@ async function loadDiscoverPage() {
         loadDiscoveryBlacklist()  // Blocked artists list
     ]);
 
+    // Reorder sections into the intended top-to-bottom grouping now that every loader has run.
+    _reorderDiscoverSections();
+
     // Check for active syncs after page load
     checkForActiveDiscoverSyncs();
+}
+
+// #discover redesign: sections were authored in code-order (and several inject into a mid-page
+// sub-container, #discover-bylt-sections), so the page reads as a jumble. After all loaders run,
+// move each section into the intended Spotify-style order. appendChild MOVES nodes — including ones
+// nested in #discover-bylt-sections — into .discover-container, so the cache sections get pulled out
+// to their own slots while the BYLT container keeps just its "Because you listen to" rows. Hidden /
+// collapsed sections (old mix tables, Daily Mixes) are left untouched and stay invisible. The hero
+// and the Artist Map hub are left in place near the top.
+function _reorderDiscoverSections() {
+    const container = document.querySelector('.discover-container');
+    if (!container) return;
+    const ORDER = [
+        { id: 'cache-genre-explorer' },          // Genre Explorer (pills) — quick browse
+        { id: 'your-mixes-section' },            // Made for you
+        { id: 'year-mixes-section' },
+        { id: 'listening-recs-section' },        // For you
+        { id: 'recommended-artists-section' },
+        { id: 'discover-bylt-sections' },        // Because You Listen To (cache sections pulled out below)
+        { title: 'recent releases' },            // New
+        { id: 'cache-genre-releases' },          // New In Your Genres
+        { id: 'seasonal-albums-section' },
+        { id: 'your-artists-section' },          // Your library
+        { id: 'your-albums-section' },
+        { id: 'cache-undiscovered' },            // Deeper digs
+        { id: 'cache-label-explorer' },          // From Your Labels
+        { id: 'cache-deep-cuts' },
+        { title: 'last.fm radio' },              // Stations & tools
+        { title: 'listenbrainz' },
+        { title: 'build a playlist' },
+    ];
+    const byTitle = (t) => Array.from(
+        document.querySelectorAll('.discover-container .discover-section, #discover-bylt-sections .discover-section'))
+        .find(s => (s.querySelector('.discover-section-title')?.textContent || '').toLowerCase().includes(t));
+    ORDER.forEach(spec => {
+        const node = spec.id ? document.getElementById(spec.id) : byTitle(spec.title);
+        if (node && node.parentElement) container.appendChild(node);
+    });
 }
 
 async function checkForActiveDiscoverSyncs() {
@@ -4405,7 +4446,9 @@ function _normalizeTrack(track) {
     return {
         name: td.name || td.track_name || track.track_name || 'Unknown Track',
         artist: (a0 && (a0.name || a0)) || td.artist_name || track.artist_name || 'Unknown Artist',
-        album: (td.album && td.album.name) || td.album_name || track.album_name || 'Unknown Album',
+        // album/duration are optional (ListenBrainz recording playlists carry neither) — leave blank
+        // rather than printing "Unknown Album" / "0:00".
+        album: (td.album && td.album.name) || td.album_name || track.album_name || '',
         cover: (td.album && td.album.images && td.album.images[0] && td.album.images[0].url) || track.album_cover_url || '',
         durationMs: td.duration_ms || track.duration_ms || 0,
     };
@@ -4419,7 +4462,7 @@ function renderCompactPlaylist(container, tracks) {
         const coverUrl = t.cover || '/static/placeholder-album.png';
         const durationMin = Math.floor(t.durationMs / 60000);
         const durationSec = Math.floor((t.durationMs % 60000) / 1000);
-        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+        const duration = t.durationMs > 0 ? `${durationMin}:${durationSec.toString().padStart(2, '0')}` : '';
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
