@@ -3146,20 +3146,25 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
-                    <!-- Discovery Adventurousness dial — fancy, syncs with Settings → Discovery -->
-                    <div class="adv-dial" id="adv-dial"
+                    <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
+                         calmer/greener at left (safe) and wilder/redder at right (obscure). Syncs with
+                         Settings → Discovery. -->
+                    <div class="adv-wave" id="adv-wave"
                          title="Pushes globally-popular artists down so more obscure picks surface in your recommendations">
-                        <div class="adv-dial-icon" id="adv-dial-icon">🧭</div>
-                        <div class="adv-dial-label">
-                            <span class="adv-dial-title">Adventurousness</span>
-                            <span class="adv-dial-state" id="adv-dial-state">Balanced</span>
+                        <div class="adv-wave-head">
+                            <span class="adv-wave-title">Adventurousness</span>
+                            <span class="adv-wave-state" id="adv-wave-state">Balanced</span>
                         </div>
-                        <span class="adv-dial-end">Safe</span>
-                        <input type="range" class="adv-dial-slider" id="adv-dial-slider" min="0" max="1" step="0.05" value="0.3"
-                               oninput="onAdvDialInput(this.value)" onchange="onAdvDialCommit(this.value)"
-                               aria-label="Discovery adventurousness">
-                        <span class="adv-dial-end">Adventurous</span>
-                        <div class="adv-dial-val" id="adv-dial-val">30%</div>
+                        <div class="adv-wave-track" id="adv-wave-track">
+                            <svg class="adv-wave-svg" id="adv-wave-svg" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
+                                <path id="adv-wave-path" fill="none" stroke-width="3" stroke-linecap="round"></path>
+                            </svg>
+                            <div class="adv-wave-orb" id="adv-wave-orb"></div>
+                        </div>
+                        <div class="adv-wave-ends">
+                            <span>Safe — artists you already like</span>
+                            <span>Adventurous — deep cuts</span>
+                        </div>
                     </div>
 
                     <!-- Recommended For You Section (similar-artists graph) -->
