@@ -1008,15 +1008,18 @@ let _recentReleasesCtrl = null;
 
 function _renderRecentReleaseCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+    // Unified Discover card — same .ya-card the Your Artists section uses (full-bleed cover,
+    // gradient, name overlaid), square so the album art isn't cropped. #discover redesign.
     return `
-        <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForRecentAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                <p class="discover-card-meta">${album.release_date}</p>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -1043,7 +1046,8 @@ async function loadDiscoverRecentReleases() {
             showErrorToast: true,
         });
     }
-    return _recentReleasesCtrl.load();
+    await _recentReleasesCtrl.load();
+    _clampGrid(document.getElementById('recent-releases-carousel'));
 }
 
 // ===============================
@@ -1182,22 +1186,19 @@ function _renderYourAlbumsGrid(albums) {
     let html = '';
     albums.forEach((album, index) => {
         const coverUrl = album.image_url || '/static/placeholder-album.png';
-        const year = album.release_date ? album.release_date.substring(0, 4) : '';
         const badgeClass = album.in_library ? 'owned' : 'missing';
         const badgeIcon = album.in_library ? '\u2713' : '\u2193';
-        const trackInfo = album.total_tracks ? `${album.total_tracks} tracks` : '';
-        const meta = [year, trackInfo].filter(Boolean).join(' \u00B7 ');
-        const sources = (album.source_services || []).join(', ');
         html += `
-            <div class="spotify-library-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
-                <div class="spotify-library-card-img">
-                    <img src="${coverUrl}" alt="${escapeHtml(album.album_name)}" loading="lazy">
-                    <div class="spotify-library-card-badge ${badgeClass}">${badgeIcon}</div>
+            <div class="ya-card discover-album-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
+                <div class="ya-card-img">
+                    <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div class="ya-card-placeholder" style="display:none">&#9835;</div>
                 </div>
-                <div class="spotify-library-card-info">
-                    <p class="spotify-library-card-title">${escapeHtml(album.album_name)}</p>
-                    <p class="spotify-library-card-artist">${escapeHtml(album.artist_name)}</p>
-                    <p class="spotify-library-card-meta">${escapeHtml(meta)}</p>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-badges"><div class="discover-album-badge ${badgeClass}">${badgeIcon}</div></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${_esc(album.album_name)}</div>
+                    <div class="ya-card-sub">${_esc(album.artist_name)}</div>
                 </div>
             </div>`;
     });
@@ -4008,14 +4009,15 @@ async function loadSeasonalContent() {
 function _renderSeasonalAlbumCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
     return `
-        <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForSeasonalAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -4050,7 +4052,8 @@ async function loadSeasonalAlbums(seasonData) {
         verboseErrors: true,
             showErrorToast: true,
     });
-    return ctrl.load();
+    await ctrl.load();
+    _clampGrid(document.getElementById('seasonal-albums-carousel'));
 }
 
 let _seasonalPlaylistCtrl = null;
@@ -8183,18 +8186,20 @@ function _cacheDiscoverCard(item, type, sectionKey, index) {
     const coverUrl = item.image_url || '/static/placeholder-album.png';
     const title = item.name || '';
     const subtitle = item.artist_name || '';
-    const meta = item.release_date ? item.release_date.substring(0, 10) : (item.label || '');
     const onclick = `openCacheDiscoverAlbum('${sectionKey}',${index})`;
-    const libBadge = item.in_library ? '<div class="discover-card-lib-badge">In Library</div>' : '';
-    return `<div class="discover-card" onclick="${onclick}" style="cursor:pointer">
-        <div class="discover-card-image">
-            <img src="${_esc(coverUrl)}" alt="${_esc(title)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
-            ${libBadge}
+    // Unified Discover album card (#discover redesign) — same .ya-card as Your Artists, square.
+    const libBadge = item.in_library
+        ? '<div class="ya-card-badges"><div class="discover-album-badge owned">&#10003;</div></div>' : '';
+    return `<div class="ya-card discover-album-card" onclick="${onclick}">
+        <div class="ya-card-img">
+            <img src="${_esc(coverUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div class="ya-card-placeholder" style="display:none">&#9835;</div>
         </div>
-        <div class="discover-card-info">
-            <h4 class="discover-card-title">${_esc(title)}</h4>
-            <p class="discover-card-subtitle">${_esc(subtitle)}</p>
-            ${meta ? `<p class="discover-card-meta">${_esc(meta)}</p>` : ''}
+        <div class="ya-card-gradient"></div>
+        ${libBadge}
+        <div class="ya-card-info">
+            <div class="ya-card-name">${_esc(title)}</div>
+            <div class="ya-card-sub">${_esc(subtitle)}</div>
         </div>
     </div>`;
 }
@@ -8339,7 +8344,32 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
     }
 }
 
-function _insertCacheSection(id, title, subtitle, html, position) {
+// Cap a wrapping discover-grid to `limit` cards (≈ a couple rows) with a Show all / Show less
+// toggle, so a 30-item section doesn't become a wall (#discover redesign). Idempotent.
+function _clampGrid(gridEl, limit = 12) {
+    if (!gridEl) return;
+    const cards = Array.from(gridEl.children);
+    // tidy any previous toggle so re-renders don't stack buttons
+    if (gridEl.nextElementSibling && gridEl.nextElementSibling.classList.contains('discover-show-all')) {
+        gridEl.nextElementSibling.remove();
+    }
+    if (cards.length <= limit) {
+        cards.forEach(c => { c.style.display = ''; });
+        return;
+    }
+    let expanded = false;
+    const btn = document.createElement('button');
+    btn.className = 'discover-show-all';
+    const apply = () => {
+        cards.forEach((c, i) => { c.style.display = (expanded || i < limit) ? '' : 'none'; });
+        btn.textContent = expanded ? 'Show less' : `Show all ${cards.length}`;
+    };
+    btn.onclick = () => { expanded = !expanded; apply(); };
+    gridEl.after(btn);
+    apply();
+}
+
+function _insertCacheSection(id, title, subtitle, html, position, wrapGrid = true) {
     const container = document.getElementById('discover-bylt-sections') || document.querySelector('.discover-container');
     if (!container) return;
     let section = document.getElementById(id);
@@ -8366,8 +8396,9 @@ function _insertCacheSection(id, title, subtitle, html, position) {
                 <h3 class="discover-section-title">${title}</h3>
             </div>
         </div>
-        <div class="discover-carousel">${html}</div>
+        ${wrapGrid ? `<div class="discover-grid">${html}</div>` : html}
     `;
+    if (wrapGrid) _clampGrid(section.querySelector('.discover-grid'));
 }
 
 async function loadCacheUndiscoveredAlbums() {
@@ -8437,7 +8468,7 @@ async function loadCacheGenreExplorer() {
             </div>
         `).join('')}</div>`;
         _insertCacheSection('cache-genre-explorer',
-            'Genre Explorer', 'Tap a genre to explore', html, 'top');
+            'Genre Explorer', 'Tap a genre to explore', html, 'top', false);
     } catch (e) { console.debug('Cache genre explorer:', e); }
 }
 

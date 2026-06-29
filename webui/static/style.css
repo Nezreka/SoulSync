@@ -35095,6 +35095,56 @@ div.artist-hero-badge {
 .mix-modal-close:hover { color: #fff; }
 .mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
 
+/* ── Unified Discover card grid (#discover redesign) ─────────────────────────
+   One responsive wrapping grid (fills the section width, wraps to rows — no
+   horizontal scroll) holding the same .ya-card the Your Artists section uses, so
+   every album/artist section reads as one design. */
+.discover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+.discover-grid .ya-card { width: 100%; }
+/* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
+.discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
+/* Secondary line under the title (album → artist). */
+.ya-card-sub {
+    font-size: 11px; font-weight: 500;
+    color: rgba(255,255,255,0.72);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    margin-top: 2px;
+}
+/* Owned / missing indicator on album cards (corner badge). */
+.discover-album-badge {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+}
+.discover-album-badge.owned { background: #1DB954; color: #000; }
+.discover-album-badge.missing {
+    background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+/* Show all / Show less toggle under a clamped discover-grid. */
+.discover-show-all {
+    margin: 14px auto 0;
+    display: block;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px; font-weight: 600;
+    padding: 8px 20px; border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.discover-show-all:hover {
+    background: rgba(var(--accent-rgb),0.15);
+    border-color: rgba(var(--accent-rgb),0.4);
+    color: #fff;
+}
+
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
