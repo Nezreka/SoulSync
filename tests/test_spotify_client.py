@@ -164,3 +164,32 @@ def test_insufficient_scope_says_reconnect():
             raise Exception('403 Forbidden: insufficient client scope')
     res = _spotify_with(_ScopeErr()).create_or_update_playlist('X', ['a'])
     assert not res['success'] and 'Reconnect Spotify' in res['error']
+
+
+# ── Spotify auth regression hotfix: scope must not force re-auth; callbacks must write
+#    the DB store the client reads (else a re-auth never takes effect) ──
+
+import os as _os
+
+
+def test_oauth_scope_has_no_write_scope_that_forces_reauth():
+    """Spotipy invalidates a cached token the moment the requested scope stops being a subset
+    of the token's granted scope — so GROWING the global scope forces every user to re-auth on
+    upgrade (it broke all Spotify users). The write scope (playlist-modify) must NOT live in the
+    global scope; request it on-demand instead."""
+    from core.spotify_client import SPOTIFY_OAUTH_SCOPE
+    assert 'playlist-modify' not in SPOTIFY_OAUTH_SCOPE
+    # the read scopes existing tokens already carry must stay
+    for s in ('user-library-read', 'user-read-private', 'playlist-read-private',
+              'playlist-read-collaborative', 'user-read-email', 'user-follow-read'):
+        assert s in SPOTIFY_OAUTH_SCOPE
+
+
+def test_global_oauth_callbacks_use_db_token_cache_not_file():
+    """The OAuth callbacks wrote the new token to the legacy file cache while the client reads
+    DatabaseTokenCache, so a re-auth never reached the client ("validation failed" despite a good
+    exchange). The global callbacks must write the same DB-backed store the client uses."""
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    src = open(_os.path.join(root, 'web_server.py'), encoding='utf-8').read()
+    assert "cache_path='config/.spotify_cache'" not in src          # no global file-cache writes
+    assert src.count('cache_handler=DatabaseTokenCache(config_manager)') >= 2

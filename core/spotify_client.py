@@ -17,12 +17,17 @@ logger = get_logger("spotify_client")
 # Single source of truth for the Spotify OAuth scope. Used by EVERY SpotifyOAuth
 # construction (the client, the per-profile registry, and all web_server callbacks) so
 # the authorize URL and token exchange can never request different scopes — a mismatch
-# silently re-prompts or denies. The `playlist-modify-*` pair powers exporting a mirrored
-# playlist back to Spotify (#945); existing users re-auth once to grant it.
+# silently re-prompts or denies.
+#
+# IMPORTANT — do NOT add scopes here lightly. Spotipy's validate_token treats a cached
+# token as invalid the moment the requested scope is no longer a subset of the token's
+# granted scope, so GROWING this string invalidates EVERY existing user's token and forces
+# a re-auth on upgrade. `playlist-modify-*` (for exporting a playlist back to Spotify, #945)
+# was pulled back out for exactly that reason — it broke all Spotify users on upgrade. The
+# Spotify export must request write access on-demand (incremental auth) instead.
 SPOTIFY_OAUTH_SCOPE = (
     "user-library-read user-read-private playlist-read-private "
-    "playlist-read-collaborative user-read-email user-follow-read "
-    "playlist-modify-public playlist-modify-private"
+    "playlist-read-collaborative user-read-email user-follow-read"
 )
 
 
