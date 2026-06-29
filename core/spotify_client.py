@@ -53,6 +53,36 @@ def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str
     return normalized
 
 
+def build_spotify_oauth_auth_manager(
+    config_manager=None,
+    *,
+    config: Optional[Dict[str, Any]] = None,
+) -> Optional[SpotifyOAuth]:
+    """Build SpotifyOAuth with the database-backed token cache.
+
+    OAuth callbacks and SpotifyClient must share the same cache store.
+    Callbacks that wrote to ``config/.spotify_cache`` while the client read
+    ``spotify.token_info`` from the DB left validation probing with a stale or
+    missing token; spotipy then tried interactive OAuth on port 8888 →
+    EADDRINUSE inside Docker.
+    """
+    from config.settings import config_manager as default_cm
+    from core.spotify_token_cache import DatabaseTokenCache
+
+    cm = config_manager or default_cm
+    cfg = normalize_spotify_oauth_config(config or cm.get_spotify_config())
+    if not cfg.get("client_id") or not cfg.get("client_secret"):
+        return None
+
+    return SpotifyOAuth(
+        client_id=cfg["client_id"],
+        client_secret=cfg["client_secret"],
+        redirect_uri=cfg.get("redirect_uri", "http://127.0.0.1:8888/callback"),
+        scope=SPOTIFY_OAUTH_SCOPE,
+        cache_handler=DatabaseTokenCache(cm),
+    )
+
+
 def _upgrade_spotify_image_url(url: str) -> str:
     """Upgrade a Spotify CDN image URL to the highest available resolution.
 
@@ -744,22 +774,11 @@ class SpotifyClient:
             return
         
         try:
-            # Tokens live in the database-backed config store, not a loose
-            # file: config/.spotify_cache sat in /app/config, which is only
-            # persistent when the user's compose maps it — an anonymous
-            # volume is recreated empty on every container pull, so tokens
-            # died nightly while every other setting survived ("it keeps
-            # unauthenticating" daily, wolf39us). The handler imports the
-            # legacy file once if the store is empty.
-            from core.spotify_token_cache import DatabaseTokenCache
-            auth_manager = SpotifyOAuth(
-                client_id=config['client_id'],
-                client_secret=config['client_secret'],
-                redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
-                scope=SPOTIFY_OAUTH_SCOPE,
-                cache_handler=DatabaseTokenCache(config_manager)
-            )
-            
+            auth_manager = build_spotify_oauth_auth_manager(config_manager, config=config)
+            if auth_manager is None:
+                logger.warning("Spotify credentials not configured")
+                return
+
             self.sp = spotipy.Spotify(auth_manager=auth_manager, retries=0, requests_timeout=15)
             # retries=0: prevent spotipy from sleeping for Retry-After duration on 429s
             # (can be hours). Our rate_limited decorator + global ban handle retries instead.

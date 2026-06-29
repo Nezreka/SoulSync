@@ -3,7 +3,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from core.spotify_client import normalize_spotify_oauth_config
+from unittest.mock import MagicMock, patch
+
+from core.spotify_client import build_spotify_oauth_auth_manager, normalize_spotify_oauth_config
+from core.spotify_token_cache import DatabaseTokenCache
 
 def test_normalization():
     # Whitespace + quotes are stripped (paste garbage); the redirect_uri's
@@ -88,6 +91,28 @@ def test_no_input():
     }
     assert normalize_spotify_oauth_config(None) == {}
     assert normalize_spotify_oauth_config(config) == expected
+
+
+def test_build_spotify_oauth_auth_manager_uses_database_cache():
+    cm = MagicMock()
+    cm.get_spotify_config.return_value = {
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "redirect_uri": "http://127.0.0.1:8888/callback",
+    }
+    with patch("core.spotify_client.SpotifyOAuth") as mock_oauth:
+        auth_manager = build_spotify_oauth_auth_manager(cm)
+        assert auth_manager is mock_oauth.return_value
+        kwargs = mock_oauth.call_args.kwargs
+        assert isinstance(kwargs["cache_handler"], DatabaseTokenCache)
+        assert kwargs["scope"]
+        assert "cache_path" not in kwargs
+
+
+def test_build_spotify_oauth_auth_manager_returns_none_without_creds():
+    cm = MagicMock()
+    cm.get_spotify_config.return_value = {"client_id": "", "client_secret": ""}
+    assert build_spotify_oauth_auth_manager(cm) is None
 
 # ── create_or_update_playlist: export a mirrored playlist back to Spotify (#945) ──
 

@@ -5195,8 +5195,11 @@ def spotify_callback():
             pass
 
     try:
-        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
-        from spotipy.oauth2 import SpotifyOAuth
+        from core.spotify_client import (
+            SpotifyClient,
+            build_spotify_oauth_auth_manager,
+            normalize_spotify_oauth_config,
+        )
         from config.settings import config_manager
 
         # Per-profile callback: the profile's own account via the shared app.
@@ -5229,13 +5232,9 @@ def spotify_callback():
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-        auth_manager = SpotifyOAuth(
-            client_id=config['client_id'],
-            client_secret=config['client_secret'],
-            redirect_uri=configured_uri,
-            scope=SPOTIFY_OAUTH_SCOPE,
-            cache_path='config/.spotify_cache'
-        )
+        auth_manager = build_spotify_oauth_auth_manager(config_manager)
+        if not auth_manager:
+            raise Exception("Spotify credentials not configured")
 
         token_info = auth_manager.get_access_token(auth_code)
 
@@ -5244,6 +5243,7 @@ def spotify_callback():
             global spotify_client
             clear_cached_metadata_client("spotify")
             spotify_client = get_spotify_client()
+            spotify_client._invalidate_auth_cache()
             if spotify_client.is_spotify_authenticated():
                 # Clear any active rate limit ban and post-ban cooldown
                 # so Spotify is immediately usable after re-auth
@@ -36102,25 +36102,21 @@ def start_oauth_callback_servers():
 
                     # Manually trigger the token exchange using spotipy's auth manager
                     try:
-                        from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
-                        from core.spotify_client import normalize_spotify_oauth_config
+                        from core.spotify_client import (
+                            build_spotify_oauth_auth_manager,
+                            normalize_spotify_oauth_config,
+                        )
 
                         # Get Spotify config
                         config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-                        # Create auth manager and exchange code for token
-                        auth_manager = SpotifyOAuth(
-                            client_id=config['client_id'],
-                            client_secret=config['client_secret'],
-                            redirect_uri=configured_uri,
-                            scope=SPOTIFY_OAUTH_SCOPE,
-                            cache_path='config/.spotify_cache'
-                        )
+                        auth_manager = build_spotify_oauth_auth_manager(config_manager)
+                        if not auth_manager:
+                            raise Exception("Spotify credentials not configured")
 
-                        # Extract the authorization code and exchange it for tokens
                         token_info = auth_manager.get_access_token(auth_code)
 
                         if token_info:
@@ -36128,6 +36124,7 @@ def start_oauth_callback_servers():
                             global spotify_client
                             clear_cached_metadata_client("spotify")
                             spotify_client = get_spotify_client()
+                            spotify_client._invalidate_auth_cache()
 
                             if spotify_client.is_spotify_authenticated():
                                 # Clear rate limit ban + post-ban cooldown so Spotify is usable immediately
