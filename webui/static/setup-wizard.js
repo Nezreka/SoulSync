@@ -253,6 +253,7 @@ function _renderWelcome(el) {
 function _renderMetadata(el) {
     const sources = [
         { id: 'deezer', name: 'Deezer', badge: 'Recommended', desc: 'No authentication required. Rich metadata with album art.' },
+        { id: 'jiosaavn', name: 'JioSaavn', badge: '', desc: 'No authentication required. Strong for Indian and Bollywood catalogs.' },
         { id: 'spotify', name: 'Spotify', badge: '', desc: 'Requires API credentials. Best for playlist sync.' },
         { id: 'itunes', name: 'iTunes', badge: '', desc: 'No authentication required. Apple Music catalog.' },
     ];

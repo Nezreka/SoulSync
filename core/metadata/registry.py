@@ -18,7 +18,7 @@ logger = get_logger("metadata.registry")
 
 MetadataClientFactory = Callable[[], Any]
 
-METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz")
+METADATA_SOURCE_PRIORITY = ("deezer", "itunes", "spotify", "discogs", "hydrabase", "musicbrainz", "jiosaavn")
 METADATA_SOURCE_LABELS = {
     "spotify": "Spotify",
     "itunes": "iTunes",
@@ -26,6 +26,7 @@ METADATA_SOURCE_LABELS = {
     "discogs": "Discogs",
     "hydrabase": "Hydrabase",
     "musicbrainz": "MusicBrainz",
+    "jiosaavn": "JioSaavn",
 }
 
 _UNSET = object()
@@ -155,6 +156,14 @@ def _get_musicbrainz_factory(client_factory: Optional[MetadataClientFactory]) ->
     from core.musicbrainz_search import MusicBrainzSearchClient
 
     return MusicBrainzSearchClient
+
+
+def _get_jiosaavn_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.jiosaavn_client import JioSaavnClient
+
+    return JioSaavnClient
 
 
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
@@ -326,6 +335,19 @@ def get_musicbrainz_client(client_factory: Optional[MetadataClientFactory] = Non
         return client
 
 
+def get_jiosaavn_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached JioSaavn metadata client keyed by base URL."""
+    base_url = _get_config_value("jiosaavn.base_url", "https://saavn.sumit.co") or "https://saavn.sumit.co"
+    cache_key = f"jiosaavn::{base_url.rstrip('/')}"
+    factory = _get_jiosaavn_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
 def is_hydrabase_enabled() -> bool:
     """Return True when Hydrabase is connected and app-enabled."""
     try:
@@ -419,6 +441,7 @@ def get_primary_client(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return client for configured primary source."""
     return get_client_for_source(
@@ -429,6 +452,7 @@ def get_primary_client(
         discogs_client_factory=discogs_client_factory,
         amazon_client_factory=amazon_client_factory,
         musicbrainz_client_factory=musicbrainz_client_factory,
+        jiosaavn_client_factory=jiosaavn_client_factory,
     )
 
 
@@ -440,6 +464,7 @@ def get_primary_source_status(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
@@ -455,6 +480,7 @@ def get_primary_source_status(
             discogs_client_factory=discogs_client_factory,
             amazon_client_factory=amazon_client_factory,
             musicbrainz_client_factory=musicbrainz_client_factory,
+            jiosaavn_client_factory=jiosaavn_client_factory,
         )
         if source == "spotify":
             connected = bool(client and client.is_spotify_authenticated())
@@ -508,6 +534,7 @@ def get_client_for_source(
     discogs_client_factory: Optional[MetadataClientFactory] = None,
     amazon_client_factory: Optional[MetadataClientFactory] = None,
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
+    jiosaavn_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
     if source == "spotify":
@@ -536,5 +563,8 @@ def get_client_for_source(
 
     if source == "musicbrainz":
         return get_musicbrainz_client(client_factory=musicbrainz_client_factory)
+
+    if source == "jiosaavn":
+        return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
 
     return None

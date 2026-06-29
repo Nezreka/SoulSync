@@ -31,7 +31,7 @@ from . import sources
 logger = logging.getLogger(__name__)
 
 VALID_SOURCES = (
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'musicbrainz', 'amazon', 'jiosaavn',
 )
 
 VALID_STREAM_SOURCES = VALID_SOURCES + ('youtube_videos',)
@@ -96,6 +96,13 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
             return get_amazon_client(), True
         except Exception as e:
             logger.warning(f"Amazon Music client init failed: {e}")
+            return None, False
+    if source_name == 'jiosaavn':
+        try:
+            from core.metadata.registry import get_jiosaavn_client
+            return get_jiosaavn_client(), True
+        except Exception as e:
+            logger.warning(f"JioSaavn client init failed: {e}")
             return None, False
     return None, False
 
@@ -194,6 +201,8 @@ def _alternate_sources(primary_source: str, deps: SearchDeps) -> list[str]:
         alts.append('hydrabase')
     if primary_source != 'amazon':
         alts.append('amazon')       # always available (T2Tunes, no auth)
+    if primary_source != 'jiosaavn':
+        alts.append('jiosaavn')     # always available (public API)
     alts.append('youtube_videos')   # always available (yt-dlp, no auth)
     alts.append('musicbrainz')      # always available (public API)
     return alts

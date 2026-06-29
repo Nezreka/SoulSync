@@ -2143,6 +2143,7 @@ SERVICE_CONFIG_REGISTRY = {
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
     'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
+    'jiosaavn':     {'always': True},   # public proxy API, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -23407,6 +23408,11 @@ def _get_metadata_fallback_client():
         if hydrabase_client and hydrabase_client.is_connected():
             return hydrabase_client
         return _get_itunes_client()
+    if source == 'jiosaavn':
+        from core.metadata.registry import get_jiosaavn_client
+        client = get_jiosaavn_client()
+        if client is not None:
+            return client
     return _get_itunes_client()
 
 @app.route('/api/deezer/arl-status', methods=['GET'])
@@ -27395,7 +27401,7 @@ def select_my_service_credential():
 # ==================================================================================
 
 # Selectable metadata sources (mirrors the Settings <select>).
-_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz', 'jiosaavn']
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
 _QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
@@ -28794,7 +28800,9 @@ def watchlist_artist_config(artist_id):
                 lookback_days = int(lookback_days) if lookback_days != '' else None
             preferred_metadata_source = data.get('preferred_metadata_source', None)
             # Validate — only accept known sources, empty string means clear override
-            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            if preferred_metadata_source == '' or preferred_metadata_source not in (
+                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz', 'jiosaavn',
+            ):
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.
