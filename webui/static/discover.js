@@ -36,9 +36,10 @@ function _advState(v) {
     return 'Deep cuts only';
 }
 // green (120°) → red (0°) through the warm spectrum (yellow, orange) as the orb moves right.
-function _advColor(v, light) {
+function _advColor(v, light, alpha) {
     const hue = 120 * (1 - Math.max(0, Math.min(1, v)));
-    return `hsl(${hue.toFixed(0)}, 85%, ${light || 55}%)`;
+    const l = light || 55;
+    return alpha != null ? `hsla(${hue.toFixed(0)}, 85%, ${l}%, ${alpha})` : `hsl(${hue.toFixed(0)}, 85%, ${l}%)`;
 }
 // Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
 function _advWaveY(u, v) {
@@ -57,14 +58,16 @@ function _advDraw() {
     if (track.offsetParent !== null) {  // skip the work while the Discover page is hidden
         const v = _advWave.value;
         _advWave.phase += 0.03 + v * 0.07;   // waves faster the more adventurous
-        let d = '';
+        let line = '';
         const N = 90;
         for (let i = 0; i <= N; i++) {
             const u = i / N;
-            d += (i === 0 ? 'M ' : ' L ') + (u * 1000).toFixed(1) + ' ' + _advWaveY(u, v).toFixed(1);
+            line += (i === 0 ? 'M ' : ' L ') + (u * 1000).toFixed(1) + ' ' + _advWaveY(u, v).toFixed(1);
         }
-        path.setAttribute('d', d);
-        path.setAttribute('stroke', _advColor(v));
+        path.setAttribute('d', line);
+        // the luminous filled area = the wave closed down to the baseline
+        const area = document.getElementById('adv-wave-area');
+        if (area) area.setAttribute('d', line + ' L 1000 80 L 0 80 Z');
         const orb = document.getElementById('adv-wave-orb');
         if (orb) orb.style.top = (_advWaveY(v, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
     }
@@ -73,15 +76,27 @@ function _advDraw() {
 function _advApply(v) {
     v = Math.max(0, Math.min(1, v));
     _advWave.value = v;
+    const c = _advColor(v, 55);
+    const cBright = _advColor(v, 62);
+    // Line stroke + its colour glow (set on change, not every frame, so the rAF stays cheap).
+    const path = document.getElementById('adv-wave-path');
+    if (path) { path.setAttribute('stroke', c); path.style.filter = `drop-shadow(0 0 7px ${c})`; }
+    const fillTop = document.getElementById('adv-wave-fill-top');
+    if (fillTop) fillTop.setAttribute('stop-color', c);   // luminous filled area
     const orb = document.getElementById('adv-wave-orb');
     if (orb) {
         orb.style.left = (v * 100).toFixed(2) + '%';
-        const c = _advColor(v, 58);
-        orb.style.background = c;
-        orb.style.boxShadow = `0 0 18px 2px ${c}, 0 0 0 5px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.55)`;
+        orb.style.color = c;                              // currentColor for the pulsing ring
+        orb.style.background = cBright;
+        orb.style.boxShadow = `0 0 22px 3px ${c}, 0 0 0 6px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.6)`;
+    }
+    const aura = document.getElementById('adv-wave-aura');   // colour wash that follows the orb
+    if (aura) {
+        aura.style.left = (v * 100).toFixed(2) + '%';
+        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.42)} 0%, transparent 68%)`;
     }
     const stateEl = document.getElementById('adv-wave-state');
-    if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = _advColor(v, 62); }
+    if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }
 }
 let _advCommitTimer = null;
 function _advCommit(v) {
