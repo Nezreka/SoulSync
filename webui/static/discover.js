@@ -2388,13 +2388,11 @@ async function loadDecadeBrowserTabs() {
         grid.className = 'discover-grid';
         const mixes = data.decades.map(d => {
             const year = d.year;
-            const icon = getDecadeIcon(year);
             return {
                 key: `decade_${year}`,
                 title: `${year}s`,
                 subtitle: `${year}s Classics`,
                 trackCount: d.track_count,
-                coverHtml: `<div class="mix-card-decade"><span class="mix-card-decade-icon">${icon}</span><span class="mix-card-decade-label">${year}s</span></div>`,
                 statusBase: `decade-${year}`,
                 actions: [
                     { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDecade(${year})` },
@@ -3306,7 +3304,6 @@ function groupListenBrainzPlaylists(playlists) {
 function buildListenBrainzPlaylistsHtml(playlists, tabId) {
     // #discover redesign: each playlist is a mix card (opens its tracks + actions in the shared
     // modal) instead of a full-width track-table subsection. Shared by Last.fm Radio + ListenBrainz.
-    const icon = tabId === 'lastfm_radio' ? '\U0001F4FB' : '\U0001F3A7';
     const mixes = playlists.map(playlist => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
@@ -3339,7 +3336,6 @@ function buildListenBrainzPlaylistsHtml(playlists, tabId) {
         return {
             key: `lb-${tabId}-${identifier}`,
             title, subtitle: `by ${creator}`, trackCount,
-            coverHtml: `<div class="mix-card-decade"><span class="mix-card-decade-icon">${icon}</span></div>`,
             statusBase: playlistId,
             statusHtml,
             actions: [
@@ -3355,6 +3351,9 @@ function buildListenBrainzPlaylistsHtml(playlists, tabId) {
         };
     });
     mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    // Caller injects this HTML synchronously; hydrate covers + tracks on the next tick so the cards
+    // exist in the DOM. Background-fetches each playlist's tracks → real mosaic + instant modal.
+    setTimeout(() => _hydrateMixCovers(mixes), 0);
     return `<div class="discover-grid">${mixes.map(_buildMixCard).join('')}</div>`;
 }
 
@@ -4395,26 +4394,42 @@ async function loadPersonalizedDailyMixes() {
     }
 }
 
+// Tracks come in two shapes across the discovery sources: flat (track_name/artist_name/…) for the
+// personalized mixes, or nested under track_data_json (name/artists[]/album/…) for the decade,
+// ListenBrainz + Last.fm playlists. Normalize both so renderers don't print "undefined". #discover
+function _normalizeTrack(track) {
+    const td = (track && track.track_data_json) || {};
+    const a0 = td.artists && td.artists[0];
+    return {
+        name: td.name || td.track_name || track.track_name || 'Unknown Track',
+        artist: (a0 && (a0.name || a0)) || td.artist_name || track.artist_name || 'Unknown Artist',
+        album: (td.album && td.album.name) || td.album_name || track.album_name || 'Unknown Album',
+        cover: (td.album && td.album.images && td.album.images[0] && td.album.images[0].url) || track.album_cover_url || '',
+        durationMs: td.duration_ms || track.duration_ms || 0,
+    };
+}
+
 function renderCompactPlaylist(container, tracks) {
     let html = '<div class="discover-playlist-tracks-compact">';
 
     tracks.forEach((track, index) => {
-        const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-        const durationMin = Math.floor(track.duration_ms / 60000);
-        const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
+        const t = _normalizeTrack(track);
+        const coverUrl = t.cover || '/static/placeholder-album.png';
+        const durationMin = Math.floor(t.durationMs / 60000);
+        const durationSec = Math.floor((t.durationMs % 60000) / 1000);
         const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
-                    <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
+                    <img src="${coverUrl}" alt="${_esc(t.album)}" loading="lazy">
                 </div>
                 <div class="track-compact-info">
-                    <div class="track-compact-name">${track.track_name}</div>
-                    <div class="track-compact-artist">${track.artist_name}</div>
+                    <div class="track-compact-name">${_esc(t.name)}</div>
+                    <div class="track-compact-artist">${_esc(t.artist)}</div>
                 </div>
-                <div class="track-compact-album">${track.album_name}</div>
+                <div class="track-compact-album">${_esc(t.album)}</div>
                 <div class="track-compact-duration">${duration}</div>
             </div>
         `;
@@ -4442,7 +4457,7 @@ function _buildMixCard(mix) {
     } else {
         const covers = [];
         for (const t of (mix.tracks || [])) {
-            const c = t.album_cover_url;
+            const c = _normalizeTrack(t).cover;
             if (c && !covers.includes(c)) covers.push(c);
             if (covers.length >= 4) break;
         }
@@ -4452,7 +4467,7 @@ function _buildMixCard(mix) {
     }
     const count = mix.tracks ? mix.tracks.length : (mix.trackCount || 0);
     return `
-        <div class="discover-mix-card" onclick="openMixModalByKey('${mix.key}')">
+        <div class="discover-mix-card" data-mix-key="${mix.key}" onclick="openMixModalByKey('${mix.key}')">
             ${cover}
             <div class="mix-card-name">${_esc(mix.title)}</div>
             <div class="mix-card-meta">${count} tracks</div>
@@ -4463,11 +4478,42 @@ function _buildMixCard(mix) {
 // Render a set of mix cards into ANY section grid (Time Machine, Last.fm Radio, ListenBrainz…) and
 // register them so openMixModalByKey can find them. Unlike _upsertMixCard this targets a given
 // container rather than the shared "Your Mixes" shelf, so each section keeps its own header.
+// For sections whose tracks load lazily (decades, Last.fm, ListenBrainz), fetch each mix's tracks in
+// the background and upgrade its card from the placeholder to a real 2x2 mosaic — and stash the
+// tracks on the mix so opening the modal is instant. #discover redesign
+function _hydrateMixCovers(mixes) {
+    mixes.forEach(mix => {
+        if (mix.tracks || !mix.fetchTracks) return;
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const card = document.querySelector(`.discover-mix-card[data-mix-key="${mix.key}"]`);
+            if (!card) return;
+            const meta = card.querySelector('.mix-card-meta');
+            if (meta) meta.textContent = `${mix.tracks.length} tracks`;
+            const covers = [];
+            for (const t of mix.tracks) {
+                const c = _normalizeTrack(t).cover;
+                if (c && !covers.includes(c)) covers.push(c);
+                if (covers.length >= 4) break;
+            }
+            if (!covers.length) return;  // no art — leave the placeholder cover
+            while (covers.length < 4) covers.push('/static/placeholder-album.png');
+            const coverEl = card.querySelector('.mix-card-cover');
+            if (coverEl) {
+                coverEl.className = 'mix-card-cover';
+                coverEl.innerHTML = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('')
+                    + '<div class="mix-card-play">&#9654;</div>';
+            }
+        }).catch(() => {});
+    });
+}
+
 function _renderMixGrid(container, mixes) {
     if (!container) return;
     mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
     container.innerHTML = mixes.map(_buildMixCard).join('');
     _clampGrid(container);
+    _hydrateMixCovers(mixes);
 }
 
 // Register/refresh a mix's card in the "Your Mixes" shelf and reveal the section.
