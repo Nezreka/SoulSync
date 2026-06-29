@@ -29,9 +29,12 @@ class _FakeClient:
         return self.result
 
 
-def _fake_resolver(ids):
-    """resolve_ids_fn stub returning the given service ids as the resolved set."""
-    def fn(tracks, service, on_progress=None):
+def _fake_resolver(ids, seen=None):
+    """resolve_ids_fn stub returning the given service ids. When ``seen`` is given, records
+    the search_id_fn it was called with (to assert the backfill toggle wiring)."""
+    def fn(tracks, service, search_id_fn=None, on_progress=None):
+        if seen is not None:
+            seen['search_id_fn'] = search_id_fn
         resolved = [{'artist': 'A', 'title': f't{i}', 'service_track_id': s}
                     for i, s in enumerate(ids)]
         matched = sum(1 for s in ids if s)
@@ -88,3 +91,22 @@ def test_reexport_passes_existing_target():
     client = _FakeClient({'success': True, 'playlist_id': 'pl-old', 'added': 1})
     ws._run_service_export(job, db, 5, 'PL', 'deezer', client, _fake_resolver(['dz']))
     assert client.calls[0][2] == 'pl-old'
+
+
+def test_backfill_off_passes_no_search_fn():
+    job = {}   # no 'backfill' key → off
+    seen = {}
+    ws._run_service_export(job, _FakeDB([{}]), 5, 'PL', 'deezer',
+                           _FakeClient({'success': True, 'playlist_id': 'p', 'added': 1}),
+                           _fake_resolver(['dz'], seen))
+    assert seen['search_id_fn'] is None
+
+
+def test_backfill_on_wires_search_fn(monkeypatch):
+    job = {'backfill': True}
+    seen = {}
+    monkeypatch.setattr(ws, '_build_service_search_id_fn', lambda service: 'SEARCH_FN')
+    ws._run_service_export(job, _FakeDB([{}]), 5, 'PL', 'spotify',
+                           _FakeClient({'success': True, 'playlist_id': 'p', 'added': 1}),
+                           _fake_resolver(['sx'], seen))
+    assert seen['search_id_fn'] == 'SEARCH_FN'

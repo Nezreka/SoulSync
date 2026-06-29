@@ -162,21 +162,25 @@ def resolve_service_track_ids(
     service: str,
     *,
     db_fn: Optional[Callable[[str, str, str], Optional[str]]] = None,
+    search_id_fn: Optional[Callable[[str, str], Optional[str]]] = None,
     on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Resolve a mirrored playlist's tracks to target-service track IDs for export.
 
     Waterfall per track: the discovery cache (``extra_data`` — free + already confidently
-    matched) → the library track's stored service id. A track with neither is reported
-    unmatched (caller skips it — never a guessed/wrong id). Returns
-    ``{"resolved": [{artist, title, album, service_track_id}], "stats": {...}}`` with
-    ``from_cache`` / ``from_library`` / ``unmatched`` tallies for the status display.
+    matched) → the library track's stored service id → (only when ``search_id_fn`` is
+    given, i.e. the opt-in backfill toggle) a confident live-search match. A track that
+    clears none of these is reported unmatched (caller skips it — never a guessed/wrong
+    id). Returns ``{"resolved": [{artist, title, album, service_track_id}], "stats":
+    {...}}`` with ``from_cache`` / ``from_library`` / ``from_search`` / ``unmatched``
+    tallies for the status display.
     """
     db_fn = db_fn or db_service_track_id
     total = len(tracks or [])
     resolved: List[Dict[str, Any]] = []
     stats: Dict[str, Any] = {
-        "total": total, "resolved": 0, "unmatched": 0, "from_cache": 0, "from_library": 0,
+        "total": total, "resolved": 0, "unmatched": 0,
+        "from_cache": 0, "from_library": 0, "from_search": 0,
     }
     for i, t in enumerate(tracks or []):
         if not isinstance(t, dict):
@@ -192,6 +196,10 @@ def resolve_service_track_ids(
             tid = db_fn(artist, title, service)
             if tid:
                 stats["from_library"] += 1
+            elif search_id_fn is not None:
+                tid = search_id_fn(artist, title)
+                if tid:
+                    stats["from_search"] += 1
 
         resolved.append({"artist": artist, "title": title, "album": album,
                          "service_track_id": tid or None})
@@ -203,6 +211,45 @@ def resolve_service_track_ids(
                 pass
 
     return {"resolved": resolved, "stats": stats}
+
+
+# Confidence floor for backfill, on the score_track scale (~1.5 = exact title + exact
+# artist, thanks to the 1.5x artist boost). A cover/karaoke (x0.05) or a wrong-artist hit
+# (no boost, caps ~1.0) can't clear this — so backfill never adds a guessed/wrong version.
+BACKFILL_MIN_SCORE = 1.2
+
+
+def search_service_track_id(
+    artist: str,
+    title: str,
+    *,
+    search_fn: Callable[[str], List[Any]],
+    min_score: float = BACKFILL_MIN_SCORE,
+) -> Optional[str]:
+    """Confident live-search match for export backfill (#945): search the target service
+    for (artist, title), rerank by relevance, and return the top match's id ONLY if it
+    clears the confidence floor. Below the floor → None: the track is left out of the
+    export rather than risk a wrong/cover/karaoke version (the whole point of backfill is
+    coverage WITHOUT the wrong-track risk). ``search_fn(query) -> List[Track]`` is injected
+    so this is unit-testable without a live service."""
+    if not title:
+        return None
+    from core.metadata.relevance import build_combined_search_query, filter_and_rerank
+    query = build_combined_search_query(title, artist)
+    try:
+        candidates = list(search_fn(query) or [])
+    except Exception as exc:
+        logger.debug(f"export backfill search failed for '{artist} - {title}': {exc}")
+        return None
+    if not candidates:
+        return None
+    ranked = filter_and_rerank(
+        candidates, expected_title=title, expected_artist=artist, min_score=min_score,
+    )
+    if not ranked:
+        return None
+    tid = getattr(ranked[0], "id", None)
+    return str(tid) if tid else None
 
 
 def file_recording_mbid(artist: str, title: str) -> Optional[str]:

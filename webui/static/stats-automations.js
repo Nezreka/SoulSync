@@ -676,20 +676,26 @@ function exportMirroredPlaylist(playlistId, name) {
                 <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Deezer playlist from this list (uses your Deezer login).</div>
             </button>
             <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID for those). Tracks without a match can't be included — you'll see how many made it. Renaming/re-syncing can reset play counts on the destination.</div>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.6);cursor:pointer;">
+                <input type="checkbox" id="pl-export-backfill" style="margin-top:2px;flex-shrink:0;accent-color:rgb(var(--accent-rgb));">
+                <span><b style="color:rgba(255,255,255,0.75);">Match missing tracks</b> (Spotify/Deezer only) — search the service for tracks with no known ID. Slower, and only confident matches are added.</span>
+            </label>
             <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
         </div>`;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
         btn.addEventListener('click', () => {
             const mode = btn.dataset.mode;
+            const bfEl = overlay.querySelector('#pl-export-backfill');
+            const backfill = !!(bfEl && bfEl.checked);
             overlay.remove();
-            _startPlaylistExport(playlistId, mode, name);
+            _startPlaylistExport(playlistId, mode, name, backfill);
         });
     });
     document.body.appendChild(overlay);
 }
 
-async function _startPlaylistExport(playlistId, mode, name) {
+async function _startPlaylistExport(playlistId, mode, name, backfill) {
     _setExportStatus(playlistId, `<span style="color:#a78bfa;">Starting export…</span>`);
     try {
         // Spotify/Deezer go to the service endpoint; ListenBrainz/JSPF keep the LB one.
@@ -699,7 +705,7 @@ async function _startPlaylistExport(playlistId, mode, name) {
             : `/api/playlists/${playlistId}/export/listenbrainz`;
         const resp = await fetch(url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: isService ? '{}' : JSON.stringify({ mode }),
+            body: isService ? JSON.stringify({ backfill: !!backfill }) : JSON.stringify({ mode }),
         });
         const data = await resp.json();
         if (!data.success || !data.job_id) {
@@ -729,7 +735,7 @@ async function _pollPlaylistExport(jobId, playlistId, mode, name) {
             if (mode === 'spotify' || mode === 'deezer') {
                 const dest = mode[0].toUpperCase() + mode.slice(1);
                 const push = job.push || {};
-                const cov = `${st.resolved || 0} added${st.unmatched ? ` · ${st.unmatched} not on ${dest}` : ''}`;
+                const cov = `${st.resolved || 0} added${st.from_search ? ` (${st.from_search} matched live)` : ''}${st.unmatched ? ` · ${st.unmatched} not on ${dest}` : ''}`;
                 const link = push.url ? ` <a href="${push.url}" target="_blank" style="color:#38bdf8;">open</a>` : '';
                 _setExportStatus(playlistId, `<span style="color:#22c55e;">Exported to ${dest} · ${cov}</span>${link}`, 12000);
                 if (typeof showToast === 'function') showToast(`Playlist exported to ${dest} (${cov})`, 'success');
