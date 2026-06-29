@@ -10515,6 +10515,32 @@ class MusicDatabase:
             logger.error(f"Error checking similar artists freshness: {e}")
             return False  # Default to re-fetching on error
 
+    def get_similar_artist_popularities(self, names, profile_id: int = 1):
+        """Map lowercased artist name -> max stored popularity (0-100) from ``similar_artists`` for
+        the given profile. Lets the Discover routes apply the adventurousness popularity-penalty at
+        request time (the stored listening-recs don't carry popularity inline). Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in clean)
+                cursor.execute(
+                    f"""SELECT LOWER(similar_artist_name) AS n, MAX(popularity) AS pop
+                        FROM similar_artists
+                        WHERE profile_id = ? AND LOWER(similar_artist_name) IN ({placeholders})
+                        GROUP BY LOWER(similar_artist_name)""",
+                    [profile_id] + clean,
+                )
+                for row in cursor.fetchall():
+                    if row['pop'] is not None:
+                        out[row['n']] = row['pop']
+        except Exception as e:
+            logger.debug(f"get_similar_artist_popularities failed: {e}")
+        return out
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
