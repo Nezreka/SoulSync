@@ -27741,9 +27741,68 @@ _playlist_export_jobs = {}
 _playlist_export_jobs_lock = threading.Lock()
 
 
+def _run_service_export(job, db, playlist_id, title, service, client, resolve_fn):
+    """Export a mirrored playlist back to a streaming service (Spotify/Deezer, #945).
+
+    Reuses the same resolve→push→store-target machinery the ListenBrainz export uses,
+    just with a service track-ID resolver and a service write client. Deps are injected
+    so the orchestration (resolve, unmatched-guard, push, idempotent target store, error
+    paths) is unit-testable without a DB or live service.
+    """
+    from core.exports.playlist_export import resolve_playlist_tracks
+
+    tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+    job['total'] = len(tracks)
+    job['phase'] = 'resolving'
+
+    def on_progress(done, total, stats):
+        job['done'] = done
+        job['stats'] = dict(stats)
+
+    out = resolve_playlist_tracks(tracks, resolve_fn, on_progress=on_progress,
+                                  id_key='service_track_id')
+    job['stats'] = out['stats']
+    ids = [r['service_track_id'] for r in out['resolved'] if r.get('service_track_id')]
+    if not ids:
+        job['phase'] = 'error'
+        job['error'] = f"No tracks matched a {service.title()} ID — nothing to export"
+        return
+    if client is None:
+        job['phase'] = 'error'
+        job['error'] = f"{service.title()} is not connected"
+        return
+
+    job['phase'] = 'pushing'
+    # Re-export updates the same service playlist in place (idempotent), mirroring the
+    # ListenBrainz #903 fix — the target ID is stored per (playlist, service).
+    existing = db.get_playlist_export_target(int(playlist_id), service)
+    res = client.create_or_update_playlist(title, ids, existing_id=existing)
+    job['push'] = res
+    if res.get('success'):
+        if res.get('playlist_id'):
+            db.set_playlist_export_target(int(playlist_id), service, str(res['playlist_id']))
+        job['phase'] = 'done'
+    else:
+        job['phase'] = 'error'
+        job['error'] = res.get('error') or f"{service.title()} push failed"
+
+
 def _run_playlist_export(job_id, playlist_id, title, mode):
     job = _playlist_export_jobs[job_id]
     try:
+        # Service export (#945) — resolve to Spotify/Deezer track IDs and push.
+        if mode in ('spotify', 'deezer'):
+            from core.exports.export_sources import build_service_resolve_fn
+            db = get_database()
+            if mode == 'spotify':
+                client = get_spotify_client()
+            else:
+                from core.deezer_download_client import DeezerDownloadClient
+                client = DeezerDownloadClient()
+            _run_service_export(job, db, playlist_id, title, mode, client,
+                                build_service_resolve_fn(mode))
+            return
+
         from core.exports.export_sources import build_resolve_fn
         from core.exports.playlist_export import resolve_playlist_tracks
         from core.exports.jspf_export import build_jspf
@@ -27813,6 +27872,38 @@ def start_playlist_export_listenbrainz(playlist_id):
         return jsonify({"success": True, "job_id": job_id})
     except Exception as e:
         logger.error(f"Playlist export start failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/<playlist_id>/export/service/<service>', methods=['POST'])
+def start_playlist_export_service(playlist_id, service):
+    """Export a mirrored playlist back to a streaming service (#945).
+
+    ``service`` ∈ {spotify, deezer}. Creates a service-owned playlist (or updates the
+    one a prior export created) from the library tracks' stored service IDs. Returns
+    {job_id} to poll via the shared export-status endpoint."""
+    try:
+        service = (service or '').lower()
+        if service not in ('spotify', 'deezer'):
+            return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': service, 'phase': 'starting', 'done': 0, 'total': 0,
+                'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export,
+                             args=(job_id, playlist_id, title, service), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Service playlist export start failed ({service}): {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
