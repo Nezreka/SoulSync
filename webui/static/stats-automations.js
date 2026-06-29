@@ -667,14 +667,18 @@ function exportMirroredPlaylist(playlistId, name) {
                 <div style="font-weight:600;">Download .jspf file</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.55);">Save a JSPF playlist you can upload to ListenBrainz manually.</div>
             </button>
+            <button class="pl-export-choice" data-mode="spotify" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to Spotify</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Spotify playlist in your account (the first time, you'll grant permission to create playlists).</div>
+            </button>
             <button class="pl-export-choice" data-mode="deezer" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
                 <div style="font-weight:600;">Sync to Deezer</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Deezer playlist from this list (uses your Deezer login).</div>
             </button>
-            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Deezer ID for that). Tracks without a match can't be included — you'll see how many made it. Renaming/re-syncing can reset play counts on the destination.</div>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID for those). Tracks without a match can't be included — you'll see how many made it. Renaming/re-syncing can reset play counts on the destination.</div>
             <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.6);cursor:pointer;">
                 <input type="checkbox" id="pl-export-backfill" style="margin-top:2px;flex-shrink:0;accent-color:rgb(var(--accent-rgb));">
-                <span><b style="color:rgba(255,255,255,0.75);">Match missing tracks</b> (Deezer) — search Deezer for tracks with no known ID. Slower, and only confident matches are added.</span>
+                <span><b style="color:rgba(255,255,255,0.75);">Match missing tracks</b> (Spotify/Deezer) — search the service for tracks with no known ID. Slower, and only confident matches are added.</span>
             </label>
             <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
         </div>`;
@@ -726,8 +730,15 @@ async function _startPlaylistExport(playlistId, mode, name, backfill) {
             body: isService ? JSON.stringify({ backfill: !!backfill }) : JSON.stringify({ mode }),
         });
         const data = await resp.json();
+        // Spotify export needs a one-time write-permission grant. Open the consent in a new tab
+        // and tell the user to try again once they've authorized.
+        if (data.needs_auth && data.auth_url) {
+            window.open(data.auth_url, '_blank');
+            _setExportStatus(playlistId, `<span style="color:#f59e0b;">Spotify needs permission to create playlists — approve it in the new tab, then click Export again.</span>`, 15000);
+            return;
+        }
         if (!data.success || !data.job_id) {
-            _setExportStatus(playlistId, `<span style="color:#ef4444;">Export failed to start</span>`);
+            _setExportStatus(playlistId, `<span style="color:#ef4444;">${_esc(data.error || 'Export failed to start')}</span>`);
             return;
         }
         _pollPlaylistExport(data.job_id, playlistId, mode, name);
