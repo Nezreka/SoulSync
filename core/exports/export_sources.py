@@ -72,6 +72,55 @@ def db_recording_mbid(artist: str, title: str) -> Optional[str]:
     return _db_match(artist, title)[0]
 
 
+# Service → the tracks-table column carrying that service's track ID (set by enrichment).
+# Trusted constants — never user input — so safe to interpolate into the SELECT below.
+_SERVICE_ID_COLUMNS = {"spotify": "spotify_track_id", "deezer": "deezer_id"}
+
+
+def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
+    """The service track ID (``spotify_track_id`` / ``deezer_id``) stored on a matched
+    library track — what lets a mirrored playlist be exported BACK to Spotify/Deezer
+    without re-searching, since enrichment already pinned it (#945). Text-matches by
+    (artist, title), same as the MBID resolver. Fail-safe: any miss/error returns None."""
+    column = _SERVICE_ID_COLUMNS.get((service or "").lower())
+    if not column or not title:
+        return None
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT t.{column} FROM tracks t JOIN artists a ON t.artist_id = a.id "
+                "WHERE LOWER(t.title) = LOWER(?) AND LOWER(a.name) = LOWER(?) LIMIT 1",
+                (title, artist),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            val = row[0] if not hasattr(row, "keys") else row[column]
+            return val or None
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110
+                pass
+    except Exception as exc:
+        logger.debug(f"export service-id lookup failed for '{artist} - {title}' ({service}): {exc}")
+        return None
+
+
+def build_service_resolve_fn(service: str) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
+    """resolve_fn for service-playlist export: ``(artist, title) -> (service_track_id, 'library')``.
+    Plugs into ``resolve_playlist_tracks(..., id_key='service_track_id')`` exactly like the
+    MBID resolver plugs in for ListenBrainz."""
+    def resolve_fn(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+        tid = db_service_track_id(artist, title, service)
+        return (tid, "library" if tid else None)
+    return resolve_fn
+
+
 def file_recording_mbid(artist: str, title: str) -> Optional[str]:
     """Recording MBID read from the matched track's file tag (set on import post-processing)."""
     _mbid, fpath = _db_match(artist, title)

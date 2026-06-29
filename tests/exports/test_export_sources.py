@@ -57,3 +57,34 @@ def test_all_miss_returns_none_and_no_write():
     fn, recorded = _wire()
     assert fn("A", "T") == (None, None)
     assert recorded == {}
+
+
+# ── service track-id resolver (#945 export to Spotify/Deezer) ──
+
+from core.exports.export_sources import (
+    db_service_track_id,
+    build_service_resolve_fn,
+    _SERVICE_ID_COLUMNS,
+)
+
+
+def test_service_id_column_mapping():
+    assert _SERVICE_ID_COLUMNS == {'spotify': 'spotify_track_id', 'deezer': 'deezer_id'}
+
+
+def test_db_service_track_id_unknown_service_is_none():
+    assert db_service_track_id('A', 'X', 'tidal') is None
+    assert db_service_track_id('A', 'X', '') is None
+
+
+def test_db_service_track_id_no_title_is_none():
+    assert db_service_track_id('A', '', 'spotify') is None
+
+
+def test_build_service_resolve_fn_returns_id_and_source(monkeypatch):
+    import core.exports.export_sources as es
+    monkeypatch.setattr(es, 'db_service_track_id',
+                        lambda a, t, s: 'spid-99' if t == 'Hit' else None)
+    fn = build_service_resolve_fn('spotify')
+    assert fn('Artist', 'Hit') == ('spid-99', 'library')
+    assert fn('Artist', 'Miss') == (None, None)
