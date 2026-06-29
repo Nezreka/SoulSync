@@ -16,8 +16,9 @@ writes a fresh non-cache hit back to the cache so the next export of the same so
 
 from __future__ import annotations
 
+import json
 import threading
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from utils.logging_config import get_logger
 
@@ -70,6 +71,185 @@ def _db_match(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
 def db_recording_mbid(artist: str, title: str) -> Optional[str]:
     """Recording MBID stored on a matched library track (``musicbrainz_recording_id``)."""
     return _db_match(artist, title)[0]
+
+
+# Service → the tracks-table column carrying that service's track ID (set by enrichment).
+# Trusted constants — never user input — so safe to interpolate into the SELECT below.
+_SERVICE_ID_COLUMNS = {"spotify": "spotify_track_id", "deezer": "deezer_id"}
+
+
+def db_service_track_id(artist: str, title: str, service: str) -> Optional[str]:
+    """The service track ID (``spotify_track_id`` / ``deezer_id``) stored on a matched
+    library track — what lets a mirrored playlist be exported BACK to Spotify/Deezer
+    without re-searching, since enrichment already pinned it (#945). Text-matches by
+    (artist, title), same as the MBID resolver. Fail-safe: any miss/error returns None."""
+    column = _SERVICE_ID_COLUMNS.get((service or "").lower())
+    if not column or not title:
+        return None
+    try:
+        from database.music_database import get_database
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                f"SELECT t.{column} FROM tracks t JOIN artists a ON t.artist_id = a.id "
+                "WHERE LOWER(t.title) = LOWER(?) AND LOWER(a.name) = LOWER(?) LIMIT 1",
+                (title, artist),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            val = row[0] if not hasattr(row, "keys") else row[column]
+            return val or None
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: S110
+                pass
+    except Exception as exc:
+        logger.debug(f"export service-id lookup failed for '{artist} - {title}' ({service}): {exc}")
+        return None
+
+
+def build_service_resolve_fn(service: str) -> Callable[[str, str], Tuple[Optional[str], Optional[str]]]:
+    """resolve_fn for service-playlist export: ``(artist, title) -> (service_track_id, 'library')``.
+    Plugs into ``resolve_playlist_tracks(..., id_key='service_track_id')`` exactly like the
+    MBID resolver plugs in for ListenBrainz."""
+    def resolve_fn(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+        tid = db_service_track_id(artist, title, service)
+        return (tid, "library" if tid else None)
+    return resolve_fn
+
+
+def service_id_from_extra_data(track: Any, service: str) -> Optional[str]:
+    """The target-service track ID the DISCOVERY step already resolved for this mirrored
+    track, read from its ``extra_data`` blob (#945 — Boulder: "all 50 are discovered to
+    Deezer already, it's not using any of that"). This is free (no API call) and reliable
+    (it's the same id used to mirror the track).
+
+    Only trusted when the track was discovered ON the export's target service — a
+    Deezer-discovered track carries a Deezer id under ``matched_data['id']``, and its
+    ``provider`` is the service name. A ``wing_it_fallback`` provider (the low-confidence
+    guess path) deliberately does NOT match here, so those fall through to the library/
+    none path rather than risk a wrong track in the exported playlist."""
+    raw = track.get("extra_data") if isinstance(track, dict) else None
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw) if isinstance(raw, str) else raw
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not data.get("discovered"):
+        return None
+    if str(data.get("provider") or "").lower() != str(service or "").lower():
+        return None
+    matched = data.get("matched_data")
+    tid = matched.get("id") if isinstance(matched, dict) else None
+    return str(tid) if tid else None
+
+
+def _track_field(track: Dict[str, Any], *names: str) -> str:
+    for n in names:
+        v = track.get(n)
+        if v:
+            return str(v)
+    return ""
+
+
+def resolve_service_track_ids(
+    tracks: List[Dict[str, Any]],
+    service: str,
+    *,
+    db_fn: Optional[Callable[[str, str, str], Optional[str]]] = None,
+    search_id_fn: Optional[Callable[[str, str], Optional[str]]] = None,
+    on_progress: Optional[Callable[[int, int, Dict[str, Any]], None]] = None,
+) -> Dict[str, Any]:
+    """Resolve a mirrored playlist's tracks to target-service track IDs for export.
+
+    Waterfall per track: the discovery cache (``extra_data`` — free + already confidently
+    matched) → the library track's stored service id → (only when ``search_id_fn`` is
+    given, i.e. the opt-in backfill toggle) a confident live-search match. A track that
+    clears none of these is reported unmatched (caller skips it — never a guessed/wrong
+    id). Returns ``{"resolved": [{artist, title, album, service_track_id}], "stats":
+    {...}}`` with ``from_cache`` / ``from_library`` / ``from_search`` / ``unmatched``
+    tallies for the status display.
+    """
+    db_fn = db_fn or db_service_track_id
+    total = len(tracks or [])
+    resolved: List[Dict[str, Any]] = []
+    stats: Dict[str, Any] = {
+        "total": total, "resolved": 0, "unmatched": 0,
+        "from_cache": 0, "from_library": 0, "from_search": 0,
+    }
+    for i, t in enumerate(tracks or []):
+        if not isinstance(t, dict):
+            t = {}
+        artist = _track_field(t, "artist", "artist_name", "creator")
+        title = _track_field(t, "title", "track_name", "name")
+        album = _track_field(t, "album", "album_name", "release_name")
+
+        tid = service_id_from_extra_data(t, service)
+        if tid:
+            stats["from_cache"] += 1
+        else:
+            tid = db_fn(artist, title, service)
+            if tid:
+                stats["from_library"] += 1
+            elif search_id_fn is not None:
+                tid = search_id_fn(artist, title)
+                if tid:
+                    stats["from_search"] += 1
+
+        resolved.append({"artist": artist, "title": title, "album": album,
+                         "service_track_id": tid or None})
+        stats["resolved" if tid else "unmatched"] += 1
+        if on_progress is not None:
+            try:
+                on_progress(i + 1, total, stats)
+            except Exception:  # noqa: S110 — a progress error must never fail the export
+                pass
+
+    return {"resolved": resolved, "stats": stats}
+
+
+# Confidence floor for backfill, on the score_track scale (~1.5 = exact title + exact
+# artist, thanks to the 1.5x artist boost). A cover/karaoke (x0.05) or a wrong-artist hit
+# (no boost, caps ~1.0) can't clear this — so backfill never adds a guessed/wrong version.
+BACKFILL_MIN_SCORE = 1.2
+
+
+def search_service_track_id(
+    artist: str,
+    title: str,
+    *,
+    search_fn: Callable[[str], List[Any]],
+    min_score: float = BACKFILL_MIN_SCORE,
+) -> Optional[str]:
+    """Confident live-search match for export backfill (#945): search the target service
+    for (artist, title), rerank by relevance, and return the top match's id ONLY if it
+    clears the confidence floor. Below the floor → None: the track is left out of the
+    export rather than risk a wrong/cover/karaoke version (the whole point of backfill is
+    coverage WITHOUT the wrong-track risk). ``search_fn(query) -> List[Track]`` is injected
+    so this is unit-testable without a live service."""
+    if not title:
+        return None
+    from core.metadata.relevance import build_combined_search_query, filter_and_rerank
+    query = build_combined_search_query(title, artist)
+    try:
+        candidates = list(search_fn(query) or [])
+    except Exception as exc:
+        logger.debug(f"export backfill search failed for '{artist} - {title}': {exc}")
+        return None
+    if not candidates:
+        return None
+    ranked = filter_and_rerank(
+        candidates, expected_title=title, expected_artist=artist, min_score=min_score,
+    )
+    if not ranked:
+        return None
+    tid = getattr(ranked[0], "id", None)
+    return str(tid) if tid else None
 
 
 def file_recording_mbid(artist: str, title: str) -> Optional[str]:

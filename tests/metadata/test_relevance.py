@@ -447,3 +447,36 @@ class TestFilterAndRerank:
         # Karaoke pattern reduces score by 0.05x — well below 0.5
         assert all(t.id != 'karaoke-id' for t in result)
         assert any(t.id == 'real-id' for t in result)
+
+
+# ── build_combined_search_query: plain, source-agnostic queries (pool-fix bug) ──
+
+from core.metadata.relevance import build_combined_search_query as _bcsq
+
+
+def test_combined_query_is_plain_not_field_scoped():
+    # THE fix: must NOT emit Spotify `track:`/`artist:` syntax — that leaked to Deezer
+    # (which aborted the connection) and other fallbacks that can't parse it.
+    q = _bcsq('Not Like Us', 'Kendrick Lamar')
+    assert q == 'Not Like Us Kendrick Lamar'
+    assert 'track:' not in q and 'artist:' not in q
+
+
+def test_combined_query_track_or_artist_alone():
+    assert _bcsq('Not Like Us', '') == 'Not Like Us'
+    assert _bcsq('', 'Kendrick Lamar') == 'Kendrick Lamar'
+
+
+def test_combined_query_trims_whitespace():
+    assert _bcsq('  Not Like Us  ', '  Kendrick Lamar ') == 'Not Like Us Kendrick Lamar'
+
+
+def test_combined_query_falls_back_to_legacy():
+    assert _bcsq('', '', 'free text search') == 'free text search'
+    # track/artist win over legacy when present
+    assert _bcsq('A', 'B', 'ignored') == 'A B'
+
+
+def test_combined_query_empty_when_nothing():
+    assert _bcsq('', '', '') == ''
+    assert _bcsq('   ', '', '  ') == ''

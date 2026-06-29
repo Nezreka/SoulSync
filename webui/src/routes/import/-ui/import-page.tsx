@@ -102,9 +102,9 @@ function ImportOptions() {
         />
         <span
           id="import-quality-filter-label"
-          title="Only import tracks that meet your quality profile; otherwise import everything regardless of quality."
+          title="Checks imported files against your Quality Profile only. Turning this off imports files regardless of format/bitrate/bit depth/sample rate; AcoustID verification is separate and is not skipped."
         >
-          Quality check on import
+          Quality profile check on import
         </span>
       </div>
       <div className={styles.importOption}>

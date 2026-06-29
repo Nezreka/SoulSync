@@ -325,11 +325,14 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 _mark_task_quarantined(context, quarantine_path)
                 logger.error(f"File quarantined due to integrity failure: {quarantine_path}")
             except Exception as quarantine_error:
-                logger.error(f"Quarantine failed ({quarantine_error}), deleting broken file: {file_path}")
-                try:
-                    os.remove(file_path)
-                except Exception as del_error:
-                    logger.error(f"Could not delete broken file either: {del_error}")
+                # Quarantine MOVE failed (e.g. cross-device / permission on a NAS).
+                # Do NOT delete — destroying a download we couldn't even quarantine is
+                # data loss and forces a re-download. Leave it in place so it can be
+                # retried; the task is still marked failed below either way (#kettui).
+                logger.error(
+                    f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                    f"for retry (not deleting): {file_path}"
+                )
 
             with matched_context_lock:
                 if context_key in matched_downloads_context:
@@ -383,11 +386,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                 _mark_task_quarantined(context, quarantine_path)
                 logger.warning("File quarantined — incomplete/silent audio: %s", quarantine_path)
             except Exception as quarantine_error:
-                logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-                try:
-                    os.remove(file_path)
-                except Exception as del_error:
-                    logger.debug("delete broken file fallback: %s", del_error)
+                # Don't delete a file we couldn't quarantine — leave it for retry
+                # instead of forcing a re-download (data loss). See integrity block.
+                logger.error(
+                    f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                    f"for retry (not deleting): {file_path}"
+                )
 
             with matched_context_lock:
                 matched_downloads_context.pop(context_key, None)
@@ -437,11 +441,12 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                     _mark_task_quarantined(context, quarantine_path)
                     logger.info(f"File quarantined due to quality mismatch: {quarantine_path}")
                 except Exception as quarantine_error:
-                    logger.error(f"Quarantine failed ({quarantine_error}), deleting file: {file_path}")
-                    try:
-                        os.remove(file_path)
-                    except Exception as e:
-                        logger.debug("delete quarantine fallback: %s", e)
+                    # Don't delete a file we couldn't quarantine — leave it for retry
+                    # instead of forcing a re-download (data loss). See integrity block.
+                    logger.error(
+                        f"Quarantine failed ({quarantine_error}) — leaving file in place "
+                        f"for retry (not deleting): {file_path}"
+                    )
 
                 context['_bitdepth_rejected'] = True
                 task_id = context.get('task_id')
@@ -535,12 +540,13 @@ def post_process_matched_download(context_key, context, file_path, runtime, meta
                             _mark_task_quarantined(context, quarantine_path)
                             logger.error(f"File quarantined due to verification failure: {quarantine_path}")
                         except Exception as quarantine_error:
-                            logger.error(f"Quarantine failed ({quarantine_error}), deleting wrong file: {file_path}")
-                            logger.error(f"Quarantine failed, deleting wrong file: {file_path}")
-                            try:
-                                os.remove(file_path)
-                            except Exception as del_error:
-                                logger.error(f"Could not delete wrong file either: {del_error}")
+                            # Don't delete a file we couldn't quarantine — leave it for
+                            # retry instead of forcing a re-download (data loss). The
+                            # task is still marked failed / requeued below. See integrity.
+                            logger.error(
+                                f"Quarantine failed ({quarantine_error}) — leaving file "
+                                f"in place for retry (not deleting): {file_path}"
+                            )
 
                         context['_acoustid_quarantined'] = True
                         context['_acoustid_failure_msg'] = verification_msg

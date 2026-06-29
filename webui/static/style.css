@@ -3272,10 +3272,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .settings-section-body {
     transition: all 0.2s ease;
+    /* Breathing room before the next tile header so an expanded tile's last
+       control (e.g. "+ Add Path") never sits flush against the next section. */
+    margin-bottom: 18px;
 }
 
 .settings-section-body.collapsed {
     display: none;
+    margin-bottom: 0;
 }
 
 .settings-group {
@@ -3392,79 +3396,19 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     color: #a78bfa;          /* Usenet — violet */
 }
 
-/* Lidarr-style intro hero card on Indexers & Downloaders tab */
-.ind-hero {
-    padding: 18px 22px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.08), rgba(35, 35, 35, 0.6));
-    border: 1px solid rgba(var(--accent-rgb), 0.15);
-}
-
-.ind-hero-title {
-    font-size: 13px;
-    font-weight: 700;
-    letter-spacing: 0.8px;
-    text-transform: uppercase;
-    color: rgb(var(--accent-rgb));
-    margin-bottom: 12px;
-}
-
-.ind-hero-flow {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.85);
-}
-
-.ind-hero-step {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-}
-
-.ind-hero-step-num {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: rgba(var(--accent-rgb), 0.2);
-    color: rgb(var(--accent-rgb));
-    font-weight: 700;
-    font-size: 11px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.ind-hero-arrow {
-    color: rgba(var(--accent-rgb), 0.55);
-    font-weight: 700;
-}
-
-.ind-hero-sub {
-    font-size: 12.5px;
-    color: rgba(255, 255, 255, 0.55);
-    line-height: 1.55;
-}
-
 .ind-hero-warning {
     margin-top: 14px;
     padding: 12px 14px;
-    background: rgba(255, 165, 0, 0.06);
-    border: 1px solid rgba(255, 165, 0, 0.2);
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 10px;
 }
 
 .ind-hero-warning-title {
     font-size: 12px;
-    font-weight: 700;
-    color: #ffb155;
-    letter-spacing: 0.4px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.3px;
     margin-bottom: 6px;
 }
 
@@ -3942,23 +3886,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.85);
 }
-.info-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    flex: 0 0 auto;
-    font-size: 12px;
-    line-height: 1;
-    color: rgba(var(--accent-rgb), 0.85);
-    cursor: pointer;
-    user-select: none;
-    transition: color 0.15s ease;
-}
-.info-icon:hover { color: rgba(var(--accent-rgb), 1); }
-.setting-help-body { margin-top: 4px; }
-
 /* Supported Formats */
 .supported-formats {
     color: rgba(255, 255, 255, 0.7);
@@ -4346,213 +4273,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(99, 179, 237, 0.3);
 }
 
-.quality-tier {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    transition: all 0.2s ease;
-}
-
-.quality-tier:hover {
-    border-color: rgba(255, 255, 255, 0.12);
-}
-
-.quality-tier-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.quality-tier-name {
-    color: rgba(255, 255, 255, 0.95);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.quality-tier-priority {
-    color: rgba(255, 255, 255, 0.45);
-    font-size: 10px;
-    font-weight: 500;
-}
-
-.quality-tier-sliders {
-    padding-left: 24px;
-    opacity: 1;
-    transition: opacity 0.3s ease;
-}
-
-.quality-tier-sliders.disabled {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-.flac-bit-depth-selector {
-    padding: 8px 12px;
-    transition: opacity 0.3s ease;
-}
-
-.flac-bit-depth-selector.disabled {
-    opacity: 0.35;
-    pointer-events: none;
-}
-
-.flac-bit-depth-selector label {
-    display: block;
-    margin-bottom: 6px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-}
-
-.bit-depth-buttons {
-    display: flex;
-    gap: 8px;
-}
-
-.bit-depth-btn {
-    flex: 1;
-    padding: 7px 12px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02));
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.bit-depth-btn.active {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.2) 0%,
-            rgba(var(--accent-light-rgb), 0.12) 100%);
-    border-color: rgba(var(--accent-rgb), 0.4);
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 600;
-    box-shadow: 0 4px 16px rgba(var(--accent-rgb), 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
-}
-
-.bit-depth-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
-.bit-depth-btn.active:hover {
-    background: linear-gradient(135deg,
-            rgba(var(--accent-rgb), 0.28) 0%,
-            rgba(var(--accent-light-rgb), 0.18) 100%);
-}
-
-.slider-group {
-    margin-top: 8px;
-}
-
-.slider-group label {
-    display: block;
-    margin-bottom: 8px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-}
-
-.dual-slider-container {
-    position: relative;
-    height: 40px;
-    margin: 10px 0;
-}
-
-.range-slider {
-    position: absolute;
-    width: 100%;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: transparent;
-    outline: none;
-    pointer-events: none;
-}
-
-.range-slider::-webkit-slider-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-}
-
-.range-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    cursor: pointer;
-    pointer-events: all;
-    border: 2px solid #0a0a0a;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.range-slider::-webkit-slider-thumb:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), #22e968);
-    transform: scale(1.15);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.range-slider::-moz-range-track {
-    width: 100%;
-    height: 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-}
-
-.range-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, rgb(var(--accent-rgb)), rgb(var(--accent-light-rgb)));
-    cursor: pointer;
-    pointer-events: all;
-    border: 2px solid #0a0a0a;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 8px rgba(var(--accent-rgb), 0.2);
-}
-
-.range-slider::-moz-range-thumb:hover {
-    background: linear-gradient(135deg, rgb(var(--accent-light-rgb)), #22e968);
-    transform: scale(1.15);
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4), 0 0 12px rgba(var(--accent-rgb), 0.3);
-}
-
-.range-slider-track {
-    position: absolute;
-    top: 18px;
-    width: 100%;
-    height: 4px;
-    background: rgba(var(--accent-rgb), 0.25);
-    border-radius: 2px;
-    pointer-events: none;
-}
-
-.slider-values {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 8px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 11px;
-    font-weight: 500;
-}
-
-.slider-values span:first-child,
-.slider-values span:last-child {
-    color: rgb(var(--accent-light-rgb));
-    font-weight: 700;
-}
-
-/* ===== END QUALITY PROFILE STYLES ===== */
-
 .test-button {
     background: rgba(var(--accent-rgb), 0.1);
     color: rgb(var(--accent-light-rgb));
@@ -4604,12 +4324,6 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 .save-button:active {
     transform: translateY(0) scale(0.97);
-}
-
-.settings-actions {
-    display: flex;
-    justify-content: center;
-    padding-top: 20px;
 }
 
 /* Additional Settings Components */
@@ -22258,8 +21972,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     height: 520px;
+    width: 100%;
+    box-sizing: border-box;
     overflow-y: auto;
     overflow-x: hidden;
+    /* Always reserve the scrollbar gutter so switching between a long log
+       (scrollbar present) and a short one (absent) never shifts the width. */
+    scrollbar-gutter: stable;
     padding: 12px;
     font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
     font-size: 12px;
@@ -55701,19 +55420,122 @@ tr.tag-diff-same {
     padding-bottom: 10vh;
 }
 
-/* Tab bar centered */
-#settings-page .stg-tabbar {
+/* Tab bar + save action sit on one control row. */
+#settings-page .settings-nav-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 14px;
+    width: 100%;
+    max-width: 920px;
     margin: 0 auto 28px;
+    padding: 0 2px;
+}
+
+#settings-page .stg-tabbar {
+    display: flex;
+    flex: 0 1 auto;
+    margin: 0;
+    width: fit-content;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-nav-row .header-actions {
+    display: flex;
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: nowrap;
+    width: auto;
+    margin: 0 0 0 auto;
+    margin-top: 0;
+}
+
+#settings-page .settings-nav-row .save-button {
+    padding: 8px 16px;
+    border-radius: 9px;
+    font-size: 0.84em;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* Columns become single centered column */
 #settings-page .settings-columns {
     flex-direction: column;
-    max-width: 760px;
+    max-width: 920px;
     width: 100%;
     gap: 0;
     margin: 0 auto;
     margin-bottom: 0;
+}
+/* The Logs tab uses the full available width — the log terminal benefits from
+   the extra horizontal space (other tabs stay at the readable 920px). Matches
+   only while the logs group is the visible one (switchSettingsTab clears its
+   inline display when active, sets display:none otherwise). */
+#settings-page .settings-columns:has(> .settings-group[data-stg="logs"]:not([style*="none"])) {
+    max-width: 100%;
+}
+
+#settings-page .settings-group[data-stg="logs"] {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-header,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-terminal,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-status {
+    width: 100%;
+}
+
+#settings-page .settings-group[data-stg="logs"] .log-viewer-controls,
+#settings-page .settings-group[data-stg="logs"] .log-viewer-actions {
+    min-width: 0;
+}
+
+/* ── Settings local title — quiet, far-left, no dashboard banner ── */
+#settings-page .dashboard-header.settings-header-compact {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+    min-height: 0;
+    padding: 0;
+    margin: 0 0 12px;
+    position: relative;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+}
+#settings-page .dashboard-header.settings-header-compact::after,
+#settings-page .settings-header-compact .dashboard-header-sweep {
+    display: none;
+}
+#settings-page .settings-header-compact .header-text {
+    min-width: 0;
+}
+#settings-page .settings-header-compact .header-title {
+    font-size: 1.82em;
+    margin: 0;
+    line-height: 1.1;
+    color: rgba(255, 255, 255, 0.88);
+}
+#settings-page .settings-header-compact .page-header-icon {
+    width: 44px;
+    height: 44px;
+    opacity: 0.86;
+}
+
+/* Checkbox/label rows that carry an ⓘ icon span the full width so the help
+   body wraps cleanly beneath them. */
+#settings-page .form-group > .setting-row {
+    flex: 1 1 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 #settings-page .settings-left-column,
@@ -55779,12 +55601,14 @@ tr.tag-diff-same {
 #settings-page .form-group {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    /* Row grammar: label grows to hold the left, control + ⓘ group at the right.
+       (Was justify-content:space-between, which stranded selects in mid-row.) */
+    justify-content: flex-start;
     flex-wrap: wrap;
-    gap: 8px 20px;
-    padding: 14px 8px !important;
+    gap: 8px 16px;
+    padding: 12px 8px !important;
     margin: 0 !important;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.035);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
     border-radius: 8px;
     transition: background 0.2s;
 }
@@ -55797,9 +55621,17 @@ tr.tag-diff-same {
     font-size: 0.9em;
     color: rgba(255, 255, 255, 0.8);
     font-weight: 400;
-    white-space: nowrap;
     margin: 0;
-    flex-shrink: 0;
+    /* Grow to fill the left so the control aligns to a consistent right edge. */
+    flex: 1 1 auto;
+    min-width: 0;
+}
+/* The growing label pushes the control to a consistent right edge; the ⓘ rides
+   immediately after the control as a pair so it can never shove it around. The
+   help callout (flex-basis:100%) wraps to its own line below. */
+#settings-page .form-group > select,
+#settings-page .form-group > .form-select {
+    flex: 0 0 auto;
 }
 
 #settings-page .form-group > input[type="text"],
@@ -55818,11 +55650,27 @@ tr.tag-diff-same {
     margin: 0;
     transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
 }
+#settings-page .form-group > textarea {
+    padding: 9px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 0.88em;
+    margin: 0;
+    resize: vertical;
+    transition: border-color 0.25s, background 0.25s, box-shadow 0.25s;
+}
 #settings-page .form-group > input:hover {
     background: rgba(255, 255, 255, 0.06);
     border-color: rgba(255, 255, 255, 0.1);
 }
-#settings-page .form-group > input:focus {
+#settings-page .form-group > textarea:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+#settings-page .form-group > input:focus,
+#settings-page .form-group > textarea:focus {
     border-color: rgba(var(--accent-rgb), 0.4);
     background: rgba(255, 255, 255, 0.06);
     outline: none;
@@ -56009,18 +55857,6 @@ tr.tag-diff-same {
     flex-wrap: wrap;
 }
 
-/* ── Quality section ── */
-#settings-page .quality-tier {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    margin-bottom: 10px;
-    transition: border-color 0.2s;
-}
-#settings-page .quality-tier:hover {
-    border-color: rgba(255, 255, 255, 0.1);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
-}
 #settings-page .preset-button {
     border-radius: 8px;
     font-size: 0.84em;
@@ -56049,6 +55885,15 @@ tr.tag-diff-same {
     color: #fff;
 }
 #settings-page .checkbox-label:last-child { border-bottom: none; }
+/* When a checkbox-label is the control of a .form-group row, the row separator
+   is the form-group's own border-bottom — drop the label's own border/box so
+   every row (checkbox or input/select) has ONE consistent full-width divider. */
+#settings-page .form-group > .checkbox-label {
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    padding: 4px 0 !important;
+    background: transparent !important;
+}
 
 /* ── Tag service groups ── */
 #settings-page .tag-service-group {
@@ -56068,30 +55913,6 @@ tr.tag-diff-same {
 }
 #settings-page .tag-service-body {
     padding: 0 18px 12px;
-}
-
-/* ── Save button — centered, sticky feel ── */
-#settings-page .settings-actions {
-    max-width: 760px;
-    width: 100%;
-    margin: 0 auto;
-    padding: 24px 0 16px;
-}
-#settings-page .settings-actions .save-button {
-    width: 100%;
-    padding: 12px;
-    border-radius: 10px;
-    font-size: 0.92em;
-    font-weight: 600;
-    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-#settings-page .settings-actions .save-button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 20px rgba(var(--accent-rgb, 29, 185, 84), 0.35);
-}
-#settings-page .settings-actions .save-button:active {
-    transform: scale(0.99);
-    box-shadow: 0 2px 8px rgba(var(--accent-rgb, 29, 185, 84), 0.2);
 }
 
 /* ── Path input groups (dir paths with Unlock buttons) ── */
@@ -56157,6 +55978,191 @@ tr.tag-diff-same {
     line-height: 1.5;
     margin: 0;
 }
+/* Collapsible ⓘ help bodies stay hidden until toggled — wins over the
+   .setting-help-text/.settings-hint display rules that would otherwise show them. */
+#settings-page .setting-help-body[hidden],
+.setting-help-body[hidden] {
+    display: none !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Expanded tile = ONE connected card. The header rounds only its top
+   and joins seamlessly to its body, which carries the side + bottom
+   frame; inner groups drop their own card frame so the expanded
+   settings clearly belong to the tile (no box-in-a-box, no detached feel).
+   ════════════════════════════════════════════════════════════════ */
+#settings-page .settings-section-header:not(.collapsed) {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    margin-bottom: 0;
+    /* Accent-tinted frame so the OPEN card clearly stands out from the grey
+       page instead of grey-on-grey. */
+    background: rgba(var(--accent-rgb), 0.07);
+    border-color: rgba(var(--accent-rgb), 0.30);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.18);
+}
+#settings-page .settings-section-body:not(.collapsed) {
+    border: 1px solid rgba(var(--accent-rgb), 0.30);
+    border-top: none;
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
+    /* Dark neutral body (accent stays on the border + header) so the lighter
+       inner sub-cards stand out clearly instead of washing out on a tint.
+       Symmetric padding so the inner sub-cards sit an equal distance from the
+       outer frame on every side. */
+    background: rgba(0, 0, 0, 0.22);
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+    padding: 14px;
+}
+/* Inner groups inside an expanded tile: no own frame/shadow/accent bar —
+   they're sub-sections of the one tile card, separated by their h3 labels. */
+/* ── Sub-cards: each sub-section inside an OPEN tile sits in its own framed
+   card that stands out clearly on the accent-tinted tile background. Covers
+   inner settings-groups (Folder Paths, File Organization, Retry rows, …) and
+   the Security method cards. ── */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group,
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup,
+#settings-page .settings-section-body:not(.collapsed) .settings-subcard,
+#settings-page .settings-section-body:not(.collapsed) [id$="-settings-container"]:not(#hybrid-settings-container) {
+    background: rgba(255, 255, 255, 0.045) !important;
+    border: 1px solid rgba(255, 255, 255, 0.13) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+    padding: 6px 16px 12px !important;
+    margin: 0 0 14px !important;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group:last-child,
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup:last-child {
+    margin-bottom: 0 !important;
+}
+#settings-page .settings-section-body:not(.collapsed) .security-subgroup {
+    padding-top: 14px !important;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group::before { display: none; }
+/* Sub-card title: clean header inside its frame (no accent bar / huge padding). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group > h3 {
+    padding: 10px 0 10px;
+    border-left: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+/* The Security wrapper group is a transparent passthrough — its .security-subgroup
+   children are the actual sub-cards (avoids a card-in-a-card). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.security-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 14px 6px !important;
+    margin: 0 !important;
+}
+/* Mid-level framed containers inside a tile sub-card get flattened so there are
+   never 3 stacked frames (tile → sub-card → container). The innermost
+   interactive items (draggable hybrid rows, tag-embed accordions) keep theirs. */
+#settings-page .settings-section-body:not(.collapsed) .api-service-frame,
+#settings-page .settings-section-body:not(.collapsed) .post-processing-section,
+#settings-page .settings-section-body:not(.collapsed) #hybrid-settings-container {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+}
+/* The Source Settings group is a transparent passthrough: the basic source/
+   stream/concurrency rows + the hybrid drag list sit flat in the tile, and each
+   per-source config pops open in ITS OWN frame directly inside the tile
+   (tile → config card, never a triple frame). */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 4px 14px 6px !important;
+    margin: 0 !important;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Collapsible info panel (ⓘ help) — one consistent pattern.
+   The ⓘ is a small circular badge flush at the end of its row; the
+   help body, when revealed, is an indented accent-bordered panel that
+   spans the full width below the control. Rows never reflow sideways.
+   ════════════════════════════════════════════════════════════════ */
+#settings-page .info-icon {
+    /* Single clean circle with a centred "i" (was the ⓘ glyph, which carried
+       its own inner circle → a double-circle that read as off-centre). */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: transparent;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    margin-left: 6px;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#settings-page .info-icon:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: rgba(var(--accent-rgb), 1);
+}
+#settings-page .info-icon.open {
+    background: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.9);
+    color: #0b0f14;
+}
+/* The revealed panel — indented, readable, clearly a callout (not a
+   detached muted line). Higher source-order than the .settings-hint /
+   .setting-help-text colour rules above, so it wins on equal specificity. */
+#settings-page .setting-help-body {
+    display: block;
+    width: 100%;
+    flex-basis: 100%;
+    box-sizing: border-box;
+    margin: 8px 0 4px;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.8em;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+    letter-spacing: 0.01em;
+}
+#settings-page .setting-help-body strong { color: rgba(255, 255, 255, 0.82); font-weight: 600; }
+#settings-page .setting-help-body em { color: rgba(var(--accent-rgb), 0.9); font-style: normal; }
+#settings-page .setting-help-body code {
+    font-family: monospace;
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.75);
+}
+/* A checkbox-label inside a .setting-row must drop its row-divider border and
+   box padding — otherwise it draws a partial underline only under the label
+   text and sits in a padded box, misaligned with the ⓘ. The label fills the
+   row so the icon is pushed flush to the right edge. (Replaces the old
+   per-element inline style="border:0;padding:0;flex:1" hacks.) */
+#settings-page .setting-row > .checkbox-label {
+    flex: 1 1 auto;
+    border-bottom: 0 !important;
+    border-radius: 0 !important;
+    padding: 4px 0 !important;
+}
+#settings-page .setting-row > .checkbox-label:hover { background: transparent; }
+/* Icon always sits at the right edge of its row, vertically centred. */
+#settings-page .setting-row > .info-icon {
+    margin-left: auto;
+    align-self: center;
+}
+
 /* Standalone help text (not inside a form-group) — add separator */
 #settings-page .settings-group > .setting-help-text {
     padding: 6px 0 14px;
@@ -56176,6 +56182,9 @@ tr.tag-diff-same {
 #settings-page #qobuz-settings-container,
 #settings-page #hifi-download-settings-container,
 #settings-page #deezer-download-settings-container,
+#settings-page #amazon-download-settings-container,
+#settings-page #lidarr-download-settings-container,
+#settings-page #soundcloud-download-settings-container,
 #settings-page #youtube-settings-container,
 #settings-page #hybrid-settings-container {
     background: rgba(255, 255, 255, 0.02);
@@ -56190,16 +56199,13 @@ tr.tag-diff-same {
 #settings-page #qobuz-settings-container:hover,
 #settings-page #hifi-download-settings-container:hover,
 #settings-page #deezer-download-settings-container:hover,
+#settings-page #amazon-download-settings-container:hover,
+#settings-page #lidarr-download-settings-container:hover,
+#settings-page #soundcloud-download-settings-container:hover,
 #settings-page #youtube-settings-container:hover,
 #settings-page #hybrid-settings-container:hover {
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
-}
-
-/* ── Path inputs with lock buttons ── */
-#settings-page .form-group .path-input-wrapper {
-    flex: 1;
-    max-width: 340px;
 }
 
 /* ── Hybrid source priority list (drag and drop) ── */
@@ -56279,6 +56285,36 @@ tr.tag-diff-same {
     color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
 }
+.hybrid-source-name[onclick]:hover {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+}
+/* ⚙ Configure button on each enabled source row */
+.hybrid-source-config-btn {
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.95em;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    line-height: 1;
+    transition: all 0.15s;
+}
+.hybrid-source-config-btn:hover {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+    background: rgba(255, 255, 255, 0.06);
+    transform: rotate(45deg);
+}
+/* Row whose config panel is currently open */
+.hybrid-source-item.config-open {
+    border-color: rgba(var(--accent-rgb, 29, 185, 84), 0.45);
+    background: rgba(var(--accent-rgb, 29, 185, 84), 0.06);
+}
+.hybrid-source-item.config-open .hybrid-source-config-btn {
+    color: rgb(var(--accent-light-rgb, 29, 185, 84));
+    transform: rotate(45deg);
+}
 .hybrid-source-badge {
     flex-shrink: 0;
     font-size: 0.68em;
@@ -56303,6 +56339,35 @@ tr.tag-diff-same {
     min-width: 18px;
     text-align: center;
 }
+/* Drag handle + drop-target highlight (mirrors the Quality ranked-target list). */
+.hybrid-source-handle {
+    cursor: grab;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    user-select: none;
+    flex-shrink: 0;
+}
+.hybrid-source-handle:active { cursor: grabbing; }
+.hybrid-source-item.drag-over {
+    border-color: rgba(var(--accent-rgb), 0.7) !important;
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.4);
+}
+/* Per-source live connection status dot (set by "Test all sources"). */
+.hybrid-source-status {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.hybrid-source-status.hss-ok     { background: #34d27b; box-shadow: 0 0 6px rgba(52, 210, 123, 0.6); }
+.hybrid-source-status.hss-fail   { background: #ff5f57; box-shadow: 0 0 6px rgba(255, 95, 87, 0.5); }
+.hybrid-source-status.hss-na     { background: rgba(255, 255, 255, 0.12); }
+.hybrid-source-status.hss-testing { background: #f0b429; animation: hssPulse 0.9s ease-in-out infinite; }
+@keyframes hssPulse { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
 .hybrid-source-toggle {
     position: relative;
     width: 36px;
@@ -56549,11 +56614,20 @@ tr.tag-diff-same {
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+    #settings-page .settings-nav-row {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+        gap: 10px;
+        padding: 0 8px;
+    }
+    #settings-page .settings-nav-row .header-actions {
+        margin-left: auto;
+    }
     /* Tab bar scrolls horizontally */
     #settings-page .stg-tabbar {
         width: 100%;
+        flex: 1 1 100%;
         border-radius: 0;
-        margin-bottom: 16px;
         justify-content: flex-start;
     }
     .stg-tab { padding: 8px 14px; font-size: 0.8em; }
@@ -56583,9 +56657,6 @@ tr.tag-diff-same {
     /* Accordion headers */
     #settings-page .stg-service > .stg-service-header { padding: 12px 14px; }
     #settings-page .stg-service > .stg-service-body { padding: 0 0 8px; }
-    /* Save button */
-    #settings-page .settings-actions { padding: 16px 8px; }
-    #settings-page .settings-actions .save-button { width: 100%; }
     /* Section titles */
     #settings-page .settings-group > h3 { padding: 24px 0 10px; }
 }
@@ -60309,14 +60380,21 @@ tr:hover .enhanced-track-actions-group { opacity: 1; }
 }
 .blacklist-entry-remove:hover { background: rgba(239, 83, 80, 0.12); color: #ef5350; }
 
-/* ── Reduce Visual Effects ── Full performance mode: disables GPU-heavy
-   properties and halts decorative animation globally. */
+/* ── Reduce Visual Effects ── Performance mode. Kills the GPU-EXPENSIVE
+   properties only — the actual lag (esp. Firefox) is backdrop-filter / box-shadow /
+   filter re-rasterizing every frame. Because !important author declarations outrank
+   animation + transition declarations in the cascade, any keyframe/transition that
+   tries to set these is forced to none even while it runs — so the expensive part is
+   neutralized without freezing the motion itself.
+
+   We deliberately do NOT blanket `animation: none` / `transition-duration: 0s`:
+   that froze every functional loading spinner (the dash-header worker-service
+   spinners read as BROKEN, stuck mid-rotation) and killed cheap transform/colour
+   feedback (e.g. the Quick Actions hover). Transform- and opacity-only motion is
+   composited for ~free, so it stays — a spinner that spins, just without glow. */
 body.reduce-effects *,
 body.reduce-effects *::before,
 body.reduce-effects *::after {
-    animation: none !important;
-    transition-duration: 0s !important;
-    transition-delay: 0s !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     box-shadow: none !important;
@@ -69094,6 +69172,17 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .reid-replace-text em { color: #7f879e; font-style: normal; font-size: 11.5px; }
 .reid-footer-actions { display: flex; gap: 10px; }
 #reid-confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* Settings cleanup: source settings uses the same inner-card spacing as Retry Logic. */
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper {
+    padding: 0 !important;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+#settings-page .settings-section-body:not(.collapsed) > .settings-group.source-settings-wrapper > .settings-subcard {
+    margin: 0 !important;
+}
 
 /* Firefox-only performance overrides (#935). Firefox re-rasterizes blur()/backdrop-filter on
    every composite where Chrome caches them, so the frosted-glass shell costs real idle GPU on

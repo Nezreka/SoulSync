@@ -128,3 +128,22 @@ def test_v2_to_v3_preserves_order_and_maps_fields():
     assert formats == ['flac', 'mp3']          # disabled mp3_192 omitted
     assert targets[0]['bit_depth'] == 24
     assert targets[1]['min_bitrate'] == 320
+
+
+# ── DSD (#939): DSF must rank as lossless, never "Low Quality" below MP3 ──
+
+def test_dsf_ranks_in_lossless_range():
+    dsf = AudioQuality('dsf', bitrate=11290).tier_score()
+    flac_cd = AudioQuality('flac', sample_rate=44100, bit_depth=16).tier_score()
+    mp3_320 = AudioQuality('mp3', bitrate=320).tier_score()
+    # DSD64 is hi-res lossless — at/above CD FLAC and well above any lossy format.
+    assert dsf >= flac_cd
+    assert dsf > mp3_320
+
+
+def test_dsf_without_measured_bitrate_still_lossless():
+    # .dff has no mutagen reader, so it classifies as 'dsf' with no measured detail —
+    # it must still land in the lossless tier, not the 'unknown' floor.
+    dsf = AudioQuality('dsf').tier_score()
+    assert dsf > AudioQuality('mp3', bitrate=320).tier_score()
+    assert dsf > AudioQuality('unknown').tier_score()

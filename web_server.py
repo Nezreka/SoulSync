@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.0"
+_SOULSYNC_BASE_VERSION = "2.8.1"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -82,8 +82,9 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited, SPOTIFY_OAUTH_SCOPE
 from core.plex_client import PlexClient
+from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
 from core.jellyfin_client import JellyfinClient
 from core.navidrome_client import NavidromeClient
@@ -303,6 +304,103 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if DEV_STATIC_NO_CACHE else 31536000
 import time as _cache_bust_time
 _STATIC_CACHE_BUST = str(int(_cache_bust_time.time()))
 
+def _valid_hex_color(value, fallback='#1db954'):
+    value = str(value or '').strip()
+    return value if re.fullmatch(r'#[0-9a-fA-F]{6}', value) else fallback
+
+
+def _hex_to_rgb(hex_color):
+    color = _valid_hex_color(hex_color)
+    return tuple(int(color[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _rgb_to_hsl(r, g, b):
+    rn, gn, bn = r / 255, g / 255, b / 255
+    max_c = max(rn, gn, bn)
+    min_c = min(rn, gn, bn)
+    lightness = (max_c + min_c) / 2
+    if max_c == min_c:
+        return 0, 0, lightness
+
+    delta = max_c - min_c
+    saturation = delta / (2 - max_c - min_c) if lightness > 0.5 else delta / (max_c + min_c)
+    if max_c == rn:
+        hue = ((gn - bn) / delta + (6 if gn < bn else 0)) / 6
+    elif max_c == gn:
+        hue = ((bn - rn) / delta + 2) / 6
+    else:
+        hue = ((rn - gn) / delta + 4) / 6
+    return hue, saturation, lightness
+
+
+def _hsl_to_rgb(hue, saturation, lightness):
+    if saturation == 0:
+        value = round(lightness * 255)
+        return value, value, value
+
+    def hue_to_rgb(p, q, t):
+        if t < 0:
+            t += 1
+        if t > 1:
+            t -= 1
+        if t < 1 / 6:
+            return p + (q - p) * 6 * t
+        if t < 1 / 2:
+            return q
+        if t < 2 / 3:
+            return p + (q - p) * (2 / 3 - t) * 6
+        return p
+
+    q = lightness * (1 + saturation) if lightness < 0.5 else lightness + saturation - lightness * saturation
+    p = 2 * lightness - q
+    return (
+        round(hue_to_rgb(p, q, hue + 1 / 3) * 255),
+        round(hue_to_rgb(p, q, hue) * 255),
+        round(hue_to_rgb(p, q, hue - 1 / 3) * 255),
+    )
+
+
+def _request_is_firefox() -> bool:
+    """Whether the current request's browser is Firefox (UA-based). Used ONLY to pick a
+    performance-friendly default; an explicit saved setting always wins. Safe outside a
+    request context (returns False)."""
+    try:
+        from flask import has_request_context, request
+        if not has_request_context():
+            return False
+        return is_firefox_user_agent(request.headers.get('User-Agent'))
+    except Exception:
+        return False
+
+
+def _initial_appearance_context():
+    preset = config_manager.get('ui_appearance.accent_preset', '#1db954')
+    custom = config_manager.get('ui_appearance.accent_color', '#1db954')
+    accent = _valid_hex_color(custom if preset == 'custom' else preset)
+    particles_enabled = config_manager.get('ui_appearance.particles_enabled', False) is True
+    # Worker orbs: explicit choice wins; unset → OFF on Firefox (the blurred orb canvas
+    # is the main remaining Firefox lag source), ON elsewhere. config default None so we
+    # can tell "unset" from an explicit False. (#kettui — single source: the server
+    # decides, the client consumes the injected value below.)
+    worker_orbs_enabled = resolve_worker_orbs_default(
+        config_manager.get('ui_appearance.worker_orbs_enabled', None),
+        _request_is_firefox(),
+    )
+    reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
+    r, g, b = _hex_to_rgb(accent)
+    hue, saturation, lightness = _rgb_to_hsl(r, g, b)
+    light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
+    neon = _hsl_to_rgb(hue, min(saturation + 0.1, 1.0), min(lightness + 0.30, 0.95))
+    return {
+        'initial_accent_color': accent,
+        'initial_accent_rgb': f'{r}, {g}, {b}',
+        'initial_accent_light_rgb': f'{light[0]}, {light[1]}, {light[2]}',
+        'initial_accent_neon_rgb': f'{neon[0]}, {neon[1]}, {neon[2]}',
+        'initial_particles_enabled': particles_enabled,
+        'initial_worker_orbs_enabled': worker_orbs_enabled,
+        'initial_reduce_effects': reduce_effects,
+    }
+
 
 @app.context_processor
 def _inject_static_cache_bust():
@@ -319,7 +417,7 @@ def _inject_static_cache_bust():
                 static_v = str(max(mtimes))
         except Exception:
             static_v = _STATIC_CACHE_BUST
-    return {'static_v': static_v}
+    return {'static_v': static_v, **_initial_appearance_context()}
 
 
 @app.context_processor
@@ -4692,18 +4790,20 @@ def _profile_spotify_oauth(profile_id_int):
     chooser so a user can't silently inherit whatever Spotify session is active
     in their browser (e.g. the admin's). Returns None if no app creds exist."""
     from spotipy.oauth2 import SpotifyOAuth
+    from core.spotify_client import normalize_spotify_oauth_config
     creds = (get_database().get_profile_spotify(profile_id_int) or {})
-    cfg = config_manager.get_spotify_config()
-    client_id = creds.get('client_id') or cfg.get('client_id')
-    client_secret = creds.get('client_secret') or cfg.get('client_secret')
-    redirect_uri = creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
+    cfg = normalize_spotify_oauth_config(config_manager.get_spotify_config())
+    profile_creds = normalize_spotify_oauth_config(creds)
+    client_id = profile_creds.get('client_id') or cfg.get('client_id')
+    client_secret = profile_creds.get('client_secret') or cfg.get('client_secret')
+    redirect_uri = profile_creds.get('redirect_uri') or cfg.get('redirect_uri', 'http://127.0.0.1:8888/callback')
     if not client_id or not client_secret:
         return None
     return SpotifyOAuth(
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+        scope=SPOTIFY_OAUTH_SCOPE,
         cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
         state=f'profile_{profile_id_int}',
         show_dialog=True,
@@ -5095,7 +5195,7 @@ def spotify_callback():
             pass
 
     try:
-        from core.spotify_client import SpotifyClient
+        from core.spotify_client import SpotifyClient, normalize_spotify_oauth_config
         from spotipy.oauth2 import SpotifyOAuth
         from config.settings import config_manager
 
@@ -5125,7 +5225,7 @@ def spotify_callback():
                     raise Exception("Failed to exchange authorization code for access token")
 
         # Global callback (admin)
-        config = config_manager.get_spotify_config()
+        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
@@ -5133,7 +5233,7 @@ def spotify_callback():
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+            scope=SPOTIFY_OAUTH_SCOPE,
             cache_path='config/.spotify_cache'
         )
 
@@ -7506,6 +7606,7 @@ def manual_search_for_task(task_id):
         link = parse_download_track_link(query)
         link_source = None
         link_track_id = None
+        linked_result = None  # the EXACT track fetched by id, injected into results
         # A pasted SoundCloud link can't be turned into an "artist title" query
         # and searched — unlisted/private tracks aren't searchable. Instead force
         # the SoundCloud source and keep the URL as the query; the SoundCloud
@@ -7535,6 +7636,18 @@ def manual_search_for_task(task_id):
             query = clean_q
             source = _src
             link_source, link_track_id = _src, _tid
+            # Fetch the EXACT linked track as a downloadable result to inject —
+            # a text search for an obscure track's name often doesn't surface it
+            # at all, so we can't rely on it being in the search results (#932).
+            # Defensive: only sources that expose get_track_result (Qobuz today);
+            # others fall back to the bubble path below — never worse than before.
+            _link_client = download_orchestrator.client(_src) if download_orchestrator else None
+            if _link_client is not None and hasattr(_link_client, 'get_track_result'):
+                try:
+                    linked_result = _link_client.get_track_result(_tid)
+                except Exception as _lr_err:
+                    logger.debug("[Manual Search] get_track_result failed for %s %s: %s",
+                                 _src, _tid, _lr_err)
 
         if source != 'all':
             if source not in valid_source_ids:
@@ -7595,13 +7708,15 @@ def manual_search_for_task(task_id):
                             "error": error,
                         }) + "\n"
                         continue
-                    # Pasted-link exact match: bubble the track whose source id
-                    # matches the link to the top so the user sees the exact version
-                    # first. Reads _source_metadata['track_id'] (TrackResult has no
-                    # top-level id) — the old getattr(t,'id') always missed (#932).
-                    if src_name == link_source and link_track_id and tracks:
-                        from core.downloads.track_link import bubble_linked_track_first
-                        tracks = bubble_linked_track_first(tracks, link_track_id)
+                    # Pasted-link exact match (#932): the linked source's search may
+                    # not surface an obscure linked track at all, so INJECT the exact
+                    # track (fetched by id) at the top and drop any search duplicate of
+                    # it. If we couldn't fetch it (source has no get_track_result, or it
+                    # failed), fall back to bubbling a matching search result — never
+                    # worse than before.
+                    if src_name == link_source and link_track_id:
+                        from core.downloads.track_link import inject_linked_track_first
+                        tracks = inject_linked_track_first(tracks, linked_result, link_track_id)
                     serialized = []
                     for t in tracks:
                         s = _serialize_candidate(t, source_override=src_name)
@@ -11652,6 +11767,9 @@ def reorganize_album_files(album_id):
             artist_name=meta['artist_name'],
             source=chosen_source,
             metadata_source=metadata_source,
+            # Rename-only (#875): just move files to the current naming scheme — skip
+            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
+            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -11768,6 +11886,9 @@ try:
         get_transfer_path=lambda: docker_resolve_path(
             config_manager.get('soulseek.transfer_path', './Transfer')
         ),
+        # Rename-only mode (#875) computes destinations via the same path builder the
+        # preview uses, so apply matches exactly what the user saw.
+        build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
     ))
 except Exception as _runner_init_err:
     logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")
@@ -21491,17 +21612,13 @@ def search_spotify_tracks():
         legacy_query = request.args.get('query', '').strip()
         limit = int(request.args.get('limit', 20))
 
-        # Build Spotify field-filtered query
-        if track_q or artist_q:
-            parts = []
-            if track_q:
-                parts.append(f'track:{track_q}')
-            if artist_q:
-                parts.append(f'artist:{artist_q}')
-            query = ' '.join(parts)
-        elif legacy_query:
-            query = legacy_query
-        else:
+        # Plain combined query — NOT field-scoped (`track:X artist:Y`). That Spotify
+        # syntax leaks to non-Spotify sources when search falls back (Deezer aborted
+        # the connection on it); the iTunes/Deezer endpoints already dropped it for the
+        # same reason, and the rerank below recovers precision. (Pool-fix "no results".)
+        from core.metadata.relevance import build_combined_search_query
+        query = build_combined_search_query(track_q, artist_q, legacy_query)
+        if not query:
             return jsonify({"error": "Query parameter is required"}), 400
 
         if use_hydrabase:
@@ -27624,9 +27741,98 @@ _playlist_export_jobs = {}
 _playlist_export_jobs_lock = threading.Lock()
 
 
+def _build_service_search_id_fn(service):
+    """Bind a confident-search ID resolver to the service's metadata search client, for the
+    opt-in export backfill (#945). Returns None when the search client isn't available — the
+    backfill then simply finds nothing for that track rather than crashing the export."""
+    from core.exports.export_sources import search_service_track_id
+    try:
+        if service == 'spotify':
+            client = get_spotify_client()
+            if not client:
+                return None
+            # allow_fallback=False is CRITICAL: Spotify's search falls back to iTunes/Deezer
+            # when rate-limited/free, returning tracks whose .id is NOT a Spotify id — backfill
+            # would then push wrong ids into the Spotify playlist. Disable it: real Spotify hits
+            # or nothing.
+            search_fn = lambda q: client.search_tracks(q, limit=8, allow_fallback=False)  # noqa: E731
+        else:
+            from core.metadata.registry import get_deezer_client
+            client = get_deezer_client()
+            if not client:
+                return None
+            # Deezer's search stays within Deezer (query-only fallback), so its .id is always a
+            # Deezer id — no cross-service guard needed.
+            search_fn = lambda q: client.search_tracks(q, limit=8)  # noqa: E731
+        return lambda artist, title: search_service_track_id(artist, title, search_fn=search_fn)
+    except Exception:
+        return None
+
+
+def _run_service_export(job, db, playlist_id, title, service, client, resolve_ids_fn=None):
+    """Export a mirrored playlist back to a streaming service (Spotify/Deezer, #945).
+
+    Resolves each track to a target-service ID via the discovery cache (the track's
+    extra_data — free + already matched) → the library's stored id → (when job['backfill']
+    is set) a confident live-search match, pushes the matched set via the service write
+    client, and stores the returned playlist id so a re-export updates in place (idempotent,
+    like the LB #903 fix). Deps injected so the orchestration is unit-testable without a DB
+    or live service.
+    """
+    from core.exports.export_sources import resolve_service_track_ids
+    resolve_ids_fn = resolve_ids_fn or resolve_service_track_ids
+
+    tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
+    job['total'] = len(tracks)
+    job['phase'] = 'resolving'
+
+    def on_progress(done, total, stats):
+        job['done'] = done
+        job['stats'] = dict(stats)
+
+    # Opt-in backfill: confident live-search for tracks the cache + library couldn't resolve.
+    search_id_fn = _build_service_search_id_fn(service) if job.get('backfill') else None
+    out = resolve_ids_fn(tracks, service, search_id_fn=search_id_fn, on_progress=on_progress)
+    job['stats'] = out['stats']
+    ids = [r['service_track_id'] for r in out['resolved'] if r.get('service_track_id')]
+    if not ids:
+        job['phase'] = 'error'
+        job['error'] = f"No tracks matched a {service.title()} ID — nothing to export"
+        return
+    if client is None:
+        job['phase'] = 'error'
+        job['error'] = f"{service.title()} is not connected"
+        return
+
+    job['phase'] = 'pushing'
+    # Re-export updates the same service playlist in place (idempotent), mirroring the
+    # ListenBrainz #903 fix — the target ID is stored per (playlist, service).
+    existing = db.get_playlist_export_target(int(playlist_id), service)
+    res = client.create_or_update_playlist(title, ids, existing_id=existing)
+    job['push'] = res
+    if res.get('success'):
+        if res.get('playlist_id'):
+            db.set_playlist_export_target(int(playlist_id), service, str(res['playlist_id']))
+        job['phase'] = 'done'
+    else:
+        job['phase'] = 'error'
+        job['error'] = res.get('error') or f"{service.title()} push failed"
+
+
 def _run_playlist_export(job_id, playlist_id, title, mode):
     job = _playlist_export_jobs[job_id]
     try:
+        # Service export (#945) — resolve to Spotify/Deezer track IDs and push.
+        if mode in ('spotify', 'deezer'):
+            db = get_database()
+            if mode == 'spotify':
+                client = get_spotify_client()
+            else:
+                from core.deezer_download_client import DeezerDownloadClient
+                client = DeezerDownloadClient()
+            _run_service_export(job, db, playlist_id, title, mode, client)
+            return
+
         from core.exports.export_sources import build_resolve_fn
         from core.exports.playlist_export import resolve_playlist_tracks
         from core.exports.jspf_export import build_jspf
@@ -27696,6 +27902,40 @@ def start_playlist_export_listenbrainz(playlist_id):
         return jsonify({"success": True, "job_id": job_id})
     except Exception as e:
         logger.error(f"Playlist export start failed: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/playlists/<playlist_id>/export/service/<service>', methods=['POST'])
+def start_playlist_export_service(playlist_id, service):
+    """Export a mirrored playlist back to a streaming service (#945).
+
+    ``service`` ∈ {spotify, deezer}. Creates a service-owned playlist (or updates the
+    one a prior export created) from the library tracks' stored service IDs. Returns
+    {job_id} to poll via the shared export-status endpoint."""
+    try:
+        service = (service or '').lower()
+        if service not in ('spotify', 'deezer'):
+            return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        body = request.get_json(silent=True) or {}
+        backfill = bool(body.get('backfill'))
+        db = get_database()
+        meta = db.get_mirrored_playlist(int(playlist_id)) or {}
+        title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
+
+        import uuid
+        job_id = uuid.uuid4().hex
+        with _playlist_export_jobs_lock:
+            _playlist_export_jobs[job_id] = {
+                'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
+                'mode': service, 'backfill': backfill, 'phase': 'starting', 'done': 0,
+                'total': 0, 'stats': {}, 'error': None,
+            }
+        t = threading.Thread(target=_run_playlist_export,
+                             args=(job_id, playlist_id, title, service), daemon=True)
+        t.start()
+        return jsonify({"success": True, "job_id": job_id})
+    except Exception as e:
+        logger.error(f"Service playlist export start failed ({service}): {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -35864,9 +36104,10 @@ def start_oauth_callback_servers():
                     try:
                         from spotipy.oauth2 import SpotifyOAuth
                         from config.settings import config_manager
+                        from core.spotify_client import normalize_spotify_oauth_config
 
                         # Get Spotify config
-                        config = config_manager.get_spotify_config()
+                        config = normalize_spotify_oauth_config(config_manager.get_spotify_config())
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
@@ -35875,7 +36116,7 @@ def start_oauth_callback_servers():
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
-                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+                            scope=SPOTIFY_OAUTH_SCOPE,
                             cache_path='config/.spotify_cache'
                         )
 

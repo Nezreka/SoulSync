@@ -44,6 +44,9 @@ _EXTENSION_FORMAT_MAP = {
     'ogg': 'ogg', 'oga': 'ogg',
     'opus': 'opus',
     'wma': 'wma',
+    # DSD (DSD Stream File / DSDIFF) — 1-bit hi-res lossless (e.g. DSD64 ≈ 11 Mbps).
+    # Both container types map to the single 'dsf' tier (#939).
+    'dsf': 'dsf', 'dff': 'dsf',
 }
 
 # Audio extensions worth probing/classifying at all — derived from the map so

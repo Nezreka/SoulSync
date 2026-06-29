@@ -360,6 +360,22 @@ def probe_audio_quality(file_path: str):
                 sample_rate=getattr(audio.info, 'sample_rate', None),
             )
 
+        if ext in ('dsf', 'dff'):
+            # DSD (DSD Stream File / DSDIFF) — 1-bit hi-res lossless (#939). mutagen
+            # reads .dsf (rate/bitrate/bit_depth); .dff has no mutagen reader, so it
+            # still classifies as the lossless 'dsf' tier just without measured detail.
+            sr = bd = br = None
+            if ext == 'dsf':
+                try:
+                    from mutagen.dsf import DSF
+                    info = DSF(file_path).info
+                    sr = getattr(info, 'sample_rate', None)
+                    bd = getattr(info, 'bits_per_sample', None)
+                    br = info.bitrate // 1000 if getattr(info, 'bitrate', None) else None
+                except Exception:  # noqa: S110 — unreadable DSF still classifies lossless, just without measured detail
+                    pass
+            return AudioQuality(format='dsf', bitrate=br, sample_rate=sr, bit_depth=bd)
+
         return None
     except Exception as e:
         logger.debug("probe_audio_quality failed for %s: %s", file_path, e)
@@ -508,14 +524,29 @@ def downsample_hires_flac(final_path, context):
     return None
 
 
+def m4a_codec(path):
+    """Codec of an .m4a/.mp4 container ('alac', 'aac', …) or None — lets the
+    lossless check tell ALAC (lossless) from AAC (lossy), since both are .m4a."""
+    try:
+        from mutagen.mp4 import MP4
+        return (getattr(MP4(path).info, 'codec', '') or '').lower() or None
+    except Exception:
+        return None
+
+
 def create_lossy_copy(final_path):
-    """Convert a FLAC file to a lossy copy using the configured codec."""
-    from mutagen.flac import FLAC
+    """Convert a lossless file (FLAC / ALAC / WAV / AIFF / DSD) to a lossy copy
+    using the configured codec. Non-lossless inputs are skipped (#941)."""
+    from core.quality.lossless import (
+        is_lossless_audio_path,
+        lossy_output_would_overwrite_source,
+    )
 
     if not config_manager.get("lossy_copy.enabled", False):
         return None
 
-    if os.path.splitext(final_path)[1].lower() != ".flac":
+    # Was FLAC-only; now any lossless source. .m4a is probed (ALAC vs AAC).
+    if not is_lossless_audio_path(final_path, probe_codec=m4a_codec):
         return None
 
     codec = config_manager.get("lossy_copy.codec", "mp3").lower()
@@ -543,6 +574,16 @@ def create_lossy_copy(final_path):
         if original_quality in out_basename:
             out_basename = out_basename.replace(original_quality, quality_label)
             out_path = os.path.join(os.path.dirname(out_path), out_basename)
+
+    # Safety invariant: never write the lossy copy over its own source (an .m4a
+    # ALAC source + AAC target lands on the same .m4a path). ffmpeg runs with -y,
+    # so this guard MUST precede it — the later delete-original guard is too late.
+    if lossy_output_would_overwrite_source(final_path, out_path):
+        logger.info(
+            f"[Lossy Copy] Skipping — {codec.upper()} output would overwrite the "
+            f"source: {os.path.basename(final_path)}"
+        )
+        return None
 
     ffmpeg_bin = shutil.which("ffmpeg")
     if not ffmpeg_bin:
