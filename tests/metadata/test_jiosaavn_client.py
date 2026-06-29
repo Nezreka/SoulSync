@@ -267,6 +267,85 @@ class TestJioSaavnClientSearch:
         assert self.client.search_albums("  ") == []
         assert self.client.search_artists("") == []
 
+    @patch("core.jiosaavn_client.get_metadata_cache")
+    @patch("core.jiosaavn_client._rate_limit")
+    def test_get_album_refetches_when_cache_lacks_songs(self, _rate_limit, mock_get_cache):
+        """Search stubs cache album metadata without a track list — get_album must refetch."""
+        cache = MagicMock()
+        cache.get_entity.return_value = {
+            "id": "1017247",
+            "name": "3 Nights 4 Days",
+            "year": 2009,
+            "type": "album",
+            "songCount": 10,
+            "url": "https://www.jiosaavn.com/album/3-nights-4-days/-FE7FJ61jhA_",
+            "artists": {"primary": [{"id": "455701", "name": "Daboo Malik"}]},
+        }
+        mock_get_cache.return_value = cache
+
+        response = MagicMock()
+        response.json.return_value = {
+            "success": True,
+            "data": {
+                "id": "1017247",
+                "name": "3 Nights 4 Days",
+                "year": 2009,
+                "type": "album",
+                "songCount": 2,
+                "songs": [
+                    {
+                        "id": "song1",
+                        "name": "Track One",
+                        "duration": 200,
+                        "album": {"id": "1017247", "name": "3 Nights 4 Days"},
+                        "artists": {"primary": [{"name": "Daboo Malik"}]},
+                    },
+                    {
+                        "id": "song2",
+                        "name": "Track Two",
+                        "duration": 180,
+                        "album": {"id": "1017247", "name": "3 Nights 4 Days"},
+                        "artists": {"primary": [{"name": "Daboo Malik"}]},
+                    },
+                ],
+            },
+        }
+        response.raise_for_status.return_value = None
+        self.client.session.get.return_value = response
+
+        album = self.client.get_album("1017247")
+
+        assert album is not None
+        assert len(album["tracks"]) == 2
+        assert album["tracks"][0]["name"] == "Track One"
+        self.client.session.get.assert_called_once_with(
+            "https://saavn.test/api/albums",
+            params={"id": "1017247"},
+            timeout=20,
+        )
+        cache.store_entity.assert_called_once()
+
+    @patch("core.jiosaavn_client.get_metadata_cache")
+    @patch("core.jiosaavn_client._rate_limit")
+    def test_search_albums_skips_overwriting_existing_cache_entries(self, _rate_limit, mock_get_cache):
+        cache = MagicMock()
+        cache.get_search_results.return_value = None
+        mock_get_cache.return_value = cache
+
+        response = MagicMock()
+        response.json.return_value = ALBUM_PAYLOAD
+        response.raise_for_status.return_value = None
+        self.client.session.get.return_value = response
+
+        self.client.search_albums("Brahmastra", limit=5)
+
+        cache.store_entities_bulk.assert_called_once_with(
+            "jiosaavn",
+            "album",
+            [("album1", ALBUM_PAYLOAD["data"]["results"][0])],
+            skip_if_exists=True,
+        )
+
 
 @patch("core.metadata.registry._client_cache", {})
 def test_registry_get_jiosaavn_client_caches_by_base_url():
