@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 
 import type { ImportQueueJob, ImportStagingFile } from '../-import.types';
 
@@ -20,6 +21,21 @@ export function useImportStaging() {
     ...importStagingFilesQueryOptions(),
   });
 
+  // A large staging folder (whole-library migration, #947) is scanned in the background; the
+  // endpoint returns `scanning: true` until it's done. While scanning, poll so the page fills
+  // in automatically once the scan completes. A plain setInterval (NOT react-query's
+  // refetchInterval, which interferes with the data query's error/retry settling) that only
+  // runs while scanning, so the normal and error states are left completely untouched.
+  const scanning = stagingQuery.data?.scanning === true;
+  const { refetch } = stagingQuery;
+  useEffect(() => {
+    if (!scanning) return undefined;
+    const id = window.setInterval(() => {
+      void refetch();
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [scanning, refetch]);
+
   return {
     refreshStaging: async () => {
       clearFinishedJobs();
@@ -28,6 +44,8 @@ export function useImportStaging() {
     // Keep the empty fallback stable so staging-driven effects do not loop while loading.
     stagingFiles: stagingQuery.data?.files ?? EMPTY_STAGING_FILES,
     stagingPath: stagingQuery.data?.staging_path || 'Not configured',
+    scanning,
+    scanProgress: stagingQuery.data?.progress ?? null,
     stagingQuery,
   };
 }
