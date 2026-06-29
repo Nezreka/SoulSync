@@ -5229,12 +5229,16 @@ def spotify_callback():
         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
         logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
+        # Write the freshly-exchanged token to the SAME store the client reads
+        # (DatabaseTokenCache), not the legacy file — otherwise a re-auth never reaches the
+        # client and "validation failed" even though the exchange succeeded.
+        from core.spotify_token_cache import DatabaseTokenCache
         auth_manager = SpotifyOAuth(
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
             scope=SPOTIFY_OAUTH_SCOPE,
-            cache_path='config/.spotify_cache'
+            cache_handler=DatabaseTokenCache(config_manager)
         )
 
         token_info = auth_manager.get_access_token(auth_code)
@@ -36111,13 +36115,17 @@ def start_oauth_callback_servers():
                         configured_uri = config.get('redirect_uri', "http://127.0.0.1:8888/callback")
                         _oauth_logger.info(f"Using redirect_uri for token exchange: {configured_uri}")
 
-                        # Create auth manager and exchange code for token
+                        # Create auth manager and exchange code for token. Use the SAME store
+                        # the client reads (DatabaseTokenCache), not the legacy file — a re-auth
+                        # written to the file never reaches the DB-backed client, so it would
+                        # report "validation failed" despite a successful exchange.
+                        from core.spotify_token_cache import DatabaseTokenCache
                         auth_manager = SpotifyOAuth(
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
                             scope=SPOTIFY_OAUTH_SCOPE,
-                            cache_path='config/.spotify_cache'
+                            cache_handler=DatabaseTokenCache(config_manager)
                         )
 
                         # Extract the authorization code and exchange it for tokens
