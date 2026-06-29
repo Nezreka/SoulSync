@@ -3404,20 +3404,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.0': [
-        { date: 'June 2026 — 2.8.0 release' },
-        { title: 'Preview Clip Cleanup (new Tools job)', desc: 'the HiFi source sometimes returns a ~30s preview clip instead of the full song, landing as a normal track. the new job scans your short tracks, checks how long each should be from its metadata source, and flags the previews. approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version. each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm before approving.', page: 'downloads' },
-        { title: 'Unverified queue stops inflating + self-heals (#934)', desc: 'the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck "unverified". now scans don\'t duplicate rows, a one-time reconcile on startup clears the existing backlog from your library truth (no re-scan), and a 🧹 Clean orphaned button removes dead rows whose file is gone. unverified review rows also got the Quarantine-style cards. (thanks @nick2000713 for #938.)', page: 'downloads' },
-        { title: 'Album Completeness handles split albums (#936)', desc: 'an album split across multiple library rows used to show every fragment as falsely "incomplete". it now groups the validated fragments into one logical album and emits one correct finding — grouping by shared id AND validating at the track level, so unrelated rows never fuse. also recognizes MusicBrainz as a readable source. (thanks @ragnarlotus.)', page: 'library' },
-        { title: 'Clear Completed is back on Downloads', desc: 'completed downloads now persist across restart, which had hidden the Clear Completed button for them. it\'s back, and clears the live list AND the persisted history so the page actually empties and stays empty (your files are untouched).', page: 'downloads' },
-        { title: 'Pasted YouTube cookies fixed (#Docker)', desc: 'pasting cookies threw `unsupported browser: "custom"` — the client passed the "Paste cookies.txt" mode through as a browser name instead of loading the file. now it uses the pasted cookies.txt, the only auth path that works on a headless/Docker box. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: 'Longer remasters no longer quarantined (#937)', desc: 'the duration check was symmetric, so a remaster running a few seconds LONGER than the metadata got rejected like a truncated download. it\'s asymmetric now — short files stay strict, longer versions get room. (thanks @diegocade1.)', page: 'downloads' },
-        { title: '"Add to Wishlist" from a discography is instant now', desc: 'it was ~15–30s PER TRACK on a large library — the per-track ownership check fell through to a full-table fuzzy scan. it now matches in-memory against the artist\'s tracks once.', page: 'library' },
-        { title: 'Wishlist art renders for re-downloads', desc: 'library-sourced wishlist items (re-downloads, preview re-fetches) stored a relative media-server path that doesn\'t render in a browser. they\'re normalized on read now, so album + artist art show up — fixes already-saved items too.', page: 'downloads' },
-        { title: 'More fixes', desc: 'watchlist now records automatic scans (#933) and no longer fuses different editions of an album; a pasted Qobuz/Tidal track floats to the top of manual search (#932); Popular Picks no longer comes up empty on Deezer.', page: 'search' },
-        { title: 'Dashboard performance, esp. Firefox/Zen (#935)', desc: 'frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame. trimmed the worst offenders, kept the orb framerate steady on Firefox (was dropping to ~1fps), and set Background Particles OFF by default. the system-memory tile now also shows SoulSync\'s own RAM.', page: 'dashboard' },
-        { title: 'Bounded memory growth (#802)', desc: 'browsing every page used to climb RSS into the GBs (plexapi XML trees deferring garbage collection) and could lock the app up. a lightweight sweeper now collects + hands memory back to the OS as it grows, so it sawtooths and settles instead of climbing.', page: 'dashboard' },
-        { title: 'Earlier versions', desc: '2.7.9 brought best-quality downloads + a ranked quality profile, the quarantine-into-Downloads consolidation, Discover "Based On Your Listening" + Listening Mix, the Wing It Pool, the Auto-Sync redesign, and the multi-disc fix (#927). 2.7.8 added Align Playlists; 2.7.3 the Quality Upgrade Finder; 2.7.0 made multi-user real.' },
+    '2.8.1': [
+        { date: 'June 2026 — 2.8.1 release' },
+        { title: 'Export playlists to Spotify & Deezer (#945)', desc: 'the mirrored-playlist export modal now has Sync to Spotify and Sync to Deezer next to the ListenBrainz/JSPF options. it builds a playlist in your account from the IDs soulsync already has — the discovery cache first, then your library — so an already-discovered playlist exports instantly with zero API calls. re-exporting updates the same playlist instead of duplicating it, and an optional "match missing tracks" toggle confidently searches for the stragglers (a wrong-artist or karaoke version is left out, never guessed). spotify needs a one-time reconnect for write access.', page: 'playlists' },
+        { title: 'Library Reorganize — Rename only (#875)', desc: 'a lighter reorganize action that just renames your files to your current naming scheme — no re-tagging, no quality/AcoustID re-check, no copy-to-staging. much faster on a NAS, won\'t fail on post-processing, and only touches files whose path actually changes (which also fixes the "2 of 14 previewed but everything got modified" album-splitting). pick it from the new Action dropdown. (thanks @tsoulard / @Tacobell444.)', page: 'library' },
+        { title: 'Broader lossless handling (#941, #939)', desc: 'lossy-copy now works for all lossless formats, not just FLAC; and DSD (.dsf/.dff) is recognized as lossless instead of being false-flagged as "truncated".', page: 'downloads' },
+        { title: 'Download + search fixes', desc: 'an unbalanced bracket in a filename no longer false-fails as "file not found"; a file we couldn\'t quarantine is left for retry instead of deleted; the Identify search defaults to "artist - title"; "file not found" errors are actionable now; pasted Qobuz/Tidal links inject the exact track into manual search (#932); and the Wing It pool "Fix Match" search works again.', page: 'downloads' },
+        { title: 'Reduce visual effects, refined', desc: 'it no longer freezes functional motion (spinners, progress) — only the expensive GPU stuff (blur, shadows, glow) is killed. worker orbs default OFF on Firefox for new users and run at ~30fps under reduce-effects.', page: 'settings' },
+        { title: 'More fixes', desc: 'jellyfin scans page the bulk fetch so the no-progress watchdog can\'t false-stall a big library; settings page cleanup (#943, thanks @nick2000713); spotify oauth credential normalization (#942, thanks HellRa1SeR); npm audit security fixes for vite/undici/babel (#944, thanks HellRa1SeR).', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.8.0 brought the Unverified-queue cleanup (#934), Preview Clip Cleanup, split-album Completeness (#936), and a dashboard performance + memory pass (#935/#802). 2.7.9 added best-quality downloads + ranked quality profiles, Discover "Based On Your Listening", and the Wing It Pool; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3448,50 +3443,49 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "The Unverified queue, finally under control",
-        description: "the headline cleanup — review-queue rows stop piling up and the existing backlog clears itself.",
+        title: "Export playlists to Spotify & Deezer",
+        description: "send a mirrored playlist back to your streaming account — the same one-click export, now pointed at Spotify and Deezer.",
         features: [
-            "#934 — the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck \"unverified\" (a frozen import-time path that stopped matching once the file moved)",
-            "scans no longer duplicate rows + heal on the spot; a one-time reconcile on startup clears the existing backlog from your library's truth — no re-scan, including human-verified files a scan skips",
-            "a 🧹 Clean orphaned button removes dead rows whose file is genuinely gone, with a safety gate that refuses to run if your library looks offline",
-            "Unverified review rows got the nicer Quarantine-style cards (artwork + inline details). thanks @nick2000713 for #938",
+            "#945 — Sync to Spotify / Sync to Deezer sit next to the ListenBrainz/JSPF options in the export modal; each builds a playlist in your account",
+            "resolves IDs from what's already on hand first — the discovery cache, then your library — so an already-discovered playlist exports instantly with zero API calls",
+            "re-exporting updates the same playlist in place instead of spawning duplicates",
+            "an optional \"match missing tracks\" toggle confidently searches for the stragglers — a wrong-artist or karaoke version is left out, never guessed in",
+            "service buttons grey out + point to Settings when disconnected; Spotify needs a one-time reconnect for write access",
         ],
     },
     {
-        title: "Preview Clip Cleanup (new Tools job)",
-        description: "find the ~30s preview clips the HiFi source sometimes hands back instead of the full song.",
+        title: "Library Reorganize — Rename only",
+        description: "a lighter reorganize that just renames, no reprocessing.",
         features: [
-            "scans your short tracks, checks how long each should be from its metadata source, and flags the previews — conservative, so genuine short tracks and anything it can't verify are left alone",
-            "approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version",
-            "each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm it's busted before approving",
-        ],
-    },
-    {
-        title: "Album Completeness handles split albums",
-        description: "a physical album split across multiple library rows no longer reports false \"incomplete\".",
-        features: [
-            "#936 — fragments are grouped into one logical album and emit a single correct finding, instead of each row looking incomplete on its own",
-            "safe by design: it groups by a shared id AND validates at the track level, so a stale id can never fuse two unrelated albums; also recognizes MusicBrainz as a readable album source. thanks @ragnarlotus",
+            "#875 — renames your files to your current naming scheme with no re-tag, no quality/AcoustID re-check, no copy-to-staging — much faster on a NAS and won't fail on post-processing reasons",
+            "only touches files whose path actually changes, which also fixes the \"2 of 14 previewed but everything got modified\" album-splitting; pick it from the new Action dropdown. thanks @tsoulard / @Tacobell444",
         ],
     },
     {
         title: "Recent fixes",
-        description: "reported bugs squashed this cycle.",
+        description: "reliability + reported bugs squashed this cycle.",
         features: [
-            "pasted YouTube cookies threw `unsupported browser: \"custom\"` on Docker — now it loads the pasted cookies.txt (the only auth path on a headless box). thanks HellRa1SeR",
-            "#937 — a remaster running a few seconds LONGER than the metadata got quarantined like a truncated download; the duration check is asymmetric now. thanks @diegocade1",
-            "\"Add to Wishlist\" from a discography went from ~15–30s PER TRACK to instant (the ownership check was doing a full-table fuzzy scan per track)",
-            "wishlist art now renders for re-downloads/preview re-fetches (relative media-server paths are normalized on read); Clear Completed is back on the Downloads page and clears the persisted history too",
-            "watchlist records automatic scans (#933) + stops fusing different editions; pasted Qobuz/Tidal floats to the top of manual search (#932); Popular Picks no longer empty on Deezer",
+            "lossy-copy now covers all lossless formats, not just FLAC (#941); DSD (.dsf/.dff) is recognized as lossless instead of false-flagged \"truncated\" (#939)",
+            "downloads: an unbalanced bracket no longer false-fails as \"file not found\"; a file we couldn't quarantine is left for retry instead of deleted; \"file not found\" errors are actionable now",
+            "pasted Qobuz/Tidal links inject the exact track into manual search (#932); the Wing It pool \"Fix Match\" search works again; the Identify search defaults to \"artist - title\"",
+            "jellyfin scans page the bulk fetch so the no-progress watchdog can't false-stall a big library; settings page cleanup (#943); spotify oauth normalization (#942); npm security fixes (#944)",
         ],
     },
     {
-        title: "Performance — dashboard + memory",
-        description: "lower idle cost and no more runaway RAM.",
+        title: "Reduce visual effects, refined",
+        description: "the lag toggle that no longer breaks the UI.",
         features: [
-            "#935 — frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame, hammering the GPU (worst on Firefox/Zen). trimmed them, kept the orb framerate steady on Firefox, and set Background Particles OFF by default",
-            "#802 — browsing every page used to climb RSS into the GBs (plexapi XML trees deferring GC) and could lock up; a lightweight sweeper now collects + returns memory to the OS as it grows, so it settles instead of climbing",
-            "the dashboard system-memory tile now also shows SoulSync's own RAM",
+            "it no longer freezes functional motion (spinners, progress indicators) — only the expensive GPU properties (blur, shadows, glow) are killed",
+            "worker orbs default OFF on Firefox for first-time users, and run at ~30fps when reduce-effects is on",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.0",
+        description: "2.8.0 was a quality + reliability release.",
+        features: [
+            "the Unverified review queue stopped inflating and self-heals — the AcoustID scan no longer duplicates rows, a startup reconcile clears the backlog, and a 🧹 Clean orphaned button sweeps dead rows (#934, thanks @nick2000713 for #938)",
+            "Preview Clip Cleanup (a Tools job that finds ~30s preview clips and re-wishlists the real version); Album Completeness handles split albums (#936, thanks @ragnarlotus)",
+            "dashboard performance + bounded memory growth that could lock up big libraries (#935 / #802)",
         ],
     },
     {
