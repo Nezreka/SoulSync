@@ -18,6 +18,7 @@ finishes downloading release).
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -363,8 +364,10 @@ def test_encoded_title_with_slash_is_not_basename_split():
 def test_finds_youtube_file_whose_title_contains_a_slash(tmp_path):
     downloads = tmp_path / 'downloads'
     # On disk the slash is sanitised to a look-alike and the colon spaced out,
-    # exactly as in the issue screenshot.
-    target = downloads / 'YouSeeBIGGIRL∕T: T.mp3'
+    # exactly as in the issue screenshot. Windows forbids ':' in filenames, so
+    # yt-dlp-style sanitisation there leaves a space instead of ': '.
+    on_disk = 'YouSeeBIGGIRL∕T T.mp3' if sys.platform == 'win32' else 'YouSeeBIGGIRL∕T: T.mp3'
+    target = downloads / on_disk
     _touch(target)
 
     found, location = find_completed_audio_file(
