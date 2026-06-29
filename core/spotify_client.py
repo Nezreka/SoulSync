@@ -806,6 +806,16 @@ class SpotifyClient:
             self._auth_cached_result = None
             self._auth_cache_time = 0
 
+    def _has_cached_oauth_token(self) -> bool:
+        """Return True when a persisted OAuth token exists (no network I/O)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, 'cache_handler', None)
+            return bool(cache_handler and cache_handler.get_cached_token() is not None)
+        except Exception:
+            return False
+
     def is_spotify_authenticated(self) -> bool:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
         Results are cached for 60 seconds to avoid excessive API calls.
@@ -881,6 +891,26 @@ class SpotifyClient:
                     logger.debug("publish_spotify_status cache hit: %s", e)
                 return self._auth_cached_result
 
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            result = self._has_cached_oauth_token()
+            with self._auth_cache_lock:
+                self._auth_cached_result = result
+                self._auth_cache_time = time.time()
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=result,
+                    authenticated=result,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status boot-phase: %s", e)
+            return result
+
         # Cache miss — make API call outside the lock.
         # Safety: if there's no cached token, return False immediately.
         # Without this guard, spotipy's auth_manager will try to start an interactive
@@ -912,7 +942,8 @@ class SpotifyClient:
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
         try:
-            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
+            probe = spotipy.Spotify(
+                auth_manager=self.sp.auth_manager, retries=0, requests_timeout=15)
             probe.current_user()
             result = True
         except Exception as e:
