@@ -701,32 +701,32 @@ function _renderRecommendedMini(artist, source, opts) {
     const artistSource = artist.source || source || '';
     const reason = reasonFn(artist);
     const reasonTitle = titleFn(artist);
-    const genreTags = (artist.genres || []).slice(0, 2).map(g =>
-        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
-    ).join('');
     const img = artist.image_url
         ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
         : `<div class="recommended-card-image-fallback">🎤</div>`;
+    // .ya-card visual (matches Your Artists / albums) while keeping the class + data hooks the
+    // watchlist handler (.recommended-card-watchlist-btn) and image enrichment
+    // (.recommended-artist-card[data-artist-id] → .recommended-card-image) rely on. #discover redesign.
     return `
-        <div class="recommended-artist-card recommended-card--carousel"
+        <div class="ya-card recommended-artist-card"
              data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
              data-artist-id="${artist.artist_id}"
              data-artist-source="${escapeHtml(artistSource)}">
-            <button class="recommended-card-watchlist-btn"
+            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+               style="display:block;text-decoration:none;color:inherit;">
+                <div class="ya-card-img recommended-card-image">${img}</div>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${escapeHtml(artist.artist_name)}</div>
+                    <div class="ya-card-sub" title="${escapeHtml(reasonTitle)}">${reason}</div>
+                </div>
+            </a>
+            <button class="recommended-card-watchlist-btn ya-card-reco-btn"
                     data-artist-id="${artist.artist_id}"
                     data-artist-name="${escapeHtml(artist.artist_name)}">
                 Add to Watchlist
             </button>
-            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
-               style="display:block;text-decoration:none;color:inherit;">
-                <div class="recommended-card-image">${img}</div>
-                <div class="recommended-card-info">
-                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                    <span class="recommended-card-similarity" title="${escapeHtml(reasonTitle)}">${reason}</span>
-                    <div class="recommended-card-genres">${genreTags}</div>
-                </div>
-            </a>
         </div>`;
 }
 
@@ -790,6 +790,7 @@ async function loadRecommendedArtistsSection() {
                 }
                 const source = (data && data.source) || 'spotify';
                 _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source);
+                _clampGrid(carousel);
             },
             loadingMessage: 'Finding recommendations...',
             emptyMessage: 'No recommendations yet — let the Similar Artists worker run',
@@ -832,6 +833,7 @@ async function loadListeningRecommendations() {
                 }
                 const source = (data && data.source) || 'spotify';
                 _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source, 'listening-recs-carousel');
+                _clampGrid(carousel);
             },
             loadingMessage: 'Reading your listening...',
             emptyMessage: 'Play more music and run a watchlist scan to see picks based on your listening',
