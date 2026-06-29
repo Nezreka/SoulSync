@@ -39,6 +39,7 @@ class AudioQuality:
         # matched target. Cross-format PRIORITY is decided solely by the user's
         # ranked-target list (target index), never by these numbers.
         format_base: dict[str, float] = {
+            'dsf':   102.0,   # DSD — 1-bit hi-res lossless, ranks at/above FLAC (#939)
             'flac':  100.0,
             'alac':   98.0,   # lossless (Apple)
             'wav':    95.0,

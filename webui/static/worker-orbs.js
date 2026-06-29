@@ -605,10 +605,18 @@
         if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
-        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
-        // difference is invisible, and the canvas GPU cost drops by two thirds
-        // for the hours the dashboard sits idle. Wakes re-run every frame.
-        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
+        // Frame-skip throttles. The canvas ticks at 60fps; we drop renders to cut cost.
+        // frameCount still increments every tick, so `time` below stays real-time and the
+        // drift speed is unchanged — we just draw it less often.
+        if (sleepLevel > 0.95) {
+            // Fully asleep → ~20fps: drift is at crawl speed so it's invisible, and the
+            // GPU cost drops two-thirds for the hours the dashboard sits idle.
+            if (frameCount % 3 !== 0) return;
+        } else if (window._reduceEffectsActive) {
+            // Reduce-effects on (user asked for performance) → ~30fps: the slow drift and
+            // sparks look the same, the per-frame cost roughly halves.
+            if (frameCount % 2 !== 0) return;
+        }
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
@@ -1057,7 +1065,12 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        return window._workerOrbsEnabled !== false && !window._reduceEffectsActive;
+        // The worker-orbs toggle controls the orbs on its own — reduce-effects no
+        // longer force-kills them. The orb glow is canvas radial gradients, NOT a CSS
+        // blur(28px) (that's the sidebar aura orbs + frosted glass, which reduce-effects
+        // still kills), so the per-frame cost is moderate, not the blur-rasterize lag.
+        // If real telemetry says otherwise, revert by re-adding `&& !window._reduceEffectsActive`.
+        return window._workerOrbsEnabled !== false;
     }
 
     // ── Real telemetry → pulses ──

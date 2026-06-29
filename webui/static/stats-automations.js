@@ -663,30 +663,71 @@ function exportMirroredPlaylist(playlistId, name) {
                 <div style="font-weight:600;">Sync to ListenBrainz</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create the playlist directly on your ListenBrainz account (needs your LB token).</div>
             </button>
-            <button class="pl-export-choice" data-mode="download" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+            <button class="pl-export-choice" data-mode="download" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
                 <div style="font-weight:600;">Download .jspf file</div>
                 <div style="font-size:12px;color:rgba(255,255,255,0.55);">Save a JSPF playlist you can upload to ListenBrainz manually.</div>
             </button>
-            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Each track is matched to its MusicBrainz recording ID (cached → library → file tag → MusicBrainz). Tracks without an ID can't be included — you'll see how many matched.</div>
+            <button class="pl-export-choice" data-mode="spotify" style="width:100%;text-align:left;margin-bottom:10px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to Spotify</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Spotify playlist in your account from this list (reconnect Spotify if it asks for write access).</div>
+            </button>
+            <button class="pl-export-choice" data-mode="deezer" style="width:100%;text-align:left;margin-bottom:16px;padding:13px 15px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#fff;cursor:pointer;">
+                <div style="font-weight:600;">Sync to Deezer</div>
+                <div style="font-size:12px;color:rgba(255,255,255,0.55);">Create a Deezer playlist from this list (uses your Deezer login).</div>
+            </button>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.4);line-height:1.5;">Tracks are matched by ID (MusicBrainz for ListenBrainz/JSPF; the stored Spotify/Deezer ID for those). Tracks without a match can't be included — you'll see how many made it. Renaming/re-syncing can reset play counts on the destination.</div>
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:12px;color:rgba(255,255,255,0.6);cursor:pointer;">
+                <input type="checkbox" id="pl-export-backfill" style="margin-top:2px;flex-shrink:0;accent-color:rgb(var(--accent-rgb));">
+                <span><b style="color:rgba(255,255,255,0.75);">Match missing tracks</b> (Spotify/Deezer only) — search the service for tracks with no known ID. Slower, and only confident matches are added.</span>
+            </label>
             <div style="text-align:right;margin-top:14px;"><button onclick="document.getElementById('pl-export-modal').remove()" style="background:none;border:none;color:rgba(255,255,255,0.5);cursor:pointer;font-size:13px;">Cancel</button></div>
         </div>`;
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
     overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
         btn.addEventListener('click', () => {
             const mode = btn.dataset.mode;
+            // Gated service button (not connected) → nudge to Settings instead of a doomed export.
+            if (btn.dataset.disconnected) {
+                const dest = mode[0].toUpperCase() + mode.slice(1);
+                overlay.remove();
+                _setExportStatus(playlistId, `<span style="color:#f59e0b;">Connect ${dest} in Settings → Connections to export here</span>`, 9000);
+                return;
+            }
+            const bfEl = overlay.querySelector('#pl-export-backfill');
+            const backfill = !!(bfEl && bfEl.checked);
             overlay.remove();
-            _startPlaylistExport(playlistId, mode, name);
+            _startPlaylistExport(playlistId, mode, name, backfill);
         });
     });
     document.body.appendChild(overlay);
+
+    // Gate Spotify/Deezer on connection (cheap token/ARL check — no live verify). Disconnected
+    // services grey out + nudge to Settings rather than letting the export fail with "not connected".
+    fetch('/api/discover/your-albums/sources').then(r => r.json()).then(data => {
+        const connected = (data && data.connected) || [];
+        overlay.querySelectorAll('.pl-export-choice[data-mode]').forEach(btn => {
+            const m = btn.dataset.mode;
+            if ((m === 'spotify' || m === 'deezer') && !connected.includes(m)) {
+                btn.dataset.disconnected = '1';
+                btn.style.opacity = '0.5';
+                const hint = btn.querySelector('div:last-child');
+                if (hint) hint.innerHTML = `<span style="color:#f59e0b;">Not connected</span> — set up ${m[0].toUpperCase() + m.slice(1)} in Settings → Connections first.`;
+            }
+        });
+    }).catch(() => {});
 }
 
-async function _startPlaylistExport(playlistId, mode, name) {
+async function _startPlaylistExport(playlistId, mode, name, backfill) {
     _setExportStatus(playlistId, `<span style="color:#a78bfa;">Starting export…</span>`);
     try {
-        const resp = await fetch(`/api/playlists/${playlistId}/export/listenbrainz`, {
+        // Spotify/Deezer go to the service endpoint; ListenBrainz/JSPF keep the LB one.
+        const isService = (mode === 'spotify' || mode === 'deezer');
+        const url = isService
+            ? `/api/playlists/${playlistId}/export/service/${mode}`
+            : `/api/playlists/${playlistId}/export/listenbrainz`;
+        const resp = await fetch(url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ mode }),
+            body: isService ? JSON.stringify({ backfill: !!backfill }) : JSON.stringify({ mode }),
         });
         const data = await resp.json();
         if (!data.success || !data.job_id) {
@@ -709,8 +750,19 @@ async function _pollPlaylistExport(jobId, playlistId, mode, name) {
             const pct = job.total ? Math.round(100 * (job.done || 0) / job.total) : 0;
             _setExportStatus(playlistId, `<span style="color:#38bdf8;">Matching ${job.done || 0}/${job.total || 0} (${pct}%)${st.resolved != null ? ` · ${st.resolved} matched` : ''}</span>`);
         } else if (job.phase === 'pushing') {
-            _setExportStatus(playlistId, `<span style="color:#a78bfa;">Pushing to ListenBrainz…</span>`);
+            const dest = (mode === 'spotify' || mode === 'deezer') ? (mode[0].toUpperCase() + mode.slice(1)) : 'ListenBrainz';
+            _setExportStatus(playlistId, `<span style="color:#a78bfa;">Pushing to ${dest}…</span>`);
         } else if (job.phase === 'done') {
+            // Spotify/Deezer export: report added + unmatched and link the new playlist.
+            if (mode === 'spotify' || mode === 'deezer') {
+                const dest = mode[0].toUpperCase() + mode.slice(1);
+                const push = job.push || {};
+                const cov = `${st.resolved || 0} added${st.from_search ? ` (${st.from_search} matched live)` : ''}${st.unmatched ? ` · ${st.unmatched} not on ${dest}` : ''}`;
+                const link = push.url ? ` <a href="${push.url}" target="_blank" style="color:#38bdf8;">open</a>` : '';
+                _setExportStatus(playlistId, `<span style="color:#22c55e;">Exported to ${dest} · ${cov}</span>${link}`, 12000);
+                if (typeof showToast === 'function') showToast(`Playlist exported to ${dest} (${cov})`, 'success');
+                return;
+            }
             const sum = job.summary || {};
             const cov = `${sum.included || 0}/${sum.total || 0} matched${sum.skipped ? ` · ${sum.skipped} unmatched` : ''}`;
             if (mode === 'download') {
@@ -1860,9 +1912,17 @@ async function searchPoolFix() {
         if (artistVal) params.set('artist', artistVal);
         params.set('limit', '20');
         const res = await fetch(`/api/spotify/search_tracks?${params.toString()}`);
-        const data = await res.json();
-        const tracks = data.tracks || [];
+        const data = await res.json().catch(() => ({}));
 
+        // Surface the real failure instead of masking every error (auth, 500, an
+        // upstream connection abort) as a bland "No results found".
+        if (!res.ok || data.error) {
+            const msg = data.error || res.statusText || `request failed (${res.status})`;
+            resultsContainer.innerHTML = `<div class="pool-fix-empty">Search error: ${_esc(msg)}</div>`;
+            return;
+        }
+
+        const tracks = data.tracks || [];
         if (tracks.length === 0) {
             resultsContainer.innerHTML = '<div class="pool-fix-empty">No results found</div>';
             return;

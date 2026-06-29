@@ -36,16 +36,22 @@ def resolve_playlist_tracks(
     resolve_fn: ResolveFn,
     *,
     on_progress: Optional[ProgressFn] = None,
+    id_key: str = "recording_mbid",
 ) -> Dict[str, Any]:
-    """Resolve every track to a recording MBID and build the export pseudo-playlist.
+    """Resolve every track to an ID and build the export pseudo-playlist.
+
+    ``resolve_fn(artist, title) -> (id, source)`` returns whatever ID the target needs —
+    a MusicBrainz recording MBID for ListenBrainz/JSPF (the default), or a Spotify/Deezer
+    track ID for service export. ``id_key`` names the field that ID lands under in each
+    resolved entry (defaults to ``recording_mbid`` so existing LB/JSPF callers are
+    untouched). The dedup + stats + ordering logic is identical regardless of ID type.
 
     ``tracks`` items may use ``artist``/``artist_name`` and ``title``/``track_name`` and
     ``album``/``album_name`` (both the mirrored-playlist and LB-cache shapes are accepted).
 
     Returns ``{"resolved": [...], "stats": {...}}`` where each resolved entry is
-    ``{artist, title, album, recording_mbid}`` (recording_mbid is None when unmatched),
-    in original order, and stats carries ``total, resolved, unmatched, deduped,
-    by_source`` for the live display.
+    ``{artist, title, album, <id_key>}`` (the ID is None when unmatched), in original
+    order, and stats carries ``total, resolved, unmatched, deduped, by_source``.
     """
     total = len(tracks or [])
     memo: Dict[str, Tuple[Optional[str], Optional[str]]] = {}
@@ -71,7 +77,7 @@ def resolve_playlist_tracks(
             memo[key] = (mbid, source)
             fresh = True
 
-        resolved.append({"artist": artist, "title": title, "album": album, "recording_mbid": mbid})
+        resolved.append({"artist": artist, "title": title, "album": album, id_key: mbid})
 
         if mbid:
             stats["resolved"] += 1

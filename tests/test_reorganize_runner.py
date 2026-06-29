@@ -73,6 +73,9 @@ def _make_item(*, queue_id='qid-1', album_id='alb-1', source=None):
     item.queue_id = queue_id
     item.album_id = album_id
     item.source = source
+    # Match the real QueueItem default: a bare MagicMock would return a truthy
+    # mock for .rename_only and wrongly take the rename-only branch (#875).
+    item.rename_only = False
     return item
 
 
@@ -233,3 +236,57 @@ def test_runner_progress_callback_forwards_to_queue(monkeypatch, tmp_path):
     # The progress fan-out happened *while* the item was running. The
     # final snapshot shows the worker-set values — what we're really
     # asserting is that progress callbacks didn't raise.
+
+
+def test_rename_only_item_routes_to_rename_executor(monkeypatch, tmp_path):
+    """#875: an item with rename_only=True invokes the rename-only executor (NOT the
+    full reorganize_album), and never creates a staging dir."""
+    captured = {}
+
+    def fake_rename_only(**kwargs):
+        captured.update(kwargs)
+        return {'status': 'completed', 'source': 'deezer',
+                'total': 1, 'moved': 1, 'skipped': 0, 'failed': 0, 'errors': []}
+
+    def fail_full(**kwargs):
+        raise AssertionError("full reorganize_album must NOT run for rename_only")
+
+    monkeypatch.setattr('core.library_reorganize.reorganize_album', fail_full, raising=True)
+    monkeypatch.setattr('core.library_reorganize.reorganize_album_rename_only',
+                        fake_rename_only, raising=True)
+
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+        build_final_path_fn=lambda *a, **k: (None, True),
+    )
+    item = _make_item(album_id='alb-R', source='deezer')
+    item.rename_only = True
+    summary = runner(item)
+
+    assert summary['status'] == 'completed' and summary['moved'] == 1
+    assert captured['album_id'] == 'alb-R'
+    assert callable(captured['build_final_path_fn'])
+    assert not (tmp_path / 'ssync_staging').exists()   # no staging for rename-only
+
+
+def test_rename_only_without_path_builder_fails_cleanly(monkeypatch, tmp_path):
+    # Defensive: build_final_path_fn omitted → rename-only can't run, returns setup_failed
+    # instead of crashing.
+    runner = build_runner(
+        get_database=lambda: object(),
+        resolve_file_path_fn=lambda p: p,
+        post_process_fn=lambda *a, **k: None,
+        cleanup_empty_directories_fn=lambda *a, **k: None,
+        is_shutting_down_fn=lambda: False,
+        get_download_path=lambda: str(tmp_path),
+        get_transfer_path=lambda: str(tmp_path / 'transfer'),
+    )
+    item = _make_item()
+    item.rename_only = True
+    assert runner(item)['status'] == 'setup_failed'
