@@ -11767,6 +11767,9 @@ def reorganize_album_files(album_id):
             artist_name=meta['artist_name'],
             source=chosen_source,
             metadata_source=metadata_source,
+            # Rename-only (#875): just move files to the current naming scheme — skip
+            # the copy + post-processing (re-tag / quality / AcoustID) of the full flow.
+            rename_only=bool(data.get('rename_only')),
         )
         return jsonify({"success": True, **result})
     except Exception as e:
@@ -11883,6 +11886,9 @@ try:
         get_transfer_path=lambda: docker_resolve_path(
             config_manager.get('soulseek.transfer_path', './Transfer')
         ),
+        # Rename-only mode (#875) computes destinations via the same path builder the
+        # preview uses, so apply matches exactly what the user saw.
+        build_final_path_fn=lambda *a, **kw: _build_final_path_for_track(*a, **kw),
     ))
 except Exception as _runner_init_err:
     logger.error(f"Failed to register reorganize queue runner: {_runner_init_err}")
