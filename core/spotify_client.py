@@ -857,7 +857,8 @@ class SpotifyClient:
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
         try:
-            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
+            probe = spotipy.Spotify(
+                auth_manager=self.sp.auth_manager, retries=0, requests_timeout=15)
             probe.current_user()
             result = True
         except Exception as e:
