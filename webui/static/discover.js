@@ -35,19 +35,20 @@ function _advState(v) {
     if (v < 0.70) return 'Adventurous';
     return 'Deep cuts only';
 }
-// green (120°) → red (0°) through the warm spectrum (yellow, orange) as the orb moves right.
+// green (120°) → blue (220°) through cyan as the orb moves right. Blue reads "deep / exploratory"
+// rather than red's "danger / bad" — safe at the green end, adventurous at the cool blue end.
 function _advColor(v, light, alpha) {
-    const hue = 120 * (1 - Math.max(0, Math.min(1, v)));
+    const hue = 120 + 100 * Math.max(0, Math.min(1, v));
     const l = light || 55;
     return alpha != null ? `hsla(${hue.toFixed(0)}, 85%, ${l}%, ${alpha})` : `hsl(${hue.toFixed(0)}, 85%, ${l}%)`;
 }
 // Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
 function _advWaveY(u, v) {
-    const amp = 2 + v * 22;            // gentle ripple at 0, tall waves at 1
-    const freq = 1.1 + v * 3.2;        // more cycles as it gets adventurous
+    const amp = 2 + v * 12;            // gentle ripple at 0, lively (not wild) at 1
+    const freq = 1.1 + v * 2.0;        // a few more cycles as it gets adventurous
     let y = 40 + amp * Math.sin(freq * u * Math.PI * 2 + _advWave.phase);
-    if (v > 0) {                       // a detuned second harmonic adds the erratic wobble
-        y += v * amp * 0.55 * Math.sin(freq * 2.4 * u * Math.PI * 2 + _advWave.phase * 1.7 + 1.3);
+    if (v > 0) {                       // a detuned second harmonic adds a touch of wobble
+        y += v * amp * 0.38 * Math.sin(freq * 2.2 * u * Math.PI * 2 + _advWave.phase * 1.6 + 1.3);
     }
     return y;
 }
@@ -57,7 +58,7 @@ function _advDraw() {
     if (!path || !track) { _advWave.raf = null; return; }
     if (track.offsetParent !== null) {  // skip the work while the Discover page is hidden
         const v = _advWave.value;
-        _advWave.phase += 0.03 + v * 0.07;   // waves faster the more adventurous
+        _advWave.phase += 0.022 + v * 0.045;   // waves a little faster the more adventurous
         let line = '';
         const N = 90;
         for (let i = 0; i <= N; i++) {
@@ -88,12 +89,12 @@ function _advApply(v) {
         orb.style.left = (v * 100).toFixed(2) + '%';
         orb.style.color = c;                              // currentColor for the pulsing ring
         orb.style.background = cBright;
-        orb.style.boxShadow = `0 0 22px 3px ${c}, 0 0 0 6px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.6)`;
+        orb.style.boxShadow = `0 0 9px 0 ${c}, inset 0 0 0 2px rgba(255,255,255,0.5)`;
     }
     const aura = document.getElementById('adv-wave-aura');   // colour wash that follows the orb
     if (aura) {
         aura.style.left = (v * 100).toFixed(2) + '%';
-        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.42)} 0%, transparent 68%)`;
+        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.26)} 0%, transparent 70%)`;
     }
     const stateEl = document.getElementById('adv-wave-state');
     if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }
