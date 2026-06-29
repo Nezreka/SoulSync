@@ -7,16 +7,29 @@
     <title>SoulSync - Music Sync & Manager</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png', v=static_v) }}">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json', v=static_v) }}">
-    <meta name="theme-color" content="#1db954">
+    <meta name="theme-color" content="{{ initial_accent_color }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='pwa-icon-192.png', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='basic-search-v2.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='mobile.css', v=static_v) }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='setup-wizard.css', v=static_v) }}">
+    <style id="soulsync-initial-appearance">
+        :root {
+            --accent-rgb: {{ initial_accent_rgb }};
+            --accent-light-rgb: {{ initial_accent_light_rgb }};
+            --accent-neon-rgb: {{ initial_accent_neon_rgb }};
+        }
+    </style>
+    <script>
+        window._particlesEnabled = {{ initial_particles_enabled|tojson }};
+        window._workerOrbsEnabled = {{ initial_worker_orbs_enabled|tojson }};
+        window._reduceEffectsActive = {{ initial_reduce_effects|tojson }};
+        window._maxPerfActive = {{ initial_max_performance|tojson }};
+    </script>
     {{ vite_assets('head')|safe }}
 </head>
 
-<body>
+<body class="{% if initial_reduce_effects %}reduce-effects {% endif %}{% if initial_max_performance %}max-performance{% endif %}">
     <!-- Setup Wizard Overlay -->
     <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
         <div class="setup-wizard-container">
@@ -347,7 +360,7 @@
         <!-- Main Content Area -->
         <div class="main-content">
             <!-- Global particle canvas for page background animations -->
-            <canvas id="page-particles-canvas"></canvas>
+            <canvas id="page-particles-canvas"{% if not initial_particles_enabled or initial_reduce_effects %} style="display: none;"{% endif %}></canvas>
             <div id="webui-react-root" class="page" data-react-app="router"></div>
 
             <!-- Dashboard Page -->
@@ -2142,7 +2155,7 @@
 
             <!-- Search Page -->
             <div class="page" id="search-page">
-                <!-- 
+                <!--
                 This top-level container replicates the QSplitter from downloads.py,
                 creating the two-panel layout for the page.
                 -->
@@ -3902,26 +3915,26 @@
             <!-- Settings Page -->
             <div class="page" id="settings-page">
                 <div class="page-shell">
-                <div class="dashboard-header"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
+                <div class="dashboard-header settings-header-compact"><div class="dashboard-header-sweep" aria-hidden="true"><span></span></div>
                     <div class="header-text">
                         <h2 class="header-title"><img src="/static/settings.png" class="page-header-icon" alt=""><span>Settings</span></h2>
-                        <p class="header-subtitle">Configure services, downloads, and preferences</p>
-                    </div>
-                    <div class="header-spacer"></div>
-                    <div class="header-actions">
-                        <button class="save-button" onclick="document.getElementById('save-settings').click()">Save Settings</button>
                     </div>
                 </div>
                 <div class="settings-content">
                     <!-- Category Tab Bar -->
-                    <div class="stg-tabbar">
-                        <button class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">Connections</button>
-                        <button class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">Downloads</button>
-                        <button class="stg-tab" data-tab="indexers" onclick="switchSettingsTab('indexers')">Indexers &amp; Downloaders</button>
-                        <button class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">Library</button>
-                        <button class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
-                        <button class="stg-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">Advanced</button>
-                        <button class="stg-tab" data-tab="logs" onclick="switchSettingsTab('logs')">Logs</button>
+                    <div class="settings-nav-row">
+                        <div class="stg-tabbar">
+                            <button class="stg-tab active" data-tab="connections" onclick="switchSettingsTab('connections')">Connections</button>
+                            <button class="stg-tab" data-tab="downloads" onclick="switchSettingsTab('downloads')">Downloads</button>
+                            <button class="stg-tab" data-tab="quality" onclick="switchSettingsTab('quality')">Quality</button>
+                            <button class="stg-tab" data-tab="library" onclick="switchSettingsTab('library')">Library</button>
+                            <button class="stg-tab" data-tab="appearance" onclick="switchSettingsTab('appearance')">Appearance</button>
+                            <button class="stg-tab" data-tab="advanced" onclick="switchSettingsTab('advanced')">Advanced</button>
+                            <button class="stg-tab" data-tab="logs" onclick="switchSettingsTab('logs')">Logs</button>
+                        </div>
+                        <div class="header-actions">
+                            <button class="save-button" id="save-settings">Save Settings</button>
+                        </div>
                     </div>
                     <!-- Settings Panels -->
                     <div class="settings-columns">
@@ -3930,6 +3943,7 @@
                             <!-- API Configuration -->
                             <div class="settings-group" data-stg="connections">
                                 <h3>API Configuration <button class="stg-accordion-toggle" onclick="toggleAllServiceAccordions(this)">Expand All</button></h3>
+
 
                                 <!-- Metadata Source Selection (first — tells user what they're configuring for) -->
                                 <div class="api-service-frame">
@@ -3945,9 +3959,9 @@
                                             <option value="musicbrainz">MusicBrainz</option>
                                             <option value="jiosaavn">JioSaavn</option>
                                         </select>
-                                    </div>
-                                    <div class="callback-info">
-                                        <div class="callback-help">Where artist, album, and track metadata comes from:<br>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                        <div class="setting-help-text setting-help-body" hidden>Where artist, album, and track metadata comes from:<br>
                                             • <strong>Spotify</strong> — official Spotify; connect your account in the Spotify section below.<br>
                                             • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
@@ -3995,13 +4009,15 @@
                                                 Disconnect</button>
                                         </div>
                                         <div class="form-group" style="margin-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 14px;">
-                                            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal;">
-                                                <input type="checkbox" id="metadata-spotify-free-enrichment" style="width: auto; margin: 0;">
-                                                <span>Use Spotify (no auth) for background enrichment</span>
-                                            </label>
-                                            <div class="callback-info">
-                                                <div class="callback-help">Runs the background metadata enrichment worker on the no-auth Spotify source instead of this connected account — keeping bulk enrichment off your official API quota (and dodging rate-limit bans), so your account is reserved for interactive search and playlist sync. <strong>On by default.</strong> Turn off to enrich through your connected account instead. Works even with no account connected. Note: the no-auth source can't supply artist genres.</div>
+                                            <div class="setting-row" style="flex:1;min-width:0;">
+                                                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: normal; margin:0;">
+                                                    <input type="checkbox" id="metadata-spotify-free-enrichment" style="width: auto; margin: 0;">
+                                                    <span>Use Spotify (no auth) for background enrichment</span>
+                                                </label>
+                                                <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                    onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                             </div>
+                                            <div class="setting-help-text setting-help-body" hidden>Runs the background metadata enrichment worker on the no-auth Spotify source instead of this connected account — keeping bulk enrichment off your official API quota (and dodging rate-limit bans), so your account is reserved for interactive search and playlist sync. <strong>On by default.</strong> Turn off to enrich through your connected account instead. Works even with no account connected. Note: the no-auth source can't supply artist genres.</div>
                                         </div>
                                     </div>
                                 </div>
@@ -4567,81 +4583,17 @@
                         <!-- Right Column - Download Settings, Database, Metadata, Logging -->
                         <div class="settings-right-column">
                             <!-- Download Settings -->
-                            <div class="settings-group" data-stg="downloads">
-                                <h3>Download Settings</h3>
-                                <div class="setting-help-text">
-                                    These are container-internal paths. Only modify them if you know what you're doing — incorrect values will break downloads.
-                                </div>
+                                                        <!-- Download Settings (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Source Settings</h3>
+                                <span class="settings-section-hint">Source, stream &amp; concurrency</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+<div class="settings-group source-settings-wrapper" data-stg="downloads">
 
-                                <div class="form-group">
-                                    <label>Input Folder (Download Dir):</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="download-path" placeholder="./downloads" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
-                                    </div>
-                                </div>
 
-                                <div class="form-group">
-                                    <label>Output Folder (Music Library):</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Import Folder:</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="staging-path" placeholder="./Staging" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('staging', this)">Unlock</button>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Music Videos Dir:</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="music-videos-path" placeholder="./MusicVideos" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('music-videos', this)">Unlock</button>
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Playlists Folder:</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="playlists-materialize-path" placeholder="./Playlists" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('playlists-materialize', this)">Unlock</button>
-                                    </div>
-                                    <div class="setting-help-text" style="margin-top: 6px;">
-                                        Where <strong>Organize by playlist</strong> builds playlist folders — as shortcuts into your library, so songs are never stored twice. Keep this <strong>outside</strong> your music library folder so your media server doesn't scan the same tracks twice.
-                                    </div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>Playlist Folder Style:</label>
-                                    <select id="playlists-materialize-mode">
-                                        <option value="symlink">Symlinks — no extra disk, point to your library</option>
-                                        <option value="copy">Copies — real duplicates (USB sticks / players that can't follow links)</option>
-                                    </select>
-                                    <div class="setting-help-text" style="margin-top: 6px;">
-                                        Symlinks use almost no space. Copies are self-contained. Symlinks fall back to copies automatically where the filesystem can't link (Windows without privileges, some network shares, FAT/exFAT drives).
-                                    </div>
-                                    <button class="test-button" id="playlists-rebuild-btn" onclick="rebuildPlaylistFolders()" style="margin-top: 10px;">
-                                        Rebuild playlist folders now
-                                    </button>
-                                    <div class="setting-help-text" id="playlists-rebuild-status" style="margin-top: 6px;"></div>
-                                </div>
-
-                                <div class="form-group">
-                                    <label>M3U Entry Base Path:</label>
-                                    <div class="path-input-group">
-                                        <input type="text" id="m3u-entry-base-path" placeholder="e.g. /mnt/music (leave empty for relative paths)" readonly>
-                                        <button class="browse-button locked" onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>
-                                    </div>
-                                    <div class="setting-help-text">
-                                        Optional prefix added to every track path in exported M3U files. Use this when your media server needs absolute paths (e.g. <code>/mnt/music</code>).
-                                    </div>
-                                </div>
-
+                                <div class="settings-subcard">
                                 <div class="form-group">
                                     <label>Download Source:</label>
                                     <select id="download-source-mode" class="form-select"
@@ -4659,7 +4611,9 @@
                                         <option value="usenet">Usenet Only (via Prowlarr)</option>
                                         <option value="hybrid">Hybrid (Primary + Fallback)</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Choose where to download music from. Hybrid mode tries primary source first,
                                         then falls back to secondary if it fails.
                                     </div>
@@ -4671,7 +4625,9 @@
                                         <option value="youtube">YouTube (Instant)</option>
                                         <option value="active">Active Download Source</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Where to stream audio when previewing tracks. YouTube is instant and requires no setup.
                                         "Active Download Source" uses your configured source (Tidal, Qobuz, etc.) — if that's Soulseek, YouTube is used automatically.
                                     </div>
@@ -4689,17 +4645,23 @@
                                         <option value="8">8</option>
                                         <option value="10">10</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Maximum simultaneous downloads per batch. Soulseek album downloads always use 1 worker
                                         due to per-user upload limits. Higher values speed up large playlists and wishlists.
                                     </div>
                                 </div>
 
+                                <div class="form-group">
+                                    <button class="test-button" id="test-all-sources-btn" onclick="testAllSources()">Test all sources</button>
+                                    <span class="setting-help-text" style="margin-left:10px;">Checks every selected source &amp; configured connection.</span>
+                                </div>
+
                                 <!-- Hybrid Mode Settings (shown only when hybrid is selected) -->
                                 <div id="hybrid-settings-container" style="display: none;">
                                     <div class="setting-help-text">
-                                        Drag to reorder source priority. Enable sources you want to use. Downloads try each enabled source in order.
-                                        The first source can use album-level downloads when supported; later sources stay track-level fallback.
+                                        Drag to reorder source priority. Toggle the sources you want to use — downloads try each enabled source in order. Click a source (or its ⚙) to configure it below. The first source can use album-level downloads when supported; later sources stay track-level fallback.
                                     </div>
                                     <div class="hybrid-source-list" id="hybrid-source-list">
                                         <!-- Populated by JS -->
@@ -4708,6 +4670,7 @@
                                     <select id="hybrid-primary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
                                     <select id="hybrid-secondary-source" style="display:none;"><option value="soulseek">Soulseek</option><option value="youtube">YouTube</option><option value="tidal">Tidal</option><option value="qobuz">Qobuz</option><option value="hifi">HiFi</option><option value="deezer_dl">Deezer</option><option value="soundcloud">SoundCloud</option></select>
                                 </div>
+                                </div><!-- end basic source subcard -->
 
                                 <!-- Soulseek Settings (shown when soulseek is active source) -->
                                 <div id="soulseek-settings-container" style="display: none;">
@@ -4977,7 +4940,7 @@
                                 <div id="prowlarr-source-redirect" style="display: none;">
                                     <div class="form-group">
                                         <div class="setting-help-text" style="padding: 12px 14px; background: rgba(var(--accent-rgb), 0.06); border: 1px solid rgba(var(--accent-rgb), 0.2); border-radius: 10px;">
-                                            📡 Torrent and Usenet downloads run through your Prowlarr indexers and your configured downloader. Set up Prowlarr + the torrent / usenet client on the <strong>Indexers &amp; Downloaders</strong> tab. Once Test Connection is green on both, this source is ready to use.
+                                            📡 Torrent / Usenet downloads use Prowlarr plus a torrent or usenet client — configure them in the <strong>Indexers &amp; Downloaders</strong> tiles below.
                                         </div>
                                     </div>
                                 </div>
@@ -5025,21 +4988,22 @@
                                 </div>
 
                             </div>
+                            </div><!-- end Download Settings body -->
 
                             <!-- ═══ QUALITY PROFILE ═══ -->
                             <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
                                  by settings.js updateSourceVisibility — gating only the inner
                                  group would leave an empty expandable shell. -->
-                            <div id="quality-profile-tile" data-stg="downloads">
+                            <div id="quality-profile-tile" data-stg="quality">
                             <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality Profile</h3>
                                 <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="downloads">
+                            <div class="settings-section-body collapsed" data-stg="quality">
 
                             <!-- Quality Profile Settings (global — applies to all download sources) -->
-                            <div class="settings-group" id="quality-profile-section" data-stg="downloads">
+                            <div class="settings-group" id="quality-profile-section" data-stg="quality">
 
                                 <!-- Presets -->
                                 <div class="quality-presets">
@@ -5075,7 +5039,7 @@
                                     <div class="setting-row">
                                         <label class="ranked-targets-label" style="margin:0;">Quality priority (drag to reorder — 1st = most preferred):</label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="help-text setting-help-body" hidden>
                                         <strong>How it works:</strong> Each download source is checked against this list
@@ -5102,6 +5066,7 @@
                                                 <option value="flac">FLAC</option>
                                                 <option value="alac">ALAC</option>
                                                 <option value="wav">WAV / AIFF</option>
+                                                <option value="dsf">DSD (DSF / DFF)</option>
                                             </optgroup>
                                             <optgroup label="Lossy">
                                                 <option value="group:lossy">All lossy</option>
@@ -5150,7 +5115,7 @@
                                     <div class="setting-row" style="margin-bottom:4px;">
                                         <label for="quality-search-mode" style="font-weight:600;">Search strategy</label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <select id="quality-search-mode" style="width:100%;max-width:420px;" onchange="onSearchModeChange()">
                                         <option value="priority">Source priority — fast (use the first source that has it)</option>
@@ -5176,7 +5141,7 @@
                                             Rank-based download order
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="help-text setting-help-body" hidden>
                                         A single source often returns several copies of the same track.<br><br>
@@ -5199,7 +5164,7 @@
                                             Accept off-list quality when nothing in the list is available
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="help-text setting-help-body" hidden>
                                         This does <strong>not</strong> mean "walk down my list" — the list already
@@ -5212,22 +5177,144 @@
                                     </div>
                                 </div>
 
-                                <!-- Require hard AcoustID verification — only shown when AcoustID is enabled -->
-                                <div class="form-group" id="acoustid-require-verified-group" style="display:none;">
+                            </div>
+
+                            </div><!-- end Quality Profile body -->
+                            </div><!-- end Quality Profile tile -->
+
+                            <!-- ═══ QUALITY ON IMPORT (moved from Library > Import — quality enforcement at import time) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Quality on Import</h3>
+                                <span class="settings-section-hint">Apply the profile to manually imported files</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="quality">
+                            <div class="settings-group" data-stg="quality">
+                                <div class="form-group">
                                     <div class="setting-row">
-                                        <label class="checkbox-label" style="margin:0;">
-                                            <input type="checkbox" id="acoustid-require-verified">
-                                            Only import AcoustID-verified tracks (reject "could not confirm")
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-quality-filter-enabled" checked>
+                                            Quality profile check on import
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">ⓘ</span>
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
-                                    <div class="help-text setting-help-body" hidden>
-                                        When <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
+                                    <div class="setting-help-body" hidden>
+                                        On by default. SoulSync probes each imported file's real audio quality and compares it
+                                        with your Quality Profile. <strong>On</strong> — files that don't meet your profile are
+                                        quarantined instead of imported (fallback/downsample settings still apply).
+                                        <strong>Off</strong> — files are imported regardless of format, bitrate, bit depth, or
+                                        sample rate. This does <strong>not</strong> skip AcoustID; fingerprint verification is a
+                                        separate setting below. Either way, the library <em>Quality Upgrade Scanner</em> still
+                                        flags below-profile tracks so you can act on them later.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-replace-lower-quality">
+                                            Replace lower quality files on import
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>
+                                        When importing from Staging, if a track already exists in your library at a lower quality
+                                        (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
+                                        If disabled, existing tracks are always kept and the import file is skipped.
+                                    </div>
+                                </div>
+                            </div>
+                            </div><!-- end Quality on Import body -->
+
+                            <!-- ═══ POST-DOWNLOAD CONVERSION (quality — moved from Library) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Post-Download Conversion</h3>
+                                <span class="settings-section-hint">Downsample hi-res, make lossy copies</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="quality">
+                            <div class="settings-group" data-stg="quality">
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="downsample-hires">
+                                            Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz)
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>When a 24-bit or high sample-rate FLAC is downloaded, it is automatically converted to 16-bit/44.1kHz. The hi-res original is <strong>replaced</strong>, not kept alongside. Requires ffmpeg.</div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="lossy-copy-enabled"
+                                                onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
+                                            Create lossy copy of downloaded FLAC files
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>After downloading a FLAC, a lossy copy at the selected codec and bitrate is created in the same folder. Requires ffmpeg.</div>
+                                </div>
+                                <div id="lossy-copy-options" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Codec:</label>
+                                        <select id="lossy-copy-codec" onchange="updateLossyBitrateOptions()">
+                                            <option value="mp3">MP3</option>
+                                            <option value="opus">Opus</option>
+                                            <option value="aac">AAC (M4A)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Bitrate:</label>
+                                        <select id="lossy-copy-bitrate">
+                                            <option value="320">320 kbps</option>
+                                            <option value="256">256 kbps</option>
+                                            <option value="192">192 kbps</option>
+                                            <option value="128">128 kbps</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" style="margin-top: 12px;">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="lossy-copy-delete-original">
+                                            Blasphemy Mode — Delete original FLAC after conversion
+                                        </label>
+                                    </div>
+                                    <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
+                                        Warning: The original high-quality file will be permanently deleted.
+                                        Only the lossy copy will remain.
+                                    </div>
+                                </div>
+                            </div>
+                            </div><!-- end Post-Download Conversion body -->
+
+                            <!-- ═══ AUDIO VERIFICATION (global quality gate) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Audio Verification</h3>
+                                <span class="settings-section-hint">AcoustID identity match + truncated/silent detection</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="quality">
+                            <div class="settings-group" data-stg="quality">
+                                <!-- AcoustID identity gate — always shown here; help notes it needs AcoustID enabled -->
+                                <div class="form-group" id="acoustid-require-verified-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="acoustid-require-verified">
+                                            Only allow AcoustID-verified tracks for imports and downloads
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>
+                                        Applies to both <strong>imports</strong> and <strong>downloads</strong>. When
+                                        <strong>on</strong>, a track that AcoustID runs but <em>cannot confirm</em>
                                         (no fingerprint match / cross-script metadata — the ⚠ "unverified" case) is
-                                        <strong>quarantined</strong> instead of imported. Downloads then try the next
-                                        candidate; imports just quarantine (no candidate to retry). Only a clean AcoustID
-                                        <strong>pass</strong> is kept.
+                                        <strong>quarantined</strong> instead of being allowed into the library. Downloads then
+                                        try the next candidate; imports just quarantine (no candidate to retry). Only a clean
+                                        AcoustID <strong>pass</strong> is kept.
                                         <br><br>
                                         ⚠️ <strong>Use with care.</strong> AcoustID "could not confirm" is <em>common</em>
                                         for perfectly good tracks — anything not in its fingerprint database: new/obscure
@@ -5240,96 +5327,51 @@
                                         outage) always import, so an AcoustID outage never stalls you. Requires AcoustID enabled.
                                     </div>
                                 </div>
-                            </div>
-
-                            </div><!-- end Quality Profile body -->
-                            </div><!-- end Quality Profile tile -->
-
-                            <!-- ═══ RETRY LOGIC ═══ -->
-                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
-                                <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Retry Logic</h3>
-                                <span class="settings-section-hint">Next-best candidate, exhaustive per-source retry</span>
-                            </div>
-                            <div class="settings-section-body collapsed" data-stg="downloads">
-
-                            <div class="settings-group" data-stg="downloads">
-                                <h3>🔁 Retry Logic</h3>
-                                <small class="settings-hint" style="margin-bottom: 10px; display: block;">Controls what happens when a downloaded file is rejected (AcoustID mismatch, wrong version, or duration/integrity failure). Independent of post-processing.</small>
                                 <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="retry-next-candidate" checked>
-                                        Retry next-best candidate on mismatch
-                                    </label>
-                                    <small class="settings-hint">When a download is quarantined (AcoustID mismatch or duration/integrity failure), automatically try the next-best candidate instead of failing the track. Off = quarantine and fail immediately.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="retry-exhaustive">
-                                        Exhaustive retry (separate budget per source)
-                                    </label>
-                                    <small class="settings-hint">Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="retries-per-query">Retries per query (per source)</label>
-                                    <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
-                                    <small class="settings-hint">In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="accept-version-mismatch-fallback">
-                                        Accept best version mismatch as last resort
-                                    </label>
-                                    <small class="settings-hint">When retries are fully exhausted and <em>every</em> candidate for a track failed the <strong>same</strong> version mismatch (e.g. only an instrumental exists), accept the best (first-tried) one instead of leaving the track missing. Only AcoustID is bypassed — integrity/duration/bit-depth checks still run, so truncated or genuinely wrong files are never let through. Off = leave such tracks failed.</small>
-                                </div>
-                                <div class="form-group">
-                                    <label for="version-mismatch-min-count">Minimum matching mismatches before accepting</label>
-                                    <input type="number" id="version-mismatch-min-count" min="1" max="20" step="1" value="2" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
-                                    <small class="settings-hint">How many quarantined candidates must have failed the <em>same</em> version mismatch before the last-resort acceptance kicks in. Higher = more confirmation that no correct version exists. Only used when the option above is on.</small>
-                                </div>
-                            </div>
-
-                            </div><!-- end Retry Logic body -->
-
-                            <!-- ═══ INDEXERS & DOWNLOADERS ═══ -->
-                            <!-- Intro hero — explains the search → fetch flow in one glance -->
-                            <div class="settings-group ind-hero" data-stg="indexers">
-                                <div class="ind-hero-title">Indexers &amp; Downloaders</div>
-                                <div class="ind-hero-flow">
-                                    <span class="ind-hero-step"><span class="ind-hero-step-num">1</span> Indexers find releases</span>
-                                    <span class="ind-hero-arrow">→</span>
-                                    <span class="ind-hero-step"><span class="ind-hero-step-num">2</span> Downloader fetches them</span>
-                                    <span class="ind-hero-arrow">→</span>
-                                    <span class="ind-hero-step"><span class="ind-hero-step-num">3</span> SoulSync imports to library</span>
-                                </div>
-                                <div class="ind-hero-sub">
-                                    Configure your Prowlarr instance to feed search results, and pick a torrent client and/or usenet client to handle the actual downloads. You only need to set up the protocols you actually use.
-                                </div>
-                                <div class="ind-hero-warning">
-                                    <div class="ind-hero-warning-title">💡 Filesystem access — easiest setup</div>
-                                    <div class="ind-hero-warning-body">
-                                        Torrent and usenet clients write files to <strong>their own download folders</strong>, not Soulseek's. SoulSync needs read access to those folders to import the files. <strong>Simplest fix:</strong> point all your downloaders (Soulseek, qBittorrent, SABnzbd / NZBGet) at the <em>same</em> download folder. One folder, one path to worry about, everything just works.
-                                        <ul>
-                                            <li><strong>Bare-metal:</strong> just set every client's download path to the same folder (e.g. your existing slskd folder). Done.</li>
-                                            <li><strong>Docker:</strong> easiest is to reuse the <code>./downloads</code> mount you already have for slskd — point qBit and SAB at <code>/downloads</code> inside their containers too. Or use the commented placeholders in <code>docker-compose.yml</code> if you want separate folders.</li>
-                                            <li><strong>Remote client (NAS / different host):</strong> mount the remote folder locally (SMB / NFS / rclone) before SoulSync can see it.</li>
-                                        </ul>
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="audio-completeness-check">
+                                            Verify real audio with ffmpeg
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
+                                    <div class="setting-help-body" hidden>Decodes every downloaded file with ffmpeg to catch fake 30s previews padded to full length and mostly-silent files — the kind whose header lies about the length so mutagen can't catch them. <strong>Off by default:</strong> this fully decodes each file, the most CPU-heavy post-processing step. Most sources (HiFi, Qobuz) already catch previews on their own, so only turn this on if you see padded/silent files slip through. Applies to all download sources.</div>
+                                </div>
+                            </div>
+                            </div><!-- end Audio Verification body -->
+
+                            <!-- ═══ INDEXERS & DOWNLOADERS (gated: only shown when torrent/usenet is a selected source — see updateDownloadSourceUI) ═══ -->
+                            <div id="indexers-downloaders-section" data-stg="downloads">
+                            <!-- Compact collapsible filesystem note (flow/intro text removed per design) -->
+                            <div class="ind-hero-warning" style="margin-bottom:12px;">
+                                <div class="ind-hero-warning-title" style="cursor:pointer;user-select:none;" onclick="const b=this.nextElementSibling; b.style.display=(b.style.display==='none'?'':'none'); const c=this.querySelector('.ind-hero-warning-caret'); if(c)c.textContent=(b.style.display==='none'?'▾':'▴');">💡 Filesystem access — easiest setup <span class="ind-hero-warning-caret" style="opacity:.6;">▾</span></div>
+                                <div class="ind-hero-warning-body" style="display:none;">
+                                    Torrent and usenet clients write files to <strong>their own download folders</strong>, not Soulseek's. SoulSync needs read access to those folders to import the files. <strong>Simplest fix:</strong> point all your downloaders (Soulseek, qBittorrent, SABnzbd / NZBGet) at the <em>same</em> download folder. One folder, one path to worry about, everything just works.
+                                    <ul>
+                                        <li><strong>Bare-metal:</strong> just set every client's download path to the same folder (e.g. your existing slskd folder). Done.</li>
+                                        <li><strong>Docker:</strong> easiest is to reuse the <code>./downloads</code> mount you already have for slskd — point qBit and SAB at <code>/downloads</code> inside their containers too. Or use the commented placeholders in <code>docker-compose.yml</code> if you want separate folders.</li>
+                                        <li><strong>Remote client (NAS / different host):</strong> mount the remote folder locally (SMB / NFS / rclone) before SoulSync can see it.</li>
+                                    </ul>
                                 </div>
                             </div>
 
                             <!-- ─── INDEXERS section ─── -->
-                            <div class="settings-section-header" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>🔎 Indexers</h3>
+                                <h3>Indexers</h3>
                                 <span class="settings-section-hint">Prowlarr — search aggregator</span>
                                 <span class="ind-status-dot ind-status-dot-unknown" id="prowlarr-status-dot" title="Not tested"></span>
                             </div>
-                            <div class="settings-section-body" data-stg="indexers">
-                                <div class="settings-group" data-stg="indexers">
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                                <div class="settings-group" data-stg="downloads">
                                     <div class="api-service-frame">
-                                        <h4 class="service-title prowlarr-title">⬢ Prowlarr</h4>
-                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                        <div class="setting-row" style="padding:14px 18px;">
+                                            <h4 class="service-title prowlarr-title" style="padding:0!important;border:0!important;margin:0!important;flex:1;">⬢ Prowlarr</h4>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                        </div>
+                                        <div class="setting-help-text setting-help-body" style="margin-bottom: 14px;" hidden>
                                             Prowlarr manages your Usenet and torrent indexers and exposes them through one API. SoulSync uses Prowlarr to search across every indexer at once for the Torrent and Usenet download sources.
                                             <br><br>
                                             Don't have it? Grab Prowlarr from <code>prowlarr.com</code> (or your *arr stack). You point Prowlarr at your indexers, then point SoulSync at Prowlarr.
@@ -5377,18 +5419,23 @@
                                 </div>
                             </div>
 
-                            <!-- ─── TORRENT CLIENT section ─── -->
-                            <div class="settings-section-header collapsed" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            <!-- ─── TORRENT CLIENT section (gated on torrent source) ─── -->
+                            <div id="torrent-tile">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>🧲 Torrent Client</h3>
+                                <h3>Torrent Client</h3>
                                 <span class="settings-section-hint">qBittorrent · Transmission · Deluge</span>
                                 <span class="ind-status-dot ind-status-dot-unknown" id="torrent-client-status-dot" title="Not tested"></span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="indexers">
-                                <div class="settings-group" data-stg="indexers">
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                                <div class="settings-group" data-stg="downloads">
                                     <div class="api-service-frame">
-                                        <h4 class="service-title torrent-title">⬢ Torrent Downloader</h4>
-                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                        <div class="setting-row" style="padding:14px 18px;">
+                                            <h4 class="service-title torrent-title" style="padding:0!important;border:0!important;margin:0!important;flex:1;">⬢ Torrent Downloader</h4>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                        </div>
+                                        <div class="setting-help-text setting-help-body" style="margin-bottom: 14px;" hidden>
                                             Where SoulSync sends torrents once Prowlarr finds them. Pick the client you already use — only one can be active at a time. Add the URL of the client's WebUI, log in if it asks for credentials, and hit Test Connection.
                                         </div>
                                         <div class="form-group">
@@ -5469,18 +5516,25 @@
                                 </div>
                             </div>
 
-                            <!-- ─── USENET CLIENT section ─── -->
-                            <div class="settings-section-header collapsed" data-stg="indexers" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                            </div><!-- end torrent-tile -->
+
+                            <!-- ─── USENET CLIENT section (gated on usenet source) ─── -->
+                            <div id="usenet-tile">
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>📰 Usenet Client</h3>
+                                <h3>Usenet Client</h3>
                                 <span class="settings-section-hint">SABnzbd · NZBGet</span>
                                 <span class="ind-status-dot ind-status-dot-unknown" id="usenet-client-status-dot" title="Not tested"></span>
                             </div>
-                            <div class="settings-section-body collapsed" data-stg="indexers">
-                                <div class="settings-group" data-stg="indexers">
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                                <div class="settings-group" data-stg="downloads">
                                     <div class="api-service-frame">
-                                        <h4 class="service-title usenet-title">⬢ Usenet Downloader</h4>
-                                        <div class="setting-help-text" style="margin-bottom: 14px;">
+                                        <div class="setting-row" style="padding:14px 18px;">
+                                            <h4 class="service-title usenet-title" style="padding:0!important;border:0!important;margin:0!important;flex:1;">⬢ Usenet Downloader</h4>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                                onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                        </div>
+                                        <div class="setting-help-text setting-help-body" style="margin-bottom: 14px;" hidden>
                                             Where SoulSync sends NZBs once Prowlarr finds them. Pick one usenet downloader. SABnzbd uses an API key for auth; NZBGet uses a username + password.
                                         </div>
                                         <div class="form-group">
@@ -5538,18 +5592,164 @@
                                     </div>
                                 </div>
                             </div>
+                            </div><!-- end usenet-tile -->
+                            </div><!-- end indexers-downloaders-section -->
+
+                            <!-- ═══ RETRY LOGIC (download behaviour — after the source/indexer config) ═══ -->
+                            <div class="settings-section-header collapsed" data-stg="downloads" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Retry Logic</h3>
+                                <span class="settings-section-hint">What happens when a download is rejected</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="downloads">
+                            <div class="settings-group" data-stg="downloads">
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="retry-next-candidate" checked>
+                                            Retry next-best candidate on mismatch
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>Controls what happens when a downloaded file is rejected (AcoustID mismatch, wrong version, or duration/integrity failure) — independent of post-processing. When on, SoulSync automatically tries the next-best candidate instead of failing the track. <strong>Off</strong> = quarantine and fail immediately.</div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="retry-exhaustive" onchange="syncRetryConditionalRows()">
+                                            Exhaustive retry (separate budget per source)
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>Give every source (Soulseek, then HiFi/Tidal/…) its own retry budget. Each source spends <em>queries × retries-per-query</em> attempts before the track moves on. Worst case across two sources can mean many downloads — use for hard-to-match tracks (e.g. CJK artist names). Requires the option above.</div>
+                                </div>
+                                <div class="form-group" id="retries-per-query-row" style="display:none;">
+                                    <div class="setting-row">
+                                        <label for="retries-per-query">Retries per query (per source)</label>
+                                        <input type="number" id="retries-per-query" min="1" max="20" step="1" value="5" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>In exhaustive mode, how many candidates to try per search query per source. The per-source budget is <em>number of search queries × this value</em>. Only used when Exhaustive retry is on.</div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="accept-version-mismatch-fallback" onchange="syncRetryConditionalRows()">
+                                            Accept best version mismatch as last resort
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>When retries are fully exhausted and <em>every</em> candidate for a track failed the <strong>same</strong> version mismatch (e.g. only an instrumental exists), accept the best (first-tried) one instead of leaving the track missing. Only AcoustID is bypassed — integrity/duration/bit-depth checks still run, so truncated or genuinely wrong files are never let through. <strong>Off</strong> = leave such tracks failed.</div>
+                                </div>
+                                <div class="form-group" id="version-mismatch-min-count-row" style="display:none;">
+                                    <div class="setting-row">
+                                        <label for="version-mismatch-min-count">Minimum matching mismatches before accepting</label>
+                                        <input type="number" id="version-mismatch-min-count" min="1" max="20" step="1" value="2" style="width: 100px;" autocomplete="off" data-bwignore="" data-1p-ignore="" data-lpignore="true">
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>How many quarantined candidates must have failed the <em>same</em> version mismatch before the last-resort acceptance kicks in. Higher = more confirmation that no correct version exists. Only used when the option above is on.</div>
+                                </div>
+                            </div>
+                            </div><!-- end Retry Logic body -->
 
                             <!-- ═══ PATHS & ORGANIZATION ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Paths &amp; Organization</h3>
-                                <span class="settings-section-hint">File templates, music library paths</span>
+                                <span class="settings-section-hint">Folders, file templates &amp; library paths</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="library">
 
+                            <!-- Folder Paths (moved here from Downloads — all path settings live together) -->
+                            <div class="settings-group" data-stg="library">
+                                <h3>Folder Paths</h3>
+                                <div class="setting-help-text" style="margin-bottom: 4px;">
+                                    Container-internal paths. Only change them if you know what you're doing — wrong values break downloads.
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Input Folder (Download Dir):</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="download-path" placeholder="./downloads" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('download', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Output Folder (Music Library):</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="transfer-path" placeholder="./Transfer" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('transfer', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Import Folder:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="staging-path" placeholder="./Staging" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('staging', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Music Videos Dir:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="music-videos-path" placeholder="./MusicVideos" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('music-videos', this)">Unlock</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlists Folder:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="playlists-materialize-path" placeholder="./Playlists" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('playlists-materialize', this)">Unlock</button>
+                                    </div>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Where <strong>Organize by playlist</strong> builds playlist folders — as shortcuts into your library, so songs are never stored twice. Keep this <strong>outside</strong> your music library folder so your media server doesn't scan the same tracks twice.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Playlist Folder Style:</label>
+                                    <select id="playlists-materialize-mode">
+                                        <option value="symlink">Symlinks — no extra disk, point to your library</option>
+                                        <option value="copy">Copies — real duplicates (USB sticks / players that can't follow links)</option>
+                                    </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Symlinks use almost no space. Copies are self-contained. Symlinks fall back to copies automatically where the filesystem can't link (Windows without privileges, some network shares, FAT/exFAT drives).
+                                    </div>
+                                    <div style="flex-basis:100%; width:100%;">
+                                        <button class="test-button" id="playlists-rebuild-btn" onclick="rebuildPlaylistFolders()">
+                                            Rebuild playlist folders now
+                                        </button>
+                                        <div class="setting-help-text" id="playlists-rebuild-status" style="margin-top: 6px;"></div>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>M3U Entry Base Path:</label>
+                                    <div class="path-input-group">
+                                        <input type="text" id="m3u-entry-base-path" placeholder="e.g. /mnt/music (leave empty for relative paths)" readonly>
+                                        <button class="browse-button locked" onclick="togglePathLock('m3u-entry-base', this)">Unlock</button>
+                                    </div>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
+                                        Optional prefix added to every track path in exported M3U files. Use this when your media server needs absolute paths (e.g. <code>/mnt/music</code>).
+                                    </div>
+                                </div>
+                            </div>
+
                             <!-- File Organization Settings -->
                             <div class="settings-group" data-stg="library">
-                                <h3>📁 File Organization</h3>
+                                <h3>File Organization</h3>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
@@ -5562,15 +5762,16 @@
                                     <label>Album Path Template:</label>
                                     <input type="text" id="template-album-path"
                                         placeholder="$albumartist/$albumartist - $album/$track - $title">
-                                    <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $album, $albumtype,
-                                        $title, $track, $disc (01), $discnum (1), $cdnum (CD01 on multi-disc, empty on single), $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Albums</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>, <code>$album</code>, <code>$albumtype</code>, <code>$title</code>, <code>$track</code>, <code>$disc</code> (01), <code>$discnum</code> (1), <code>$cdnum</code> (CD01 on multi-disc, empty on single), <code>$year</code>, <code>$quality</code> (filename only). Use <code>${var}</code> to append text: <code>${albumtype}s</code> → Albums</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Single Path Template:</label>
                                     <input type="text" id="template-single-path"
                                         placeholder="$artist/$artist - $title/$title">
-                                    <small class="settings-hint">Variables: $albumartist, $artist, $artistletter, $title, $track (01), $album, $albumtype, $year, $quality (filename only). Use ${var} to append text: ${albumtype}s → Singles</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Variables: <code>$albumartist</code>, <code>$artist</code>, <code>$artistletter</code>, <code>$title</code>, <code>$track</code> (01), <code>$album</code>, <code>$albumtype</code>, <code>$year</code>, <code>$quality</code> (filename only). Use <code>${var}</code> to append text: <code>${albumtype}s</code> → Singles</small>
                                 </div>
 
                                 <!-- Playlist Path Template: hidden from the UI. Playlists now import
@@ -5589,14 +5790,16 @@
                                     <label>Playlist File Naming:</label>
                                     <input type="text" id="template-playlist-item"
                                         placeholder="Leave empty to keep the library filename">
-                                    <small class="settings-hint">Renames the files inside each "Organize by Playlist" folder (your real library files are never touched). <strong>Filename only — no folders.</strong> Variables: $position (playlist order), $artist, $album, $track, $title. Must include $title and cannot contain "/". Example: <code>$position - $artist - $title</code> → <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library filename.</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Renames the files inside each "Organize by Playlist" folder (your real library files are never touched). <strong>Filename only — no folders.</strong> Variables: <code>$position</code> (playlist order), <code>$artist</code>, <code>$album</code>, <code>$track</code>, <code>$title</code>. Must include <code>$title</code> and cannot contain "/". Example: <code>$position - $artist - $title</code> → <code>01 - Daft Punk - One More Time.flac</code>. Empty = keep the original library filename.</small>
                                 </div>
 
                                 <div class="form-group">
                                     <label>Music Video Path Template:</label>
                                     <input type="text" id="template-video-path"
                                         placeholder="$artist/$title-video">
-                                    <small class="settings-hint">Variables: $artist, $artistletter, $title, $year. Use ${var} to append text. Default: $artist/$title-video</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Variables: <code>$artist</code>, <code>$artistletter</code>, <code>$title</code>, <code>$year</code>. Use <code>${var}</code> to append text. Default: <code>$artist/$title-video</code></small>
                                 </div>
 
                                 <div class="form-group">
@@ -5605,7 +5808,8 @@
                                         <option value="Disc">Disc (e.g., Disc 1/)</option>
                                         <option value="CD">CD (e.g., CD 1/)</option>
                                     </select>
-                                    <small class="settings-hint">Label used for auto-created disc subfolders on multi-disc albums.</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Label used for auto-created disc subfolders on multi-disc albums.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -5614,9 +5818,8 @@
                                         <option value="first">First Listed Artist (recommended)</option>
                                         <option value="all">All Artists Combined</option>
                                     </select>
-                                    <small class="settings-hint">How $albumartist resolves for albums with multiple artists.
-                                        "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y & The Alchemist").
-                                        Full artist list is always preserved in file metadata tags.</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>How <code>$albumartist</code> resolves for albums with multiple artists. "First Listed" uses only the primary artist for folder names (e.g., "Larry June" instead of "Larry June, Curren$y &amp; The Alchemist"). Full artist list is always preserved in file metadata tags.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -5627,21 +5830,24 @@
                                         <option value=" / ">/ (slash)</option>
                                         <option value=" & ">&amp; (ampersand)</option>
                                     </select>
-                                    <small class="settings-hint">Separator between multiple artists in the ARTIST tag (e.g. <code>&amp;</code> matches MusicBrainz/Picard style)</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Separator between multiple artists in the ARTIST tag (e.g. <code>&amp;</code> matches MusicBrainz/Picard style)</small>
                                 </div>
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="write-multi-artist">
                                         <span>Write multi-value ARTISTS tag</span>
                                     </label>
-                                    <small class="settings-hint">Write each artist as a separate tag value for Navidrome/Jellyfin multi-artist support</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Write each artist as a separate tag value for Navidrome/Jellyfin multi-artist support</small>
                                 </div>
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="feat-in-title">
                                         <span>Move featured artists to title</span>
                                     </label>
-                                    <small class="settings-hint">Keep only primary artist in ARTIST tag, append others as (feat. ...) in title</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Keep only primary artist in ARTIST tag, append others as (feat. ...) in title</small>
                                 </div>
 
                                 <div class="form-group">
@@ -5649,9 +5855,8 @@
                                         <input type="checkbox" id="allow-duplicate-tracks" checked>
                                         Allow duplicate tracks across albums
                                     </label>
-                                    <small class="settings-hint">When enabled, the same song can be added to the wishlist from
-                                        different albums (e.g., completing a discography where albums share tracks).
-                                        When disabled, tracks with the same name and artist are skipped.</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>When enabled, the same song can be added to the wishlist from different albums (e.g., completing a discography where albums share tracks). When disabled, tracks with the same name and artist are skipped.</small>
                                 </div>
 
                                 <div class="form-group">
@@ -5667,7 +5872,7 @@
 
                             <!-- Music Library Paths (moved into Paths & Organization) -->
                             <div class="settings-group" data-stg="library">
-                                <h3>📂 Music Library Paths</h3>
+                                <h3>Music Library Paths</h3>
 
                                 <div class="help-text" style="margin-bottom: 12px;">
                                     Tell SoulSync where your music files live. Required for tag writing, streaming, and file detection
@@ -5695,7 +5900,6 @@
 
                             <!-- Metadata Enhancement Settings -->
                             <div class="settings-group" data-stg="library">
-                                <h3>🎵 Post-Processing</h3>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
@@ -5703,7 +5907,8 @@
                                             onchange="document.getElementById('post-processing-options').style.display = this.checked ? 'block' : 'none'">
                                         Enable post-processing on downloaded files
                                     </label>
-                                    <small class="settings-hint">Master toggle — disabling this skips all metadata, artwork, and lyrics processing</small>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <small class="settings-hint setting-help-body" hidden>Master toggle — disabling this skips all metadata, artwork, and lyrics processing.</small>
                                 </div>
 
                                 <div id="post-processing-options">
@@ -5727,11 +5932,13 @@
                                                 <input type="checkbox" id="prefer-caa-art">
                                                 Use MusicBrainz Cover Art Archive for album art
                                             </label>
-                                            <small>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640). Ignored when a preferred album art source list is set below — add Cover Art Archive to that list instead.</small>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            <small class="settings-hint setting-help-body" hidden>Higher resolution but quality may vary. When off, uses Spotify/iTunes/Deezer art (consistent 640x640). Ignored when a preferred album art source list is set below — add Cover Art Archive to that list instead.</small>
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label" style="cursor:default;">Preferred album art sources</label>
-                                            <small class="settings-hint">Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior.</small>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            <small class="settings-hint setting-help-body" hidden>Order the sources to choose whose cover art is used. The first source that has a cover wins; misses fall through to the next, and if none match, your download's own art is kept. Only sources you're connected to are shown — leave all off to keep current behavior.</small>
                                             <div class="hybrid-source-list" id="art-source-list"></div>
                                         </div>
                                         <div class="form-group">
@@ -5739,7 +5946,8 @@
                                                 <input type="checkbox" id="single-to-album-enabled">
                                                 Match singles to their parent album
                                             </label>
-                                            <small class="settings-hint">When a track matches a single release, look up the album that contains it and tag it as that album — so every song in an album gets the same (album) cover instead of some getting the single's art. Off by default: adds an extra metadata lookup per single-matched track.</small>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            <small class="settings-hint setting-help-body" hidden>When a track matches a single release, look up the album that contains it and tag it as that album — so every song in an album gets the same (album) cover instead of some getting the single's art. Off by default: adds an extra metadata lookup per single-matched track.</small>
                                         </div>
                                         <div class="form-group">
                                             <label class="checkbox-label">
@@ -5752,19 +5960,14 @@
                                                 <input type="checkbox" id="replaygain-enabled">
                                                 Apply ReplayGain tags after download
                                             </label>
-                                            <small class="settings-hint">Analyzes loudness and writes ReplayGain track gain/peak tags. Requires ffmpeg. Adds a few seconds per track.</small>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            <small class="settings-hint setting-help-body" hidden>Analyzes loudness and writes ReplayGain track gain/peak tags. Requires ffmpeg. Adds a few seconds per track.</small>
                                         </div>
                                         <div class="form-group">
                                             <label for="duration-tolerance-seconds">Duration tolerance (seconds)</label>
                                             <input type="number" id="duration-tolerance-seconds" min="0" max="60" step="0.5" value="0" style="width: 100px;">
-                                            <small class="settings-hint">Maximum drift between the file's actual length and the metadata source's expected length before the file is quarantined. <strong>0 = auto</strong> (3s normal, 5s for tracks &gt;10min). Raise this if tracks routinely quarantine for being a few seconds off (live recordings, alternate masterings, etc). Capped at 60s.</small>
-                                        </div>
-                                        <div class="form-group">
-                                            <label class="checkbox-label">
-                                                <input type="checkbox" id="audio-completeness-check">
-                                                Verify real audio with ffmpeg (detect truncated / silent files)
-                                            </label>
-                                            <small class="settings-hint">Decodes every downloaded file with ffmpeg to catch fake 30s previews padded to full length and mostly-silent files — the kind whose header lies about the length so mutagen can't catch them. <strong>Off by default:</strong> this fully decodes each file, the most CPU-heavy post-processing step. Most sources (HiFi, Qobuz) already catch previews on their own, so only turn this on if you see padded/silent files slip through. Applies to all download sources.</small>
+                                            <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                            <small class="settings-hint setting-help-body" hidden>Maximum drift between the file's actual length and the metadata source's expected length before the file is quarantined. <strong>0 = auto</strong> (3s normal, 5s for tracks &gt;10min). Raise this if tracks routinely quarantine for being a few seconds off (live recordings, alternate masterings, etc). Capped at 60s.</small>
                                         </div>
                                     </div>
 
@@ -5979,99 +6182,42 @@
                                 </div>
                             </div>
 
-                            <!-- Post-Download Conversion Settings -->
-                            <div class="settings-group" data-stg="library">
-                                <h3>📀 Post-Download Conversion</h3>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="downsample-hires">
-                                        Downsample Hi-Res FLAC to CD quality (16-bit / 44.1kHz)
-                                    </label>
-                                </div>
-                                <div class="help-text">
-                                    When a 24-bit or high sample rate FLAC is downloaded, it will be
-                                    automatically converted to 16-bit/44.1kHz. The hi-res original is
-                                    replaced — not kept alongside. Requires ffmpeg.
-                                </div>
-
-                                <div class="form-group" style="margin-top: 16px;">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="lossy-copy-enabled"
-                                            onchange="document.getElementById('lossy-copy-options').style.display = this.checked ? 'block' : 'none'">
-                                        Create lossy copy of downloaded FLAC files
-                                    </label>
-                                </div>
-
-                                <div id="lossy-copy-options" style="display: none;">
-                                    <div class="form-group">
-                                        <label>Codec:</label>
-                                        <select id="lossy-copy-codec" onchange="updateLossyBitrateOptions()">
-                                            <option value="mp3">MP3</option>
-                                            <option value="opus">Opus</option>
-                                            <option value="aac">AAC (M4A)</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group">
-                                        <label>Bitrate:</label>
-                                        <select id="lossy-copy-bitrate">
-                                            <option value="320">320 kbps</option>
-                                            <option value="256">256 kbps</option>
-                                            <option value="192">192 kbps</option>
-                                            <option value="128">128 kbps</option>
-                                        </select>
-                                    </div>
-                                    <div class="help-text">
-                                        After downloading a FLAC, a lossy copy at the selected codec and bitrate
-                                        will be created in the same folder. Requires ffmpeg.
-                                    </div>
-                                    <div class="form-group" style="margin-top: 12px;">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="lossy-copy-delete-original">
-                                            Blasphemy Mode — Delete original FLAC after conversion
-                                        </label>
-                                    </div>
-                                    <div class="help-text" style="color: rgba(255, 100, 100, 0.8);">
-                                        Warning: The original high-quality file will be permanently deleted.
-                                        Only the lossy copy will remain.
-                                    </div>
-                                </div>
-                            </div>
-
                             </div><!-- end Post-Processing body -->
 
-                            <!-- ═══ LIBRARY PREFERENCES ═══ -->
+                            <!-- ═══ LISTENING STATS ═══ -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Library Preferences</h3>
-                                <span class="settings-section-hint">Import, content filter, playlists, stats</span>
+                                <h3>Listening Stats</h3>
+                                <span class="settings-section-hint">Play history from your media server</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="library">
-
-                            <!-- Listening Stats Settings -->
                             <div class="settings-group" data-stg="library">
-                                <h3>📊 Listening Stats</h3>
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="listening-stats-enabled">
                                         Enable listening stats collection from media server
                                     </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>
+                                    Polls your active media server (Plex, Jellyfin, or Navidrome) for play history
+                                    and displays stats on the Stats page.
                                 </div>
                                 <div class="form-group">
                                     <label>Poll Interval (minutes):</label>
                                     <input type="number" id="listening-stats-interval" min="5" max="1440" value="30">
                                 </div>
-                                <div class="help-text">
-                                    Polls your active media server (Plex, Jellyfin, or Navidrome) for play history
-                                    and displays stats on the Stats page.
-                                </div>
                             </div>
+                            </div><!-- end Listening Stats body -->
 
-                            </div><!-- end Library Preferences body -->
-
-                            <!-- Security & Access Settings -->
-                            <div class="settings-group" data-stg="advanced">
-                                <h3>🔒 Security &amp; Access</h3>
+                            <!-- Security & Access (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Security &amp; Access</h3>
+                                <span class="settings-section-hint">PIN · user accounts · reverse proxy</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+                            <div class="settings-group security-wrapper" data-stg="advanced">
                                 <div class="setting-help-text" style="margin-bottom: 18px;">
                                     By default, anyone who can reach SoulSync on your network can use it. Protect access below with a simple shared <strong>PIN</strong>, or full <strong>user accounts</strong> with passwords — you only need one. The last group is just for exposing SoulSync over the internet.
                                 </div>
@@ -6188,10 +6334,18 @@
                                     </div>
                                 </div>
                             </div>
+                            </div><!-- end Security & Access body -->
 
                             <!-- Discovery Settings -->
-                            <div class="settings-group" data-stg="advanced">
-                                <h3>🔍 Discovery Pool Settings</h3>
+                                                        <!-- Discovery Pool Settings (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Discovery Pool Settings</h3>
+                                <span class="settings-section-hint">Lookback &amp; hemisphere</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
 
                                 <div class="form-group">
                                     <label>Lookback Period:</label>
@@ -6202,7 +6356,9 @@
                                         <option value="180">Last 6 months</option>
                                         <option value="all">Entire discography</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Controls how far back to scan when adding new artists or refreshing discovery
                                         pool.
                                         Once scanned, artists are kept updated with new releases only.
@@ -6215,13 +6371,16 @@
                                         <option value="northern">Northern Hemisphere</option>
                                         <option value="southern">Southern Hemisphere</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                        onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Adjusts seasonal playlists on the Discover page to match your region.
                                         Southern hemisphere flips seasons (e.g. December = Summer, June = Winter).
                                         Holidays like Christmas and Halloween stay calendar-fixed.
                                     </div>
                                 </div>
                             </div>
+                            </div><!-- end Discovery Pool Settings body -->
 
                         </div>
 
@@ -6282,13 +6441,27 @@
                                         <input type="checkbox" id="reduce-effects-enabled">
                                         Reduce Visual Effects
                                     </label>
-                                    <small class="settings-hint">Disables backdrop blur, animations, transitions, and shadows. Significantly reduces GPU/CPU usage on low-end devices.</small>
+                                    <small class="settings-hint">Disables backdrop blur and shadows (the GPU-heavy bits). Keeps functional motion like loading spinners. Good for low-end devices.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="max-performance-enabled">
+                                        Max Performance
+                                    </label>
+                                    <small class="settings-hint">Nuclear low-power mode for software-rendered / no-GPU setups (e.g. Docker, remote desktop). Turns off Worker Orbs, Particles, all blur/shadows AND every animation &amp; transition (loading spinners go static). Overrides the three options above.</small>
                                 </div>
                             </div>
 
                             <!-- Database Settings -->
-                            <div class="settings-group" data-stg="advanced">
+                                                        <!-- Database Settings (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Database Settings</h3>
+                                <span class="settings-section-hint">Concurrency</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
 
                                 <div class="form-group">
                                     <label>Concurrent Workers:</label>
@@ -6302,15 +6475,23 @@
                                         <option value="9">9</option>
                                         <option value="10">10</option>
                                     </select>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                 </div>
 
-                                <div class="help-text">Number of parallel threads for database updates. Higher values =
-                                    faster updates but more server load.</div>
+                                <div class="help-text setting-help-body" hidden>Number of parallel threads for database updates. Higher values = faster updates but more server load.</div>
                             </div>
+                            </div><!-- end Database Settings body -->
 
                             <!-- Database Maintenance -->
-                            <div class="settings-group" data-stg="advanced">
+                                                        <!-- Database Maintenance (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Database Maintenance</h3>
+                                <span class="settings-section-hint">Size, vacuum &amp; cleanup</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
 
                                 <div class="form-group" id="db-maintenance-info">
                                     <label>Database Size:</label>
@@ -6335,39 +6516,87 @@
                                 </div>
                                 <div id="db-vacuum-status" style="display: none; margin-top: 8px; padding: 8px 12px; border-radius: 8px; font-size: 0.85em;"></div>
                             </div>
+                            </div><!-- end Database Maintenance body -->
 
 
-                            <!-- Content Filter Settings -->
+                            <!-- Import Settings (collapsible tile) — first here so it isn't buried among filters -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Import</h3>
+                                <span class="settings-section-hint">Folder-artist override, permanent library</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
                             <div class="settings-group" data-stg="library">
-                                <h3>🔞 Content Filter</h3>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-folder-artist-override">
+                                            Use the top Staging folder as the artist
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        On by default (legacy behaviour). When enabled, files staged as
+                                        <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
+                                        folder as the album artist — handy for mixtapes/compilations whose embedded tags
+                                        carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
+                                        under one container folder: otherwise every file's artist gets overwritten with
+                                        that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
+                                        metadata-identified artist is always kept.
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-transfer-permanent">
+                                            Transfer is my permanent library — never move files out
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        Off by default. Turn this <strong>on</strong> if your Transfer folder is your
+                                        real, permanent library (served by Navidrome/Plex/etc.) rather than a scratch
+                                        drop area. A Deep Scan then never relocates files it doesn't recognize out to
+                                        Staging — it leaves them in place and just reports them. Even with this off, a
+                                        Deep Scan now refuses to move files when the database looks badly out of sync
+                                        with disk, as a safety guard against wiping a library (issue #904).
+                                    </div>
+                                </div>
+                            </div>
+                            </div><!-- end Import body -->
 
+                            <!-- Filtering (Content Filter + Genre Whitelist consolidated into one tile) -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Filtering</h3>
+                                <span class="settings-section-hint">Explicit content &amp; genre whitelist</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library">
+                            <div class="settings-group" data-stg="library">
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="allow-explicit" checked>
                                         Allow explicit content in downloads
                                     </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                 </div>
-                                <div class="help-text">
+                                <div class="help-text setting-help-body" hidden>
                                     When disabled, tracks marked as explicit on Spotify will be skipped
                                     during matched downloads. Does not affect manual Soulseek searches.
                                 </div>
-                            </div>
-
-
-                            <!-- Genre Whitelist -->
-                            <div class="settings-group" data-stg="library">
-                                <h3>🎵 Genre Whitelist</h3>
 
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="genre-whitelist-enabled" onchange="if(typeof debouncedAutoSaveSettings==='function')debouncedAutoSaveSettings()">
                                         Enable strict genre filtering
                                     </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                 </div>
-                                <div class="help-text" style="margin-bottom:12px;">
+                                <div class="help-text setting-help-body" hidden style="margin-bottom:12px;">
                                     When enabled, only genres on the whitelist below are kept during enrichment. Junk tags (artist names, radio shows, playlist names) are silently dropped. When disabled, all genres pass through unchanged.
                                 </div>
-
                                 <div id="genre-whitelist-container" style="display:none">
                                     <div class="form-group" style="margin-bottom:8px;">
                                         <input type="text" id="genre-whitelist-search" placeholder="Search or add genre..." class="form-input" style="margin-bottom:8px;">
@@ -6379,98 +6608,26 @@
                                     </div>
                                 </div>
                             </div>
+                            </div><!-- end Filtering body -->
 
-                            <!-- Import Settings (collapsible tile) -->
+                            <!-- Playlists (M3U Export + Playlist Sync consolidated into one tile) -->
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Import</h3>
-                                <span class="settings-section-hint">Quality filter, replace rules, folder-artist</span>
+                                <h3>Playlists</h3>
+                                <span class="settings-section-hint">M3U export &amp; server playlist sync</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="library">
-
                             <div class="settings-group" data-stg="library">
-                                <h3>📥 Import Settings</h3>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="import-quality-filter-enabled" checked>
-                                        Only import tracks that meet your quality profile
-                                    </label>
-                                </div>
-                                <div class="help-text">
-                                    On by default. SoulSync always probes each downloaded file's real audio quality; this
-                                    toggle decides what to do with the result. <strong>On</strong> — files that don't meet your
-                                    quality profile are quarantined instead of imported (the same gate the download pipeline
-                                    uses; fallback/downsample settings still apply). <strong>Off</strong> — everything is
-                                    imported regardless of quality. Either way, the library <em>Quality Upgrade Scanner</em>
-                                    still flags below-profile tracks so you can act on them later.
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="import-replace-lower-quality">
-                                        Replace lower quality files on import
-                                    </label>
-                                </div>
-                                <div class="help-text">
-                                    When importing from Staging, if a track already exists in your library at a lower quality
-                                    (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
-                                    If disabled, existing tracks are always kept and the import file is skipped.
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="import-folder-artist-override">
-                                        Use the top Staging folder as the artist
-                                    </label>
-                                </div>
-                                <div class="help-text">
-                                    On by default (legacy behaviour). When enabled, files staged as
-                                    <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
-                                    folder as the album artist — handy for mixtapes/compilations whose embedded tags
-                                    carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
-                                    under one container folder: otherwise every file's artist gets overwritten with
-                                    that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
-                                    metadata-identified artist is always kept.
-                                </div>
-
-                                <div class="form-group">
-                                    <label class="checkbox-label">
-                                        <input type="checkbox" id="import-transfer-permanent">
-                                        Transfer is my permanent library — never move files out
-                                    </label>
-                                </div>
-                                <div class="help-text">
-                                    Off by default. Turn this <strong>on</strong> if your Transfer folder is your
-                                    real, permanent library (served by Navidrome/Plex/etc.) rather than a scratch
-                                    drop area. A Deep Scan then never relocates files it doesn't recognize out to
-                                    Staging — it leaves them in place and just reports them. Even with this off, a
-                                    Deep Scan now refuses to move files when the database looks badly out of sync
-                                    with disk, as a safety guard against wiping a library (issue #904).
-                                </div>
-                            </div>
-
-                            </div><!-- end Import body -->
-
-
-                            <!-- M3U Export Settings -->
-                            <div class="settings-group" data-stg="library">
-                                <h3>📋 M3U Playlist Export</h3>
-
                                 <div class="form-group">
                                     <label class="checkbox-label">
                                         <input type="checkbox" id="m3u-export-enabled">
                                         Auto-save M3U file when downloading playlists
                                     </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                 </div>
-                                <div class="help-text">
+                                <div class="help-text setting-help-body" hidden>
                                     Saves an M3U playlist file alongside your music. Albums are skipped — they're already grouped by your media server.
                                 </div>
-                            </div>
-
-                            <!-- Playlist Sync Settings -->
-                            <div class="settings-group" data-stg="library">
-                                <h3>Playlist Sync Settings</h3>
 
                                 <div class="form-group">
                                     <label>Sync mode:</label>
@@ -6479,7 +6636,8 @@
                                         <option value="reconcile">Reconcile — edit in place, keep image &amp; description</option>
                                         <option value="append">Append — only add new tracks, never remove</option>
                                     </select>
-                                    <div class="help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="help-text setting-help-body" hidden>
                                         "Replace" deletes and recreates the server playlist every sync, which wipes its custom image/description. "Reconcile" updates the same playlist in place (adds new tracks, removes ones no longer in the source) so your custom image and description survive. "Append" only ever adds.
                                     </div>
                                 </div>
@@ -6491,10 +6649,18 @@
                                     </label>
                                 </div>
                             </div>
+                            </div><!-- end Playlists body -->
 
                             <!-- Logging Settings -->
-                            <div class="settings-group" data-stg="advanced">
+                                                        <!-- Logging (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Logging</h3>
+                                <span class="settings-section-hint">Log level &amp; path</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
 
                                 <div class="form-group">
                                     <label>Log Level:</label>
@@ -6504,7 +6670,8 @@
                                         <option value="WARNING">WARNING (Minimal)</option>
                                         <option value="ERROR">ERROR (Critical Only)</option>
                                     </select>
-                                    <div class="setting-help-text">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="setting-help-text setting-help-body" hidden>
                                         Controls the level of detail in application logs. DEBUG shows all details, INFO
                                         shows general operations, WARNING and ERROR show only issues.
                                     </div>
@@ -6515,10 +6682,18 @@
                                     <div class="readonly-field" id="log-path-display">logs/app.log</div>
                                 </div>
                             </div>
+                            </div><!-- end Logging body -->
 
                             <!-- SoulSync API Keys -->
-                            <div class="settings-group" data-stg="advanced">
+                                                        <!-- SoulSync API (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
                                 <h3>SoulSync API</h3>
+                                <span class="settings-section-hint">REST keys &amp; inbound endpoint</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
                                 <div class="api-service-frame">
                                     <h4 class="service-title" style="color: #64ffda;">REST API Keys</h4>
                                     <div class="setting-help-text" style="margin-bottom: 12px; color: #888; font-size: 12px;">
@@ -6571,10 +6746,18 @@
                                     </div>
                                 </div>
                             </div>
+                            </div><!-- end SoulSync API body -->
 
                             <!-- Developer Mode -->
-                            <div class="settings-group" data-stg="advanced">
-                                <h3>🔧 Developer Mode</h3>
+                                                        <!-- Developer Mode (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Developer Mode</h3>
+                                <span class="settings-section-hint">Advanced log viewer</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+
                                 <div class="form-group">
                                     <label>Password:</label>
                                     <div style="display: flex; gap: 8px;">
@@ -6584,6 +6767,7 @@
                                     <div id="dev-mode-status" style="margin-top: 8px; color: #888;">Inactive</div>
                                 </div>
                             </div>
+                            </div><!-- end Developer Mode body -->
                         </div>
                     </div>
 
@@ -6626,10 +6810,6 @@
                         </div>
                     </div>
 
-                    <!-- Save Button -->
-                    <div class="settings-actions">
-                        <button class="save-button" id="save-settings">Save Settings</button>
-                    </div>
                 </div>
                 </div>
             </div>

@@ -72,3 +72,31 @@ def test_empty_playlist():
     out = resolve_playlist_tracks([], lambda a, t: (None, None))
     assert out["resolved"] == []
     assert out["stats"]["total"] == 0
+
+
+# ── id_key generalization (#945 service export reuses the LB resolver) ──
+
+from core.exports.playlist_export import resolve_playlist_tracks as _rpt
+
+
+def _const_resolver(mapping):
+    return lambda artist, title: mapping.get((artist, title), (None, None))
+
+
+def test_default_id_key_is_recording_mbid_unchanged():
+    # ListenBrainz/JSPF callers must be byte-for-byte unaffected by the generalization.
+    out = _rpt([{'artist': 'A', 'title': 'X'}], _const_resolver({('A', 'X'): ('mbid-1', 'db')}))
+    assert out['resolved'][0]['recording_mbid'] == 'mbid-1'
+    assert 'service_track_id' not in out['resolved'][0]
+
+
+def test_custom_id_key_carries_service_id():
+    out = _rpt(
+        [{'artist': 'A', 'title': 'X'}, {'artist': 'B', 'title': 'Y'}],
+        _const_resolver({('A', 'X'): ('spid-1', 'library')}),   # B/Y unmatched
+        id_key='service_track_id',
+    )
+    assert out['resolved'][0]['service_track_id'] == 'spid-1'
+    assert out['resolved'][1]['service_track_id'] is None
+    assert 'recording_mbid' not in out['resolved'][0]
+    assert out['stats']['resolved'] == 1 and out['stats']['unmatched'] == 1

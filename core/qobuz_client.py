@@ -164,6 +164,8 @@ class QobuzClient(DownloadSourcePlugin):
 
     def _restore_session(self):
         """Try to restore saved session from config."""
+        from core.boot_phase import is_boot_phase
+
         saved = config_manager.get('qobuz.session', {})
         app_id = saved.get('app_id', '')
         app_secret = saved.get('app_secret', '')
@@ -177,6 +179,10 @@ class QobuzClient(DownloadSourcePlugin):
                 'X-App-Id': self.app_id,
                 'X-User-Auth-Token': self.user_auth_token,
             })
+
+            if is_boot_phase():
+                logger.info("Loaded Qobuz session from config (verification deferred until after boot)")
+                return
 
             # Verify the token is still valid
             try:
@@ -715,6 +721,26 @@ class QobuzClient(DownloadSourcePlugin):
             logger.error(f"Error getting Qobuz track {track_id}: {e}")
             return None
 
+    def get_track_result(self, track_id):
+        """Fetch ONE track by ID and convert it to a downloadable TrackResult.
+
+        Used when a pasted Qobuz link must inject the EXACT track: a text search
+        for an obscure track's name often doesn't surface it at all, so bubbling
+        the matching id is a no-op (#932). Returns None on any failure so the
+        caller falls back to the text-search path."""
+        try:
+            track = self.get_track(track_id)
+            if not track:
+                return None
+            quality_key = quality_tier_for_source('qobuz', default='lossless')
+            quality_info = QOBUZ_QUALITY_MAP.get(quality_key, QOBUZ_QUALITY_MAP['lossless'])
+            # require_streamable=False: this is the exact track the user linked — don't
+            # let a missing/absent 'streamable' flag in track/get drop it (#932).
+            return self._qobuz_to_track_result(track, quality_info, require_streamable=False)
+        except Exception as e:
+            logger.debug(f"get_track_result failed for Qobuz {track_id}: {e}")
+            return None
+
     # ===================== Playlists & Favorites =====================
     #
     # Qobuz playlist sync surface — mirrors the Tidal client contract
@@ -1012,14 +1038,20 @@ class QobuzClient(DownloadSourcePlugin):
             traceback.print_exc()
             return ([], [])
 
-    def _qobuz_to_track_result(self, track: Dict, quality_info: dict) -> Optional[TrackResult]:
-        """Convert Qobuz track dict to TrackResult (Soulseek-compatible format)."""
+    def _qobuz_to_track_result(self, track: Dict, quality_info: dict,
+                               require_streamable: bool = True) -> Optional[TrackResult]:
+        """Convert Qobuz track dict to TrackResult (Soulseek-compatible format).
+
+        ``require_streamable`` gates bulk SEARCH results on the ``streamable`` flag
+        (filters noise). For a track the user explicitly pasted a link to, pass
+        False: ``track/get`` may omit the flag (which would default-False and wrongly
+        drop the exact track they asked for), and they should get to try it (#932)."""
         track_id = track.get('id')
         if not track_id:
             return None
 
-        # Check if track is streamable
-        if not track.get('streamable', False):
+        # Check if track is streamable (skipped for explicit by-id link fetches).
+        if require_streamable and not track.get('streamable', False):
             return None
 
         performer = track.get('performer', {})

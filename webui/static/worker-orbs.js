@@ -605,10 +605,18 @@
         if (performance.now() < _scrollPauseUntil) return;
 
         frameCount++;
-        // Fully asleep: render at ~20fps. The drift is at crawl speed so the
-        // difference is invisible, and the canvas GPU cost drops by two thirds
-        // for the hours the dashboard sits idle. Wakes re-run every frame.
-        if (sleepLevel > 0.95 && frameCount % 3 !== 0) return;
+        // Frame-skip throttles. The canvas ticks at 60fps; we drop renders to cut cost.
+        // frameCount still increments every tick, so `time` below stays real-time and the
+        // drift speed is unchanged — we just draw it less often.
+        if (sleepLevel > 0.95) {
+            // Fully asleep → ~20fps: drift is at crawl speed so it's invisible, and the
+            // GPU cost drops two-thirds for the hours the dashboard sits idle.
+            if (frameCount % 3 !== 0) return;
+        } else if (window._reduceEffectsActive) {
+            // Reduce-effects on (user asked for performance) → ~30fps: the slow drift and
+            // sparks look the same, the per-frame cost roughly halves.
+            if (frameCount % 2 !== 0) return;
+        }
         const time = frameCount / 60;
         const w = canvas.width;
         const h = canvas.height;
@@ -1057,7 +1065,13 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        return window._workerOrbsEnabled !== false && !window._reduceEffectsActive;
+        // Reduce-effects does NOT gate the orbs — they have their own toggle, so that
+        // setting controls them on its own. The orbs ARE killed by Max Performance: in a
+        // Docker / headless / remote-desktop container there is no GPU, so the per-frame
+        // radial-gradient canvas fill rasterizes on the CPU and can saturate a core,
+        // freezing the whole UI. Max Performance is the nuclear low-power switch for
+        // exactly those software-rendered setups, so the canvas loop must stay off there.
+        return window._workerOrbsEnabled !== false && !window._maxPerfActive;
     }
 
     // ── Real telemetry → pulses ──

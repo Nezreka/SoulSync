@@ -3404,20 +3404,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.0': [
-        { date: 'June 2026 — 2.8.0 release' },
-        { title: 'Preview Clip Cleanup (new Tools job)', desc: 'the HiFi source sometimes returns a ~30s preview clip instead of the full song, landing as a normal track. the new job scans your short tracks, checks how long each should be from its metadata source, and flags the previews. approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version. each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm before approving.', page: 'downloads' },
-        { title: 'Unverified queue stops inflating + self-heals (#934)', desc: 'the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck "unverified". now scans don\'t duplicate rows, a one-time reconcile on startup clears the existing backlog from your library truth (no re-scan), and a 🧹 Clean orphaned button removes dead rows whose file is gone. unverified review rows also got the Quarantine-style cards. (thanks @nick2000713 for #938.)', page: 'downloads' },
-        { title: 'Album Completeness handles split albums (#936)', desc: 'an album split across multiple library rows used to show every fragment as falsely "incomplete". it now groups the validated fragments into one logical album and emits one correct finding — grouping by shared id AND validating at the track level, so unrelated rows never fuse. also recognizes MusicBrainz as a readable source. (thanks @ragnarlotus.)', page: 'library' },
-        { title: 'Clear Completed is back on Downloads', desc: 'completed downloads now persist across restart, which had hidden the Clear Completed button for them. it\'s back, and clears the live list AND the persisted history so the page actually empties and stays empty (your files are untouched).', page: 'downloads' },
-        { title: 'Pasted YouTube cookies fixed (#Docker)', desc: 'pasting cookies threw `unsupported browser: "custom"` — the client passed the "Paste cookies.txt" mode through as a browser name instead of loading the file. now it uses the pasted cookies.txt, the only auth path that works on a headless/Docker box. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: 'Longer remasters no longer quarantined (#937)', desc: 'the duration check was symmetric, so a remaster running a few seconds LONGER than the metadata got rejected like a truncated download. it\'s asymmetric now — short files stay strict, longer versions get room. (thanks @diegocade1.)', page: 'downloads' },
-        { title: '"Add to Wishlist" from a discography is instant now', desc: 'it was ~15–30s PER TRACK on a large library — the per-track ownership check fell through to a full-table fuzzy scan. it now matches in-memory against the artist\'s tracks once.', page: 'library' },
-        { title: 'Wishlist art renders for re-downloads', desc: 'library-sourced wishlist items (re-downloads, preview re-fetches) stored a relative media-server path that doesn\'t render in a browser. they\'re normalized on read now, so album + artist art show up — fixes already-saved items too.', page: 'downloads' },
-        { title: 'More fixes', desc: 'watchlist now records automatic scans (#933) and no longer fuses different editions of an album; a pasted Qobuz/Tidal track floats to the top of manual search (#932); Popular Picks no longer comes up empty on Deezer.', page: 'search' },
-        { title: 'Dashboard performance, esp. Firefox/Zen (#935)', desc: 'frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame. trimmed the worst offenders, kept the orb framerate steady on Firefox (was dropping to ~1fps), and set Background Particles OFF by default. the system-memory tile now also shows SoulSync\'s own RAM.', page: 'dashboard' },
-        { title: 'Bounded memory growth (#802)', desc: 'browsing every page used to climb RSS into the GBs (plexapi XML trees deferring garbage collection) and could lock the app up. a lightweight sweeper now collects + hands memory back to the OS as it grows, so it sawtooths and settles instead of climbing.', page: 'dashboard' },
-        { title: 'Earlier versions', desc: '2.7.9 brought best-quality downloads + a ranked quality profile, the quarantine-into-Downloads consolidation, Discover "Based On Your Listening" + Listening Mix, the Wing It Pool, the Auto-Sync redesign, and the multi-disc fix (#927). 2.7.8 added Align Playlists; 2.7.3 the Quality Upgrade Finder; 2.7.0 made multi-user real.' },
+    '2.8.2': [
+        { date: 'June 2026 — 2.8.2 release' },
+        { title: 'Spotify Docker boot hang fixed (#949)', desc: 'with Spotify as your primary metadata source, an unreachable Spotify API could block the gunicorn worker at startup — the container bound port 8008 but never served the Web UI. provider auth probes are deferred during boot (and capped with a timeout) so startup can\'t hang on a slow Spotify; same guard for Qobuz/Deezer/Tidal. (thanks HellRa1SeR.)', page: 'settings' },
+        { title: '"Re-auth didn\'t stick" fixed', desc: 'the OAuth callback wrote your Spotify token to one cache while the app read another, so re-authenticating could silently fail validation. unified on one token store — re-auth takes effect now.', page: 'settings' },
+        { title: 'Sync to Spotify works', desc: 'exporting a mirrored playlist to Spotify now asks for playlist-write permission once, on-demand, the first time you use it. your normal Spotify login is untouched, so upgrading never forces a re-auth.', page: 'playlists' },
+        { title: 'The "slow after update" fix (#948)', desc: 'the real cause of post-update lag was browser password managers (Bitwarden/1Password/etc.) rebuilding their autofill overlay on every DOM change — and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields left alone). ~110x less main-thread blocking in the reporter\'s benchmark. (thanks @nick2000713.)', page: 'dashboard' },
+        { title: 'Max Performance mode', desc: 'Settings → Appearance. one switch kills the worker orbs, particles, all blur/shadows and every animation, and greys out the individual effect toggles. for software-rendered / no-GPU setups (Docker, remote desktop) where even simple animations cost real CPU.', page: 'settings' },
+        { title: 'Large-library imports no longer time out (#947)', desc: 'dropping a whole library into staging used to make the import page scan every file synchronously and hit the request timeout — so it never loaded. the scan now runs in the background with a live "Scanning N of M…" progress, and the page fills in automatically when done. (thanks @ramonskie.)', page: 'downloads' },
+        { title: 'Earlier versions', desc: '2.8.1 added playlist export to Spotify & Deezer (#945), a Rename-only Library Reorganize (#875), broader lossless + DSD handling, and a refined reduce-visual-effects pass. 2.8.0 brought the Unverified-queue cleanup (#934) + dashboard performance work; 2.7.9 added best-quality downloads + the Wing It Pool; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3448,50 +3443,45 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "The Unverified queue, finally under control",
-        description: "the headline cleanup — review-queue rows stop piling up and the existing backlog clears itself.",
+        title: "Spotify, reliably",
+        description: "the Docker boot hang and the \"logged out / re-auth won't stick\" issues are fixed.",
         features: [
-            "#934 — the AcoustID scan was creating a fresh history row every run and leaving already-verified files stuck \"unverified\" (a frozen import-time path that stopped matching once the file moved)",
-            "scans no longer duplicate rows + heal on the spot; a one-time reconcile on startup clears the existing backlog from your library's truth — no re-scan, including human-verified files a scan skips",
-            "a 🧹 Clean orphaned button removes dead rows whose file is genuinely gone, with a safety gate that refuses to run if your library looks offline",
-            "Unverified review rows got the nicer Quarantine-style cards (artwork + inline details). thanks @nick2000713 for #938",
+            "#949 — with Spotify as your primary source, an unreachable Spotify API could block the gunicorn worker at startup (the container bound :8008 but never served the UI). auth probes are deferred during boot + capped with a timeout so startup can't hang; same guard for Qobuz/Deezer/Tidal. thanks HellRa1SeR",
+            "\"re-auth didn't stick\" — the OAuth callback wrote your token to one cache while the app read another; unified on a single token store, so re-authenticating actually takes effect",
+            "Sync to Spotify works — exporting a mirrored playlist to Spotify asks for write permission once, on-demand, the first time you use it; your normal login is untouched, so upgrading never forces a re-auth",
         ],
     },
     {
-        title: "Preview Clip Cleanup (new Tools job)",
-        description: "find the ~30s preview clips the HiFi source sometimes hands back instead of the full song.",
+        title: "The \"slow after update\" fix",
+        description: "the post-update lag wasn't us — it was your password manager.",
         features: [
-            "scans your short tracks, checks how long each should be from its metadata source, and flags the previews — conservative, so genuine short tracks and anything it can't verify are left alone",
-            "approve a finding and it deletes the clip, drops it from the library, and re-wishlists the full version",
-            "each finding has a ▶ Play button + a file-length-vs-real-length readout so you can confirm it's busted before approving",
+            "#948 — browser password managers (Bitwarden/1Password/etc.) rebuild their autofill overlay on every DOM change, and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields untouched) — ~110x less main-thread blocking, ~20 → ~96 FPS in the reporter's benchmark. thanks @nick2000713",
+            "new Max Performance mode (Settings → Appearance) — one switch kills orbs, particles, all blur/shadows and every animation, for software-rendered / no-GPU setups (Docker, remote desktop)",
         ],
     },
     {
-        title: "Album Completeness handles split albums",
-        description: "a physical album split across multiple library rows no longer reports false \"incomplete\".",
+        title: "Large-library imports no longer time out",
+        description: "migrate a whole library into staging without the page choking.",
         features: [
-            "#936 — fragments are grouped into one logical album and emit a single correct finding, instead of each row looking incomplete on its own",
-            "safe by design: it groups by a shared id AND validates at the track level, so a stale id can never fuse two unrelated albums; also recognizes MusicBrainz as a readable album source. thanks @ragnarlotus",
+            "#947 — dropping thousands of files into staging used to scan every file synchronously and hit the request timeout, so the import page never loaded (and every reload re-timed-out)",
+            "the scan now runs in the background with a live \"Scanning N of M…\" progress, and the page fills in automatically when it's done. auto-import remains the hands-off path for matching. thanks @ramonskie",
         ],
     },
     {
-        title: "Recent fixes",
-        description: "reported bugs squashed this cycle.",
+        title: "Earlier in 2.8.1",
+        description: "2.8.1 was a features + reliability release.",
         features: [
-            "pasted YouTube cookies threw `unsupported browser: \"custom\"` on Docker — now it loads the pasted cookies.txt (the only auth path on a headless box). thanks HellRa1SeR",
-            "#937 — a remaster running a few seconds LONGER than the metadata got quarantined like a truncated download; the duration check is asymmetric now. thanks @diegocade1",
-            "\"Add to Wishlist\" from a discography went from ~15–30s PER TRACK to instant (the ownership check was doing a full-table fuzzy scan per track)",
-            "wishlist art now renders for re-downloads/preview re-fetches (relative media-server paths are normalized on read); Clear Completed is back on the Downloads page and clears the persisted history too",
-            "watchlist records automatic scans (#933) + stops fusing different editions; pasted Qobuz/Tidal floats to the top of manual search (#932); Popular Picks no longer empty on Deezer",
+            "playlist export to Spotify & Deezer (#945) — send a mirrored playlist back to your streaming account, resolving IDs from the discovery cache + your library",
+            "Rename-only Library Reorganize (#875), broader lossless + DSD handling (#941/#939), a pile of download/search fixes, and a refined reduce-visual-effects pass",
         ],
     },
     {
-        title: "Performance — dashboard + memory",
-        description: "lower idle cost and no more runaway RAM.",
+        title: "Earlier in 2.8.0",
+        description: "2.8.0 was a quality + reliability release.",
         features: [
-            "#935 — frosted-glass blur, cursor-glow blobs and the worker-orb animation were repainting every frame, hammering the GPU (worst on Firefox/Zen). trimmed them, kept the orb framerate steady on Firefox, and set Background Particles OFF by default",
-            "#802 — browsing every page used to climb RSS into the GBs (plexapi XML trees deferring GC) and could lock up; a lightweight sweeper now collects + returns memory to the OS as it grows, so it settles instead of climbing",
-            "the dashboard system-memory tile now also shows SoulSync's own RAM",
+            "the Unverified review queue stopped inflating and self-heals — the AcoustID scan no longer duplicates rows, a startup reconcile clears the backlog, and a 🧹 Clean orphaned button sweeps dead rows (#934, thanks @nick2000713 for #938)",
+            "Preview Clip Cleanup (a Tools job that finds ~30s preview clips and re-wishlists the real version); Album Completeness handles split albums (#936, thanks @ragnarlotus)",
+            "dashboard performance + bounded memory growth that could lock up big libraries (#935 / #802)",
         ],
     },
     {
