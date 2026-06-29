@@ -31,11 +31,14 @@ function _advState(v) {
     return { word: 'Deep cuts only', icon: '🔮' };
 }
 function onAdvDialInput(value) {
-    const s = _advState(parseFloat(value));
+    const v = parseFloat(value);
+    const s = _advState(v);
     const stateEl = document.getElementById('adv-dial-state');
     if (stateEl) stateEl.textContent = s.word;
     const iconEl = document.getElementById('adv-dial-icon');
     if (iconEl) iconEl.textContent = s.icon;
+    const valEl = document.getElementById('adv-dial-val');
+    if (valEl) valEl.textContent = Math.round(v * 100) + '%';
 }
 let _advCommitTimer = null;
 function onAdvDialCommit(value) {
