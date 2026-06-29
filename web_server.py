@@ -38728,6 +38728,11 @@ def start_runtime_services():
         _runtime_started = True
 
 
+# Module import is complete — provider clients may now perform network probes.
+from core.boot_phase import mark_boot_complete
+mark_boot_complete()
+
+
 # Direct execution: python web_server.py (dev/Windows fallback)
 # Production should use: gunicorn -c gunicorn.conf.py wsgi:application
 if _DIRECT_RUN:

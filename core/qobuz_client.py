@@ -164,6 +164,8 @@ class QobuzClient(DownloadSourcePlugin):
 
     def _restore_session(self):
         """Try to restore saved session from config."""
+        from core.boot_phase import is_boot_phase
+
         saved = config_manager.get('qobuz.session', {})
         app_id = saved.get('app_id', '')
         app_secret = saved.get('app_secret', '')
@@ -177,6 +179,10 @@ class QobuzClient(DownloadSourcePlugin):
                 'X-App-Id': self.app_id,
                 'X-User-Auth-Token': self.user_auth_token,
             })
+
+            if is_boot_phase():
+                logger.info("Loaded Qobuz session from config (verification deferred until after boot)")
+                return
 
             # Verify the token is still valid
             try:
