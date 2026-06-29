@@ -17,12 +17,27 @@ logger = get_logger("spotify_client")
 # Single source of truth for the Spotify OAuth scope. Used by EVERY SpotifyOAuth
 # construction (the client, the per-profile registry, and all web_server callbacks) so
 # the authorize URL and token exchange can never request different scopes — a mismatch
-# silently re-prompts or denies. The `playlist-modify-*` pair powers exporting a mirrored
-# playlist back to Spotify (#945); existing users re-auth once to grant it.
+# silently re-prompts or denies.
+#
+# IMPORTANT — do NOT add scopes here lightly. Spotipy's validate_token treats a cached
+# token as invalid the moment the requested scope is no longer a subset of the token's
+# granted scope, so GROWING this string invalidates EVERY existing user's token and forces
+# a re-auth on upgrade. `playlist-modify-*` (for exporting a playlist back to Spotify, #945)
+# was pulled back out for exactly that reason — it broke all Spotify users on upgrade. The
+# Spotify export must request write access on-demand (incremental auth) instead.
 SPOTIFY_OAUTH_SCOPE = (
     "user-library-read user-read-private playlist-read-private "
-    "playlist-read-collaborative user-read-email user-follow-read "
-    "playlist-modify-public playlist-modify-private"
+    "playlist-read-collaborative user-read-email user-follow-read"
+)
+
+# The export scope = the normal login scope PLUS playlist write. Requested ONLY by the
+# on-demand export-auth route (/auth/spotify/export) when a user chooses to export a playlist
+# to Spotify — NEVER by the normal login. That's the whole safety property: the global scope
+# above is unchanged, so no existing token is invalidated. The token Spotify returns from the
+# export flow is a SUPERSET of the read scope, so it still passes the normal auth check
+# (read ⊆ read+write) — one account, one token, just with write added for the opt-in user.
+SPOTIFY_EXPORT_SCOPE = (
+    SPOTIFY_OAUTH_SCOPE + " playlist-modify-public playlist-modify-private"
 )
 
 
@@ -791,6 +806,16 @@ class SpotifyClient:
             self._auth_cached_result = None
             self._auth_cache_time = 0
 
+    def _has_cached_oauth_token(self) -> bool:
+        """Return True when a persisted OAuth token exists (no network I/O)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, 'cache_handler', None)
+            return bool(cache_handler and cache_handler.get_cached_token() is not None)
+        except Exception:
+            return False
+
     def is_spotify_authenticated(self) -> bool:
         """Check if Spotify client is specifically authenticated (not just iTunes fallback).
         Results are cached for 60 seconds to avoid excessive API calls.
@@ -866,6 +891,26 @@ class SpotifyClient:
                     logger.debug("publish_spotify_status cache hit: %s", e)
                 return self._auth_cached_result
 
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            result = self._has_cached_oauth_token()
+            with self._auth_cache_lock:
+                self._auth_cached_result = result
+                self._auth_cache_time = time.time()
+            try:
+                from core.metadata.status import publish_spotify_status
+
+                publish_spotify_status(
+                    connected=result,
+                    authenticated=result,
+                    rate_limited=False,
+                    rate_limit=None,
+                    post_ban_cooldown=None,
+                )
+            except Exception as e:
+                logger.debug("publish_spotify_status boot-phase: %s", e)
+            return result
+
         # Cache miss — make API call outside the lock.
         # Safety: if there's no cached token, return False immediately.
         # Without this guard, spotipy's auth_manager will try to start an interactive
@@ -897,7 +942,8 @@ class SpotifyClient:
         # Use a dedicated probe client (retries=0) so a 429 here propagates
         # immediately and we can detect long Retry-After bans.
         try:
-            probe = spotipy.Spotify(auth_manager=self.sp.auth_manager, retries=0)
+            probe = spotipy.Spotify(
+                auth_manager=self.sp.auth_manager, retries=0, requests_timeout=15)
             probe.current_user()
             result = True
         except Exception as e:
@@ -1147,6 +1193,19 @@ class SpotifyClient:
                  logger.info(f"Returning {len(playlists)} playlists fetched before error.")
                  return playlists
             return []
+
+    def has_write_scope(self) -> bool:
+        """True when the cached Spotify token carries playlist-modify (the export write scope).
+        The export endpoint uses this to decide whether to run, or to first send the user
+        through the on-demand export-auth flow. Fail-safe: any error → False (not authorized)."""
+        if self.sp is None:
+            return False
+        try:
+            cache_handler = getattr(self.sp.auth_manager, "cache_handler", None)
+            token = cache_handler.get_cached_token() if cache_handler else None
+            return "playlist-modify" in ((token or {}).get("scope") or "")
+        except Exception:
+            return False
 
     def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
                                   public=False, description=""):

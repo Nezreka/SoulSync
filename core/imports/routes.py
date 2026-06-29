@@ -8,7 +8,7 @@ import time
 import uuid
 from concurrent.futures import as_completed
 from dataclasses import dataclass
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 from core.imports.album import build_album_import_context, build_album_import_match_payload, resolve_album_artist_context
 from core.imports.context import get_import_context_artist, get_import_track_info, normalize_import_context
@@ -84,12 +84,124 @@ class ImportRouteRuntime:
 _STAGING_SCAN_LOCK = threading.Lock()
 _STAGING_SCAN_TTL = 6.0  # seconds — covers the page-open burst; re-scans after
 _staging_scan_cache: Dict[str, Any] = {"path": None, "ts": 0.0, "records": None}
+# Bumped by invalidate_staging_scan_cache() so a background scan that finishes after an
+# import doesn't re-commit stale (pre-import) records (see the generation guard above).
+_staging_scan_generation: Dict[str, int] = {"value": 0}
+
+# Background-scan plumbing: a large staging folder (whole-library migration, #947) makes
+# the synchronous scan exceed gunicorn's 120s request timeout. The runner moves the SAME
+# scan off the request thread; the endpoints report progress instead of blocking.
+_staging_scan_status: Dict[str, Any] = {
+    "status": "idle", "scanned": 0, "total": 0, "path": None, "error": None,
+}
+_staging_scan_status_lock = threading.Lock()
 
 
-def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str) -> list[Dict[str, Any]]:
+def _staging_cache_hit(staging_path: str) -> Optional[list]:
+    """The cached records for ``staging_path`` if still fresh, else None (no scan triggered)."""
+    c = _staging_scan_cache
+    if (c["records"] is not None and c["path"] == staging_path
+            and (time.time() - c["ts"]) < _STAGING_SCAN_TTL):
+        return c["records"]
+    return None
+
+
+def ensure_background_staging_scan(runtime: ImportRouteRuntime, staging_path: str) -> None:
+    """Start a background scan for ``staging_path`` unless the cache is warm or a scan for
+    this path is already running. Idempotent — safe to call on every request."""
+    if _staging_cache_hit(staging_path) is not None:
+        return
+    with _staging_scan_status_lock:
+        if (_staging_scan_status["status"] == "scanning"
+                and _staging_scan_status["path"] == staging_path):
+            return
+        _staging_scan_status.update({"status": "scanning", "scanned": 0, "total": 0,
+                                     "path": staging_path, "error": None})
+
+    def _run() -> None:
+        try:
+            _scan_staging_records(runtime, staging_path, progress=_staging_scan_status)
+            with _staging_scan_status_lock:
+                if _staging_scan_status["path"] == staging_path:
+                    _staging_scan_status["status"] = "done"
+        except Exception as exc:  # noqa: BLE001 — surface any scan error to the poller
+            with _staging_scan_status_lock:
+                _staging_scan_status.update({"status": "error", "error": str(exc)})
+
+    threading.Thread(target=_run, name="staging-scan", daemon=True).start()
+
+
+def get_staging_records_or_status(runtime: ImportRouteRuntime, staging_path: str,
+                                  *, grace_seconds: float = 3.0) -> tuple[str, Any]:
+    """Non-blocking staging access for the page endpoints. Returns ``("ready", records)``
+    when the cache is warm or the scan completes within ``grace_seconds`` (so small/normal
+    folders still answer in a single request), otherwise ``("scanning", status_dict)`` after
+    making sure a background scan is running."""
+    records = _staging_cache_hit(staging_path)
+    if records is not None:
+        return ("ready", records)
+    ensure_background_staging_scan(runtime, staging_path)
+    deadline = time.time() + max(0.0, grace_seconds)
+    while True:
+        records = _staging_cache_hit(staging_path)
+        if records is not None:
+            return ("ready", records)
+        with _staging_scan_status_lock:
+            status = dict(_staging_scan_status)
+        if status.get("status") == "error":
+            return ("error", status)
+        if time.time() >= deadline:
+            return ("scanning", status)
+        time.sleep(0.05)
+
+
+def _records_or_scanning_payload(runtime: ImportRouteRuntime, staging_path: str):
+    """Shared helper for the page endpoints: returns ``(records, None)`` when the scan is
+    ready, or ``(None, payload)`` when a background scan is still running — the caller
+    returns that payload so the page polls + shows progress instead of blocking/timing out.
+
+    A scan error is re-raised so the endpoint's own try/except logs + returns it exactly as
+    when the scan ran inline (preserves the existing error contract)."""
+    state, val = get_staging_records_or_status(runtime, staging_path)
+    if state == "error":
+        raise RuntimeError(val.get("error") or "staging scan failed")
+    if state == "scanning":
+        return None, {"success": True, "scanning": True,
+                      "progress": {"scanned": val.get("scanned", 0),
+                                   "total": val.get("total", 0)}}
+    return val, None
+
+
+def staging_scan_status(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
+    """Lightweight, instant scan-progress poll for the page (no grace-wait, no file I/O) —
+    ``ready`` true once the cache is warm and the files/groups/hints calls will answer fast."""
+    try:
+        staging_path = runtime.get_staging_path()
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}, 500
+    with _staging_scan_status_lock:
+        st = dict(_staging_scan_status)
+    return {
+        "success": True,
+        "ready": _staging_cache_hit(staging_path) is not None,
+        "status": st.get("status", "idle"),
+        "scanned": st.get("scanned", 0),
+        "total": st.get("total", 0),
+        "error": st.get("error"),
+    }, 200
+
+
+def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str,
+                          *, progress: Optional[Dict[str, Any]] = None) -> list[Dict[str, Any]]:
     """Walk staging + read each audio file's tags ONCE, returning per-file records
     that staging files/groups/hints all derive from. Briefly cached + locked so the
-    page-open trio shares a single scan rather than each re-walking and re-reading."""
+    page-open trio shares a single scan rather than each re-walking and re-reading.
+
+    ``progress`` (optional, default None = unchanged behaviour) is a dict the scan
+    updates live with ``total`` (audio-file count, from a fast first pass) and ``scanned``
+    (tag-reads done so far) so a background runner can report progress. A generation guard
+    keeps a scan that finishes AFTER an import (which bumped ``_staging_scan_generation``)
+    from committing stale records to the cache."""
     now = time.time()
     cached = _staging_scan_cache
     if (cached["records"] is not None and cached["path"] == staging_path
@@ -103,33 +215,50 @@ def _scan_staging_records(runtime: ImportRouteRuntime, staging_path: str) -> lis
                 and (now - cached["ts"]) < _STAGING_SCAN_TTL):
             return cached["records"]
 
-        records: list[Dict[str, Any]] = []
+        start_generation = _staging_scan_generation["value"]
+
+        # Pass 1 (fast): collect the audio-file list — no tag I/O — so we know the total.
+        audio_files: list[tuple[str, str, Optional[str]]] = []
         if os.path.isdir(staging_path):
             for root, _dirs, filenames in os.walk(staging_path):
                 rel_dir = os.path.relpath(root, staging_path)
                 top_folder = rel_dir.split(os.sep)[0] if rel_dir != "." else None
                 for fname in filenames:
-                    ext = os.path.splitext(fname)[1].lower()
-                    if ext not in AUDIO_EXTENSIONS:
-                        continue
-                    full_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(full_path, staging_path)
-                    meta = runtime.read_staging_file_metadata(full_path, rel_path)
-                    records.append({
-                        "filename": fname, "rel_path": rel_path, "full_path": full_path,
-                        "extension": ext, "title": meta["title"], "album": meta["album"],
-                        "artist": meta["artist"], "albumartist": meta["albumartist"],
-                        "track_number": meta["track_number"], "disc_number": meta["disc_number"],
-                        "top_folder": top_folder,
-                    })
+                    if os.path.splitext(fname)[1].lower() in AUDIO_EXTENSIONS:
+                        audio_files.append((root, fname, top_folder))
+        if progress is not None:
+            progress["total"] = len(audio_files)
+            progress["scanned"] = 0
 
-        _staging_scan_cache.update({"path": staging_path, "ts": time.time(), "records": records})
+        # Pass 2 (slow): read each file's tags, updating progress as we go.
+        records: list[Dict[str, Any]] = []
+        for root, fname, top_folder in audio_files:
+            full_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(full_path, staging_path)
+            meta = runtime.read_staging_file_metadata(full_path, rel_path)
+            records.append({
+                "filename": fname, "rel_path": rel_path, "full_path": full_path,
+                "extension": os.path.splitext(fname)[1].lower(),
+                "title": meta["title"], "album": meta["album"],
+                "artist": meta["artist"], "albumartist": meta["albumartist"],
+                "track_number": meta["track_number"], "disc_number": meta["disc_number"],
+                "top_folder": top_folder,
+            })
+            if progress is not None:
+                progress["scanned"] += 1
+
+        # Generation guard: if an import invalidated the cache mid-scan, these records are
+        # stale — return them to this caller but do NOT commit them as the shared cache.
+        if _staging_scan_generation["value"] == start_generation:
+            _staging_scan_cache.update({"path": staging_path, "ts": time.time(), "records": records})
         return records
 
 
 def invalidate_staging_scan_cache() -> None:
     """Drop the cached staging scan (call after an import moves/removes files so the
-    next files/groups/hints request reflects the new state immediately)."""
+    next files/groups/hints request reflects the new state immediately). Also bumps the
+    scan generation so an in-flight background scan won't re-commit pre-import records."""
+    _staging_scan_generation["value"] += 1
     _staging_scan_cache.update({"path": None, "ts": 0.0, "records": None})
 
 
@@ -138,6 +267,10 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
     try:
         staging_path = runtime.get_staging_path()
         os.makedirs(staging_path, exist_ok=True)
+
+        records, scanning = _records_or_scanning_payload(runtime, staging_path)
+        if scanning is not None:
+            return scanning, 200
 
         files = [
             {
@@ -151,7 +284,7 @@ def staging_files(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
                 "disc_number": r["disc_number"],
                 "extension": r["extension"],
             }
-            for r in _scan_staging_records(runtime, staging_path)
+            for r in records
         ]
 
         files.sort(key=lambda f: f["filename"].lower())
@@ -168,8 +301,12 @@ def staging_groups(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
         if not os.path.isdir(staging_path):
             return {"success": True, "groups": []}, 200
 
+        records, scanning = _records_or_scanning_payload(runtime, staging_path)
+        if scanning is not None:
+            return scanning, 200
+
         album_groups = {}
-        for r in _scan_staging_records(runtime, staging_path):
+        for r in records:
             album = r["album"]
             artist = r["albumartist"] or r["artist"]
             if not album or not artist:
@@ -215,9 +352,13 @@ def staging_hints(runtime: ImportRouteRuntime) -> tuple[Dict[str, Any], int]:
         if not os.path.isdir(staging_path):
             return {"success": True, "hints": []}, 200
 
+        records, scanning = _records_or_scanning_payload(runtime, staging_path)
+        if scanning is not None:
+            return scanning, 200
+
         tag_albums = {}
         folder_hints = {}
-        for r in _scan_staging_records(runtime, staging_path):
+        for r in records:
             if r["top_folder"]:
                 folder_hints[r["top_folder"]] = folder_hints.get(r["top_folder"], 0) + 1
 

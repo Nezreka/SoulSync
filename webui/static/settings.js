@@ -1572,6 +1572,16 @@ async function loadSettingsData() {
         if (reduceCheckbox) reduceCheckbox.checked = reduceEffects;
         applyReduceEffects(reduceEffects);
 
+        // Max Performance — same device-scoped resolution as reduce-effects:
+        // localStorage is the per-device truth, server value the cross-device default.
+        // Applied last so it can lock/override the dependent toggles above when on.
+        const serverMaxPerf = settings.ui_appearance?.max_performance === true; // default false
+        const localMaxPerf = localStorage.getItem('soulsync-max-performance'); // '1' | '0' | null
+        const maxPerf = localMaxPerf !== null ? (localMaxPerf === '1') : serverMaxPerf;
+        const maxPerfCheckbox = document.getElementById('max-performance-enabled');
+        if (maxPerfCheckbox) maxPerfCheckbox.checked = maxPerf;
+        applyMaxPerformance(maxPerf);
+
         // Populate Logging information
         const logLevelSelect = document.getElementById('log-level-select');
         if (logLevelSelect) logLevelSelect.value = settings.logging?.level || 'INFO';
@@ -3493,9 +3503,13 @@ async function saveSettings(quiet = false) {
             accent_preset: document.getElementById('accent-preset')?.value || '#1db954',
             accent_color: document.getElementById('accent-custom-color')?.value || '#1db954',
             sidebar_visualizer: document.getElementById('sidebar-visualizer-type')?.value || 'bars',
-            particles_enabled: document.getElementById('particles-enabled')?.checked !== false,
-            worker_orbs_enabled: document.getElementById('worker-orbs-enabled')?.checked !== false,
-            reduce_effects: document.getElementById('reduce-effects-enabled')?.checked === true
+            // Read the runtime flags / localStorage, not the checkboxes: while Max
+            // Performance is on it locks those boxes visually-off, but the user's real
+            // saved prefs live in the flags — so saving must not clobber them.
+            particles_enabled: window._particlesEnabled !== false,
+            worker_orbs_enabled: window._workerOrbsEnabled !== false,
+            reduce_effects: window._reduceEffectsActive === true,
+            max_performance: window._maxPerfActive === true
         },
         youtube: {
             cookies_browser: document.getElementById('youtube-cookies-browser').value,

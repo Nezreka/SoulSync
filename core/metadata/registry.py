@@ -357,10 +357,26 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
     return None
 
 
+def get_configured_primary_source() -> str:
+    """Return metadata.fallback_source as stored in config, without runtime downgrade.
+
+    Unlike get_primary_source(), this never probes Spotify auth. Use at boot and
+    anywhere blocking network I/O must be avoided (gunicorn worker import, Docker
+    cold start when Spotify is unreachable).
+    """
+    _default = METADATA_SOURCE_PRIORITY[0]
+    return _get_config_value("metadata.fallback_source", _default) or _default
+
+
 def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] = None) -> str:
     """Return configured primary metadata source."""
+    from core.boot_phase import is_boot_phase
+
+    if is_boot_phase():
+        return get_configured_primary_source()
+
     _default = METADATA_SOURCE_PRIORITY[0]
-    source = _get_config_value("metadata.fallback_source", _default) or _default
+    source = get_configured_primary_source()
 
     if source == "spotify":
         try:
@@ -447,7 +463,19 @@ def get_primary_source_status(
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
 ) -> Dict[str, Any]:
     """Return a generic status snapshot for the active primary metadata source."""
+    from core.boot_phase import is_boot_phase
+
     source = _get_config_value("metadata.fallback_source", "deezer") or "deezer"
+    if is_boot_phase():
+        display_source = source
+        if source == "spotify" and _get_config_value("metadata.spotify_free", False):
+            display_source = "spotify_free"
+        return {
+            "source": display_source,
+            "connected": False,
+            "response_time": 0,
+        }
+
     started = time.time()
     connected = False
 
@@ -515,9 +543,13 @@ def get_client_for_source(
     musicbrainz_client_factory: Optional[MetadataClientFactory] = None,
 ):
     """Return exact client for a source, or None if unavailable."""
+    from core.boot_phase import is_boot_phase
+
     if source == "spotify":
         try:
             client = get_spotify_client(client_factory=spotify_client_factory)
+            if is_boot_phase():
+                return client if client and getattr(client, "sp", None) else None
             if client and client.is_spotify_authenticated():
                 return client
         except Exception as e:

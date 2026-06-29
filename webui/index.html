@@ -24,11 +24,12 @@
         window._particlesEnabled = {{ initial_particles_enabled|tojson }};
         window._workerOrbsEnabled = {{ initial_worker_orbs_enabled|tojson }};
         window._reduceEffectsActive = {{ initial_reduce_effects|tojson }};
+        window._maxPerfActive = {{ initial_max_performance|tojson }};
     </script>
     {{ vite_assets('head')|safe }}
 </head>
 
-<body{% if initial_reduce_effects %} class="reduce-effects"{% endif %}>
+<body class="{% if initial_reduce_effects %}reduce-effects {% endif %}{% if initial_max_performance %}max-performance{% endif %}">
     <!-- Setup Wizard Overlay -->
     <div id="setup-wizard-overlay" class="setup-wizard-overlay" style="display: none;">
         <div class="setup-wizard-container">
@@ -6438,7 +6439,14 @@
                                         <input type="checkbox" id="reduce-effects-enabled">
                                         Reduce Visual Effects
                                     </label>
-                                    <small class="settings-hint">Disables backdrop blur, animations, transitions, and shadows. Significantly reduces GPU/CPU usage on low-end devices.</small>
+                                    <small class="settings-hint">Disables backdrop blur and shadows (the GPU-heavy bits). Keeps functional motion like loading spinners. Good for low-end devices.</small>
+                                </div>
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="max-performance-enabled">
+                                        Max Performance
+                                    </label>
+                                    <small class="settings-hint">Nuclear low-power mode for software-rendered / no-GPU setups (e.g. Docker, remote desktop). Turns off Worker Orbs, Particles, all blur/shadows AND every animation &amp; transition (loading spinners go static). Overrides the three options above.</small>
                                 </div>
                             </div>
 

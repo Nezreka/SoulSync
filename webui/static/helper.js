@@ -3404,15 +3404,15 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.1': [
-        { date: 'June 2026 — 2.8.1 release' },
-        { title: 'Export playlists to Spotify & Deezer (#945)', desc: 'the mirrored-playlist export modal now has Sync to Spotify and Sync to Deezer next to the ListenBrainz/JSPF options. it builds a playlist in your account from the IDs soulsync already has — the discovery cache first, then your library — so an already-discovered playlist exports instantly with zero API calls. re-exporting updates the same playlist instead of duplicating it, and an optional "match missing tracks" toggle confidently searches for the stragglers (a wrong-artist or karaoke version is left out, never guessed). spotify needs a one-time reconnect for write access.', page: 'playlists' },
-        { title: 'Library Reorganize — Rename only (#875)', desc: 'a lighter reorganize action that just renames your files to your current naming scheme — no re-tagging, no quality/AcoustID re-check, no copy-to-staging. much faster on a NAS, won\'t fail on post-processing, and only touches files whose path actually changes (which also fixes the "2 of 14 previewed but everything got modified" album-splitting). pick it from the new Action dropdown. (thanks @tsoulard / @Tacobell444.)', page: 'library' },
-        { title: 'Broader lossless handling (#941, #939)', desc: 'lossy-copy now works for all lossless formats, not just FLAC; and DSD (.dsf/.dff) is recognized as lossless instead of being false-flagged as "truncated".', page: 'downloads' },
-        { title: 'Download + search fixes', desc: 'an unbalanced bracket in a filename no longer false-fails as "file not found"; a file we couldn\'t quarantine is left for retry instead of deleted; the Identify search defaults to "artist - title"; "file not found" errors are actionable now; pasted Qobuz/Tidal links inject the exact track into manual search (#932); and the Wing It pool "Fix Match" search works again.', page: 'downloads' },
-        { title: 'Reduce visual effects, refined', desc: 'it no longer freezes functional motion (spinners, progress) — only the expensive GPU stuff (blur, shadows, glow) is killed. worker orbs default OFF on Firefox for new users and run at ~30fps under reduce-effects.', page: 'settings' },
-        { title: 'More fixes', desc: 'jellyfin scans page the bulk fetch so the no-progress watchdog can\'t false-stall a big library; settings page cleanup (#943, thanks @nick2000713); spotify oauth credential normalization (#942, thanks HellRa1SeR); npm audit security fixes for vite/undici/babel (#944, thanks HellRa1SeR).', page: 'settings' },
-        { title: 'Earlier versions', desc: '2.8.0 brought the Unverified-queue cleanup (#934), Preview Clip Cleanup, split-album Completeness (#936), and a dashboard performance + memory pass (#935/#802). 2.7.9 added best-quality downloads + ranked quality profiles, Discover "Based On Your Listening", and the Wing It Pool; 2.7.0 made multi-user real.' },
+    '2.8.2': [
+        { date: 'June 2026 — 2.8.2 release' },
+        { title: 'Spotify Docker boot hang fixed (#949)', desc: 'with Spotify as your primary metadata source, an unreachable Spotify API could block the gunicorn worker at startup — the container bound port 8008 but never served the Web UI. provider auth probes are deferred during boot (and capped with a timeout) so startup can\'t hang on a slow Spotify; same guard for Qobuz/Deezer/Tidal. (thanks HellRa1SeR.)', page: 'settings' },
+        { title: '"Re-auth didn\'t stick" fixed', desc: 'the OAuth callback wrote your Spotify token to one cache while the app read another, so re-authenticating could silently fail validation. unified on one token store — re-auth takes effect now.', page: 'settings' },
+        { title: 'Sync to Spotify works', desc: 'exporting a mirrored playlist to Spotify now asks for playlist-write permission once, on-demand, the first time you use it. your normal Spotify login is untouched, so upgrading never forces a re-auth.', page: 'playlists' },
+        { title: 'The "slow after update" fix (#948)', desc: 'the real cause of post-update lag was browser password managers (Bitwarden/1Password/etc.) rebuilding their autofill overlay on every DOM change — and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields left alone). ~110x less main-thread blocking in the reporter\'s benchmark. (thanks @nick2000713.)', page: 'dashboard' },
+        { title: 'Max Performance mode', desc: 'Settings → Appearance. one switch kills the worker orbs, particles, all blur/shadows and every animation, and greys out the individual effect toggles. for software-rendered / no-GPU setups (Docker, remote desktop) where even simple animations cost real CPU.', page: 'settings' },
+        { title: 'Large-library imports no longer time out (#947)', desc: 'dropping a whole library into staging used to make the import page scan every file synchronously and hit the request timeout — so it never loaded. the scan now runs in the background with a live "Scanning N of M…" progress, and the page fills in automatically when done. (thanks @ramonskie.)', page: 'downloads' },
+        { title: 'Earlier versions', desc: '2.8.1 added playlist export to Spotify & Deezer (#945), a Rename-only Library Reorganize (#875), broader lossless + DSD handling, and a refined reduce-visual-effects pass. 2.8.0 brought the Unverified-queue cleanup (#934) + dashboard performance work; 2.7.9 added best-quality downloads + the Wing It Pool; 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3443,40 +3443,36 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Export playlists to Spotify & Deezer",
-        description: "send a mirrored playlist back to your streaming account — the same one-click export, now pointed at Spotify and Deezer.",
+        title: "Spotify, reliably",
+        description: "the Docker boot hang and the \"logged out / re-auth won't stick\" issues are fixed.",
         features: [
-            "#945 — Sync to Spotify / Sync to Deezer sit next to the ListenBrainz/JSPF options in the export modal; each builds a playlist in your account",
-            "resolves IDs from what's already on hand first — the discovery cache, then your library — so an already-discovered playlist exports instantly with zero API calls",
-            "re-exporting updates the same playlist in place instead of spawning duplicates",
-            "an optional \"match missing tracks\" toggle confidently searches for the stragglers — a wrong-artist or karaoke version is left out, never guessed in",
-            "service buttons grey out + point to Settings when disconnected; Spotify needs a one-time reconnect for write access",
+            "#949 — with Spotify as your primary source, an unreachable Spotify API could block the gunicorn worker at startup (the container bound :8008 but never served the UI). auth probes are deferred during boot + capped with a timeout so startup can't hang; same guard for Qobuz/Deezer/Tidal. thanks HellRa1SeR",
+            "\"re-auth didn't stick\" — the OAuth callback wrote your token to one cache while the app read another; unified on a single token store, so re-authenticating actually takes effect",
+            "Sync to Spotify works — exporting a mirrored playlist to Spotify asks for write permission once, on-demand, the first time you use it; your normal login is untouched, so upgrading never forces a re-auth",
         ],
     },
     {
-        title: "Library Reorganize — Rename only",
-        description: "a lighter reorganize that just renames, no reprocessing.",
+        title: "The \"slow after update\" fix",
+        description: "the post-update lag wasn't us — it was your password manager.",
         features: [
-            "#875 — renames your files to your current naming scheme with no re-tag, no quality/AcoustID re-check, no copy-to-staging — much faster on a NAS and won't fail on post-processing reasons",
-            "only touches files whose path actually changes, which also fixes the \"2 of 14 previewed but everything got modified\" album-splitting; pick it from the new Action dropdown. thanks @tsoulard / @Tacobell444",
+            "#948 — browser password managers (Bitwarden/1Password/etc.) rebuild their autofill overlay on every DOM change, and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields untouched) — ~110x less main-thread blocking, ~20 → ~96 FPS in the reporter's benchmark. thanks @nick2000713",
+            "new Max Performance mode (Settings → Appearance) — one switch kills orbs, particles, all blur/shadows and every animation, for software-rendered / no-GPU setups (Docker, remote desktop)",
         ],
     },
     {
-        title: "Recent fixes",
-        description: "reliability + reported bugs squashed this cycle.",
+        title: "Large-library imports no longer time out",
+        description: "migrate a whole library into staging without the page choking.",
         features: [
-            "lossy-copy now covers all lossless formats, not just FLAC (#941); DSD (.dsf/.dff) is recognized as lossless instead of false-flagged \"truncated\" (#939)",
-            "downloads: an unbalanced bracket no longer false-fails as \"file not found\"; a file we couldn't quarantine is left for retry instead of deleted; \"file not found\" errors are actionable now",
-            "pasted Qobuz/Tidal links inject the exact track into manual search (#932); the Wing It pool \"Fix Match\" search works again; the Identify search defaults to \"artist - title\"",
-            "jellyfin scans page the bulk fetch so the no-progress watchdog can't false-stall a big library; settings page cleanup (#943); spotify oauth normalization (#942); npm security fixes (#944)",
+            "#947 — dropping thousands of files into staging used to scan every file synchronously and hit the request timeout, so the import page never loaded (and every reload re-timed-out)",
+            "the scan now runs in the background with a live \"Scanning N of M…\" progress, and the page fills in automatically when it's done. auto-import remains the hands-off path for matching. thanks @ramonskie",
         ],
     },
     {
-        title: "Reduce visual effects, refined",
-        description: "the lag toggle that no longer breaks the UI.",
+        title: "Earlier in 2.8.1",
+        description: "2.8.1 was a features + reliability release.",
         features: [
-            "it no longer freezes functional motion (spinners, progress indicators) — only the expensive GPU properties (blur, shadows, glow) are killed",
-            "worker orbs default OFF on Firefox for first-time users, and run at ~30fps when reduce-effects is on",
+            "playlist export to Spotify & Deezer (#945) — send a mirrored playlist back to your streaming account, resolving IDs from the discovery cache + your library",
+            "Rename-only Library Reorganize (#875), broader lossless + DSD handling (#941/#939), a pile of download/search fixes, and a refined reduce-visual-effects pass",
         ],
     },
     {

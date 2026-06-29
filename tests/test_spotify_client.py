@@ -164,3 +164,77 @@ def test_insufficient_scope_says_reconnect():
             raise Exception('403 Forbidden: insufficient client scope')
     res = _spotify_with(_ScopeErr()).create_or_update_playlist('X', ['a'])
     assert not res['success'] and 'Reconnect Spotify' in res['error']
+
+
+# ── Spotify auth regression hotfix: scope must not force re-auth; callbacks must write
+#    the DB store the client reads (else a re-auth never takes effect) ──
+
+import os as _os
+
+
+def test_oauth_scope_has_no_write_scope_that_forces_reauth():
+    """Spotipy invalidates a cached token the moment the requested scope stops being a subset
+    of the token's granted scope — so GROWING the global scope forces every user to re-auth on
+    upgrade (it broke all Spotify users). The write scope (playlist-modify) must NOT live in the
+    global scope; request it on-demand instead."""
+    from core.spotify_client import SPOTIFY_OAUTH_SCOPE
+    assert 'playlist-modify' not in SPOTIFY_OAUTH_SCOPE
+    # the read scopes existing tokens already carry must stay
+    for s in ('user-library-read', 'user-read-private', 'playlist-read-private',
+              'playlist-read-collaborative', 'user-read-email', 'user-follow-read'):
+        assert s in SPOTIFY_OAUTH_SCOPE
+
+
+def test_global_oauth_callbacks_use_db_token_cache_not_file():
+    """The OAuth callbacks wrote the new token to the legacy file cache while the client reads
+    DatabaseTokenCache, so a re-auth never reached the client ("validation failed" despite a good
+    exchange). The global callbacks must write the same DB-backed store the client uses."""
+    root = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    src = open(_os.path.join(root, 'web_server.py'), encoding='utf-8').read()
+    assert "cache_path='config/.spotify_cache'" not in src          # no global file-cache writes
+    assert src.count('cache_handler=DatabaseTokenCache(config_manager)') >= 2
+
+
+# ── on-demand Spotify export write-auth (#945 follow-up) ──
+
+def test_export_scope_is_global_plus_write_and_global_stays_readonly():
+    """The export scope adds playlist-modify ON TOP of the unchanged global scope. Critically
+    the GLOBAL scope must NOT gain write (that's what force-invalidated everyone's token)."""
+    from core.spotify_client import SPOTIFY_OAUTH_SCOPE, SPOTIFY_EXPORT_SCOPE
+    assert 'playlist-modify' not in SPOTIFY_OAUTH_SCOPE           # global stays read-only
+    assert 'playlist-modify-public' in SPOTIFY_EXPORT_SCOPE
+    assert 'playlist-modify-private' in SPOTIFY_EXPORT_SCOPE
+    # export scope is a strict superset of the global read scope
+    assert set(SPOTIFY_OAUTH_SCOPE.split()).issubset(set(SPOTIFY_EXPORT_SCOPE.split()))
+
+
+class _CacheHandler:
+    def __init__(self, token):
+        self._token = token
+
+    def get_cached_token(self):
+        return self._token
+
+
+def _client_with_token(token):
+    import types
+    c = _SpotifyClient.__new__(_SpotifyClient)
+    c.sp = types.SimpleNamespace(auth_manager=types.SimpleNamespace(cache_handler=_CacheHandler(token)))
+    return c
+
+
+def test_has_write_scope_true_when_token_carries_playlist_modify():
+    tok = {'scope': 'user-library-read playlist-modify-public playlist-read-private'}
+    assert _client_with_token(tok).has_write_scope() is True
+
+
+def test_has_write_scope_false_for_readonly_token_or_missing():
+    assert _client_with_token({'scope': 'user-library-read playlist-read-private'}).has_write_scope() is False
+    assert _client_with_token(None).has_write_scope() is False           # no cached token
+    assert _client_with_token({}).has_write_scope() is False             # token w/o scope field
+
+
+def test_has_write_scope_false_when_no_client():
+    c = _SpotifyClient.__new__(_SpotifyClient)
+    c.sp = None
+    assert c.has_write_scope() is False
