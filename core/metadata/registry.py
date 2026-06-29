@@ -352,10 +352,21 @@ def get_hydrabase_client(allow_fallback: bool = True, require_enabled: bool = Tr
     return None
 
 
+def get_configured_primary_source() -> str:
+    """Return metadata.fallback_source as stored in config, without runtime downgrade.
+
+    Unlike get_primary_source(), this never probes Spotify auth. Use at boot and
+    anywhere blocking network I/O must be avoided (gunicorn worker import, Docker
+    cold start when Spotify is unreachable).
+    """
+    _default = METADATA_SOURCE_PRIORITY[0]
+    return _get_config_value("metadata.fallback_source", _default) or _default
+
+
 def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] = None) -> str:
     """Return configured primary metadata source."""
     _default = METADATA_SOURCE_PRIORITY[0]
-    source = _get_config_value("metadata.fallback_source", _default) or _default
+    source = get_configured_primary_source()
 
     if source == "spotify":
         try:

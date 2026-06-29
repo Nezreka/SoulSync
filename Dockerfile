@@ -139,6 +139,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_PATH=/app/data/music_library.db
+ENV SOULSYNC_CONFIG_PATH=/app/config/config.json
 ENV PUID=1000
 ENV PGID=1000
 ENV UMASK=022
