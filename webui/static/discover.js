@@ -22,12 +22,57 @@ let personalizedDiscoveryShuffle = [];
 let personalizedListeningMix = [];   // #913: the "Your Listening Mix" track playlist
 let buildPlaylistSelectedArtists = [];
 
+// ── Adventurousness dial (Discover page) — fancy control, syncs with Settings → Discovery ──
+// Same config key (discover.adventurousness) as the Settings slider, so the two stay in sync.
+function _advState(v) {
+    if (v < 0.12) return { word: 'Playing it safe', icon: '🛟' };
+    if (v < 0.40) return { word: 'Balanced', icon: '🧭' };
+    if (v < 0.70) return { word: 'Adventurous', icon: '🎲' };
+    return { word: 'Deep cuts only', icon: '🔮' };
+}
+function onAdvDialInput(value) {
+    const s = _advState(parseFloat(value));
+    const stateEl = document.getElementById('adv-dial-state');
+    if (stateEl) stateEl.textContent = s.word;
+    const iconEl = document.getElementById('adv-dial-icon');
+    if (iconEl) iconEl.textContent = s.icon;
+}
+let _advCommitTimer = null;
+function onAdvDialCommit(value) {
+    const v = parseFloat(value);
+    clearTimeout(_advCommitTimer);
+    _advCommitTimer = setTimeout(async () => {
+        try {
+            await fetch('/api/discover/adventurousness', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: v }),
+            });
+        } catch (e) { console.debug('adventurousness save failed', e); }
+        // Re-fetch the two rec rows so the dial is felt immediately (the routes re-rank live).
+        if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    }, 200);
+}
+async function loadAdventurousnessDial() {
+    const slider = document.getElementById('adv-dial-slider');
+    if (!slider) return;
+    try {
+        const resp = await fetch('/api/discover/adventurousness');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const v = (typeof data.value === 'number') ? data.value : 0.3;
+        slider.value = v;
+        onAdvDialInput(v);
+    } catch (e) { /* non-fatal */ }
+}
+
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
     // Load all sections
     await Promise.all([
         loadDiscoverHero(),
+        loadAdventurousnessDial(),  // sets the Discover-page dial from config
         loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
         loadPersonalizedListeningMix(),  // #913: playable track mix from those picks
         loadRecommendedArtistsSection(),
