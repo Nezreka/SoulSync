@@ -27749,12 +27749,21 @@ def _build_service_search_id_fn(service):
     try:
         if service == 'spotify':
             client = get_spotify_client()
+            if not client:
+                return None
+            # allow_fallback=False is CRITICAL: Spotify's search falls back to iTunes/Deezer
+            # when rate-limited/free, returning tracks whose .id is NOT a Spotify id — backfill
+            # would then push wrong ids into the Spotify playlist. Disable it: real Spotify hits
+            # or nothing.
+            search_fn = lambda q: client.search_tracks(q, limit=8, allow_fallback=False)  # noqa: E731
         else:
             from core.metadata.registry import get_deezer_client
             client = get_deezer_client()
-        if not client:
-            return None
-        search_fn = lambda q: client.search_tracks(q, limit=8)  # noqa: E731
+            if not client:
+                return None
+            # Deezer's search stays within Deezer (query-only fallback), so its .id is always a
+            # Deezer id — no cross-service guard needed.
+            search_fn = lambda q: client.search_tracks(q, limit=8)  # noqa: E731
         return lambda artist, title: search_service_track_id(artist, title, search_fn=search_fn)
     except Exception:
         return None
