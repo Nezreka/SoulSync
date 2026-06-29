@@ -3147,22 +3147,19 @@
                     </div>
 
                     <!-- Discovery Adventurousness dial — fancy, syncs with Settings → Discovery -->
-                    <div class="adv-dial" id="adv-dial">
-                        <div class="adv-dial-head">
-                            <div class="adv-dial-icon" id="adv-dial-icon">🧭</div>
-                            <div>
-                                <div class="adv-dial-title">Adventurousness</div>
-                                <div class="adv-dial-state" id="adv-dial-state">Balanced</div>
-                            </div>
+                    <div class="adv-dial" id="adv-dial"
+                         title="Pushes globally-popular artists down so more obscure picks surface in your recommendations">
+                        <div class="adv-dial-icon" id="adv-dial-icon">🧭</div>
+                        <div class="adv-dial-label">
+                            <span class="adv-dial-title">Adventurousness</span>
+                            <span class="adv-dial-state" id="adv-dial-state">Balanced</span>
                         </div>
-                        <div class="adv-dial-slider-wrap">
-                            <span class="adv-dial-end">Safe</span>
-                            <input type="range" class="adv-dial-slider" id="adv-dial-slider" min="0" max="1" step="0.05" value="0.3"
-                                   oninput="onAdvDialInput(this.value)" onchange="onAdvDialCommit(this.value)"
-                                   aria-label="Discovery adventurousness">
-                            <span class="adv-dial-end">Adventurous</span>
-                        </div>
-                        <div class="adv-dial-hint">Pushes popular artists down so obscure picks surface in your recommendations</div>
+                        <span class="adv-dial-end">Safe</span>
+                        <input type="range" class="adv-dial-slider" id="adv-dial-slider" min="0" max="1" step="0.05" value="0.3"
+                               oninput="onAdvDialInput(this.value)" onchange="onAdvDialCommit(this.value)"
+                               aria-label="Discovery adventurousness">
+                        <span class="adv-dial-end">Adventurous</span>
+                        <div class="adv-dial-val" id="adv-dial-val">30%</div>
                     </div>
 
                     <!-- Recommended For You Section (similar-artists graph) -->
