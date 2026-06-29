@@ -2371,7 +2371,46 @@ function _renderTabbedTrackList(tracks) {
 }
 
 async function loadDecadeBrowserTabs() {
-    return _getDecadeBrowserTabsCtrl().loadTabs();
+    // #discover redesign: Time Machine is now a shelf of decade mix cards (each opens its tracks in
+    // the shared modal) instead of a tabbed track table. Tracks load lazily on open.
+    const grid = document.getElementById('decade-tab-contents');
+    if (!grid) return;
+    const tabs = document.getElementById('decade-tabs');
+    if (tabs) tabs.style.display = 'none';
+    try {
+        const resp = await fetch('/api/discover/decades/available');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.decades) || !data.decades.length) {
+            grid.closest('.discover-section')?.style.setProperty('display', 'none');
+            return;
+        }
+        grid.className = 'discover-grid';
+        const mixes = data.decades.map(d => {
+            const year = d.year;
+            const icon = getDecadeIcon(year);
+            return {
+                key: `decade_${year}`,
+                title: `${year}s`,
+                subtitle: `${year}s Classics`,
+                trackCount: d.track_count,
+                coverHtml: `<div class="mix-card-decade"><span class="mix-card-decade-icon">${icon}</span><span class="mix-card-decade-label">${year}s</span></div>`,
+                statusBase: `decade-${year}`,
+                actions: [
+                    { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDecade(${year})` },
+                    { label: 'Sync', primary: true, isSync: true, onclick: `startDecadeSync(${year})` },
+                ],
+                // Populate decadeTracksCache like the old tab fetch did so startDecadeSync works.
+                fetchTracks: () => fetch(`/api/discover/decade/${year}`).then(r => r.json()).then(dd => {
+                    const tracks = (dd && dd.tracks) || [];
+                    decadeTracksCache[year] = tracks;
+                    activeDecade = year;
+                    return tracks;
+                }),
+            };
+        });
+        _renderMixGrid(grid, mixes);
+    } catch (e) { console.debug('Decade browser:', e); }
 }
 
 function switchDecadeTab(decade) {
@@ -4416,34 +4455,54 @@ function renderCompactPlaylist(container, tracks) {
 // the track list + actions in a modal. The old per-mix full-width tables collapse
 // into these cards (the table now lives inside the opened mix, where it belongs).
 const _discoverMixRegistry = {};
+// Keys that belong to the shared "Your Mixes" shelf specifically. The registry above also holds
+// other sections' mixes (decades, Last.fm, ListenBrainz) for openMixModalByKey, so the shelf must
+// render only its own keys — not Object.values(registry), or those sections leak in.
+const _yourMixKeys = [];
 
 function _buildMixCard(mix) {
-    const covers = [];
-    for (const t of mix.tracks) {
-        const c = t.album_cover_url;
-        if (c && !covers.includes(c)) covers.push(c);
-        if (covers.length >= 4) break;
+    let cover;
+    if (mix.coverHtml) {
+        // Sections with no per-track art (e.g. decades) supply their own cover (a gradient + label).
+        cover = `<div class="mix-card-cover mix-card-cover--solid">${mix.coverHtml}<div class="mix-card-play">&#9654;</div></div>`;
+    } else {
+        const covers = [];
+        for (const t of (mix.tracks || [])) {
+            const c = t.album_cover_url;
+            if (c && !covers.includes(c)) covers.push(c);
+            if (covers.length >= 4) break;
+        }
+        while (covers.length < 4) covers.push('/static/placeholder-album.png');
+        const mosaic = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('');
+        cover = `<div class="mix-card-cover">${mosaic}<div class="mix-card-play">&#9654;</div></div>`;
     }
-    while (covers.length < 4) covers.push('/static/placeholder-album.png');
-    const mosaic = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('');
+    const count = mix.tracks ? mix.tracks.length : (mix.trackCount || 0);
     return `
         <div class="discover-mix-card" onclick="openMixModalByKey('${mix.key}')">
-            <div class="mix-card-cover">
-                ${mosaic}
-                <div class="mix-card-play">&#9654;</div>
-            </div>
+            ${cover}
             <div class="mix-card-name">${_esc(mix.title)}</div>
-            <div class="mix-card-meta">${mix.tracks.length} tracks</div>
+            <div class="mix-card-meta">${count} tracks</div>
         </div>
     `;
+}
+
+// Render a set of mix cards into ANY section grid (Time Machine, Last.fm Radio, ListenBrainz…) and
+// register them so openMixModalByKey can find them. Unlike _upsertMixCard this targets a given
+// container rather than the shared "Your Mixes" shelf, so each section keeps its own header.
+function _renderMixGrid(container, mixes) {
+    if (!container) return;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    container.innerHTML = mixes.map(_buildMixCard).join('');
+    _clampGrid(container);
 }
 
 // Register/refresh a mix's card in the "Your Mixes" shelf and reveal the section.
 function _upsertMixCard(mix) {
     _discoverMixRegistry[mix.key] = mix;
+    if (!_yourMixKeys.includes(mix.key)) _yourMixKeys.push(mix.key);
     const shelf = document.getElementById('your-mixes-grid');
     if (!shelf) return;
-    shelf.innerHTML = Object.values(_discoverMixRegistry).map(_buildMixCard).join('');
+    shelf.innerHTML = _yourMixKeys.map(k => _buildMixCard(_discoverMixRegistry[k])).join('');
     const section = document.getElementById('your-mixes-section');
     if (section) section.style.display = 'block';
 }
@@ -4472,12 +4531,26 @@ function openMixModal(mix) {
     // statusBase mirrors startDiscoverPlaylistSync's id convention (underscores → hyphens) so
     // the sync's live-progress updates land on THIS modal's status elements (the old hidden
     // section's duplicates are stripped in _collapseOldMixSection so there's no id clash).
-    const base = mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '';
-    // Download opens its own modal beneath this one — close this first so it's interactable.
-    const actions = mix.syncKey ? `
-        <button class="btn btn--sm btn--secondary" onclick="document.getElementById('mix-modal-overlay').remove(); openDownloadModalForDiscoverPlaylist('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')">Download</button>
-        <button class="btn btn--sm btn--primary" id="${base}-sync-btn" onclick="startDiscoverPlaylistSync('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')">Sync</button>` : '';
-    const syncStatus = mix.syncKey ? `
+    // A mix either uses the built-in syncKey path (Download + Sync via startDiscoverPlaylistSync)
+    // or supplies a custom `actions` list + `statusBase` (decades, ListenBrainz, Last.fm radio) so
+    // any playlist section can reuse this modal. statusBase drives the live sync-status element ids.
+    const base = mix.statusBase || (mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '');
+    const closeFirst = "document.getElementById('mix-modal-overlay').remove(); ";
+    let actionList = mix.actions;
+    if (!actionList && mix.syncKey) {
+        // Download opens its own modal beneath this one — close this first so it's interactable.
+        actionList = [
+            { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDiscoverPlaylist('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+            { label: 'Sync', primary: true, isSync: true, onclick: `startDiscoverPlaylistSync('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+        ];
+    }
+    const actions = (actionList || []).map(a => {
+        const cls = a.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary';
+        const idAttr = (a.isSync && base) ? ` id="${base}-sync-btn"` : '';
+        const oc = (a.closeFirst ? closeFirst : '') + a.onclick;
+        return `<button class="${cls}"${idAttr} onclick="${oc}">${_esc(a.label)}</button>`;
+    }).join('');
+    const syncStatus = base ? `
         <div class="discover-sync-status" id="${base}-sync-status" style="display:none">
             <div class="sync-status-content">
                 <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
@@ -4495,7 +4568,7 @@ function openMixModal(mix) {
                 <div>
                     <div class="mix-modal-subtitle">${_esc(mix.subtitle || 'Mix')}</div>
                     <h2 class="mix-modal-title">${_esc(mix.title)}</h2>
-                    <div class="mix-modal-meta">${mix.tracks.length} tracks</div>
+                    <div class="mix-modal-meta">${mix.tracks ? mix.tracks.length + ' tracks' : ''}</div>
                 </div>
                 <div class="mix-modal-actions">
                     ${actions}
@@ -4507,12 +4580,25 @@ function openMixModal(mix) {
         </div>
     `;
     document.body.appendChild(overlay);
-    renderCompactPlaylist(document.getElementById('mix-modal-tracks'), mix.tracks);
+    const body = document.getElementById('mix-modal-tracks');
+    if (mix.tracks) {
+        renderCompactPlaylist(body, mix.tracks);
+    } else if (mix.fetchTracks) {
+        // Lazy sections (e.g. decades) load their tracks on open; fetch then fill in the count.
+        body.innerHTML = '<div class="discover-empty"><p>Loading tracks…</p></div>';
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const metaEl = overlay.querySelector('.mix-modal-meta');
+            if (metaEl) metaEl.textContent = `${mix.tracks.length} tracks`;
+            renderCompactPlaylist(body, mix.tracks);
+        }).catch(() => { body.innerHTML = '<div class="discover-empty"><p>Failed to load tracks</p></div>'; });
+    }
 
     // If a sync for this mix is already in flight (the modal was closed mid-sync), reveal the
     // live status + disable the button so re-opening picks the progress back up — the next
     // poll/WebSocket tick refills the counters onto this fresh modal's elements.
-    if (mix.syncKey && discoverSyncPollers[mix.syncKey]) {
+    const pollerKey = mix.pollerKey || mix.syncKey;
+    if (pollerKey && discoverSyncPollers[pollerKey]) {
         const statusEl = document.getElementById(`${base}-sync-status`);
         if (statusEl) statusEl.style.display = 'block';
         const btnEl = document.getElementById(`${base}-sync-btn`);
