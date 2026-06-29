@@ -29604,6 +29604,24 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
+        # Adventurousness re-rank (aurral-style): enrich popularity at request time (the stored recs
+        # don't carry it inline, so this works on existing data), then push globally-popular picks
+        # down per the user's dial. level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
+        try:
+            level = float(config_manager.get('discovery.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            level = 0.0
+        if level > 0 and stored:
+            try:
+                pops = database.get_similar_artist_popularities([a.get('name') for a in stored])
+                for a in stored:
+                    if a.get('popularity') is None:
+                        a['popularity'] = pops.get((a.get('name') or '').strip().lower())
+                from core.discovery.listening_recommendations import apply_adventurousness
+                stored = apply_adventurousness(stored, level)
+            except Exception as _adv_err:
+                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
+
         result_artists = []
         for a in stored:
             name = a.get('name')
