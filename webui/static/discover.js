@@ -50,7 +50,7 @@ async function loadDiscoverPage() {
         initializeLastfmRadioSection(),  // Last.fm Radio section (gated on API key)
         initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
+        // loadGenreBrowserTabs(),  // REMOVED (#discover redesign): empty + redundant with Genre Explorer
         loadListenBrainzPlaylistsFromBackend(),  // Load ListenBrainz playlist states for persistence
         loadDiscoveryBlacklist()  // Blocked artists list
     ]);
@@ -3304,84 +3304,58 @@ function groupListenBrainzPlaylists(playlists) {
 }
 
 function buildListenBrainzPlaylistsHtml(playlists, tabId) {
-    let html = '';
-    playlists.forEach((playlist, index) => {
+    // #discover redesign: each playlist is a mix card (opens its tracks + actions in the shared
+    // modal) instead of a full-width track-table subsection. Shared by Last.fm Radio + ListenBrainz.
+    const icon = tabId === 'lastfm_radio' ? '\U0001F4FB' : '\U0001F3A7';
+    const mixes = playlists.map(playlist => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
-        console.log(`📋 Playlist ${index}:`, {
-            title: playlistData.title,
-            fullIdentifier: playlistData.identifier,
-            extractedIdentifier: identifier
-        });
         const title = playlistData.title || 'Untitled Playlist';
         const creator = playlistData.creator || 'ListenBrainz';
-
         let trackCount = 50;
         if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
             trackCount = playlistData.annotation.track_count;
         } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
             trackCount = playlistData.track.length;
         }
-
-        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
-        const virtualPlaylistId = `discover_lb_${tabId}_${identifier}`;
-
-        html += `
-            <div class="discover-section-subsection">
-                <div class="discover-section-header">
-                    <div>
-                        <h3 class="discover-section-subtitle-large">${title}</h3>
-                        <p class="discover-section-meta" id="${playlistId}-meta">by ${creator} • Loading tracks...</p>
-                    </div>
-                    <div class="discover-section-actions">
-                        <button class="action-button secondary"
-                                onclick="openDownloadModalForListenBrainzPlaylist('${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download missing tracks">
-                            <span class="button-icon">↓</span>
-                            <span class="button-text">Download</span>
-                        </button>
-                        <span class="wing-it-wrap">
-                        <button class="action-button wing-it-btn-sm"
-                                onclick="_toggleWingItDropdownLB(this, '${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download or sync using raw track names — no metadata discovery">
-                            <span class="button-icon">⚡</span>
-                            <span class="button-text">Wing It</span>
-                        </button>
-                        </span>
-                        <button class="action-button primary"
-                                id="${playlistId}-sync-btn"
-                                onclick="startListenBrainzPlaylistSync('${identifier}')"
-                                title="Sync to media server"
-                                style="display: none;">
-                            <span class="button-icon">⟳</span>
-                            <span class="button-text">Sync</span>
-                        </button>
+        const escTitle = escapeForInlineJs(title);
+        // playlistId is the status base startListenBrainzPlaylistSync targets; LB uses its own
+        // -sync-total/-sync-matched spans, so we hand the modal a matching statusHtml block.
+        const playlistId = `discover-lb-playlist-${identifier}`;
+        const statusHtml = `
+            <div class="discover-sync-status" id="${playlistId}-sync-status" style="display:none">
+                <div class="sync-status-content">
+                    <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                    <div class="sync-status-stats">
+                        <span class="sync-stat">&#9834; <span id="${playlistId}-sync-total">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10003; <span id="${playlistId}-sync-matched">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10007; <span id="${playlistId}-sync-failed">0</span></span>
+                        <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
                     </div>
                 </div>
-                <!-- Sync Status Display -->
-                <div class="discover-sync-status" id="${playlistId}-sync-status" style="display: none;">
-                    <div class="sync-status-content">
-                        <div class="sync-status-label">
-                            <span class="sync-icon">⟳</span>
-                            <span>Syncing to media server...</span>
-                        </div>
-                        <div class="sync-status-stats">
-                            <span class="sync-stat">♪ <span id="${playlistId}-sync-total">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✓ <span id="${playlistId}-sync-matched">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✗ <span id="${playlistId}-sync-failed">0</span></span>
-                            <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="discover-playlist-container compact" id="${playlistId}-playlist">
-                    <div class="discover-loading"><div class="loading-spinner"></div><p>Loading tracks...</p></div>
-                </div>
-            </div>
-        `;
+            </div>`;
+        return {
+            key: `lb-${tabId}-${identifier}`,
+            title, subtitle: `by ${creator}`, trackCount,
+            coverHtml: `<div class="mix-card-decade"><span class="mix-card-decade-icon">${icon}</span></div>`,
+            statusBase: playlistId,
+            statusHtml,
+            actions: [
+                { label: 'Download', closeFirst: true, onclick: `openDownloadModalForListenBrainzPlaylist('${identifier}', '${escTitle}')` },
+                { label: 'Sync', primary: true, isSync: true, onclick: `startListenBrainzPlaylistSync('${identifier}')` },
+            ],
+            // Tracks load lazily on open; cache them where displayListenBrainzTracks would so reuse works.
+            fetchTracks: () => fetch(`/api/discover/listenbrainz/playlist/${identifier}`).then(r => r.json()).then(d => {
+                const tracks = (d && d.tracks) || [];
+                listenbrainzTracksCache[identifier] = tracks;
+                return tracks;
+            }),
+        };
     });
-    return html;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    return `<div class="discover-grid">${mixes.map(_buildMixCard).join('')}</div>`;
 }
 
 function loadTracksForPlaylists(playlists) {
@@ -4550,7 +4524,9 @@ function openMixModal(mix) {
         const oc = (a.closeFirst ? closeFirst : '') + a.onclick;
         return `<button class="${cls}"${idAttr} onclick="${oc}">${_esc(a.label)}</button>`;
     }).join('');
-    const syncStatus = base ? `
+    // A section can supply its own status markup (e.g. ListenBrainz uses -sync-total/-sync-matched
+    // spans instead of the generic -sync-completed/-sync-pending). Otherwise use the generic block.
+    const syncStatus = mix.statusHtml || (base ? `
         <div class="discover-sync-status" id="${base}-sync-status" style="display:none">
             <div class="sync-status-content">
                 <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
@@ -4561,7 +4537,7 @@ function openMixModal(mix) {
                     <span class="sync-stat">(<span id="${base}-sync-percentage">0</span>%)</span>
                 </div>
             </div>
-        </div>` : '';
+        </div>` : '');
     overlay.innerHTML = `
         <div class="mix-modal">
             <div class="mix-modal-header">
