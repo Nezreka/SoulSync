@@ -312,7 +312,14 @@ class JioSaavnClient:
 
         entries = [(str(item.get("id")), item) for item in raw_items if item.get("id")]
         if entries:
-            cache.store_entities_bulk("jiosaavn", search_type, entries)
+            # Search hits are summary stubs (songIds, no track list). Don't
+            # overwrite a fuller album entity already cached by get_album().
+            cache.store_entities_bulk(
+                "jiosaavn",
+                search_type,
+                entries,
+                skip_if_exists=(search_type == "album"),
+            )
             cache.store_search_results(
                 "jiosaavn",
                 search_type,
@@ -383,6 +390,12 @@ class JioSaavnClient:
         track = Track.from_api(raw)
         return self._track_to_enhanced_dict(track, raw)
 
+    @staticmethod
+    def _album_raw_has_songs(raw: Dict[str, Any]) -> bool:
+        """True when cached/API album payload includes an actual track list."""
+        songs = raw.get("songs")
+        return isinstance(songs, list) and bool(songs)
+
     def get_album(self, album_id: str) -> Optional[Dict[str, Any]]:
         album_id = str(album_id or "").strip()
         if not album_id:
@@ -390,7 +403,7 @@ class JioSaavnClient:
 
         cache = get_metadata_cache()
         cached = cache.get_entity("jiosaavn", "album", album_id)
-        if cached:
+        if cached and self._album_raw_has_songs(cached):
             album = Album.from_api(cached)
             return self._album_to_enhanced_dict(album, cached)
 
