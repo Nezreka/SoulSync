@@ -35177,9 +35177,9 @@ div.artist-hero-badge {
     box-shadow: 0 10px 34px rgba(0,0,0,0.30);
     overflow: hidden;  /* contain the colour aura wash */
 }
-.adv-wave-head { display: flex; align-items: baseline; gap: 12px; position: relative; z-index: 2; }
-.adv-wave-title { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: 0.2px; }
-.adv-wave-state { font-size: 12px; font-weight: 700; transition: color 0.25s; }
+.adv-wave-head { display: flex; flex-direction: column; gap: 1px; position: relative; z-index: 2; }
+.adv-wave-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: rgba(255,255,255,0.38); }
+.adv-wave-state { font-size: 21px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.15; transition: color 0.25s; }
 .adv-wave-track {
     position: relative; height: 104px; margin: 6px 0 2px;
     cursor: grab; touch-action: none;
@@ -35197,18 +35197,18 @@ div.artist-hero-badge {
     width: 22px; height: 22px; border-radius: 50%;
     transform: translate(-50%, -50%);
     background: #1DB954; color: #1DB954;
-    box-shadow: 0 0 20px 3px #1DB954, 0 0 0 6px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.6);
+    box-shadow: 0 0 9px 0 #1DB954, inset 0 0 0 2px rgba(255,255,255,0.5);
     pointer-events: none;  /* the track captures the pointer; the orb is purely visual */
     will-change: left, top;
 }
 .adv-wave-orb::after {
-    content: ''; position: absolute; inset: -7px; border-radius: 50%;
-    border: 2px solid currentColor; opacity: 0.5;
-    animation: adv-orb-pulse 2.4s ease-out infinite;
+    content: ''; position: absolute; inset: -5px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: 0.4;
+    animation: adv-orb-pulse 2.8s ease-out infinite;
 }
 @keyframes adv-orb-pulse {
-    0% { transform: scale(0.7); opacity: 0.55; }
-    100% { transform: scale(1.95); opacity: 0; }
+    0% { transform: scale(0.75); opacity: 0.4; }
+    100% { transform: scale(1.5); opacity: 0; }
 }
 .adv-wave-ends {
     display: flex; justify-content: space-between;
