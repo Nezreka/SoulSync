@@ -3156,8 +3156,16 @@
                             <span class="adv-wave-state" id="adv-wave-state">Balanced</span>
                         </div>
                         <div class="adv-wave-track" id="adv-wave-track">
+                            <div class="adv-wave-aura" id="adv-wave-aura"></div>
                             <svg class="adv-wave-svg" id="adv-wave-svg" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
-                                <path id="adv-wave-path" fill="none" stroke-width="3" stroke-linecap="round"></path>
+                                <defs>
+                                    <linearGradient id="adv-wave-fill" x1="0" y1="0" x2="0" y2="1">
+                                        <stop id="adv-wave-fill-top" offset="0" stop-color="#1DB954" stop-opacity="0.32"/>
+                                        <stop offset="1" stop-color="#1DB954" stop-opacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                <path id="adv-wave-area" fill="url(#adv-wave-fill)" stroke="none"></path>
+                                <path id="adv-wave-path" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
                             </svg>
                             <div class="adv-wave-orb" id="adv-wave-orb"></div>
                         </div>

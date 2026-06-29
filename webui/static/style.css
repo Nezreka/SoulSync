@@ -35168,35 +35168,52 @@ div.artist-hero-badge {
    and wilder + redder at the right (obscure). The path + colours are drawn each frame in
    JS (rAF). Syncs with Settings → Discovery. */
 .adv-wave {
-    max-width: 880px;
-    margin: 0 0 26px;
-    padding: 16px 22px 14px;
-    border-radius: 16px;
-    background: linear-gradient(135deg, rgba(255,255,255,0.035), rgba(255,255,255,0.01));
+    position: relative;
+    margin: 0 0 28px;
+    padding: 18px 26px 16px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012));
     border: 1px solid rgba(255,255,255,0.07);
-    box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30);
+    overflow: hidden;  /* contain the colour aura wash */
 }
-.adv-wave-head { display: flex; align-items: baseline; gap: 12px; }
-.adv-wave-title { font-size: 14px; font-weight: 700; color: #fff; }
+.adv-wave-head { display: flex; align-items: baseline; gap: 12px; position: relative; z-index: 2; }
+.adv-wave-title { font-size: 15px; font-weight: 800; color: #fff; letter-spacing: 0.2px; }
 .adv-wave-state { font-size: 12px; font-weight: 700; transition: color 0.25s; }
 .adv-wave-track {
-    position: relative; height: 84px; margin: 4px 0 2px;
+    position: relative; height: 104px; margin: 6px 0 2px;
     cursor: grab; touch-action: none;
 }
 .adv-wave-track:active { cursor: grabbing; }
-.adv-wave-svg { width: 100%; height: 100%; display: block; overflow: visible; }
-.adv-wave-orb {
+.adv-wave-aura {
     position: absolute; top: 50%; left: 30%;
-    width: 20px; height: 20px; border-radius: 50%;
+    width: 360px; height: 230px; transform: translate(-50%, -50%);
+    pointer-events: none; filter: blur(14px); z-index: 0;
+    will-change: left, background;
+}
+.adv-wave-svg { width: 100%; height: 100%; display: block; overflow: visible; position: relative; z-index: 1; }
+.adv-wave-orb {
+    position: absolute; top: 50%; left: 30%; z-index: 2;
+    width: 22px; height: 22px; border-radius: 50%;
     transform: translate(-50%, -50%);
-    background: #1DB954;
-    box-shadow: 0 0 18px 2px #1DB954, 0 0 0 5px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.55);
+    background: #1DB954; color: #1DB954;
+    box-shadow: 0 0 20px 3px #1DB954, 0 0 0 6px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.6);
     pointer-events: none;  /* the track captures the pointer; the orb is purely visual */
     will-change: left, top;
+}
+.adv-wave-orb::after {
+    content: ''; position: absolute; inset: -7px; border-radius: 50%;
+    border: 2px solid currentColor; opacity: 0.5;
+    animation: adv-orb-pulse 2.4s ease-out infinite;
+}
+@keyframes adv-orb-pulse {
+    0% { transform: scale(0.7); opacity: 0.55; }
+    100% { transform: scale(1.95); opacity: 0; }
 }
 .adv-wave-ends {
     display: flex; justify-content: space-between;
     font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
+    position: relative; z-index: 2;
 }
 
 /* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
