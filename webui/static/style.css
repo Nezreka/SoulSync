@@ -35006,6 +35006,95 @@ div.artist-hero-badge {
 }
 .ya-card-name:hover { color: var(--accent); }
 
+/* ── Your Mixes (Spotify-style playlist cards, #discover redesign) ───────────
+   Each mix is ONE card: a 2x2 mosaic cover from its top tracks + name below, with
+   a hover play button. Click opens the track list in a modal. Replaces the old
+   full-width compact-track tables. */
+.discover-mixes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 18px;
+}
+.discover-mix-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 12px;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
+}
+.discover-mix-card:hover {
+    transform: translateY(-5px);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(var(--accent-rgb),0.25);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb),0.12);
+}
+.mix-card-cover {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.mix-card-tile {
+    background-size: cover;
+    background-position: center;
+    background-color: #1a1a1a;
+}
+.mix-card-play {
+    position: absolute;
+    bottom: 10px; right: 10px;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #000;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; padding-left: 2px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s, transform 0.25s;
+    z-index: 2;
+}
+.discover-mix-card:hover .mix-card-play {
+    opacity: 1; transform: translateY(0);
+}
+.mix-card-name {
+    font-size: 14px; font-weight: 700; color: #fff;
+    margin-top: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mix-card-meta {
+    font-size: 12px; color: rgba(255,255,255,0.5);
+    margin-top: 3px;
+}
+/* The mix modal — opened from a mix card; holds the track list + per-mix actions. */
+.mix-modal {
+    background: #14141c; border-radius: 18px;
+    width: 760px; max-width: 94vw; max-height: 86vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.mix-modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 24px; gap: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.mix-modal-subtitle { font-size: 12px; color: #999; }
+.mix-modal-title { font-size: 24px; font-weight: 700; color: #fff; margin: 4px 0; }
+.mix-modal-meta { font-size: 12px; color: rgba(255,255,255,0.5); }
+.mix-modal-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mix-modal-close {
+    background: none; border: none; color: rgba(255,255,255,0.5);
+    font-size: 16px; cursor: pointer; padding: 6px; line-height: 1;
+}
+.mix-modal-close:hover { color: #fff; }
+.mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
+
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;

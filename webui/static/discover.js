@@ -4278,8 +4278,12 @@ async function loadPersonalizedPopularPicks() {
         }
 
         personalizedPopularPicks = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'popular_picks', title: 'Popular Picks',
+            subtitle: 'Popular tracks from artists you love',
+            tracks: data.tracks, syncKey: 'popular_picks',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading popular picks:', error);
@@ -4301,8 +4305,12 @@ async function loadPersonalizedHiddenGems() {
         }
 
         personalizedHiddenGems = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'hidden_gems', title: 'Hidden Gems',
+            subtitle: 'Deeper cuts you might have missed',
+            tracks: data.tracks, syncKey: 'hidden_gems',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading hidden gems:', error);
@@ -4327,8 +4335,14 @@ async function loadPersonalizedListeningMix() {
         }
 
         personalizedListeningMix = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        // Spotify-style: collapse this mix into a card in the "Your Mixes" shelf; its
+        // track list + actions live in the modal you open from the card (#discover redesign).
+        _upsertMixCard({
+            key: 'listening_mix', title: 'Your Listening Mix',
+            subtitle: 'From artists matched to your listening',
+            tracks: data.tracks, syncKey: 'listening_mix',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading listening mix:', error);
@@ -4408,6 +4422,115 @@ function renderCompactPlaylist(container, tracks) {
 
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ── Your Mixes shelf (#discover redesign) ───────────────────────────────────
+// Each mix is ONE card (a 2x2 mosaic cover from its top tracks); clicking it opens
+// the track list + actions in a modal. The old per-mix full-width tables collapse
+// into these cards (the table now lives inside the opened mix, where it belongs).
+const _discoverMixRegistry = {};
+
+function _buildMixCard(mix) {
+    const covers = [];
+    for (const t of mix.tracks) {
+        const c = t.album_cover_url;
+        if (c && !covers.includes(c)) covers.push(c);
+        if (covers.length >= 4) break;
+    }
+    while (covers.length < 4) covers.push('/static/placeholder-album.png');
+    const mosaic = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('');
+    return `
+        <div class="discover-mix-card" onclick="openMixModalByKey('${mix.key}')">
+            <div class="mix-card-cover">
+                ${mosaic}
+                <div class="mix-card-play">&#9654;</div>
+            </div>
+            <div class="mix-card-name">${_esc(mix.title)}</div>
+            <div class="mix-card-meta">${mix.tracks.length} tracks</div>
+        </div>
+    `;
+}
+
+// Register/refresh a mix's card in the "Your Mixes" shelf and reveal the section.
+function _upsertMixCard(mix) {
+    _discoverMixRegistry[mix.key] = mix;
+    const shelf = document.getElementById('your-mixes-grid');
+    if (!shelf) return;
+    shelf.innerHTML = Object.values(_discoverMixRegistry).map(_buildMixCard).join('');
+    const section = document.getElementById('your-mixes-section');
+    if (section) section.style.display = 'block';
+}
+
+// Collapse a now-redundant per-mix table section out of view, and strip its sync-status +
+// sync-button so their ids can't shadow the modal's (the modal owns the live sync display
+// now). Keeps the container so each loader's "already loaded?" guard still works on refresh.
+function _collapseOldMixSection(container) {
+    const section = container.closest('.discover-section');
+    if (!section) return;
+    section.querySelectorAll('.discover-sync-status, [id$="-sync-btn"]').forEach(el => el.remove());
+    section.style.display = 'none';
+}
+
+function openMixModalByKey(key) {
+    const mix = _discoverMixRegistry[key];
+    if (mix) openMixModal(mix);
+}
+
+function openMixModal(mix) {
+    document.getElementById('mix-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'mix-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    // statusBase mirrors startDiscoverPlaylistSync's id convention (underscores → hyphens) so
+    // the sync's live-progress updates land on THIS modal's status elements (the old hidden
+    // section's duplicates are stripped in _collapseOldMixSection so there's no id clash).
+    const base = mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '';
+    // Download opens its own modal beneath this one — close this first so it's interactable.
+    const actions = mix.syncKey ? `
+        <button class="btn btn--sm btn--secondary" onclick="document.getElementById('mix-modal-overlay').remove(); openDownloadModalForDiscoverPlaylist('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')">Download</button>
+        <button class="btn btn--sm btn--primary" id="${base}-sync-btn" onclick="startDiscoverPlaylistSync('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')">Sync</button>` : '';
+    const syncStatus = mix.syncKey ? `
+        <div class="discover-sync-status" id="${base}-sync-status" style="display:none">
+            <div class="sync-status-content">
+                <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                <div class="sync-status-stats">
+                    <span class="sync-stat">&#10003; <span id="${base}-sync-completed">0</span></span>
+                    <span class="sync-stat">&#9203; <span id="${base}-sync-pending">0</span></span>
+                    <span class="sync-stat">&#10007; <span id="${base}-sync-failed">0</span></span>
+                    <span class="sync-stat">(<span id="${base}-sync-percentage">0</span>%)</span>
+                </div>
+            </div>
+        </div>` : '';
+    overlay.innerHTML = `
+        <div class="mix-modal">
+            <div class="mix-modal-header">
+                <div>
+                    <div class="mix-modal-subtitle">${_esc(mix.subtitle || 'Mix')}</div>
+                    <h2 class="mix-modal-title">${_esc(mix.title)}</h2>
+                    <div class="mix-modal-meta">${mix.tracks.length} tracks</div>
+                </div>
+                <div class="mix-modal-actions">
+                    ${actions}
+                    <button class="mix-modal-close" onclick="document.getElementById('mix-modal-overlay').remove()">&#10005;</button>
+                </div>
+            </div>
+            ${syncStatus}
+            <div class="mix-modal-body" id="mix-modal-tracks"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    renderCompactPlaylist(document.getElementById('mix-modal-tracks'), mix.tracks);
+
+    // If a sync for this mix is already in flight (the modal was closed mid-sync), reveal the
+    // live status + disable the button so re-opening picks the progress back up — the next
+    // poll/WebSocket tick refills the counters onto this fresh modal's elements.
+    if (mix.syncKey && discoverSyncPollers[mix.syncKey]) {
+        const statusEl = document.getElementById(`${base}-sync-status`);
+        if (statusEl) statusEl.style.display = 'block';
+        const btnEl = document.getElementById(`${base}-sync-btn`);
+        if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; }
+    }
 }
 
 async function blockDiscoveryArtist(artistName) {
@@ -7975,8 +8098,12 @@ async function loadDiscoveryShuffle() {
         }
 
         personalizedDiscoveryShuffle = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'discovery_shuffle', title: 'Discovery Shuffle',
+            subtitle: 'A shuffle across everything we discovered for you',
+            tracks: data.tracks, syncKey: 'discovery_shuffle',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading discovery shuffle:', error);
