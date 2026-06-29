@@ -4398,7 +4398,9 @@ async function loadPersonalizedDailyMixes() {
 // personalized mixes, or nested under track_data_json (name/artists[]/album/…) for the decade,
 // ListenBrainz + Last.fm playlists. Normalize both so renderers don't print "undefined". #discover
 function _normalizeTrack(track) {
-    const td = (track && track.track_data_json) || {};
+    // track_data_json when present, else the track itself (decade/Spotify-shaped rows carry
+    // name/artists[]/album at the top level — same fallback _renderTabbedTrackList uses).
+    const td = (track && track.track_data_json) || track || {};
     const a0 = td.artists && td.artists[0];
     return {
         name: td.name || td.track_name || track.track_name || 'Unknown Track',
