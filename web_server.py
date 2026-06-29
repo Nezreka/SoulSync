@@ -29608,7 +29608,7 @@ def get_discover_listening_recommendations():
         # don't carry it inline, so this works on existing data), then push globally-popular picks
         # down per the user's dial. level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
         try:
-            level = float(config_manager.get('discovery.adventurousness', 0.3) or 0)
+            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
         except (TypeError, ValueError):
             level = 0.0
         if level > 0 and stored:

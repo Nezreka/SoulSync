@@ -1480,6 +1480,13 @@ async function loadSettingsData() {
         // Populate Listening Stats settings
         document.getElementById('listening-stats-enabled').checked = settings.listening_stats?.enabled === true;
         document.getElementById('listening-stats-interval').value = settings.listening_stats?.poll_interval || 30;
+        const _advEl = document.getElementById('discover-adventurousness');
+        if (_advEl) {
+            const _adv = settings.discover?.adventurousness;
+            _advEl.value = (typeof _adv === 'number') ? _adv : 0.3;
+            const _advVal = document.getElementById('discover-adventurousness-val');
+            if (_advVal) _advVal.textContent = parseFloat(_advEl.value).toFixed(2);
+        }
         document.getElementById('lossy-copy-options').style.display =
             settings.lossy_copy?.enabled ? 'block' : 'none';
 
@@ -3494,6 +3501,13 @@ async function saveSettings(quiet = false) {
         listening_stats: {
             enabled: document.getElementById('listening-stats-enabled').checked,
             poll_interval: parseInt(document.getElementById('listening-stats-interval').value) || 30,
+        },
+        discover: {
+            // Adventurousness dial (0 safe .. 1 obscure) — drives the Discover popularity penalty.
+            // Use the slider's value directly (0 is valid; don't `|| 0.3` it away).
+            adventurousness: document.getElementById('discover-adventurousness')
+                ? parseFloat(document.getElementById('discover-adventurousness').value)
+                : 0.3,
         },
         m3u_export: {
             enabled: document.getElementById('m3u-export-enabled').checked,
