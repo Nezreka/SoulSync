@@ -134,6 +134,7 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
         self._device_auth_future = None
         self._device_auth_link = None
+        self._boot_session_tokens: Optional[dict] = None
 
         # Engine reference is populated by set_engine() at registration
         # time. Until then dispatch returns None — orchestrator wires
@@ -163,6 +164,14 @@ class TidalDownloadClient(DownloadSourcePlugin):
         expiry_time = saved.get('expiry_time', 0)
 
         if token_type and access_token:
+            from core.boot_phase import is_boot_phase
+            if is_boot_phase():
+                self._boot_session_tokens = saved
+                logger.info(
+                    "Loaded Tidal download session from config (verification deferred until after boot)"
+                )
+                return
+
             try:
                 expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
 
@@ -181,6 +190,39 @@ class TidalDownloadClient(DownloadSourcePlugin):
             except Exception as e:
                 logger.warning(f"Could not restore Tidal session: {e}")
 
+    def _complete_deferred_session(self) -> bool:
+        """Finish restoring a session that was deferred during boot."""
+        pending = getattr(self, '_boot_session_tokens', None)
+        if not pending or tidalapi is None:
+            self._boot_session_tokens = None
+            return False
+
+        if not self.session:
+            self.session = tidalapi.Session()
+
+        token_type = pending.get('token_type', '')
+        access_token = pending.get('access_token', '')
+        refresh_token = pending.get('refresh_token', '')
+        expiry_time = pending.get('expiry_time', 0)
+        self._boot_session_tokens = None
+
+        try:
+            expiry_dt = datetime.fromtimestamp(expiry_time, tz=timezone.utc) if expiry_time else None
+            restored = self.session.load_oauth_session(
+                token_type=token_type,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                expiry_time=expiry_dt,
+            )
+            if restored and self.session.check_login():
+                logger.info("Restored Tidal download session from saved tokens")
+                self._save_session()
+                return True
+            logger.warning("Saved Tidal session tokens are invalid/expired")
+        except Exception as e:
+            logger.warning(f"Could not restore Tidal session: {e}")
+        return False
+
     def _save_session(self):
         if not self.session:
             return
@@ -192,6 +234,14 @@ class TidalDownloadClient(DownloadSourcePlugin):
         })
 
     def is_authenticated(self) -> bool:
+        from core.boot_phase import is_boot_phase
+        if is_boot_phase():
+            pending = getattr(self, '_boot_session_tokens', None)
+            return bool(pending and pending.get('access_token'))
+
+        if getattr(self, '_boot_session_tokens', None):
+            return self._complete_deferred_session()
+
         if not self.session:
             return False
         try:

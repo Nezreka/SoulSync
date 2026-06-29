@@ -121,6 +121,7 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self._license_token = None
         self._user_data = None
         self._authenticated = False
+        self._pending_arl: Optional[str] = None
 
         # Quality preference
         self._quality = quality_tier_for_source('deezer', default='flac')
@@ -128,7 +129,12 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         # Try to authenticate on init if ARL is configured
         arl = config_manager.get('deezer_download.arl', '')
         if arl:
-            self._authenticate(arl)
+            from core.boot_phase import is_boot_phase
+            if is_boot_phase():
+                self._pending_arl = arl
+                logger.debug("Deezer ARL present — authentication deferred until after boot")
+            else:
+                self._authenticate(arl)
 
         logger.info(f"Deezer download client initialized (download path: {self.download_path})")
 
@@ -227,6 +233,11 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         return self._authenticated
 
     def is_authenticated(self) -> bool:
+        if self._pending_arl and not self._authenticated:
+            from core.boot_phase import is_boot_phase
+            if not is_boot_phase():
+                self._authenticate(self._pending_arl)
+                self._pending_arl = None
         return self._authenticated
 
     async def check_connection(self) -> bool:

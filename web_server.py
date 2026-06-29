@@ -36535,11 +36535,13 @@ except Exception as e:
 # they explicitly want background Spotify enrichment.
 spotify_enrichment_worker = None
 try:
-    from core.metadata_service import get_primary_source as _get_primary_source
+    from core.metadata_service import get_configured_primary_source
     from database.music_database import MusicDatabase
     spotify_enrichment_db = MusicDatabase()
     spotify_enrichment_worker = SpotifyWorker(database=spotify_enrichment_db)
-    _primary = _get_primary_source()
+    # Use configured source only — get_primary_source() probes Spotify auth and can
+    # block gunicorn worker boot indefinitely when the API is unreachable.
+    _primary = get_configured_primary_source()
     _user_paused = config_manager.get('spotify_enrichment_paused', False)
     if _user_paused or _primary != 'spotify':
         spotify_enrichment_worker.paused = True  # Set BEFORE start() to prevent race condition
@@ -39023,6 +39025,11 @@ def start_runtime_services():
         logger.info("WebSocket emitters started (Phase 1-7: global/dashboard/enrichment/tools/sync/automations/repair + rate monitor + live logs)")
 
         _runtime_started = True
+
+
+# Module import is complete — provider clients may now perform network probes.
+from core.boot_phase import mark_boot_complete
+mark_boot_complete()
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)
