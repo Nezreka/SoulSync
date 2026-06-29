@@ -1942,15 +1942,14 @@ let genreTracks = [];
 function _renderGenreCard(genre) {
     const icon = getGenreIcon(genre.name);
     const displayName = capitalizeGenre(genre.name);
+    // Genres have no cover art — a gradient .ya-card with the emoji, so they match the grid. #discover redesign
     return `
-        <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
-            <div class="discover-card-image genre-card-image">
-                <div class="genre-icon-large">${icon}</div>
-            </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${displayName}</h4>
-                <p class="discover-card-subtitle">${genre.track_count} tracks</p>
-                <p class="discover-card-meta">Curated</p>
+        <div class="ya-card discover-genre-card" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
+            <div class="ya-card-img genre-card-art"><div class="genre-icon-large">${icon}</div></div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${displayName}</div>
+                <div class="ya-card-sub">${genre.track_count} tracks</div>
             </div>
         </div>
     `;
@@ -8114,19 +8113,26 @@ function _renderByltSection(section, idx) {
                     </div>
                 </div>
             </div>
-            <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
+            <div class="discover-grid" id="bylt-carousel-${idx}"></div>
         </div>
     `;
 }
 
 function _renderByltTrackCard(t) {
+    const img = t.image_url
+        ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        : '';
     return `
-        <div class="discover-card">
-            <div class="discover-card-image">
-                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+        <div class="ya-card discover-album-card">
+            <div class="ya-card-img">
+                ${img}
+                <div class="ya-card-placeholder" style="display:${t.image_url ? 'none' : 'flex'}">&#9835;</div>
             </div>
-            <div class="discover-card-title">${_esc(t.name)}</div>
-            <div class="discover-card-artist">${_esc(t.artist)}</div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(t.name)}</div>
+                <div class="ya-card-sub">${_esc(t.artist)}</div>
+            </div>
         </div>
     `;
 }
@@ -8169,6 +8175,7 @@ async function loadBecauseYouListenTo() {
                     const carousel = document.getElementById(`bylt-carousel-${idx}`);
                     if (!carousel) return;
                     carousel.innerHTML = section.tracks.map(t => _renderByltTrackCard(t)).join('');
+                    _clampGrid(carousel);
                 });
             },
         });
