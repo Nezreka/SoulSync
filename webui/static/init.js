@@ -424,6 +424,7 @@ bootstrapServerAppearanceSettings();
         if (el.type === 'password') return true;
         return SKIP_CONTAINERS.some(sel => typeof el.closest === 'function' && el.closest(sel));
     };
+    const IGNORE_ATTRS = ['data-bwignore', 'data-1p-ignore', 'data-lpignore', 'data-form-type'];
     const tag = (el) => {
         if (el.dataset.pmTagged) return;            // tagged once — never touch again
         if (isCredentialField(el)) return;          // leave real login fields for the manager
@@ -444,21 +445,44 @@ bootstrapServerAppearanceSettings();
     // The `:not([data-pm-tagged])` selector makes the steady-state sweep a no-op
     // (it only ever processes freshly-added inputs), and our own attribute writes
     // don't re-arm the observer (it watches childList, not attributes).
-    let pending = false;
+    let pending = false, observer = null, disabled = false;
     const scheduleSweep = () => {
-        if (pending) return;
+        if (disabled || pending) return;
         pending = true;
-        const run = () => { pending = false; sweep(); };
+        const run = () => { pending = false; if (!disabled) sweep(); };
         if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 400 });
         else setTimeout(run, 300);
     };
 
-    const start = () => {
-        sweep();
-        new MutationObserver(scheduleSweep).observe(document.body, { childList: true, subtree: true });
+    const startObserving = () => {
+        if (observer) return;
+        observer = new MutationObserver(scheduleSweep);
+        observer.observe(document.body, { childList: true, subtree: true });
     };
+    const start = () => { sweep(); startObserving(); };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
+
+    // Benchmark hook (not used by the app): toggle the suppression at runtime so a
+    // before/after can be measured without rebuilding. disable() strips the ignore
+    // hints + stops the observer, so password managers re-attach their autofill
+    // overlay — i.e. the pre-fix "before" behaviour. enable() re-tags + resumes.
+    window.__pmSuppress = {
+        disable() {
+            disabled = true;
+            if (observer) { observer.disconnect(); observer = null; }
+            document.querySelectorAll('[data-pm-tagged]').forEach((el) => {
+                IGNORE_ATTRS.forEach((a) => el.removeAttribute(a));
+                delete el.dataset.pmTagged;
+            });
+        },
+        enable() {
+            disabled = false;
+            sweep();
+            startObserving();
+        },
+        get isActive() { return !disabled; },
+    };
 })();
 
 // ── Profile System ─────────────────────────────────────────────
