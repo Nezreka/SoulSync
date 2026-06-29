@@ -138,7 +138,9 @@ body {
 /* In performance mode the aura loses its blur + animation, leaving two hard
    static circles — hide them entirely instead. */
 body.reduce-effects .sidebar::before,
-body.reduce-effects .sidebar::after {
+body.reduce-effects .sidebar::after,
+body.max-performance .sidebar::before,
+body.max-performance .sidebar::after {
     display: none !important;
 }
 
@@ -500,12 +502,14 @@ body:not(.reduce-effects) .nav-button.active:hover {
    transparent border, so no layout shift). The expensive full-effects
    bits (gradient, transform/translateX, multi-layer box-shadow) stay
    off so hovering doesn't trigger compositing/repaint churn. */
-body.reduce-effects .nav-button:hover {
+body.reduce-effects .nav-button:hover,
+body.max-performance .nav-button:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
 }
 
-body.reduce-effects .nav-button.active:hover {
+body.reduce-effects .nav-button.active:hover,
+body.max-performance .nav-button.active:hover {
     background: rgba(var(--accent-rgb), 0.18);
     border-color: rgba(var(--accent-rgb), 0.3);
 }
@@ -63508,7 +63512,9 @@ body[data-artist-source="source"] #artist-detail-page #library-artist-enhance-bt
 }
 
 body.reduce-effects .dash-card::before,
-body.reduce-effects .dash-card::after {
+body.reduce-effects .dash-card::after,
+body.max-performance .dash-card::before,
+body.max-performance .dash-card::after {
     display: none;
 }
 .dash-card:hover {
