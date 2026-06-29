@@ -730,11 +730,11 @@ async function _startPlaylistExport(playlistId, mode, name, backfill) {
             body: isService ? JSON.stringify({ backfill: !!backfill }) : JSON.stringify({ mode }),
         });
         const data = await resp.json();
-        // Spotify export needs a one-time write-permission grant. Open the consent in a new tab
-        // and tell the user to try again once they've authorized.
+        // Spotify export needs a one-time write-permission grant. Surface a clickable link (a
+        // direct user click avoids popup-blocking; window.open after this await would be blocked)
+        // and tell the user to retry once they've authorized.
         if (data.needs_auth && data.auth_url) {
-            window.open(data.auth_url, '_blank');
-            _setExportStatus(playlistId, `<span style="color:#f59e0b;">Spotify needs permission to create playlists — approve it in the new tab, then click Export again.</span>`, 15000);
+            _setExportStatus(playlistId, `<span style="color:#f59e0b;">Spotify needs permission to create playlists — <a href="${data.auth_url}" target="_blank" rel="noopener" style="color:#38bdf8;text-decoration:underline;">authorize</a>, then click Export again.</span>`, 20000);
             return;
         }
         if (!data.success || !data.job_id) {
