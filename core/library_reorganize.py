@@ -26,6 +26,7 @@ without a source ID are reported back to the caller and skipped
 entirely.
 """
 
+import errno
 import os
 import re
 import shutil
@@ -34,7 +35,7 @@ import time
 import uuid
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # Per-album track concurrency. Matches the download workers' per-batch
 # concurrency (3) so reorganize feels comparable to a fresh download.
@@ -1101,6 +1102,12 @@ def preview_album_reorganize(
             'track_number': track.get('track_number', 0),
             'current_path': _trim_to_transfer(db_path, resolved, transfer_dir),
             'new_path': '',
+            # Absolute on-disk paths (additive). `current_path`/`new_path` above are
+            # display-trimmed; these carry the real paths so the rename-only executor
+            # acts on EXACTLY what the preview computed — no separate path logic that
+            # could drift from what the user saw (#875).
+            'current_path_abs': resolved or '',
+            'new_path_abs': '',
             'file_exists': resolved is not None,
             'unchanged': False,
             'collision': False,
@@ -1148,6 +1155,7 @@ def preview_album_reorganize(
             new_full, _ok = build_final_path_fn(
                 context, spotify_artist, album_info, file_ext, create_dirs=False
             )
+            item['new_path_abs'] = new_full or ''
             item['new_path'] = (
                 os.path.relpath(new_full, transfer_dir)
                 if transfer_dir and new_full and new_full.startswith(transfer_dir)
@@ -1803,6 +1811,150 @@ def reorganize_album(
                     artist_dirs.add(artist)
             for artist_dir in artist_dirs:
                 _prune_empty_album_dirs(artist_dir)
+
+    return summary
+
+
+def _rename_track_in_place(current_abs: str, new_abs: str) -> Tuple[bool, Optional[str]]:
+    """Move ONE file from ``current_abs`` to ``new_abs`` in place — no copy, no re-tag,
+    no post-processing. Creates the destination folder, carries sibling-format files
+    (e.g. a lossy ``.opus`` alongside the ``.flac``) along with the renamed stem, and
+    falls back to a cross-device move when the rename crosses a filesystem boundary.
+
+    Refuses to overwrite a DIFFERENT existing file at the destination (returns an error
+    instead) — never silent data loss. Returns ``(ok, error_message)``.
+    """
+    try:
+        if current_abs and not os.path.exists(current_abs):
+            return False, 'source file no longer on disk'
+        same = os.path.normpath(current_abs) == os.path.normpath(new_abs)
+        if os.path.exists(new_abs) and not same:
+            return False, 'destination already exists'
+        os.makedirs(os.path.dirname(new_abs), exist_ok=True)
+        # Carry sibling-format audio to the same destination with the renamed stem —
+        # mirrors _finalize_track so lossy-copy pairs don't get orphaned.
+        for sibling_src in _find_sibling_audio_files(current_abs):
+            _move_sibling_to_destination(sibling_src, new_abs)
+        try:
+            os.rename(current_abs, new_abs)
+        except OSError as e:
+            if getattr(e, 'errno', None) == errno.EXDEV:
+                shutil.move(current_abs, new_abs)  # crosses a filesystem boundary
+            else:
+                raise
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def reorganize_album_rename_only(
+    *,
+    album_id: str,
+    db,
+    transfer_dir: str,
+    resolve_file_path_fn: Callable[[Optional[str]], Optional[str]],
+    build_final_path_fn: Callable,
+    update_track_path_fn: Optional[Callable[[object, str], None]] = None,
+    cleanup_empty_dir_fn: Optional[Callable[[str], None]] = None,
+    on_progress: Optional[Callable[[dict], None]] = None,
+    primary_source: Optional[str] = None,
+    strict_source: bool = False,
+    metadata_source: str = 'api',
+    stop_check: Optional[Callable[[], bool]] = None,
+    preview_fn: Optional[Callable] = None,
+) -> dict:
+    """RENAME-ONLY reorganize (#875): move each track's file to the path the current
+    naming scheme dictates, and nothing else — no copy-to-staging, no re-tag, no
+    quality/AcoustID checks.
+
+    It acts on EXACTLY what :func:`preview_album_reorganize` computed (injected via
+    ``preview_fn`` for testability), so the apply can never disagree with what the user
+    saw, and ONLY files whose path actually changes are touched — files marked
+    ``unchanged`` are skipped, which is what keeps a rename from rewriting the whole
+    album (the #875 complaint). Tags and audio are left byte-for-byte alone.
+
+    Returns the same summary shape as :func:`reorganize_album`.
+    """
+    preview_fn = preview_fn or preview_album_reorganize
+    summary = {
+        'status': 'completed', 'source': None, 'total': 0,
+        'moved': 0, 'skipped': 0, 'failed': 0, 'errors': [],
+    }
+
+    def _emit(**updates):
+        if on_progress is None:
+            return
+        try:
+            on_progress(updates)
+        except Exception as e:
+            logger.debug("[Reorganize/rename] progress emit failed: %s", e)
+
+    preview = preview_fn(
+        album_id=album_id, db=db, transfer_dir=transfer_dir,
+        resolve_file_path_fn=resolve_file_path_fn,
+        build_final_path_fn=build_final_path_fn,
+        primary_source=primary_source, strict_source=strict_source,
+        metadata_source=metadata_source,
+    )
+    summary['source'] = preview.get('source')
+    if not preview.get('success'):
+        summary['status'] = preview.get('status', 'error')
+        return summary
+
+    tracks = preview.get('tracks', [])
+    summary['total'] = len(tracks)
+    src_dirs_touched: Set[str] = set()
+
+    for t in tracks:
+        if stop_check and stop_check():
+            break
+        title = t.get('title', 'Unknown')
+        _emit(current_track=title)
+
+        # Skip anything that isn't a real, changing move. `unchanged` is the key one —
+        # it's why a rename no longer rewrites files whose name didn't change.
+        if (not t.get('matched') or t.get('unchanged')
+                or t.get('collision') or not t.get('new_path_abs')):
+            summary['skipped'] += 1
+            _emit(skipped=summary['skipped'])
+            continue
+
+        current_abs = t.get('current_path_abs')
+        new_abs = t.get('new_path_abs')
+        ok, err = _rename_track_in_place(current_abs, new_abs)
+        if not ok:
+            summary['failed'] += 1
+            summary['errors'].append({
+                'track_id': t.get('track_id'), 'title': title,
+                'error': err or 'rename failed',
+            })
+            _emit(failed=summary['failed'], errors=list(summary['errors']))
+            continue
+
+        # File is at its new home — update the DB directly (authoritative; no need to
+        # round-trip through a server scan to learn what we just did). On DB failure the
+        # file still moved; a library scan reconciles it, so we don't fail the track.
+        if update_track_path_fn:
+            try:
+                update_track_path_fn(t.get('track_id'), new_abs)
+            except Exception as db_err:
+                logger.warning(
+                    "[Reorganize/rename] DB path update failed for %s: %s "
+                    "(file moved to %s; a scan will reconcile)",
+                    t.get('track_id'), db_err, new_abs,
+                )
+        if current_abs:
+            src_dirs_touched.add(os.path.dirname(current_abs))
+        summary['moved'] += 1
+        _emit(moved=summary['moved'],
+              processed=summary['moved'] + summary['skipped'] + summary['failed'])
+
+    if cleanup_empty_dir_fn:
+        for src_dir in src_dirs_touched:
+            try:
+                cleanup_empty_dir_fn(src_dir)
+            except Exception as e:
+                logger.debug("[Reorganize/rename] cleanup of %s failed: %s", src_dir, e)
 
     return summary
 

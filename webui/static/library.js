@@ -7460,6 +7460,16 @@ async function showReorganizeModal(albumId) {
     html += '</select>';
     html += '</div>';
 
+    // Action: full pipeline vs rename-only (#875).
+    html += '<div class="reorganize-source-section">';
+    html += '<label class="reorganize-label">Action</label>';
+    html += '<div class="reorganize-template-hint">"Full reorganize" re-tags and re-checks every track through the import pipeline — thorough, but slow and it re-touches every file. "Rename only" just moves files to your current naming scheme: no re-tagging, no quality/AcoustID checks, and only files whose name actually changes are touched. Tip: renaming can reset play counts / date-added on your media server.</div>';
+    html += '<select id="reorganize-action-select" class="reorganize-template-input">';
+    html += '<option value="full">Full reorganize (default)</option>';
+    html += '<option value="rename">Rename only (skip post-processing)</option>';
+    html += '</select>';
+    html += '</div>';
+
     // Preview area
     html += '<div class="reorganize-preview-section">';
     html += '<div class="reorganize-preview-header">';
@@ -7644,10 +7654,11 @@ async function executeReorganize() {
     try {
         const chosenSource = document.getElementById('reorganize-source-select')?.value || '';
         const chosenMode = document.getElementById('reorganize-mode-select')?.value || 'api';
+        const renameOnly = document.getElementById('reorganize-action-select')?.value === 'rename';
         const response = await fetch(`/api/library/album/${_reorganizeAlbumId}/reorganize`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source: chosenSource, mode: chosenMode })
+            body: JSON.stringify({ source: chosenSource, mode: chosenMode, rename_only: renameOnly })
         });
         const result = await response.json();
         if (!result.success) throw new Error(result.error);

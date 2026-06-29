@@ -711,3 +711,73 @@ def test_exhaustive_single_source_exhausted_fails(monkeypatch):
     assert task["status"] == "failed"
     assert submitted == []
     assert completion == [("rbatch", "rtask", False)]
+
+
+def test_quarantine_failure_preserves_file_instead_of_deleting(tmp_path, monkeypatch):
+    """REGRESSION: when move_to_quarantine itself FAILS (e.g. a cross-device move on
+    a NAS), the rejected file must be LEFT IN PLACE for retry — never deleted.
+
+    Deleting a download we couldn't even quarantine is data loss that forces a
+    re-download (Discord: Shdjfgatdif). The task is still marked failed + the batch
+    still notified — only the destructive os.remove is gone. Drives the real pipeline
+    through the integrity-rejection path with quarantine forced to raise."""
+    source_path = tmp_path / "source.flac"
+    source_path.write_bytes(b"audio")
+
+    context_key, task_id, batch_id = "ctx-q", "task-q", "batch-q"
+    context = {
+        "search_result": {"is_simple_download": True, "filename": "Album/source.flac", "album": "Album"},
+        "track_info": {}, "original_search_result": {}, "is_album_download": False,
+        "task_id": task_id, "batch_id": batch_id,
+    }
+    completion_calls = []
+
+    snap = (dict(runtime_state.matched_downloads_context), dict(runtime_state.download_tasks),
+            dict(runtime_state.download_batches), set(runtime_state.processed_download_ids),
+            dict(runtime_state.post_process_locks))
+    for d in (runtime_state.matched_downloads_context, runtime_state.download_tasks,
+              runtime_state.download_batches, runtime_state.processed_download_ids,
+              runtime_state.post_process_locks):
+        d.clear()
+
+    runtime = types.SimpleNamespace(
+        automation_engine=None,
+        on_download_completed=lambda b, t, success: completion_calls.append((b, t, success)),
+        web_scan_manager=types.SimpleNamespace(request_scan=lambda r: None),
+        repair_worker=None,
+    )
+    fake_acoustid = types.ModuleType("core.acoustid_verification")
+    fake_acoustid.AcoustIDVerification = _FakeAcoustidVerifier
+    fake_acoustid.VerificationResult = types.SimpleNamespace(FAIL="FAIL")
+    monkeypatch.setitem(sys.modules, "core.acoustid_verification", fake_acoustid)
+
+    from core.imports.file_integrity import IntegrityResult
+    # Integrity FAILS → enters the quarantine block.
+    monkeypatch.setattr(import_pipeline, "check_audio_integrity",
+                        lambda *_a, **_k: IntegrityResult(ok=False, reason="broken (test)", checks={}))
+    # The quarantine MOVE itself raises → exercises the except branch (the fix).
+    def _boom(*_a, **_k):
+        raise OSError("cross-device link not permitted (simulated NAS)")
+    monkeypatch.setattr(import_pipeline, "move_to_quarantine", _boom)
+    monkeypatch.setattr(import_paths, "_get_config_manager", lambda: _Config(str(tmp_path / "Transfer")))
+    monkeypatch.setattr(import_pipeline, "add_activity_item", lambda *a, **k: None)
+
+    runtime_state.matched_downloads_context[context_key] = context
+    runtime_state.download_tasks[task_id] = {"track_info": {}, "status": "running"}
+
+    try:
+        import_pipeline.post_process_matched_download_with_verification(
+            context_key, context, str(source_path), task_id, batch_id, runtime)
+
+        # THE regression: a file we couldn't quarantine is preserved, not deleted.
+        assert source_path.exists(), "file must be LEFT IN PLACE when quarantine fails"
+        # Downstream still correct — task failed, batch notified of failure.
+        assert runtime_state.download_tasks[task_id]["status"] == "failed"
+        assert completion_calls == [(batch_id, task_id, False)]
+    finally:
+        for d, original in zip(
+            (runtime_state.matched_downloads_context, runtime_state.download_tasks,
+             runtime_state.download_batches, runtime_state.processed_download_ids,
+             runtime_state.post_process_locks), snap):
+            d.clear()
+            d.update(original)

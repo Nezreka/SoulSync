@@ -3373,6 +3373,14 @@ class RepairWorker:
             return {'success': False, 'error': f'Source file not found: {file_path}'}
 
         out_path = os.path.splitext(resolved)[0] + out_ext
+        # Safety invariant: ffmpeg runs with -y, so refuse to convert a file onto
+        # itself (an .m4a ALAC source + AAC target shares the .m4a path) — that
+        # would destroy the original lossless file (#941).
+        from core.quality.lossless import lossy_output_would_overwrite_source
+        if lossy_output_would_overwrite_source(resolved, out_path):
+            return {'success': False,
+                    'error': f'{codec.upper()} output would overwrite the source file; '
+                             f'choose a different lossy codec'}
         if os.path.exists(out_path):
             return {'success': True, 'action': 'already_exists',
                     'message': f'{quality_label} copy already exists'}

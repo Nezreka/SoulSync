@@ -21,17 +21,24 @@ import { fallbackImage, RefreshIcon, useImportStaging } from './import-shared';
 export function ImportPage() {
   useReactPageShell('import');
 
-  const { refreshStaging, stagingFiles, stagingPath, stagingQuery } = useImportStaging();
+  const { refreshStaging, scanning, scanProgress, stagingFiles, stagingPath, stagingQuery } =
+    useImportStaging();
   const isRefreshing = stagingQuery.isRefetching;
   const lastRefreshedAt =
     stagingQuery.dataUpdatedAt > 0 ? formatShortTime(stagingQuery.dataUpdatedAt) : null;
+  // While a large staging folder is still scanning (#947), show progress instead of a count.
+  const fileCountText = scanning
+    ? scanProgress && scanProgress.total > 0
+      ? `Scanning ${scanProgress.scanned} of ${scanProgress.total} files…`
+      : 'Scanning staging folder…'
+    : getStagingStatsText(stagingFiles);
 
   return (
     <div id="import-page" data-testid="import-page">
       <div className={styles.importPageContainer}>
         <ImportHeader
           error={stagingQuery.error}
-          fileCountText={getStagingStatsText(stagingFiles)}
+          fileCountText={fileCountText}
           loading={stagingQuery.isLoading}
           stagingPath={stagingPath}
           refreshing={isRefreshing}
@@ -102,9 +109,9 @@ function ImportOptions() {
         />
         <span
           id="import-quality-filter-label"
-          title="Only import tracks that meet your quality profile; otherwise import everything regardless of quality."
+          title="Checks imported files against your Quality Profile only. Turning this off imports files regardless of format/bitrate/bit depth/sample rate; AcoustID verification is separate and is not skipped."
         >
-          Quality check on import
+          Quality profile check on import
         </span>
       </div>
       <div className={styles.importOption}>

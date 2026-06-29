@@ -520,8 +520,18 @@ class TidalClient:
         
         return True
     
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """Check if client is authenticated, refreshing expired tokens if possible"""
+        from core.boot_phase import is_boot_phase
+
+        if is_boot_phase():
+            if self.access_token and time.time() < self.token_expires_at:
+                return True
+            return bool(self.access_token and self.refresh_token)
+
+        # Token still valid — no refresh needed. (Restored: #949 moved this short-circuit
+        # into the boot-phase branch only, so every post-boot call fell through to the
+        # refresh below — a constant silent-refresh loop on a perfectly valid token.)
         if self.access_token and time.time() < self.token_expires_at:
             return True
 

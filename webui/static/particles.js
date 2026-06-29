@@ -2352,8 +2352,8 @@
     // Listen for page changes from script.js
     window.pageParticles = {
         setPage(pageId) {
-            // Reduce Visual Effects performance mode halts the loop entirely.
-            if (window._reduceEffectsActive) { stop(); return; }
+            // Reduce Visual Effects / Max Performance modes halt the loop entirely.
+            if (window._reduceEffectsActive || window._maxPerfActive) { stop(); return; }
             const presetName = PAGE_PRESETS[pageId] || 'none';
             setPreset(presetName);
         },
@@ -2362,7 +2362,7 @@
 
     // Auto-start for initial page (respect particles toggle)
     requestAnimationFrame(() => {
-        if (window._particlesEnabled === false || window._reduceEffectsActive) return;
+        if (window._particlesEnabled === false || window._reduceEffectsActive || window._maxPerfActive) return;
         const activePage = document.querySelector('.page.active');
         if (activePage) {
             const pageId = activePage.id.replace('-page', '');

@@ -6,7 +6,10 @@ parsers are tested here; the ffmpeg call is integration.
 
 import pytest
 
+import core.imports.silence as silence_mod
 from core.imports.silence import (
+    detect_broken_audio,
+    is_dsd_path,
     silence_ratio_from_output,
     is_mostly_silent_reason,
     measured_duration_from_astats,
@@ -102,3 +105,47 @@ def test_no_incomplete_reason_for_full_file():
 def test_no_incomplete_reason_when_unmeasurable():
     assert incomplete_audio_reason(None, 188.4, min_ratio=0.85) is None
     assert incomplete_audio_reason(30.0, 0, min_ratio=0.85) is None
+
+
+# ── DSD (#939): the samples÷rate truncation math is invalid for DSD, so it must
+#    be skipped for .dsf/.dff (silence detection still applies). ──
+
+def test_is_dsd_path():
+    assert is_dsd_path("/m/Album/01. Song.dsf") is True
+    assert is_dsd_path("/m/Album/01. Song.DFF") is True   # case-insensitive
+    assert is_dsd_path("/m/Album/01. Song.flac") is False
+    assert is_dsd_path("") is False
+    assert is_dsd_path(None) is False
+
+
+class _FakeProc:
+    def __init__(self, stderr):
+        self.stderr = stderr.encode("utf-8")
+
+
+class _FakeInfo:
+    length = 330.0          # container says 330s
+    sample_rate = 44100
+
+
+def _patch_broken_pipeline(monkeypatch, astats_stderr):
+    """Make detect_broken_audio run against a canned 'truncated' ffmpeg result."""
+    monkeypatch.setattr(silence_mod, "_ffmpeg_available", lambda: True)
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: type("A", (), {"info": _FakeInfo()})())
+    monkeypatch.setattr(silence_mod.subprocess, "run", lambda *_a, **_k: _FakeProc(astats_stderr))
+
+
+def test_truncation_flagged_for_normal_file(monkeypatch):
+    # ~40s decoded of a 330s container (12%) → a normal file IS flagged truncated.
+    astats = "[Parsed_astats_0 @ 0x55] Number of samples: 1764000\n"   # 1764000/44100 ≈ 40s
+    _patch_broken_pipeline(monkeypatch, astats)
+    reason = detect_broken_audio("/m/Album/01. Song.flac", min_ratio=0.85)
+    assert reason and "Incomplete audio" in reason
+
+
+def test_truncation_skipped_for_dsd(monkeypatch):
+    # Same 12%-decoding numbers, but a .dsf file must NOT be flagged — the math is
+    # invalid for DSD (ffmpeg decodes DSD to PCM at a different rate). #939
+    astats = "[Parsed_astats_0 @ 0x55] Number of samples: 1764000\n"
+    _patch_broken_pipeline(monkeypatch, astats)
+    assert detect_broken_audio("/m/Album/01. Song.dsf", min_ratio=0.85) is None

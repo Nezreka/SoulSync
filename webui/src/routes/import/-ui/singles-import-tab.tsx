@@ -50,7 +50,10 @@ export function SinglesImportTab() {
 
     setOpenSingleSearch(fileKey);
     const defaultQuery =
-      [file?.artist, file?.title].filter(Boolean).join(' ') ||
+      // "artist - title" (the placeholder hints this, and source search needs the
+      // dash to disambiguate — "Sub Focus Last Jungle" finds junk, "Sub Focus - Last
+      // Jungle" finds the track). filter(Boolean) keeps a lone title dash-free.
+      [file?.artist, file?.title].filter(Boolean).join(' - ') ||
       (file?.filename || '').replace(/\.[^.]+$/, '');
     ensureSingleSearch(fileKey, defaultQuery);
     if (defaultQuery && !singleSearches[fileKey]?.results.length) {

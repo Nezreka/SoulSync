@@ -179,6 +179,14 @@ function initAccentColorListeners() {
             applyReduceEffects(reduceEffectsCheckbox.checked);
         });
     }
+
+    // Max Performance toggle — apply immediately on change
+    const maxPerfCheckbox = document.getElementById('max-performance-enabled');
+    if (maxPerfCheckbox) {
+        maxPerfCheckbox.addEventListener('change', () => {
+            applyMaxPerformance(maxPerfCheckbox.checked);
+        });
+    }
 }
 
 function applyReduceEffects(enabled) {
@@ -209,6 +217,67 @@ function applyReduceEffects(enabled) {
             window.workerOrbs.setPage(activeId);
         }
     }
+}
+
+// Max Performance overrides Worker Orbs / Particles / Reduce Effects, so while it's
+// on we lock those checkboxes (greyed + visually off) and restore them when it's
+// off. We never fire their change handlers, so the user's real saved prefs
+// (window._workerOrbsEnabled / _particlesEnabled / the reduce-effects localStorage)
+// stay intact — saving reads those, not these forced-off boxes.
+function _syncMaxPerfDependentToggles(maxPerfOn) {
+    const ids = ['worker-orbs-enabled', 'particles-enabled', 'reduce-effects-enabled'];
+    ids.forEach(id => {
+        const cb = document.getElementById(id);
+        if (!cb) return;
+        const group = cb.closest('.form-group');
+        if (maxPerfOn) {
+            cb.disabled = true;
+            cb.checked = false;
+            if (group) group.classList.add('setting-overridden');
+        } else {
+            cb.disabled = false;
+            if (group) group.classList.remove('setting-overridden');
+            // Restore each box to the user's real per-device preference.
+            if (id === 'worker-orbs-enabled') cb.checked = window._workerOrbsEnabled !== false;
+            else if (id === 'particles-enabled') cb.checked = window._particlesEnabled === true;
+            else if (id === 'reduce-effects-enabled') cb.checked = localStorage.getItem('soulsync-reduce-effects') === '1';
+        }
+    });
+}
+
+// Max Performance — the nuclear low-power switch for software-rendered / no-GPU
+// setups (e.g. Docker). Superset of Reduce Visual Effects: body.max-performance CSS
+// kills the expensive GPU properties AND all animation/transitions, while here we
+// halt every JS canvas loop (particles + worker orbs; cursor-glow + API sparks gate
+// on window._maxPerfActive themselves).
+function applyMaxPerformance(enabled) {
+    if (enabled) {
+        document.body.classList.add('max-performance');
+    } else {
+        document.body.classList.remove('max-performance');
+    }
+    window._maxPerfActive = enabled;
+    localStorage.setItem('soulsync-max-performance', enabled ? '1' : '0');
+
+    const pcanvas = document.getElementById('page-particles-canvas');
+    if (enabled) {
+        if (window.pageParticles) window.pageParticles.stop();
+        if (pcanvas) pcanvas.style.display = 'none';
+        if (window.workerOrbs) window.workerOrbs.setPage('_disabled');
+    } else {
+        // Restore whatever the user's own toggles (and reduce-effects) still allow.
+        const reduce = window._reduceEffectsActive === true;
+        const activePage = document.querySelector('.page.active');
+        const activeId = activePage ? activePage.id.replace('-page', '') : null;
+        if (!reduce && window._particlesEnabled !== false) {
+            if (pcanvas) pcanvas.style.display = '';
+            if (window.pageParticles && activeId) window.pageParticles.setPage(activeId);
+        }
+        if (window._workerOrbsEnabled !== false && window.workerOrbs && activeId) {
+            window.workerOrbs.setPage(activeId);
+        }
+    }
+    _syncMaxPerfDependentToggles(enabled);
 }
 
 // Bootstrap accent and reduce-effects from localStorage instantly (prevents flash)
@@ -254,16 +323,41 @@ function applyReduceEffects(enabled) {
         }
     }
 
-    if (localStorage.getItem('soulsync-reduce-effects') === '1') {
+    const reduceEffectsSaved = localStorage.getItem('soulsync-reduce-effects');
+    if (reduceEffectsSaved === '1') {
         document.body.classList.add('reduce-effects');
         window._reduceEffectsActive = true;
+    } else if (reduceEffectsSaved === '0') {
+        document.body.classList.remove('reduce-effects');
+        window._reduceEffectsActive = false;
+    } else if (window._reduceEffectsActive) {
+        document.body.classList.add('reduce-effects');
+    }
+    // Max Performance — device-scoped (localStorage wins over the server default,
+    // same as reduce-effects). The window flag is seeded server-side in index.html
+    // for a flash-free first paint; localStorage reconciles it here.
+    const maxPerfSaved = localStorage.getItem('soulsync-max-performance');
+    if (maxPerfSaved === '1') {
+        document.body.classList.add('max-performance');
+        window._maxPerfActive = true;
+    } else if (maxPerfSaved === '0') {
+        document.body.classList.remove('max-performance');
+        window._maxPerfActive = false;
+    } else if (window._maxPerfActive) {
+        document.body.classList.add('max-performance');
     }
     const saved = localStorage.getItem('soulsync-accent');
     if (saved) applyAccentColor(saved);
     // Bootstrap particles setting from localStorage — OFF by default (continuous
     // full-page canvas = real GPU cost); only on when the user explicitly enabled it.
     const particlesSaved = localStorage.getItem('soulsync-particles');
-    window._particlesEnabled = (particlesSaved === 'true');
+    if (particlesSaved === 'true') {
+        window._particlesEnabled = true;
+    } else if (particlesSaved === 'false') {
+        window._particlesEnabled = false;
+    } else if (typeof window._particlesEnabled !== 'boolean') {
+        window._particlesEnabled = false;
+    }
     if (!window._particlesEnabled) {
         const canvas = document.getElementById('page-particles-canvas');
         if (canvas) canvas.style.display = 'none';
@@ -272,7 +366,123 @@ function applyReduceEffects(enabled) {
     const workerOrbsSaved = localStorage.getItem('soulsync-worker-orbs');
     if (workerOrbsSaved === 'false') {
         window._workerOrbsEnabled = false;
+    } else if (workerOrbsSaved === 'true') {
+        window._workerOrbsEnabled = true;
+    } else if (typeof window._workerOrbsEnabled !== 'boolean') {
+        window._workerOrbsEnabled = true;
     }
+})();
+
+async function bootstrapServerAppearanceSettings() {
+    try {
+        const response = await fetch('/api/settings', { credentials: 'same-origin' });
+        const settings = await response.json();
+        if (!response.ok || !settings || typeof settings !== 'object' || settings.error) return;
+
+        const appearance = settings.ui_appearance || {};
+        const preset = appearance.accent_preset || '#1db954';
+        const custom = appearance.accent_color || '#1db954';
+        const accent = preset === 'custom' ? custom : preset;
+        applyAccentColor(accent);
+
+        if (Object.prototype.hasOwnProperty.call(appearance, 'particles_enabled')) {
+            applyParticlesSetting(appearance.particles_enabled !== false);
+        }
+        if (Object.prototype.hasOwnProperty.call(appearance, 'worker_orbs_enabled')) {
+            applyWorkerOrbsSetting(appearance.worker_orbs_enabled !== false);
+        }
+        if (localStorage.getItem('soulsync-reduce-effects') === null) {
+            applyReduceEffects(appearance.reduce_effects === true);
+        }
+    } catch (error) {
+        console.warn('Could not bootstrap appearance settings:', error);
+    }
+}
+
+bootstrapServerAppearanceSettings();
+
+// ── Password-manager autofill suppression ──────────────────────────────
+// Bitwarden / 1Password / LastPass etc. attach an inline autofill overlay to
+// every <input>/<select>/<textarea> and REBUILD it on every DOM mutation. This
+// app mutates the DOM continuously (live service status, download/automation
+// progress bars, the per-second "next run" countdown, innerHTML hub rebuilds),
+// so the managers' whole-document MutationObserver storms the main thread. A
+// captured DevTools trace (2026-06-29) showed Bitwarden's
+// bootstrap-autofill-overlay.js (setupOverlayOnField / setupOverlayListeners)
+// using ~6× the CPU of the entire SoulSync app — almost the whole freeze.
+//
+// None of these fields are credentials (they're search boxes, filters, config),
+// so we mark them ignored and the managers skip them: once a field carries the
+// ignore hint, the overlay is never (re)attached, so the mutation→re-setup storm
+// stops. Real sign-in fields (password type + the auth overlays) are left alone
+// so the user can still autofill the login / PIN screen. Purely additive data-*
+// attributes — no functional effect on the app, and a no-op for any manager that
+// doesn't honour them.
+(function suppressPasswordManagerAutofill() {
+    const SKIP_CONTAINERS = ['#login-overlay', '#launch-pin-overlay', '#profile-pin-dialog'];
+    const isCredentialField = (el) => {
+        if (el.type === 'password') return true;
+        return SKIP_CONTAINERS.some(sel => typeof el.closest === 'function' && el.closest(sel));
+    };
+    const IGNORE_ATTRS = ['data-bwignore', 'data-1p-ignore', 'data-lpignore', 'data-form-type'];
+    const tag = (el) => {
+        if (el.dataset.pmTagged) return;            // tagged once — never touch again
+        if (isCredentialField(el)) return;          // leave real login fields for the manager
+        el.dataset.pmTagged = '1';
+        el.setAttribute('data-bwignore', 'true');   // Bitwarden
+        el.setAttribute('data-1p-ignore', '');      // 1Password
+        el.setAttribute('data-lpignore', 'true');   // LastPass
+        el.setAttribute('data-form-type', 'other'); // Dashlane
+        if (!el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+    };
+    const sweep = () => {
+        document.querySelectorAll(
+            'input:not([data-pm-tagged]),textarea:not([data-pm-tagged]),select:not([data-pm-tagged])'
+        ).forEach(tag);
+    };
+
+    // Debounce: a burst of DOM mutations triggers at most one sweep per idle slot.
+    // The `:not([data-pm-tagged])` selector makes the steady-state sweep a no-op
+    // (it only ever processes freshly-added inputs), and our own attribute writes
+    // don't re-arm the observer (it watches childList, not attributes).
+    let pending = false, observer = null, disabled = false;
+    const scheduleSweep = () => {
+        if (disabled || pending) return;
+        pending = true;
+        const run = () => { pending = false; if (!disabled) sweep(); };
+        if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 400 });
+        else setTimeout(run, 300);
+    };
+
+    const startObserving = () => {
+        if (observer) return;
+        observer = new MutationObserver(scheduleSweep);
+        observer.observe(document.body, { childList: true, subtree: true });
+    };
+    const start = () => { sweep(); startObserving(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
+    else start();
+
+    // Benchmark hook (not used by the app): toggle the suppression at runtime so a
+    // before/after can be measured without rebuilding. disable() strips the ignore
+    // hints + stops the observer, so password managers re-attach their autofill
+    // overlay — i.e. the pre-fix "before" behaviour. enable() re-tags + resumes.
+    window.__pmSuppress = {
+        disable() {
+            disabled = true;
+            if (observer) { observer.disconnect(); observer = null; }
+            document.querySelectorAll('[data-pm-tagged]').forEach((el) => {
+                IGNORE_ATTRS.forEach((a) => el.removeAttribute(a));
+                delete el.dataset.pmTagged;
+            });
+        },
+        enable() {
+            disabled = false;
+            sweep();
+            startObserving();
+        },
+        get isActive() { return !disabled; },
+    };
 })();
 
 // ── Profile System ─────────────────────────────────────────────
@@ -2951,7 +3161,8 @@ async function loadPageData(pageId) {
     const RECENTER_DELAY_MS = 1500;
     let recenterTimer = 0;
 
-    const isReduced = () => document.body.classList.contains('reduce-effects');
+    const isReduced = () => document.body.classList.contains('reduce-effects')
+        || document.body.classList.contains('max-performance');
 
     const gridCenter = () => {
         const r = grid.getBoundingClientRect();

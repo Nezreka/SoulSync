@@ -218,12 +218,43 @@ class TestEnrichStatsItems:
 
         album_by_name = {a["name"]: a for a in cache["top_albums"]}
         assert album_by_name["First Album"]["id"] == "al1"
-        assert album_by_name["First Album"]["image_url"] == "http://img/al1.jpg"
+        # image_url is normalized at build time now (#935) — it's enriched (truthy);
+        # exact form depends on the image-cache config, so don't pin the raw value.
+        assert album_by_name["First Album"]["image_url"]
 
         track_by_name = {t["name"]: t for t in cache["top_tracks"]}
         assert track_by_name["Alpha"]["id"] == "t1"
         assert track_by_name["Bravo"]["id"] == "t2"
         assert track_by_name["Alpha"]["artist_id"] == "a1"
+
+    def test_image_urls_normalized_at_build_time(self, db, worker, monkeypatch):
+        """#935: image URLs are run through the fixer HERE, at cache-build time, so the
+        /api/stats/cached read does zero per-image image-cache writes on the hot path
+        (those writes were the ~20s stats hang on HDD-backed installs). Deterministic
+        via a stub fixer so it doesn't depend on the real image-cache config."""
+        _insert_track(db, "t1", "Alpha", "a1", "Band One", "al1", "First Album")
+
+        seen = []
+
+        def _fake_fix(url):
+            seen.append(url)
+            return f"/api/image-cache/fixed::{url}"
+
+        monkeypatch.setattr("core.metadata.normalize_image_url", _fake_fix)
+
+        cache = {
+            "top_artists": [{"name": "Band One"}],
+            "top_albums": [{"name": "First Album"}],
+            "top_tracks": [{"name": "Alpha", "artist": "Band One"}],
+        }
+        worker._enrich_stats_items(cache)
+
+        # every section's raw thumb_url was passed through the fixer, and the cached
+        # value is the fixed (browser-safe) url — so the read path has nothing to do.
+        assert cache["top_albums"][0]["image_url"] == "/api/image-cache/fixed::http://img/al1.jpg"
+        assert cache["top_artists"][0]["image_url"].startswith("/api/image-cache/fixed::")
+        assert cache["top_tracks"][0]["image_url"].startswith("/api/image-cache/fixed::")
+        assert any("al1" in str(s) for s in seen)
 
     def test_unknown_entries_left_untouched(self, db, worker):
         _insert_track(db, "t1", "Real", "a1", "Real Band", "al1", "Real Album")

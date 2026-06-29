@@ -244,3 +244,61 @@ def test_atomic_helper_cleans_temp_and_keeps_source_on_failure(tmp_path, monkeyp
     assert src.exists()                           # source preserved on failure
     assert not dst.exists()                       # no partial final file
     assert not list(dstdir.glob(".*ssync-tmp"))   # temp cleaned up
+
+
+# ── #941: create_lossy_copy now accepts all lossless sources + never overwrites them ──
+
+import core.imports.file_ops as _fo
+
+
+def _enable_lossy(monkeypatch, codec="mp3", bitrate="320"):
+    cfg = {"lossy_copy.enabled": True, "lossy_copy.codec": codec,
+           "lossy_copy.bitrate": bitrate, "lossy_copy.delete_original": False}
+    monkeypatch.setattr(_fo.config_manager, "get", lambda k, d=None: cfg.get(k, d))
+    monkeypatch.setattr(_fo, "get_audio_quality_string", lambda _p: None)
+
+
+def test_create_lossy_copy_rejects_non_lossless(monkeypatch, tmp_path):
+    _enable_lossy(monkeypatch)
+    src = tmp_path / "song.mp3"
+    src.write_bytes(b"id3")
+    assert _fo.create_lossy_copy(str(src)) is None   # lossy input → nothing to do
+
+
+def test_create_lossy_copy_now_accepts_wav(monkeypatch, tmp_path):
+    """Was FLAC-only; a WAV must now pass the gate and convert (#941)."""
+    _enable_lossy(monkeypatch, codec="mp3")
+    monkeypatch.setattr(_fo.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr("mutagen.File", lambda *_a, **_k: None)  # skip tag write
+
+    seen = {}
+
+    def _fake_run(cmd, **_kw):
+        seen["cmd"] = cmd
+        open(cmd[-1], "wb").write(b"fake-mp3")   # ffmpeg "writes" the output
+        return types.SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(_fo.subprocess, "run", _fake_run)
+
+    src = tmp_path / "song.wav"
+    src.write_bytes(b"RIFF....WAVE")
+    out = _fo.create_lossy_copy(str(src))
+    assert out and out.endswith(".mp3")          # WAV passed the gate + converted
+    assert str(src) in seen["cmd"]               # ffmpeg got the .wav input
+
+
+def test_create_lossy_copy_skips_when_output_would_overwrite_source(monkeypatch, tmp_path):
+    """REGRESSION: .m4a ALAC source + AAC codec → output is the same .m4a path.
+    ffmpeg (-y) must NEVER run, or it would destroy the original lossless file."""
+    _enable_lossy(monkeypatch, codec="aac", bitrate="256")
+    monkeypatch.setattr(_fo, "m4a_codec", lambda _p: "alac")   # source IS ALAC (lossless)
+
+    ran = {"called": False}
+    monkeypatch.setattr(_fo.subprocess, "run",
+                        lambda *_a, **_k: ran.__setitem__("called", True))
+
+    src = tmp_path / "track.m4a"
+    src.write_bytes(b"....ALAC....")
+    out = _fo.create_lossy_copy(str(src))
+    assert out is None                 # skipped — output would overwrite source
+    assert ran["called"] is False      # the original was never touched

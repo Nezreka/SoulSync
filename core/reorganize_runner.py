@@ -37,6 +37,7 @@ def build_runner(
     is_shutting_down_fn: Callable[[], bool],
     get_download_path: Callable[[], str],
     get_transfer_path: Callable[[], str],
+    build_final_path_fn: Optional[Callable] = None,
 ) -> Callable[[object], dict]:
     """Return the closure the queue worker invokes per item.
 
@@ -59,7 +60,7 @@ def build_runner(
         A callable ``runner(item)`` suitable for
         :meth:`core.reorganize_queue.ReorganizeQueue.set_runner`.
     """
-    from core.library_reorganize import reorganize_album
+    from core.library_reorganize import reorganize_album, reorganize_album_rename_only
     from core.reorganize_queue import get_queue
 
     def _update_track_path(track_id, new_path):
@@ -80,17 +81,6 @@ def build_runner(
         # server restart.
         download_dir = get_download_path()
         transfer_dir = get_transfer_path()
-        staging_root = os.path.join(download_dir, 'ssync_staging')
-        try:
-            os.makedirs(staging_root, exist_ok=True)
-        except OSError as mk_err:
-            logger.error(f"[Reorganize] Cannot create staging dir {staging_root}: {mk_err}")
-            return {
-                'status': 'setup_failed',
-                'source': None,
-                'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
-                'errors': [{'error': f'Could not create staging dir: {mk_err}'}],
-            }
 
         def _cleanup_empty(src_dir):
             try:
@@ -104,6 +94,42 @@ def build_runner(
             except Exception as e:
                 # Progress fan-out failures must never break a run.
                 logger.debug("reorganize progress fan-out: %s", e)
+
+        # Rename-only mode (#875): just move files to the current scheme — no staging,
+        # no copy, no post-processing. Falls through to the full pipeline otherwise.
+        if getattr(item, 'rename_only', False):
+            if build_final_path_fn is None:
+                return {
+                    'status': 'setup_failed', 'source': None,
+                    'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
+                    'errors': [{'error': 'Rename-only mode unavailable (no path builder)'}],
+                }
+            return reorganize_album_rename_only(
+                album_id=item.album_id,
+                db=get_database(),
+                transfer_dir=transfer_dir,
+                resolve_file_path_fn=resolve_file_path_fn,
+                build_final_path_fn=build_final_path_fn,
+                update_track_path_fn=_update_track_path,
+                cleanup_empty_dir_fn=_cleanup_empty,
+                on_progress=_on_progress,
+                primary_source=item.source,
+                strict_source=bool(item.source),
+                metadata_source=getattr(item, 'metadata_source', 'api') or 'api',
+                stop_check=is_shutting_down_fn,
+            )
+
+        staging_root = os.path.join(download_dir, 'ssync_staging')
+        try:
+            os.makedirs(staging_root, exist_ok=True)
+        except OSError as mk_err:
+            logger.error(f"[Reorganize] Cannot create staging dir {staging_root}: {mk_err}")
+            return {
+                'status': 'setup_failed',
+                'source': None,
+                'total': 0, 'moved': 0, 'skipped': 0, 'failed': 0,
+                'errors': [{'error': f'Could not create staging dir: {mk_err}'}],
+            }
 
         return reorganize_album(
             album_id=item.album_id,
