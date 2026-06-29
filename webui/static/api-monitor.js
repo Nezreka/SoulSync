@@ -386,8 +386,8 @@ function _renderEqualizerBars(grid, data) {
         // Call embers: tiny accent sparks rise off the fill tip, spawned per
         // socket update in proportion to REAL traffic — motion strictly means
         // API calls are happening right now. Suppressed during cooldown and
-        // under reduced-effects.
-        if (!window._reduceEffectsActive && !cooling && realPct > 0.03) {
+        // under reduced-effects / max-performance.
+        if (!window._reduceEffectsActive && !window._maxPerfActive && !cooling && realPct > 0.03) {
             _spawnEmbers(bar, pct, realPct > 0.6 ? 3 : realPct > 0.25 ? 2 : 1);
         }
 

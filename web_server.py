@@ -387,6 +387,7 @@ def _initial_appearance_context():
         _request_is_firefox(),
     )
     reduce_effects = config_manager.get('ui_appearance.reduce_effects', False) is True
+    max_performance = config_manager.get('ui_appearance.max_performance', False) is True
     r, g, b = _hex_to_rgb(accent)
     hue, saturation, lightness = _rgb_to_hsl(r, g, b)
     light = _hsl_to_rgb(hue, saturation, min(lightness + 0.16, 0.95))
@@ -399,6 +400,7 @@ def _initial_appearance_context():
         'initial_particles_enabled': particles_enabled,
         'initial_worker_orbs_enabled': worker_orbs_enabled,
         'initial_reduce_effects': reduce_effects,
+        'initial_max_performance': max_performance,
     }
 
 

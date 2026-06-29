@@ -1065,12 +1065,13 @@
     // ── Page awareness ──
 
     function isEnabled() {
-        // The worker-orbs toggle controls the orbs on its own — reduce-effects no
-        // longer force-kills them. The orb glow is canvas radial gradients, NOT a CSS
-        // blur(28px) (that's the sidebar aura orbs + frosted glass, which reduce-effects
-        // still kills), so the per-frame cost is moderate, not the blur-rasterize lag.
-        // If real telemetry says otherwise, revert by re-adding `&& !window._reduceEffectsActive`.
-        return window._workerOrbsEnabled !== false;
+        // Reduce-effects does NOT gate the orbs — they have their own toggle, so that
+        // setting controls them on its own. The orbs ARE killed by Max Performance: in a
+        // Docker / headless / remote-desktop container there is no GPU, so the per-frame
+        // radial-gradient canvas fill rasterizes on the CPU and can saturate a core,
+        // freezing the whole UI. Max Performance is the nuclear low-power switch for
+        // exactly those software-rendered setups, so the canvas loop must stay off there.
+        return window._workerOrbsEnabled !== false && !window._maxPerfActive;
     }
 
     // ── Real telemetry → pulses ──
