@@ -82,7 +82,7 @@ if not pp_logger.handlers:
     _pp_handler.setFormatter(_logging.Formatter("%(asctime)s - %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     pp_logger.addHandler(_pp_handler)
     pp_logger.propagate = False
-from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited
+from core.spotify_client import SpotifyClient, Playlist as SpotifyPlaylist, Track as SpotifyTrack, _is_globally_rate_limited as _spotify_rate_limited, SPOTIFY_OAUTH_SCOPE
 from core.plex_client import PlexClient
 from core.ui_appearance import is_firefox_user_agent, resolve_worker_orbs_default
 from plexapi.myplex import MyPlexAccount, MyPlexPinLogin
@@ -4803,7 +4803,7 @@ def _profile_spotify_oauth(profile_id_int):
         client_id=client_id,
         client_secret=client_secret,
         redirect_uri=redirect_uri,
-        scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+        scope=SPOTIFY_OAUTH_SCOPE,
         cache_path=f'config/.spotify_cache_profile_{profile_id_int}',
         state=f'profile_{profile_id_int}',
         show_dialog=True,
@@ -5233,7 +5233,7 @@ def spotify_callback():
             client_id=config['client_id'],
             client_secret=config['client_secret'],
             redirect_uri=configured_uri,
-            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+            scope=SPOTIFY_OAUTH_SCOPE,
             cache_path='config/.spotify_cache'
         )
 
@@ -35993,7 +35993,7 @@ def start_oauth_callback_servers():
                             client_id=config['client_id'],
                             client_secret=config['client_secret'],
                             redirect_uri=configured_uri,
-                            scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+                            scope=SPOTIFY_OAUTH_SCOPE,
                             cache_path='config/.spotify_cache'
                         )
 

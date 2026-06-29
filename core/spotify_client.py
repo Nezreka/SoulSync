@@ -14,6 +14,18 @@ from core.metadata.cache import get_metadata_cache
 logger = get_logger("spotify_client")
 
 
+# Single source of truth for the Spotify OAuth scope. Used by EVERY SpotifyOAuth
+# construction (the client, the per-profile registry, and all web_server callbacks) so
+# the authorize URL and token exchange can never request different scopes — a mismatch
+# silently re-prompts or denies. The `playlist-modify-*` pair powers exporting a mirrored
+# playlist back to Spotify (#945); existing users re-auth once to grant it.
+SPOTIFY_OAUTH_SCOPE = (
+    "user-library-read user-read-private playlist-read-private "
+    "playlist-read-collaborative user-read-email user-follow-read "
+    "playlist-modify-public playlist-modify-private"
+)
+
+
 def normalize_spotify_oauth_config(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Normalize Spotify OAuth config before building an auth manager.
 
@@ -744,7 +756,7 @@ class SpotifyClient:
                 client_id=config['client_id'],
                 client_secret=config['client_secret'],
                 redirect_uri=config.get('redirect_uri', "http://127.0.0.1:8888/callback"),
-                scope="user-library-read user-read-private playlist-read-private playlist-read-collaborative user-read-email user-follow-read",
+                scope=SPOTIFY_OAUTH_SCOPE,
                 cache_handler=DatabaseTokenCache(config_manager)
             )
             
@@ -1135,6 +1147,56 @@ class SpotifyClient:
                  logger.info(f"Returning {len(playlists)} playlists fetched before error.")
                  return playlists
             return []
+
+    def create_or_update_playlist(self, name, track_ids, *, existing_id=None,
+                                  public=False, description=""):
+        """Create a Spotify playlist owned by the authed user (or replace an existing
+        one's tracks in place), for exporting a mirrored playlist back to Spotify (#945).
+
+        ``track_ids`` are Spotify track IDs (the stored ``spotify_track_id`` per library
+        track). ``existing_id`` set → replace that playlist's contents (idempotent
+        re-export); unset → create a new playlist. Requires the ``playlist-modify-*``
+        scope — a token issued before that scope was added gets a clear "reconnect"
+        error rather than a raw 403. Returns
+        ``{success, playlist_id, url, added, error}``.
+        """
+        if not self.is_spotify_authenticated():
+            return {"success": False, "error": "Spotify is not connected"}
+        uris = [f"spotify:track:{t}" for t in (track_ids or []) if t]
+        if not uris:
+            return {"success": False, "error": "No matching Spotify tracks to export"}
+        try:
+            playlist_id = existing_id
+            if playlist_id:
+                # Replace contents (re-export). replace_items caps at 100 — seed with the
+                # first 100, then append the rest in 100-track chunks.
+                self.sp.playlist_replace_items(playlist_id, uris[:100])
+                for i in range(100, len(uris), 100):
+                    self.sp.playlist_add_items(playlist_id, uris[i:i + 100])
+            else:
+                user_id = (self.sp.current_user() or {}).get("id")
+                created = self.sp.user_playlist_create(
+                    user_id, name, public=public, description=description,
+                )
+                playlist_id = (created or {}).get("id")
+                if not playlist_id:
+                    return {"success": False, "error": "Spotify did not return a playlist id"}
+                for i in range(0, len(uris), 100):
+                    self.sp.playlist_add_items(playlist_id, uris[i:i + 100])
+            return {
+                "success": True,
+                "playlist_id": playlist_id,
+                "url": f"https://open.spotify.com/playlist/{playlist_id}",
+                "added": len(uris),
+            }
+        except Exception as e:
+            msg = str(e)
+            if "403" in msg or "scope" in msg.lower() or "insufficient" in msg.lower():
+                return {"success": False,
+                        "error": "Reconnect Spotify to grant playlist write access "
+                                 "(Settings → reconnect Spotify)."}
+            _detect_and_set_rate_limit(e, "create_or_update_playlist")
+            return {"success": False, "error": msg}
 
     @rate_limited
     def get_saved_tracks_count(self) -> int:

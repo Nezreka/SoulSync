@@ -88,3 +88,79 @@ def test_no_input():
     }
     assert normalize_spotify_oauth_config(None) == {}
     assert normalize_spotify_oauth_config(config) == expected
+
+# ── create_or_update_playlist: export a mirrored playlist back to Spotify (#945) ──
+
+from core.spotify_client import SpotifyClient as _SpotifyClient
+
+
+class _FakeSp:
+    def __init__(self):
+        self.calls = []
+
+    def current_user(self):
+        self.calls.append(('current_user',))
+        return {'id': 'user-1'}
+
+    def user_playlist_create(self, user_id, name, public=False, description=''):
+        self.calls.append(('create', user_id, name, public))
+        return {'id': 'pl-new'}
+
+    def playlist_add_items(self, pid, uris):
+        self.calls.append(('add', pid, list(uris)))
+
+    def playlist_replace_items(self, pid, uris):
+        self.calls.append(('replace', pid, list(uris)))
+
+
+def _spotify_with(sp, authed=True):
+    c = _SpotifyClient.__new__(_SpotifyClient)
+    c.sp = sp
+    c.is_spotify_authenticated = lambda: authed
+    return c
+
+
+def test_create_new_playlist_adds_tracks():
+    sp = _FakeSp()
+    res = _spotify_with(sp).create_or_update_playlist('My Mix', ['a', 'b', 'c'])
+    assert res['success'] and res['playlist_id'] == 'pl-new'
+    assert res['url'] == 'https://open.spotify.com/playlist/pl-new'
+    assert res['added'] == 3
+    assert ('create', 'user-1', 'My Mix', False) in sp.calls
+    assert ('add', 'pl-new', ['spotify:track:a', 'spotify:track:b', 'spotify:track:c']) in sp.calls
+
+
+def test_update_existing_replaces_no_create():
+    sp = _FakeSp()
+    res = _spotify_with(sp).create_or_update_playlist('My Mix', ['a', 'b'], existing_id='pl-x')
+    assert res['success'] and res['playlist_id'] == 'pl-x'
+    assert ('replace', 'pl-x', ['spotify:track:a', 'spotify:track:b']) in sp.calls
+    assert not any(c[0] == 'create' for c in sp.calls)
+
+
+def test_chunks_over_100_tracks():
+    sp = _FakeSp()
+    res = _spotify_with(sp).create_or_update_playlist('Big', [str(i) for i in range(250)])
+    assert res['added'] == 250
+    adds = [c for c in sp.calls if c[0] == 'add']
+    assert len(adds) == 3 and len(adds[0][2]) == 100 and len(adds[2][2]) == 50
+
+
+def test_empty_tracks_errors_no_api_calls():
+    sp = _FakeSp()
+    res = _spotify_with(sp).create_or_update_playlist('X', [])
+    assert not res['success'] and 'No matching' in res['error']
+    assert sp.calls == []
+
+
+def test_not_authed_errors():
+    res = _spotify_with(_FakeSp(), authed=False).create_or_update_playlist('X', ['a'])
+    assert not res['success'] and 'not connected' in res['error']
+
+
+def test_insufficient_scope_says_reconnect():
+    class _ScopeErr(_FakeSp):
+        def user_playlist_create(self, *a, **k):
+            raise Exception('403 Forbidden: insufficient client scope')
+    res = _spotify_with(_ScopeErr()).create_or_update_playlist('X', ['a'])
+    assert not res['success'] and 'Reconnect Spotify' in res['error']
