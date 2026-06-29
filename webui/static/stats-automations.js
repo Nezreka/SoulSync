@@ -686,6 +686,13 @@ function exportMirroredPlaylist(playlistId, name) {
     overlay.querySelectorAll('.pl-export-choice').forEach(btn => {
         btn.addEventListener('click', () => {
             const mode = btn.dataset.mode;
+            // Gated service button (not connected) → nudge to Settings instead of a doomed export.
+            if (btn.dataset.disconnected) {
+                const dest = mode[0].toUpperCase() + mode.slice(1);
+                overlay.remove();
+                _setExportStatus(playlistId, `<span style="color:#f59e0b;">Connect ${dest} in Settings → Connections to export here</span>`, 9000);
+                return;
+            }
             const bfEl = overlay.querySelector('#pl-export-backfill');
             const backfill = !!(bfEl && bfEl.checked);
             overlay.remove();
@@ -693,6 +700,21 @@ function exportMirroredPlaylist(playlistId, name) {
         });
     });
     document.body.appendChild(overlay);
+
+    // Gate Spotify/Deezer on connection (cheap token/ARL check — no live verify). Disconnected
+    // services grey out + nudge to Settings rather than letting the export fail with "not connected".
+    fetch('/api/discover/your-albums/sources').then(r => r.json()).then(data => {
+        const connected = (data && data.connected) || [];
+        overlay.querySelectorAll('.pl-export-choice[data-mode]').forEach(btn => {
+            const m = btn.dataset.mode;
+            if ((m === 'spotify' || m === 'deezer') && !connected.includes(m)) {
+                btn.dataset.disconnected = '1';
+                btn.style.opacity = '0.5';
+                const hint = btn.querySelector('div:last-child');
+                if (hint) hint.innerHTML = `<span style="color:#f59e0b;">Not connected</span> — set up ${m[0].toUpperCase() + m.slice(1)} in Settings → Connections first.`;
+            }
+        });
+    }).catch(() => {});
 }
 
 async function _startPlaylistExport(playlistId, mode, name, backfill) {
