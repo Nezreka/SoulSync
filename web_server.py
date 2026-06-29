@@ -27741,15 +27741,17 @@ _playlist_export_jobs = {}
 _playlist_export_jobs_lock = threading.Lock()
 
 
-def _run_service_export(job, db, playlist_id, title, service, client, resolve_fn):
+def _run_service_export(job, db, playlist_id, title, service, client, resolve_ids_fn=None):
     """Export a mirrored playlist back to a streaming service (Spotify/Deezer, #945).
 
-    Reuses the same resolve→push→store-target machinery the ListenBrainz export uses,
-    just with a service track-ID resolver and a service write client. Deps are injected
-    so the orchestration (resolve, unmatched-guard, push, idempotent target store, error
-    paths) is unit-testable without a DB or live service.
+    Resolves each track to a target-service ID via the discovery cache (the track's
+    extra_data — free + already matched) then the library's stored id, pushes the matched
+    set via the service write client, and stores the returned playlist id so a re-export
+    updates in place (idempotent, like the LB #903 fix). Deps injected so the orchestration
+    is unit-testable without a DB or live service.
     """
-    from core.exports.playlist_export import resolve_playlist_tracks
+    from core.exports.export_sources import resolve_service_track_ids
+    resolve_ids_fn = resolve_ids_fn or resolve_service_track_ids
 
     tracks = db.get_mirrored_playlist_tracks(int(playlist_id))
     job['total'] = len(tracks)
@@ -27759,8 +27761,7 @@ def _run_service_export(job, db, playlist_id, title, service, client, resolve_fn
         job['done'] = done
         job['stats'] = dict(stats)
 
-    out = resolve_playlist_tracks(tracks, resolve_fn, on_progress=on_progress,
-                                  id_key='service_track_id')
+    out = resolve_ids_fn(tracks, service, on_progress=on_progress)
     job['stats'] = out['stats']
     ids = [r['service_track_id'] for r in out['resolved'] if r.get('service_track_id')]
     if not ids:
@@ -27792,15 +27793,13 @@ def _run_playlist_export(job_id, playlist_id, title, mode):
     try:
         # Service export (#945) — resolve to Spotify/Deezer track IDs and push.
         if mode in ('spotify', 'deezer'):
-            from core.exports.export_sources import build_service_resolve_fn
             db = get_database()
             if mode == 'spotify':
                 client = get_spotify_client()
             else:
                 from core.deezer_download_client import DeezerDownloadClient
                 client = DeezerDownloadClient()
-            _run_service_export(job, db, playlist_id, title, mode, client,
-                                build_service_resolve_fn(mode))
+            _run_service_export(job, db, playlist_id, title, mode, client)
             return
 
         from core.exports.export_sources import build_resolve_fn
