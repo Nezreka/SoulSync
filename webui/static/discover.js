@@ -22,27 +22,69 @@ let personalizedDiscoveryShuffle = [];
 let personalizedListeningMix = [];   // #913: the "Your Listening Mix" track playlist
 let buildPlaylistSelectedArtists = [];
 
-// ── Adventurousness dial (Discover page) — fancy control, syncs with Settings → Discovery ──
-// Same config key (discover.adventurousness) as the Settings slider, so the two stay in sync.
+// ── Adventurousness — living wave dial (Discover page) ──────────────────────────────────────
+// A draggable orb rides an animated line. At the left (value 0) the line is green and waves gently
+// ("artists you already like"); dragging right shifts the colour through the spectrum to red and the
+// wave grows bigger + more erratic. Drawn each frame with rAF. Shares discover.adventurousness with
+// the Settings slider, so the two stay in sync.
+const _advWave = { value: 0.3, phase: 0, raf: null, dragging: false };
+
 function _advState(v) {
-    if (v < 0.12) return { word: 'Playing it safe', icon: '🛟' };
-    if (v < 0.40) return { word: 'Balanced', icon: '🧭' };
-    if (v < 0.70) return { word: 'Adventurous', icon: '🎲' };
-    return { word: 'Deep cuts only', icon: '🔮' };
+    if (v < 0.12) return 'Playing it safe';
+    if (v < 0.40) return 'Balanced';
+    if (v < 0.70) return 'Adventurous';
+    return 'Deep cuts only';
 }
-function onAdvDialInput(value) {
-    const v = parseFloat(value);
-    const s = _advState(v);
-    const stateEl = document.getElementById('adv-dial-state');
-    if (stateEl) stateEl.textContent = s.word;
-    const iconEl = document.getElementById('adv-dial-icon');
-    if (iconEl) iconEl.textContent = s.icon;
-    const valEl = document.getElementById('adv-dial-val');
-    if (valEl) valEl.textContent = Math.round(v * 100) + '%';
+// green (120°) → red (0°) through the warm spectrum (yellow, orange) as the orb moves right.
+function _advColor(v, light) {
+    const hue = 120 * (1 - Math.max(0, Math.min(1, v)));
+    return `hsl(${hue.toFixed(0)}, 85%, ${light || 55}%)`;
+}
+// Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
+function _advWaveY(u, v) {
+    const amp = 2 + v * 22;            // gentle ripple at 0, tall waves at 1
+    const freq = 1.1 + v * 3.2;        // more cycles as it gets adventurous
+    let y = 40 + amp * Math.sin(freq * u * Math.PI * 2 + _advWave.phase);
+    if (v > 0) {                       // a detuned second harmonic adds the erratic wobble
+        y += v * amp * 0.55 * Math.sin(freq * 2.4 * u * Math.PI * 2 + _advWave.phase * 1.7 + 1.3);
+    }
+    return y;
+}
+function _advDraw() {
+    const path = document.getElementById('adv-wave-path');
+    const track = document.getElementById('adv-wave-track');
+    if (!path || !track) { _advWave.raf = null; return; }
+    if (track.offsetParent !== null) {  // skip the work while the Discover page is hidden
+        const v = _advWave.value;
+        _advWave.phase += 0.03 + v * 0.07;   // waves faster the more adventurous
+        let d = '';
+        const N = 90;
+        for (let i = 0; i <= N; i++) {
+            const u = i / N;
+            d += (i === 0 ? 'M ' : ' L ') + (u * 1000).toFixed(1) + ' ' + _advWaveY(u, v).toFixed(1);
+        }
+        path.setAttribute('d', d);
+        path.setAttribute('stroke', _advColor(v));
+        const orb = document.getElementById('adv-wave-orb');
+        if (orb) orb.style.top = (_advWaveY(v, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
+    }
+    _advWave.raf = requestAnimationFrame(_advDraw);
+}
+function _advApply(v) {
+    v = Math.max(0, Math.min(1, v));
+    _advWave.value = v;
+    const orb = document.getElementById('adv-wave-orb');
+    if (orb) {
+        orb.style.left = (v * 100).toFixed(2) + '%';
+        const c = _advColor(v, 58);
+        orb.style.background = c;
+        orb.style.boxShadow = `0 0 18px 2px ${c}, 0 0 0 5px rgba(255,255,255,0.08), inset 0 0 0 2px rgba(255,255,255,0.55)`;
+    }
+    const stateEl = document.getElementById('adv-wave-state');
+    if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = _advColor(v, 62); }
 }
 let _advCommitTimer = null;
-function onAdvDialCommit(value) {
-    const v = parseFloat(value);
+function _advCommit(v) {
     clearTimeout(_advCommitTimer);
     _advCommitTimer = setTimeout(async () => {
         try {
@@ -54,19 +96,44 @@ function onAdvDialCommit(value) {
         // Re-fetch the two rec rows so the dial is felt immediately (the routes re-rank live).
         if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
         if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
-    }, 200);
+    }, 220);
+}
+function _advInitDrag() {
+    const track = document.getElementById('adv-wave-track');
+    if (!track || track._advWired) return;
+    track._advWired = true;
+    const fromX = (clientX) => {
+        const r = track.getBoundingClientRect();
+        return r.width ? (clientX - r.left) / r.width : 0;
+    };
+    track.addEventListener('pointerdown', (e) => {
+        _advWave.dragging = true;
+        try { track.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        _advApply(fromX(e.clientX));
+    });
+    track.addEventListener('pointermove', (e) => { if (_advWave.dragging) _advApply(fromX(e.clientX)); });
+    const end = (e) => {
+        if (!_advWave.dragging) return;
+        _advWave.dragging = false;
+        _advApply(fromX(e.clientX));
+        _advCommit(_advWave.value);
+    };
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
 }
 async function loadAdventurousnessDial() {
-    const slider = document.getElementById('adv-dial-slider');
-    if (!slider) return;
+    const track = document.getElementById('adv-wave-track');
+    if (!track) return;
+    _advInitDrag();
     try {
         const resp = await fetch('/api/discover/adventurousness');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const v = (typeof data.value === 'number') ? data.value : 0.3;
-        slider.value = v;
-        onAdvDialInput(v);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (typeof data.value === 'number') _advWave.value = data.value;
+        }
     } catch (e) { /* non-fatal */ }
+    _advApply(_advWave.value);
+    if (!_advWave.raf) _advWave.raf = requestAnimationFrame(_advDraw);
 }
 
 async function loadDiscoverPage() {
