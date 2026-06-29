@@ -177,6 +177,7 @@ from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
 from core.imports.routes import staging_groups as _import_staging_groups
 from core.imports.routes import staging_hints as _import_staging_hints
+from core.imports.routes import staging_scan_status as _import_staging_scan_status
 from core.imports.routes import staging_suggestions as _import_staging_suggestions
 from core.imports.paths import build_final_path_for_track as _build_final_path_for_track
 from core.imports.pipeline import build_import_pipeline_runtime as _build_import_pipeline_runtime
@@ -37697,6 +37698,12 @@ def import_staging_files():
 @app.route('/api/import/staging/groups', methods=['GET'])
 def import_staging_groups():
     payload, status = _import_staging_groups(_build_import_route_runtime())
+    return jsonify(payload), status
+
+
+@app.route('/api/import/staging/scan-status', methods=['GET'])
+def import_staging_scan_status():
+    payload, status = _import_staging_scan_status(_build_import_route_runtime())
     return jsonify(payload), status
 
 
