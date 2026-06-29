@@ -168,4 +168,71 @@ def test_resolve_waterfall_cache_then_library_then_unmatched():
     ids = [r['service_track_id'] for r in out['resolved']]
     assert ids == ['111', 'lib-222', None]
     s = out['stats']
-    assert s == {'total': 3, 'resolved': 2, 'unmatched': 1, 'from_cache': 1, 'from_library': 1}
+    assert s == {'total': 3, 'resolved': 2, 'unmatched': 1, 'from_cache': 1,
+                 'from_library': 1, 'from_search': 0}
+
+
+# ── backfill: confident live-search match for the un-cached/un-enriched tail (#945) ──
+
+from core.metadata.types import Track as _Track
+from core.exports.export_sources import search_service_track_id, BACKFILL_MIN_SCORE
+
+
+def _cand(name, artist, tid, album_type='album'):
+    return _Track(id=tid, name=name, artists=[artist], album='A',
+                  duration_ms=200000, album_type=album_type)
+
+
+def test_backfill_exact_match_returned():
+    search = lambda q: [_cand('Not Like Us', 'Kendrick Lamar', 'dz-NLU')]
+    assert search_service_track_id('Kendrick Lamar', 'Not Like Us', search_fn=search) == 'dz-NLU'
+
+
+def test_backfill_wrong_artist_rejected():
+    """SAFETY: an exact-title hit by the WRONG artist scores below the floor (no 1.5x exact-
+    artist boost) → None, so backfill never adds someone else's same-named track."""
+    search = lambda q: [_cand('Not Like Us', 'Some Other Guy', 'wrong-id')]
+    assert search_service_track_id('Kendrick Lamar', 'Not Like Us', search_fn=search) is None
+
+
+def test_backfill_karaoke_cover_rejected():
+    """SAFETY: a karaoke/cover version is buried (x0.05) below the floor → None."""
+    search = lambda q: [_cand('Not Like Us (Karaoke Version)', 'Karaoke All Stars', 'kar-id')]
+    assert search_service_track_id('Kendrick Lamar', 'Not Like Us', search_fn=search) is None
+
+
+def test_backfill_picks_real_over_cover():
+    search = lambda q: [
+        _cand('Not Like Us (Karaoke Version)', 'Karaoke All Stars', 'kar-id'),
+        _cand('Not Like Us', 'Kendrick Lamar', 'real-id'),
+    ]
+    assert search_service_track_id('Kendrick Lamar', 'Not Like Us', search_fn=search) == 'real-id'
+
+
+def test_backfill_empty_and_error_and_no_title():
+    assert search_service_track_id('A', 'X', search_fn=lambda q: []) is None
+    def boom(q):
+        raise RuntimeError('deezer flaked')
+    assert search_service_track_id('A', 'X', search_fn=boom) is None      # fail-safe
+    assert search_service_track_id('A', '', search_fn=lambda q: [_cand('X', 'A', 'i')]) is None
+
+
+def test_resolve_waterfall_uses_search_only_when_cache_and_library_miss():
+    tracks = [
+        _extra('deezer', 111) | {'artist_name': 'A', 'track_name': 'Cached'},
+        {'artist_name': 'A', 'track_name': 'InLib'},
+        {'artist_name': 'A', 'track_name': 'OnlyOnSvc'},
+    ]
+    db_fn = lambda a, t, s: 'lib-2' if t == 'InLib' else None
+    search_id_fn = lambda a, t: 'srch-3' if t == 'OnlyOnSvc' else None
+    out = resolve_service_track_ids(tracks, 'deezer', db_fn=db_fn, search_id_fn=search_id_fn)
+    assert [r['service_track_id'] for r in out['resolved']] == ['111', 'lib-2', 'srch-3']
+    s = out['stats']
+    assert (s['from_cache'], s['from_library'], s['from_search'], s['unmatched']) == (1, 1, 1, 0)
+
+
+def test_resolve_no_search_fn_leaves_tail_unmatched():
+    out = resolve_service_track_ids([{'artist_name': 'A', 'track_name': 'X'}], 'deezer',
+                                    db_fn=lambda a, t, s: None)   # search_id_fn omitted
+    assert out['resolved'][0]['service_track_id'] is None
+    assert out['stats']['unmatched'] == 1 and out['stats']['from_search'] == 0

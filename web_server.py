@@ -27741,14 +27741,34 @@ _playlist_export_jobs = {}
 _playlist_export_jobs_lock = threading.Lock()
 
 
+def _build_service_search_id_fn(service):
+    """Bind a confident-search ID resolver to the service's metadata search client, for the
+    opt-in export backfill (#945). Returns None when the search client isn't available — the
+    backfill then simply finds nothing for that track rather than crashing the export."""
+    from core.exports.export_sources import search_service_track_id
+    try:
+        if service == 'spotify':
+            client = get_spotify_client()
+        else:
+            from core.metadata.registry import get_deezer_client
+            client = get_deezer_client()
+        if not client:
+            return None
+        search_fn = lambda q: client.search_tracks(q, limit=8)  # noqa: E731
+        return lambda artist, title: search_service_track_id(artist, title, search_fn=search_fn)
+    except Exception:
+        return None
+
+
 def _run_service_export(job, db, playlist_id, title, service, client, resolve_ids_fn=None):
     """Export a mirrored playlist back to a streaming service (Spotify/Deezer, #945).
 
     Resolves each track to a target-service ID via the discovery cache (the track's
-    extra_data — free + already matched) then the library's stored id, pushes the matched
-    set via the service write client, and stores the returned playlist id so a re-export
-    updates in place (idempotent, like the LB #903 fix). Deps injected so the orchestration
-    is unit-testable without a DB or live service.
+    extra_data — free + already matched) → the library's stored id → (when job['backfill']
+    is set) a confident live-search match, pushes the matched set via the service write
+    client, and stores the returned playlist id so a re-export updates in place (idempotent,
+    like the LB #903 fix). Deps injected so the orchestration is unit-testable without a DB
+    or live service.
     """
     from core.exports.export_sources import resolve_service_track_ids
     resolve_ids_fn = resolve_ids_fn or resolve_service_track_ids
@@ -27761,7 +27781,9 @@ def _run_service_export(job, db, playlist_id, title, service, client, resolve_id
         job['done'] = done
         job['stats'] = dict(stats)
 
-    out = resolve_ids_fn(tracks, service, on_progress=on_progress)
+    # Opt-in backfill: confident live-search for tracks the cache + library couldn't resolve.
+    search_id_fn = _build_service_search_id_fn(service) if job.get('backfill') else None
+    out = resolve_ids_fn(tracks, service, search_id_fn=search_id_fn, on_progress=on_progress)
     job['stats'] = out['stats']
     ids = [r['service_track_id'] for r in out['resolved'] if r.get('service_track_id')]
     if not ids:
@@ -27885,6 +27907,8 @@ def start_playlist_export_service(playlist_id, service):
         service = (service or '').lower()
         if service not in ('spotify', 'deezer'):
             return jsonify({"success": False, "error": f"Unsupported export target: {service}"}), 400
+        body = request.get_json(silent=True) or {}
+        backfill = bool(body.get('backfill'))
         db = get_database()
         meta = db.get_mirrored_playlist(int(playlist_id)) or {}
         title = (meta.get('name') or meta.get('title') or 'SoulSync Export').strip() or 'SoulSync Export'
@@ -27894,8 +27918,8 @@ def start_playlist_export_service(playlist_id, service):
         with _playlist_export_jobs_lock:
             _playlist_export_jobs[job_id] = {
                 'job_id': job_id, 'playlist_id': str(playlist_id), 'title': title,
-                'mode': service, 'phase': 'starting', 'done': 0, 'total': 0,
-                'stats': {}, 'error': None,
+                'mode': service, 'backfill': backfill, 'phase': 'starting', 'done': 0,
+                'total': 0, 'stats': {}, 'error': None,
             }
         t = threading.Thread(target=_run_playlist_export,
                              args=(job_id, playlist_id, title, service), daemon=True)
