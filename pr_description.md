@@ -1,19 +1,19 @@
 # soulsync 2.8.1 — `dev` → `main`
 
-a feature + reliability release. the headline is **export a mirrored playlist back to Spotify or Deezer** — same one-click flow as the listenbrainz export, now pointed at the streaming services. plus a **rename-only mode** for Library Reorganize, broader lossless handling, a pile of download fixes, and the reduce-visual-effects pass refined so it stops freezing functional motion.
+a feature + reliability release. the headline is **export a mirrored playlist back to Deezer** — same one-click flow as the listenbrainz export, now pointed at your Deezer account (Spotify export is coming in a follow-up). plus a **rename-only mode** for Library Reorganize, broader lossless handling, a pile of download fixes, and the reduce-visual-effects pass refined so it stops freezing functional motion.
 
 ---
 
 ## what's new
 
-### 🎧 Export playlists to Spotify & Deezer (#945)
-the mirrored-playlist export modal now has **Sync to Spotify** and **Sync to Deezer** next to the listenbrainz / jspf options. it builds a playlist in your account from the tracks soulsync already has the service IDs for:
+### 🎧 Export playlists to Deezer (#945)
+the mirrored-playlist export modal now has **Sync to Deezer** next to the listenbrainz / jspf options. it builds a Deezer playlist in your account from the tracks soulsync already has the Deezer IDs for:
 
 - resolves each track from what's already on hand first — the **discovery cache**, then your library's stored IDs — so for an already-discovered playlist it's instant and uses **zero API calls**
 - re-exporting **updates the same playlist in place** instead of spawning duplicates
 - an optional **"match missing tracks"** toggle does a confident live search for the stragglers — and only adds a match it's sure about (a wrong-artist or karaoke version is left out, never guessed)
-- service buttons grey out + point you to Settings when that service isn't connected
-- spotify needs a one-time reconnect to grant playlist-write access
+- the Deezer button greys out + points you to Settings when Deezer isn't connected
+- _Spotify export is wired up but waiting on an on-demand write-permission flow, so it's hidden for now_
 
 ### 🏷️ Library Reorganize — Rename only (#875)
 a lighter reorganize action: it just **renames your files** to your current naming scheme — no re-tagging, no quality/AcoustID re-check, no copy-to-staging. much faster on a NAS, won't fail on post-processing reasons, and only touches files whose path actually changes (which also fixes the "2 of 14 previewed but everything got modified" album-splitting). pick it from the new **Action** dropdown in the reorganize modal.
