@@ -3,9 +3,28 @@
 from __future__ import annotations
 
 from core.discovery.popularity import (
+    fetch_artist_popularity,
     log_normalize_popularity,
     resolve_popularity,
 )
+
+
+class _SpotifyFree:
+    def get_artist(self, aid):
+        return {"followers": {"total": 5_000_000}}
+
+    def search_artists(self, name):
+        return [{"followers": {"total": 5_000_000}}]
+
+
+class _LastFm:
+    def get_artist_info(self, name):
+        return {"stats": {"listeners": 1_000_000}}
+
+
+class _Deezer:
+    def get_artist_info(self, did):
+        return {"followers": {"total": 500_000}}
 
 
 # ── log_normalize_popularity ─────────────────────────────────────────────────
@@ -56,3 +75,28 @@ def test_cascade_returns_none_when_nothing_usable():
     assert resolve_popularity() == (None, None)
     assert resolve_popularity(spotify_followers=0, lastfm_listeners=0, deezer_fans=0) == (None, None)
     assert resolve_popularity(lastfm_listeners=-5) == (None, None)
+
+
+# ── fetch_artist_popularity (injected-client orchestration) ──────────────────
+def test_fetch_uses_spotify_free_first():
+    pop, src = fetch_artist_popularity("X", spotify_id="sp1", spotify_free=_SpotifyFree(), lastfm=_LastFm())
+    assert src == "spotify_free" and pop > 70
+
+
+def test_fetch_falls_through_when_a_source_errors():
+    class _Boom:
+        def get_artist(self, aid):
+            raise RuntimeError("down")
+    pop, src = fetch_artist_popularity("X", spotify_id="sp1", spotify_free=_Boom(), lastfm=_LastFm())
+    assert src == "lastfm"     # spotify raised -> fell through, no crash
+
+
+def test_fetch_deezer_needs_an_id():
+    # no spotify/lastfm, deezer client present but no deezer_id -> nothing fetched
+    assert fetch_artist_popularity("X", deezer=_Deezer()) == (None, None)
+    pop, src = fetch_artist_popularity("X", deezer_id="dz1", deezer=_Deezer())
+    assert src == "deezer"
+
+
+def test_fetch_none_with_no_clients():
+    assert fetch_artist_popularity("X", spotify_id="sp1", deezer_id="dz1") == (None, None)

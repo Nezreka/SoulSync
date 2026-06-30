@@ -74,3 +74,49 @@ def resolve_popularity(
         return log_normalize_popularity(
             deezer_fans, floor_log=DEEZER_FLOOR_LOG, ceil_log=DEEZER_CEIL_LOG), "deezer"
     return None, None
+
+
+def _dig(obj, *path):
+    """Walk a dict path, tolerating missing keys / non-dicts -> None."""
+    cur = obj
+    for key in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def fetch_artist_popularity(
+    name: str, *, spotify_id: Optional[str] = None, deezer_id: Optional[str] = None,
+    spotify_free=None, lastfm=None, deezer=None,
+) -> Tuple[Optional[float], Optional[str]]:
+    """Run the popularity cascade for ONE artist over whatever clients are passed (all optional). Each
+    source is wrapped so one failing just falls through to the next. The clients are INJECTED — no
+    imports here — so this is unit-testable without the network. Returns ``(0..100, source)`` or
+    ``(None, None)``. Shapes: Spotify Free ``get_artist``/``search_artists`` -> ``followers.total``;
+    Last.fm ``get_artist_info`` -> ``stats.listeners``; Deezer ``get_artist_info`` -> ``followers.total``.
+    """
+    def _safe(fn):
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    sp_followers = None
+    if spotify_free is not None and (spotify_id or name):
+        art = _safe(lambda: spotify_free.get_artist(spotify_id)) if spotify_id else \
+            _safe(lambda: (spotify_free.search_artists(name) or [None])[0])
+        sp_followers = _dig(art, "followers", "total")
+
+    lf_listeners = None
+    if lastfm is not None and name:
+        info = _safe(lambda: lastfm.get_artist_info(name))
+        lf_listeners = _dig(info, "stats", "listeners")
+
+    dz_fans = None
+    if deezer is not None and deezer_id:
+        info = _safe(lambda: deezer.get_artist_info(deezer_id))
+        dz_fans = _dig(info, "followers", "total")
+
+    return resolve_popularity(
+        spotify_followers=sp_followers, lastfm_listeners=lf_listeners, deezer_fans=dz_fans)
