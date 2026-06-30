@@ -29499,6 +29499,33 @@ def get_discover_hero():
     return _discover_hero_get()
 
 
+_discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
+_DISCOVER_GENRE_WEIGHT = 0.6          # a candidate fully in your top genre gets up to +60% score
+
+
+def _discover_genre_taste(database, profile_id):
+    """Cached genre-taste profile for a profile — ``{genre_lower: 0..1}`` from the genres of your
+    top-played artists, weighted by plays. Cached 5 min (it changes slowly) so the live dial-drag
+    re-fetch doesn't recompute it. Fail-soft -> ``{}`` (no genre data -> no boost, never a penalty)."""
+    import time
+    now = time.time()
+    cached = _discover_taste_cache.get(profile_id)
+    if cached and now < cached[0]:
+        return cached[1]
+    profile = {}
+    try:
+        from core.discovery.listening_recommendations import build_genre_taste_profile
+        top = database.get_top_artists('all', 300) or []
+        genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
+        weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
+                     t.get('play_count', 1) or 1) for t in top]
+        profile = build_genre_taste_profile(weighted)
+    except Exception as e:
+        logger.debug(f"discover genre taste profile failed: {e}")
+    _discover_taste_cache[profile_id] = (now + 300, profile)
+    return profile
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -29565,27 +29592,35 @@ def get_discover_similar_artists():
                 artist_data["because"] = because
             result_artists.append(artist_data)
 
-        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
-        # Derive a score from the SQL signals (occurrence primary, similarity a minor tiebreak); at
-        # level 0 apply_adventurousness returns the list unchanged, so the featured-rotation order is
-        # fully preserved. Fail-soft. The frontend shows the top slice, so the obscure ones surface.
+        # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
+        # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
+        # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
+        # rotation order is left untouched (no regression). Fail-soft.
         try:
             _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
         except (TypeError, ValueError):
             _adv_level = 0.0
-        if _adv_level > 0 and result_artists:
+        _taste = _discover_genre_taste(database, get_current_profile_id())
+        if result_artists and (_adv_level > 0 or _taste):
             try:
+                from core.discovery.listening_recommendations import apply_adventurousness, genre_affinity
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
-                    a['_adv_score'] = _oc + (10.0 - _rank) * 0.1
-                from core.discovery.listening_recommendations import apply_adventurousness
-                result_artists = apply_adventurousness(
-                    result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                    _base = _oc + (10.0 - _rank) * 0.1
+                    _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
+                    a['_adv_score'] = _base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
+                # The genre boost must reorder even at dial 0 (apply_adventurousness no-ops there), so
+                # sort by the boosted score first; the dial then layers its popularity penalty on top.
+                result_artists.sort(key=lambda a: -a['_adv_score'])
+                if _adv_level > 0:
+                    result_artists = apply_adventurousness(
+                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
                 for a in result_artists:
                     a.pop('_adv_score', None)
             except Exception as _adv_err:
-                logger.debug(f"similar-artists adventurousness re-rank skipped: {_adv_err}")
+                logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
 
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
@@ -29650,6 +29685,21 @@ def get_discover_listening_recommendations():
             stored = json.loads(raw) or []
         except (ValueError, TypeError):
             stored = []
+
+        # Genre/tag affinity boost (aurral parity, always-on): candidates whose genres match the
+        # genres you actually PLAY rank higher. Additive — affinity 0 (no match / no genre data)
+        # leaves the score untouched, so it can only ever surface a taste match, never bury anything.
+        try:
+            taste = _discover_genre_taste(database, get_current_profile_id())
+            if taste and stored:
+                from core.discovery.listening_recommendations import genre_affinity
+                for a in stored:
+                    aff = genre_affinity(a.get('genres') or [], taste)
+                    if aff > 0:
+                        a['score'] = float(a.get('score') or 0) * (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
+                stored.sort(key=lambda a: -float(a.get('score') or 0))   # reorder by the boosted score
+        except Exception as _ga_err:
+            logger.debug(f"genre-affinity boost skipped: {_ga_err}")
 
         # Adventurousness re-rank (aurral-style): enrich popularity at request time (the stored recs
         # don't carry it inline, so this works on existing data), then push globally-popular picks

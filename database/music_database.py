@@ -10541,6 +10541,41 @@ class MusicDatabase:
             logger.debug(f"get_similar_artist_popularities failed: {e}")
         return out
 
+    def get_artist_genres_by_name(self, names):
+        """Map lowercased artist name -> genres list (from the library ``artists`` table). Feeds the
+        Discover genre-taste profile (the genres of your top-played artists). Handles both the JSON
+        array and legacy comma-separated genre encodings. Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        import json as _json
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in clean)
+                cursor.execute(
+                    f"SELECT LOWER(name) AS n, genres FROM artists "
+                    f"WHERE genres IS NOT NULL AND TRIM(genres) != '' AND LOWER(name) IN ({placeholders})",
+                    clean,
+                )
+                for row in cursor.fetchall():
+                    raw = (row['genres'] or '').strip()
+                    if not raw:
+                        continue
+                    try:
+                        genres = _json.loads(raw) if raw.startswith('[') else None
+                    except (ValueError, TypeError):
+                        genres = None
+                    if not isinstance(genres, list):
+                        genres = [g.strip() for g in raw.split(',') if g.strip()]
+                    genres = [str(g).strip() for g in genres if str(g).strip()]
+                    if genres:
+                        out[row['n']] = genres
+        except Exception as e:
+            logger.debug(f"get_artist_genres_by_name failed: {e}")
+        return out
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
