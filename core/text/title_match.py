@@ -22,6 +22,10 @@ get rejected; the real track is then correctly reported missing.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Iterable
+from typing import TypeVar
+
+T = TypeVar("T")
 
 # Articles / prepositions / conjunctions only. Deliberately NOT pronouns
 # ("you", "me", "i") — those carry meaning in song titles and dropping them
@@ -227,10 +231,48 @@ def base_title_before_dash(title: str) -> str:
     return title[:idx].strip() if idx > 0 else title
 
 
+def choose_best_title_candidate(
+    search_norm: str,
+    search_clean: str,
+    candidates: Iterable[tuple[str, str, T]],
+    similarity_fn: Callable[[str, str], float],
+    *,
+    threshold: float = 0.7,
+) -> T | None:
+    """Pick the best title candidate instead of the first acceptable one.
+
+    Several UI/library paths strip parenthetical qualifiers for fallback matching,
+    so both ``Ratata`` and ``Ratata (Afro Bros Remix)`` clean to ``ratata``.
+    A first-match loop can therefore select the remix for a bare-title request
+    when DB order happens to put the remix first. Rank exact normalized title
+    matches before cleaned-title fallbacks, then fuzzy matches.
+    """
+    best_payload: T | None = None
+    best_rank: tuple[float, float, float] | None = None
+
+    for db_norm, db_clean, payload in candidates:
+        if search_norm == db_norm:
+            rank = (0, 0.0, abs(len(search_norm) - len(db_norm)))
+        elif search_clean == db_clean:
+            rank = (1, 0.0, abs(len(search_norm) - len(db_norm)))
+        else:
+            sim = max(similarity_fn(search_norm, db_norm), similarity_fn(search_clean, db_clean))
+            if sim < threshold:
+                continue
+            rank = (2, -sim, abs(len(search_norm) - len(db_norm)))
+
+        if best_rank is None or rank < best_rank:
+            best_rank = rank
+            best_payload = payload
+
+    return best_payload
+
+
 __all__ = [
     "titles_plausibly_same",
     "strip_redundant_context_qualifiers",
     "strip_subtitle_qualifiers",
     "numeric_tokens_differ",
     "base_title_before_dash",
+    "choose_best_title_candidate",
 ]

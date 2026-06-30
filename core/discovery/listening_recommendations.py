@@ -39,6 +39,14 @@ def _positive_float(value: object, default: float = 1.0) -> float:
     return f if f > 0 else default
 
 
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    """Plain float coercion that keeps 0 / negatives (unlike _positive_float) — popularity can be 0."""
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
 def _get(row: object, attr: str):
     """Read a field from a dataclass row or a dict row."""
     if isinstance(row, dict):
@@ -232,6 +240,159 @@ def rank_recommended_artists(
         ))
     out.sort(key=lambda r: (-r.score, -r.seed_count, r.name.lower()))
     return out[:limit]
+
+
+# ── Adventurousness re-rank (aurral-style popularity penalty) ────────────────────────────────
+# Both Discover rec rows already EXCLUDE what you own / watch, so "novelty" is baked in; the lever we
+# were missing is a POPULARITY PENALTY. At higher adventurousness, globally-popular candidates are
+# pushed down so the obscure / non-obvious picks surface. Pure + reusable across both rec rows.
+_MAX_POP_PENALTY = 0.7  # at level 1.0 a popularity-100 candidate loses 70% of its score
+
+# Multi-dimensional adventurousness: the dial blends THREE exploration axes, not just popularity.
+# Anchored at the historical default (0.3) so anyone who never touches the dial sees the exact same
+# ranking as before — the dial only changes behaviour as you move away from 0.3.
+_DIAL_DEFAULT = 0.3
+_GENRE_AT_DEFAULT = 0.6      # genre-affinity boost weight at the default (was the fixed constant)
+_NOVELTY_AT_DEFAULT = 0.4    # novelty (already-heard) penalty weight at the default (ditto)
+# Per-unit-of-dial slopes. Genre LOOSENS as you get adventurous (negative); novelty TIGHTENS.
+_GENRE_SLOPE = -0.55        # dial 0 -> ~0.77 (very on-taste); dial 1 -> ~0.22 (out-of-taste allowed)
+_NOVELTY_SLOPE = 0.45       # dial 0 -> ~0.27 (familiar OK);   dial 1 -> ~0.72 (strongly prefer unheard)
+
+
+def adventurousness_weights(level: object) -> dict:
+    """Map the 0..1 adventurousness dial to per-signal weights. Pure — the SINGLE source of truth for
+    how the dial blends the three exploration axes, so both rec routes stay consistent.
+
+    - ``genre``: STRONG at dial 0 (stay on your genres) -> RELAXED at dial 1 (allow out-of-taste).
+    - ``novelty``: GENTLE at dial 0 -> STRONG at dial 1 (prefer the unheard).
+    - ``popularity``: 0 at dial 0 -> ``_MAX_POP_PENALTY`` at dial 1 (the existing penalty).
+
+    Linear + monotonic, and pivoted on the default (0.3) so the weights there equal the previous fixed
+    constants exactly — i.e. zero ranking change for anyone who leaves the dial alone.
+    """
+    lvl = max(0.0, min(1.0, _coerce_float(level, _DIAL_DEFAULT)))
+    genre = _GENRE_AT_DEFAULT + _GENRE_SLOPE * (lvl - _DIAL_DEFAULT)
+    novelty = _NOVELTY_AT_DEFAULT + _NOVELTY_SLOPE * (lvl - _DIAL_DEFAULT)
+    return {
+        "genre": max(0.0, genre),
+        "novelty": max(0.0, min(1.0, novelty)),
+        "popularity": lvl * _MAX_POP_PENALTY,
+    }
+
+
+def apply_adventurousness(
+    items: Sequence[dict],
+    level: object,
+    *,
+    score_key: str = "score",
+    pop_key: str = "popularity",
+    tiebreak_key: str = "seed_count",
+) -> List[dict]:
+    """Re-rank ``items`` (dicts with a numeric score + an optional 0–100 popularity) by an
+    adventurousness-scaled popularity penalty. Returns a NEW list, most-adventurous first.
+
+    ``level`` is clamped to 0..1. At ``level <= 0`` the input order is returned **unchanged** (a
+    copy), so the feature is fully additive / no-regression. Items missing a popularity are never
+    penalised. Adjusted score = ``score × (1 − level × MAX_POP_PENALTY × popularity/100)``.
+    """
+    lvl = max(0.0, min(1.0, _coerce_float(level, 0.0)))
+    if lvl <= 0.0:
+        return list(items)
+
+    def _adjusted(it: object) -> float:
+        score = _coerce_float(_get(it, score_key), 0.0)
+        pop = _get(it, pop_key)
+        if pop is None:
+            return score
+        pop_norm = max(0.0, min(1.0, _coerce_float(pop, 0.0) / 100.0))
+        return score * (1.0 - lvl * _MAX_POP_PENALTY * pop_norm)
+
+    return sorted(
+        items,
+        key=lambda it: (-_adjusted(it), -_coerce_float(_get(it, tiebreak_key), 0.0), _norm(_get(it, "name"))),
+    )
+
+
+# ── Genre / tag affinity (aurral's missing signal) ──────────────────────────────────────────
+# Rank candidates whose genres match the genres you actually PLAY higher. Always-on, data we already
+# store (no popularity-style backfill needed). Built additively: affinity is 0 when there's no genre
+# data on either side, so it can only ever BOOST a taste-match — never penalise a genreless candidate.
+
+def build_genre_taste_profile(weighted_artists: Sequence) -> Dict[str, float]:
+    """Turn the user's played/owned artists into a normalised genre-taste profile.
+
+    ``weighted_artists``: iterable of ``(genres, weight)`` — ``genres`` is one artist's list of genre
+    strings, ``weight`` that artist's importance (e.g. play count). Returns ``{genre_lower: 0..1}``
+    with the heaviest genre at 1.0. Pure; ``{}`` when there's nothing to learn from.
+    """
+    totals: Dict[str, float] = {}
+    for entry in weighted_artists or ():
+        try:
+            genres, weight = entry
+        except (TypeError, ValueError):
+            continue
+        w = _coerce_float(weight, 1.0)   # missing weight -> 1.0, but a zero/negative one doesn't shape taste
+        if w <= 0:
+            continue
+        for g in genres or ():
+            key = _norm(g)
+            if key:
+                totals[key] = totals.get(key, 0.0) + w
+    if not totals:
+        return {}
+    mx = max(totals.values())
+    if mx <= 0:
+        return {}
+    return {g: v / mx for g, v in totals.items()}
+
+
+def genre_affinity(candidate_genres: Sequence, taste_profile: Dict[str, float]) -> float:
+    """0..1 — how well a candidate's genres match the user's taste profile (from
+    :func:`build_genre_taste_profile`): the candidate's single strongest taste-matching genre. Pure;
+    returns 0.0 when either side is empty, so a genreless candidate is never penalised.
+    """
+    if not candidate_genres or not taste_profile:
+        return 0.0
+    best = 0.0
+    for g in candidate_genres:
+        best = max(best, _coerce_float(taste_profile.get(_norm(g)), 0.0))
+    return best
+
+
+# ── Novelty (aurral's "unheard" signal) ─────────────────────────────────────────────────────
+# Both rows already exclude what you OWN, so the extra lever is demoting recs you've already HEARD
+# (played but never added). 0 plays -> fully novel (1.0); the more you've played a candidate, the less
+# novel it is. The caller applies it as a soft penalty so an unheard candidate is the baseline.
+
+def novelty_score(play_count: object, *, half_at: float = 8.0) -> float:
+    """0..1 — how unheard a candidate is to you. ``0`` plays -> ``1.0`` (fully novel); ``half_at``
+    plays -> ``0.5``; heavy rotation -> ~0. Negative / non-numeric play counts are treated as 0
+    (fully novel), so a candidate with no play data is never penalised. Pure."""
+    p = max(0.0, _coerce_float(play_count, 0.0))
+    h = max(1e-9, float(half_at))
+    return h / (h + p)
+
+
+# ── "Why this rec" chips (explainability — the flex aurral doesn't have) ─────────────────────
+# Turn the scoring signals into short human tags shown on each rec card. Pure. Only emits a tag when
+# the signal is actually meaningful, so a card shows 0-3 informative chips, never noise.
+
+def why_chips(*, genre_affinity: float = 0.0, popularity: object = None, seed_count: object = 0) -> List[dict]:
+    """Return ``[{'type', 'label'}]`` explaining why a candidate is recommended. ``type`` lets the UI
+    pick an icon. Thresholds keep it honest: genre tag only on a real taste match, 'deep cut' only on
+    a known-but-low popularity (not on unfilled 0 / -1), consensus only when 2+ of your artists agree.
+    """
+    chips: List[dict] = []
+    if _coerce_float(genre_affinity, 0.0) >= 0.45:
+        chips.append({"type": "genre", "label": "Your genres"})
+    if popularity is not None:
+        pf = _coerce_float(popularity, -1.0)
+        if 0 < pf < 30:
+            chips.append({"type": "obscure", "label": "Deep cut"})
+    sc = int(_coerce_float(seed_count, 0.0))
+    if sc >= 2:
+        chips.append({"type": "consensus", "label": f"{sc} of your artists"})
+    return chips
 
 
 def aggregate_candidate_tracks(

@@ -5,6 +5,7 @@ import { HttpResponse, http, server } from '@/test/msw';
 
 import {
   approveAutoImportResult,
+  matchImportAlbum,
   processImportAlbumTrack,
   processImportSingleFile,
   rejectAutoImportResult,
@@ -47,6 +48,21 @@ describe('import api', () => {
     for (const call of spy.mock.calls) {
       expect(call[1]).toMatchObject({ timeout: 300_000 });
     }
+    spy.mockRestore();
+  });
+
+  it('#957: album-match call uses the long timeout, not ky default 10s', async () => {
+    // Building the match payload fetches the tracklist + reads every staging file's tags; on a slow
+    // NAS / big album that exceeds the 10s default and aborts with "Request timed out" mid-work.
+    const ok = { json: async () => ({ success: true }) };
+    const spy = vi.spyOn(apiClient, 'post').mockReturnValue(ok as never);
+
+    await matchImportAlbum({ albumId: 'abc', source: 'deezer' });
+
+    expect(spy).toHaveBeenCalledWith(
+      'import/album/match',
+      expect.objectContaining({ timeout: 300_000 }),
+    );
     spy.mockRestore();
   });
 });

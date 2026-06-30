@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from core.discovery.listening_recommendations import (
+    adventurousness_weights,
     aggregate_candidate_tracks,
+    apply_adventurousness,
+    build_genre_taste_profile,
     build_recency_weighted_seeds,
+    genre_affinity,
+    novelty_score,
+    why_chips,
     choose_mix_fetch_source,
     names_match,
     rank_recommended_artists,
@@ -314,3 +320,140 @@ def test_rank_threading_changes_winner_within_a_seed():
     ranked = rank_recommended_artists(seeds, grouped)
     assert [r.name for r in ranked] == ["Close", "Far"]
     assert ranked[0].score > ranked[1].score
+
+
+# ── apply_adventurousness (aurral-style popularity-penalty re-rank) ───────────
+def test_adventurousness_zero_is_noop_but_copies():
+    items = [{"name": "A", "score": 5.0, "popularity": 90},
+             {"name": "B", "score": 4.0, "popularity": 10}]
+    out = apply_adventurousness(items, 0.0)
+    assert [i["name"] for i in out] == ["A", "B"]   # order unchanged
+    assert out == items                              # same content
+    assert out is not items                          # but a fresh list (additive)
+
+
+def test_adventurousness_demotes_the_popular_one():
+    # Same score; at full adventurousness the obscure pick (pop 10) overtakes the giant (pop 95).
+    items = [{"name": "Giant", "score": 5.0, "popularity": 95},
+             {"name": "Obscure", "score": 5.0, "popularity": 10}]
+    assert [i["name"] for i in apply_adventurousness(items, 1.0)] == ["Obscure", "Giant"]
+
+
+def test_adventurousness_penalty_is_proportional_not_absolute():
+    # A much stronger score still wins despite being more popular — the penalty scales the score.
+    items = [{"name": "StrongPopular", "score": 10.0, "popularity": 80},
+             {"name": "WeakObscure", "score": 1.0, "popularity": 0}]
+    assert apply_adventurousness(items, 0.5)[0]["name"] == "StrongPopular"
+
+
+def test_adventurousness_missing_popularity_is_unpenalized():
+    items = [{"name": "Popular", "score": 5.0, "popularity": 100},
+             {"name": "NoPop", "score": 5.0}]
+    assert apply_adventurousness(items, 1.0)[0]["name"] == "NoPop"
+
+
+def test_adventurousness_clamps_level():
+    items = [{"name": "A", "score": 5.0, "popularity": 100},
+             {"name": "B", "score": 5.0, "popularity": 0}]
+    assert [i["name"] for i in apply_adventurousness(items, 5.0)] == ["B", "A"]    # >1 clamps to 1
+    assert [i["name"] for i in apply_adventurousness(items, -2.0)] == ["A", "B"]   # <0 clamps to 0 (no-op)
+
+
+# ── genre affinity (aurral's missing tag signal) ─────────────────────────────
+def test_taste_profile_aggregates_and_normalizes():
+    profile = build_genre_taste_profile([
+        (["Indie Rock", "Shoegaze"], 10),   # heavier artist
+        (["Indie Rock", "Pop"], 4),         # lighter
+    ])
+    assert profile["indie rock"] == 1.0                    # 10+4=14 is the heaviest -> normalized to 1
+    assert round(profile["shoegaze"], 4) == round(10 / 14, 4)
+    assert round(profile["pop"], 4) == round(4 / 14, 4)
+
+
+def test_taste_profile_empty_inputs():
+    assert build_genre_taste_profile([]) == {}
+    assert build_genre_taste_profile([([], 5), (None, 3)]) == {}
+    assert build_genre_taste_profile([(["rock"], 0)]) == {}   # zero weight -> nothing learned
+
+
+def test_genre_affinity_takes_the_best_matching_genre():
+    profile = {"indie rock": 1.0, "shoegaze": 0.7, "pop": 0.3}
+    assert genre_affinity(["Indie Rock"], profile) == 1.0          # your top genre
+    assert genre_affinity(["Shoegaze", "Metal"], profile) == 0.7   # best of the candidate's genres
+    assert genre_affinity(["Metal", "Jazz"], profile) == 0.0       # no overlap with your taste
+
+
+def test_genre_affinity_is_additive_safe():
+    # 0 whenever either side is empty -> a genreless candidate (or no taste data) is never penalized.
+    assert genre_affinity([], {"rock": 1.0}) == 0.0
+    assert genre_affinity(["rock"], {}) == 0.0
+    assert genre_affinity(None, {"rock": 1.0}) == 0.0
+
+
+# ── novelty (aurral's "unheard" signal) ──────────────────────────────────────
+def test_novelty_unheard_is_fully_novel():
+    assert novelty_score(0) == 1.0            # never played -> baseline, never penalized
+    assert novelty_score(None) == 1.0         # no play data -> treated as unheard
+    assert novelty_score(-5) == 1.0           # negative clamps to 0
+
+
+def test_adventurousness_weights_anchored_at_default():
+    # At the historical default the blend equals the old fixed constants -> zero ranking change for
+    # anyone who never moves the dial.
+    w = adventurousness_weights(0.3)
+    assert round(w["genre"], 6) == 0.6
+    assert round(w["novelty"], 6) == 0.4
+    assert round(w["popularity"], 6) == round(0.3 * 0.7, 6)
+
+
+def test_adventurousness_weights_monotonic():
+    lo, mid, hi = (adventurousness_weights(x) for x in (0.0, 0.5, 1.0))
+    assert lo["genre"] > mid["genre"] > hi["genre"]          # genre leash loosens
+    assert lo["novelty"] < mid["novelty"] < hi["novelty"]    # novelty pull tightens
+    assert lo["popularity"] < mid["popularity"] < hi["popularity"]
+
+
+def test_adventurousness_weights_endpoints_and_clamps():
+    assert adventurousness_weights(0.0)["popularity"] == 0.0
+    assert round(adventurousness_weights(1.0)["popularity"], 6) == 0.7
+    for lvl in (-5, 0, 0.5, 1, 5):
+        w = adventurousness_weights(lvl)
+        assert w["genre"] >= 0.0
+        assert 0.0 <= w["novelty"] <= 1.0
+        assert 0.0 <= w["popularity"] <= 0.7
+    assert adventurousness_weights(-1) == adventurousness_weights(0.0)   # clamp low
+    assert adventurousness_weights(2) == adventurousness_weights(1.0)    # clamp high
+    assert adventurousness_weights("nonsense") == adventurousness_weights(0.3)  # bad input -> default
+
+
+def test_novelty_decays_with_plays():
+    assert novelty_score(8) == 0.5            # half_at default = 8 plays -> half novel
+    assert novelty_score(8, half_at=20) > novelty_score(8)   # a higher half_at = slower decay
+    heavy = novelty_score(1000)
+    assert 0.0 < heavy < 0.02                 # heavy rotation -> near zero
+    # monotonically decreasing
+    assert novelty_score(1) > novelty_score(5) > novelty_score(50)
+
+
+# ── why_chips (explainability) ───────────────────────────────────────────────
+def _types(chips):
+    return [c["type"] for c in chips]
+
+
+def test_why_chips_only_on_meaningful_signals():
+    chips = why_chips(genre_affinity=0.9, popularity=12, seed_count=4)
+    assert _types(chips) == ["genre", "obscure", "consensus"]
+    assert chips[2]["label"] == "4 of your artists"
+
+
+def test_why_chips_thresholds():
+    assert why_chips(genre_affinity=0.2) == []                 # weak genre match -> no tag
+    assert why_chips(popularity=50) == []                      # popular -> not a deep cut
+    assert why_chips(popularity=0) == []                       # unfilled (0) -> no deep-cut tag
+    assert why_chips(popularity=-1) == []                      # sentinel -> no tag
+    assert why_chips(seed_count=1) == []                       # a single seed isn't "consensus"
+
+
+def test_why_chips_empty_when_nothing_notable():
+    assert why_chips() == []
+    assert why_chips(genre_affinity=0.1, popularity=80, seed_count=0) == []
