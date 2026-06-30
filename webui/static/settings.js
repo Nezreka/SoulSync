@@ -109,7 +109,113 @@ function _isMetadataSourceSelectable(source) {
         const token = document.getElementById('discogs-token');
         return !!token?.value?.trim();
     }
+    if (source === 'jiosaavn') {
+        return document.getElementById('experimental-jiosaavn-enabled')?.checked === true;
+    }
     return true;
+}
+
+function syncJiosaavnMetadataSourceOption(enabled) {
+    const select = document.getElementById('metadata-fallback-source');
+    if (!select) return;
+
+    let option = select.querySelector('option[value="jiosaavn"]');
+    if (enabled) {
+        if (!option) {
+            option = document.createElement('option');
+            option.value = 'jiosaavn';
+            option.textContent = 'JioSaavn';
+            const anchor = select.querySelector('option[value="musicbrainz"]');
+            if (anchor?.nextSibling) {
+                select.insertBefore(option, anchor.nextSibling);
+            } else {
+                select.appendChild(option);
+            }
+        }
+        return;
+    }
+
+    if (select.value === 'jiosaavn') {
+        select.value = 'deezer';
+        select.dataset.lastValidSource = 'deezer';
+    }
+    option?.remove();
+}
+
+let _experimentalEnableResolver = null;
+
+function showExperimentalEnableDialog({ title, message }) {
+    if (_experimentalEnableResolver) {
+        _experimentalEnableResolver(false);
+        _experimentalEnableResolver = null;
+    }
+
+    const overlay = document.getElementById('experimental-enable-modal-overlay');
+    const titleEl = document.getElementById('experimental-enable-modal-title');
+    const messageEl = document.getElementById('experimental-enable-modal-message');
+    const ack = document.getElementById('experimental-enable-ack-checkbox');
+    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
+    if (!overlay || !titleEl || !messageEl || !ack || !confirmBtn) {
+        return Promise.resolve(false);
+    }
+
+    titleEl.textContent = title || 'Enable experimental feature';
+    messageEl.textContent = message || '';
+    ack.checked = false;
+    confirmBtn.disabled = true;
+
+    const onAckChange = () => {
+        confirmBtn.disabled = !ack.checked;
+    };
+    ack.onchange = onAckChange;
+
+    overlay.classList.remove('hidden');
+
+    return new Promise((resolve) => {
+        _experimentalEnableResolver = (result) => {
+            ack.onchange = null;
+            resolve(result);
+        };
+    });
+}
+
+function resolveExperimentalEnableDialog(confirmed) {
+    const overlay = document.getElementById('experimental-enable-modal-overlay');
+    const ack = document.getElementById('experimental-enable-ack-checkbox');
+    const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
+    const ok = confirmed && ack?.checked;
+
+    if (overlay) overlay.classList.add('hidden');
+    if (ack) ack.checked = false;
+    if (confirmBtn) confirmBtn.disabled = true;
+
+    if (_experimentalEnableResolver) {
+        _experimentalEnableResolver(ok);
+        _experimentalEnableResolver = null;
+    }
+}
+
+async function onExperimentalJiosaavnToggle(checkbox) {
+    if (!checkbox) return;
+
+    if (!checkbox.checked) {
+        syncJiosaavnMetadataSourceOption(false);
+        debouncedAutoSaveSettings();
+        return;
+    }
+
+    checkbox.checked = false;
+
+    const acknowledged = await showExperimentalEnableDialog({
+        title: 'Enable JioSaavn',
+        message: 'JioSaavn uses a third-party public API proxy. Coverage and availability may change without notice. Once enabled, JioSaavn will appear as a metadata source on the Connections tab and in search.',
+    });
+
+    if (!acknowledged) return;
+
+    checkbox.checked = true;
+    syncJiosaavnMetadataSourceOption(true);
+    debouncedAutoSaveSettings();
 }
 
 function _metadataSourceFallback(source) {
@@ -1156,6 +1262,7 @@ async function loadSettingsData() {
                 ((settings && settings.error) || 'unexpected response'));
         }
         window._settingsLoadFailed = false;  // good load → saving is safe again
+        window._settingsPayload = settings;
 
         // Populate Spotify settings
         document.getElementById('spotify-client-id').value = settings.spotify?.client_id || '';
@@ -1281,6 +1388,14 @@ async function loadSettingsData() {
         // Default ON: unset (undefined) reads as enabled, matching the worker's
         // config default (metadata.spotify_free_enrichment defaults True).
         if (_efEl) _efEl.checked = settings.metadata?.spotify_free_enrichment !== false;
+
+        const _jiosaavnExp = document.getElementById('experimental-jiosaavn-enabled');
+        const jiosaavnEnabled = settings.experimental?.jiosaavn_enabled === true;
+        if (_jiosaavnExp) _jiosaavnExp.checked = jiosaavnEnabled;
+        syncJiosaavnMetadataSourceOption(jiosaavnEnabled);
+        if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
+            document.getElementById('metadata-fallback-source').value = 'jiosaavn';
+        }
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -3234,6 +3349,12 @@ async function saveSettings(quiet = false) {
         if (!quiet) {
             showToast('Discogs requires a personal access token before it can be selected as the primary metadata source.', 'warning');
         }
+    } else if (metadataSource === 'jiosaavn' && !document.getElementById('experimental-jiosaavn-enabled')?.checked) {
+        metadataSource = 'deezer';
+        if (metadataSourceSelect) metadataSourceSelect.value = metadataSource;
+        if (!quiet) {
+            showToast('JioSaavn is not enabled — turn it on under Advanced → Experimental.', 'warning');
+        }
     }
 
     // Validate the optional "Playlist File Naming" template before saving: it's a
@@ -3332,6 +3453,9 @@ async function saveSettings(quiet = false) {
             // Independent opt-in: run the enrichment worker on Spotify Free even
             // when an official account is connected (spares the official quota).
             spotify_free_enrichment: document.getElementById('metadata-spotify-free-enrichment')?.checked || false
+        },
+        experimental: {
+            jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,

@@ -3286,6 +3286,75 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     margin-bottom: 0;
 }
 
+.settings-experimental-break {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 28px 0 20px;
+    padding: 0 4px;
+    user-select: none;
+}
+
+.settings-experimental-break__line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(245, 166, 35, 0.55) 20%,
+        rgba(245, 166, 35, 0.55) 80%,
+        transparent
+    );
+}
+
+.settings-experimental-break__label {
+    flex-shrink: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(245, 180, 80, 0.92);
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(245, 166, 35, 0.35);
+    background: rgba(245, 166, 35, 0.08);
+}
+
+.settings-experimental-intro {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.experimental-enable-modal .confirm-modal-content p {
+    margin: 0 0 16px;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.experimental-enable-ack {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.78);
+    cursor: pointer;
+    margin: 0;
+}
+
+.experimental-enable-ack input {
+    width: auto;
+    margin: 3px 0 0;
+    flex-shrink: 0;
+}
+
+#experimental-enable-confirm-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .settings-group {
     background: linear-gradient(135deg, rgba(35, 35, 35, 0.6), rgba(20, 20, 20, 0.8));
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -38545,6 +38614,7 @@ div.artist-hero-badge {
 .enh-source-tab.enh-tab-amazon.active { background: rgba(255, 153, 0, 0.2); color: #FF9900; }
 .enh-source-tab.enh-tab-youtube.active { background: rgba(255, 0, 0, 0.2); color: #ff4444; }
 .enh-source-tab.enh-tab-musicbrainz.active { background: rgba(186, 51, 88, 0.2); color: #BA3358; }
+.enh-source-tab.enh-tab-jiosaavn.active { background: rgba(43, 197, 180, 0.2); color: #2bc5b4; }
 
 /* ── Source picker icon row (replaces dropdown + post-search tabs) ── */
 .enh-source-row {
