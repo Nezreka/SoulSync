@@ -721,10 +721,16 @@ def score_album_duration_fit(
                     continue
                 track_num = int(track.get('track_number') or 0)
                 track_disc = _extract_track_disc(track)
+                track_dur = _track_duration_ms(track)
+                # Require a REAL track duration here. duration_sanity_ok() returns True when either
+                # side is missing (correct for the main matcher: "don't reject when unsure"), but this
+                # is a COMPARATIVE scorer — a tracklist with no durations would otherwise score a
+                # perfect fit and beat the album whose real durations actually align.
                 if (
                     track_num == file_track_num
                     and track_disc == file_disc
-                    and duration_sanity_ok(file_dur, _track_duration_ms(track))
+                    and track_dur > 0
+                    and duration_sanity_ok(file_dur, track_dur)
                 ):
                     used_track_indices.add(idx)
                     matches += 1
@@ -737,7 +743,8 @@ def score_album_duration_fit(
                     continue
                 if file_disc > 0 and _extract_track_disc(track) != file_disc:
                     continue
-                if duration_sanity_ok(file_dur, _track_duration_ms(track)):
+                track_dur = _track_duration_ms(track)
+                if track_dur > 0 and duration_sanity_ok(file_dur, track_dur):
                     used_track_indices.add(idx)
                     matches += 1
                     matched = True

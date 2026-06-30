@@ -31,6 +31,19 @@ class TestScoreAlbumDurationFit:
         tracks = _tracks((2, 237000), (3, 261000))
         assert score_album_duration_fit(file_tags, tracks) == 1.0
 
+    def test_missing_track_durations_do_not_inflate_fit(self):
+        """A tracklist with no durations must score 0 fit, not a perfect 1.0 — duration_sanity_ok
+        is lenient on missing data, so without the >0 guard a duration-less album beats a real one."""
+        file_tags = {
+            'a.mp3': {'duration_ms': 261000, 'track_number': 3},
+            'b.mp3': {'duration_ms': 236000, 'track_number': 2},
+        }
+        no_duration_tracks = [
+            {'name': 'Track 2', 'track_number': 2, 'duration_ms': 0},
+            {'name': 'Track 3', 'track_number': 3, 'duration_ms': 0},
+        ]
+        assert score_album_duration_fit(file_tags, no_duration_tracks) == 0.0
+
     def test_partial_fit_when_one_track_wrong_duration(self):
         """Mirrors the Sheesha case on the wrong JioSaavn album listing."""
         file_tags = {
@@ -114,6 +127,23 @@ class TestPickAlbumByDurationFit:
         )
         assert used is False
         assert picked.id == '1'
+
+    def test_real_durations_win_over_missing_durations(self):
+        """The album whose durations actually fit must win even when the duration-less variant scores
+        HIGHER on name — otherwise the lenient sanity check hands it an undeserved perfect fit."""
+        album_missing = _album('2', '3 Nights And 4 Days')   # higher name score, but no durations
+        album_real = _album('1', '3 Nights 4 Days')
+        scored = [(0.90, album_missing), (0.88, album_real)]
+        file_tags = {
+            'a.mp3': {'duration_ms': 261000, 'track_number': 3},
+            'b.mp3': {'duration_ms': 236000, 'track_number': 2},
+        }
+        tracks_by_id = {
+            '2': [{'track_number': 2, 'duration_ms': 0}, {'track_number': 3, 'duration_ms': 0}],
+            '1': _tracks((2, 236000), (3, 261000)),
+        }
+        picked, fit, used = pick_album_by_duration_fit(scored, file_tags, tracks_by_id)
+        assert picked.id == '1' and fit == 1.0 and used is True
 
     def test_disc_aware_position_matching(self):
         """Same track number on different discs must not count as a position hit."""
