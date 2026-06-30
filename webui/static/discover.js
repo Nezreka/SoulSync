@@ -43,9 +43,13 @@ function _advColor(v, light, alpha) {
     return alpha != null ? `hsla(${hue.toFixed(0)}, 85%, ${l}%, ${alpha})` : `hsl(${hue.toFixed(0)}, 85%, ${l}%)`;
 }
 // Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
+// px the orb + colour aura stay inset from the track edges, so they never collide with the card's
+// overflow:hidden and get sliced (the half-orb / hard green block on the left in the v0 screenshot).
+const _ADV_ORB_PAD = 18;
+
 function _advWaveY(u, v) {
-    const amp = 2 + v * 12;            // gentle ripple at 0, lively (not wild) at 1
-    const freq = 1.1 + v * 2.0;        // a few more cycles as it gets adventurous
+    const amp = 4.5 + v * 10;          // real body even at rest (was a near-flat ±2 wire), lively at 1
+    const freq = 1.25 + v * 1.9;       // a few more cycles as it gets adventurous
     let y = 40 + amp * Math.sin(freq * u * Math.PI * 2 + _advWave.phase);
     if (v > 0) {                       // a detuned second harmonic adds a touch of wobble
         y += v * amp * 0.38 * Math.sin(freq * 2.2 * u * Math.PI * 2 + _advWave.phase * 1.6 + 1.3);
@@ -70,7 +74,13 @@ function _advDraw() {
         const area = document.getElementById('adv-wave-area');
         if (area) area.setAttribute('d', line + ' L 1000 80 L 0 80 Z');
         const orb = document.getElementById('adv-wave-orb');
-        if (orb) orb.style.top = (_advWaveY(v, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
+        if (orb) {
+            // Sample the wave at the orb's INSET x (not raw v) so the handle still sits exactly on the
+            // line after we pulled its travel in from the edges.
+            const W = track.clientWidth || 1;
+            const uOrb = (_ADV_ORB_PAD + v * (W - 2 * _ADV_ORB_PAD)) / W;
+            orb.style.top = (_advWaveY(uOrb, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
+        }
     }
     _advWave.raf = requestAnimationFrame(_advDraw);
 }
@@ -86,15 +96,15 @@ function _advApply(v) {
     if (fillTop) fillTop.setAttribute('stop-color', c);   // luminous filled area
     const orb = document.getElementById('adv-wave-orb');
     if (orb) {
-        orb.style.left = (v * 100).toFixed(2) + '%';
+        orb.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
         orb.style.color = c;                              // currentColor for the pulsing ring
         orb.style.background = cBright;
         orb.style.boxShadow = `0 0 9px 0 ${c}, inset 0 0 0 2px rgba(255,255,255,0.5)`;
     }
     const aura = document.getElementById('adv-wave-aura');   // colour wash that follows the orb
     if (aura) {
-        aura.style.left = (v * 100).toFixed(2) + '%';
-        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.26)} 0%, transparent 70%)`;
+        aura.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
+        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.16)} 0%, transparent 72%)`;
     }
     const stateEl = document.getElementById('adv-wave-state');
     if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }

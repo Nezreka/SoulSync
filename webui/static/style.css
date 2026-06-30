@@ -35282,8 +35282,8 @@ div.artist-hero-badge {
 .adv-wave-track:active { cursor: grabbing; }
 .adv-wave-aura {
     position: absolute; top: 50%; left: 30%;
-    width: 360px; height: 230px; transform: translate(-50%, -50%);
-    pointer-events: none; filter: blur(14px); z-index: 0;
+    width: 300px; height: 200px; transform: translate(-50%, -50%);
+    pointer-events: none; filter: blur(24px); z-index: 0;   /* heavier blur = soft glow, no hard clipped edge */
     will-change: left, background;
 }
 .adv-wave-svg { width: 100%; height: 100%; display: block; overflow: visible; position: relative; z-index: 1; }
