@@ -2829,6 +2829,7 @@ def generate_playlist_m3u():
         # contention) — which is exactly why "Export M3U" hung with nothing in the
         # logs. One WAL-concurrent read can't be starved that way.
         from collections import defaultdict
+        from core.text.title_match import choose_best_title_candidate
         lib_by_artist = defaultdict(list)
         for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
             lib_by_artist[_clean(row['artist'])].append(
@@ -2847,15 +2848,12 @@ def generate_playlist_m3u():
                 file_path_map[idx] = None
                 continue
             s_norm, s_clean = _norm(name), _clean(name)
-            matched_path = None
-            for db_n, db_c, fp in candidates:
-                if s_norm == db_n or s_clean == db_c:
-                    matched_path = fp
-                    break
-                if max(SequenceMatcher(None, s_norm, db_n).ratio(),
-                       SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
-                    matched_path = fp
-                    break
+            matched_path = choose_best_title_candidate(
+                s_norm,
+                s_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
             file_path_map[idx] = matched_path
 
         # --- build M3U content ---
@@ -10357,16 +10355,13 @@ def library_check_tracks():
 
         def _match_title(search_norm, search_clean, candidates):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
-            for db_norm, db_clean, db_track in candidates:
-                if search_norm == db_norm or search_clean == db_clean:
-                    return db_track
-                sim = max(
-                    SequenceMatcher(None, search_norm, db_norm).ratio(),
-                    SequenceMatcher(None, search_clean, db_clean).ratio()
-                )
-                if sim >= 0.7:
-                    return db_track
-            return None
+            from core.text.title_match import choose_best_title_candidate
+            return choose_best_title_candidate(
+                search_norm,
+                search_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
