@@ -29671,6 +29671,64 @@ def discover_adventurousness():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _resolve_popularity_sources():
+    """Best-effort handles for the popularity cascade — each may be None (then it's skipped)."""
+    spotify_free = lastfm = deezer = None
+    try:
+        from core.spotify_free_metadata import SpotifyFreeMetadataClient, spotify_free_installed
+        if spotify_free_installed():
+            spotify_free = SpotifyFreeMetadataClient()
+    except Exception as e:
+        logger.debug(f"spotify-free unavailable for backfill: {e}")
+    try:
+        from core.lastfm_client import LastFMClient
+        _key = config_manager.get('lastfm.api_key', '')
+        if _key:
+            lastfm = LastFMClient(api_key=_key)
+    except Exception as e:
+        logger.debug(f"lastfm unavailable for backfill: {e}")
+    try:
+        deezer = _get_deezer_client()
+    except Exception as e:
+        logger.debug(f"deezer unavailable for backfill: {e}")
+    return spotify_free, lastfm, deezer
+
+
+@app.route('/api/discover/popularity-backfill/start', methods=['POST'])
+@admin_only
+def start_popularity_backfill():
+    """Kick off the background popularity backfill (fills similar_artists.popularity via the Spotify
+    Free -> Last.fm -> Deezer cascade). Rate-limited + resumable; safe to call repeatedly."""
+    try:
+        from core.discovery import popularity_backfill as pb
+        if pb.is_running():
+            return jsonify({"success": False, "error": "Backfill already running", "state": pb.get_state()})
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            return jsonify({"success": False,
+                            "error": "No popularity source available — configure Last.fm, Spotify Free, or Deezer."})
+        pb.start_background(get_database(), spotify_free=spotify_free, lastfm=lastfm, deezer=deezer,
+                            profile_id=get_current_profile_id())
+        return jsonify({"success": True, "state": pb.get_state()})
+    except Exception as e:
+        logger.error(f"start popularity backfill error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/popularity-backfill/status', methods=['GET'])
+def popularity_backfill_status():
+    from core.discovery import popularity_backfill as pb
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+@app.route('/api/discover/popularity-backfill/cancel', methods=['POST'])
+@admin_only
+def cancel_popularity_backfill():
+    from core.discovery import popularity_backfill as pb
+    pb.cancel()
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).

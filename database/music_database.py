@@ -10614,12 +10614,15 @@ class MusicDatabase:
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                # popularity = 0 / null means "not filled". The backfill writes a real 0..100, or a
+                # -1 sentinel for "tried, no source had it" — so -1 rows are excluded and the sweep
+                # terminates instead of re-fetching the unfillable ones forever.
                 cursor.execute(
                     "SELECT similar_artist_name AS name, "
                     "MAX(similar_artist_spotify_id) AS spotify_id, "
                     "MAX(similar_artist_deezer_id) AS deezer_id "
                     "FROM similar_artists "
-                    "WHERE (popularity IS NULL OR popularity <= 0) AND profile_id = ? "
+                    "WHERE (popularity IS NULL OR popularity = 0) AND profile_id = ? "
                     "GROUP BY similar_artist_name LIMIT ?",
                     (profile_id, limit),
                 )
@@ -10628,6 +10631,23 @@ class MusicDatabase:
         except Exception as e:
             logger.debug(f"get_similar_artists_missing_popularity failed: {e}")
         return rows
+
+    def count_similar_artists_missing_popularity(self, profile_id: int = 1) -> int:
+        """How many distinct similar artists still need a popularity backfill (for progress). -> 0 on error."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM similar_artists "
+                    "WHERE (popularity IS NULL OR popularity = 0) AND profile_id = ? "
+                    "GROUP BY similar_artist_name)",
+                    (profile_id,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.debug(f"count_similar_artists_missing_popularity failed: {e}")
+            return 0
 
     def update_similar_artist_popularity(self, name, popularity, profile_id: int = 1):
         """Set popularity (0-100, stored as int) for every ``similar_artists`` row matching ``name``
