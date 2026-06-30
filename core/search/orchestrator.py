@@ -64,6 +64,10 @@ class SearchDeps:
 
 def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
     """Return (client, is_available) for an explicit metadata source request."""
+    from core.metadata.registry import experimental_source_rejected
+    if experimental_source_rejected(source_name):
+        return None, False
+
     if source_name == 'spotify':
         # Available when real auth OR the no-creds SpotipyFree fallback can serve
         # (the client routes to free internally when auth is missing/limited).
@@ -99,9 +103,7 @@ def resolve_client(source_name: str, deps: SearchDeps) -> tuple[Any, bool]:
             return None, False
     if source_name == 'jiosaavn':
         try:
-            from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
-            if not is_jiosaavn_enabled():
-                return None, False
+            from core.metadata.registry import get_jiosaavn_client
             return get_jiosaavn_client(), True
         except Exception as e:
             logger.warning(f"JioSaavn client init failed: {e}")
@@ -203,10 +205,11 @@ def _alternate_sources(primary_source: str, deps: SearchDeps) -> list[str]:
         alts.append('hydrabase')
     if primary_source != 'amazon':
         alts.append('amazon')       # always available (T2Tunes, no auth)
-    if primary_source != 'jiosaavn':
-        from core.metadata.registry import is_jiosaavn_enabled
-        if is_jiosaavn_enabled():
-            alts.append('jiosaavn')     # public API when experimentally enabled
+    # Experimental sources surface as alternates only when individually enabled.
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+    for name in EXPERIMENTAL_SOURCES:
+        if primary_source != name and is_source_enabled(name):
+            alts.append(name)
     alts.append('youtube_videos')   # always available (yt-dlp, no auth)
     alts.append('musicbrainz')      # always available (public API)
     return alts

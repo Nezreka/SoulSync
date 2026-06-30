@@ -33,17 +33,31 @@ def test_musicbrainz_is_first_class_metadata_client():
     ) is client
 
 
-def test_jiosaavn_disabled_by_default(monkeypatch):
+def test_experimental_source_disabled_by_default(monkeypatch):
     monkeypatch.setattr(
         registry,
         "_get_config_value",
-        lambda key, default=None: default if key == "experimental.jiosaavn_enabled" else None,
+        lambda key, default=None: default,
     )
+    # Non-experimental sources are always enabled and never rejected.
+    assert registry.is_experimental_source("jiosaavn") is True
+    assert registry.is_experimental_source("deezer") is False
+    assert registry.is_source_enabled("deezer") is True
+    assert registry.is_source_enabled("jiosaavn") is False
     assert registry.is_jiosaavn_enabled() is False
+    assert registry.experimental_source_rejected("jiosaavn") is True
+    assert registry.experimental_source_rejected("deezer") is False
+    assert registry.experimental_source_rejected("") is False
+    assert registry.experimental_status() == {"jiosaavn_enabled": False}
 
 
-def test_jiosaavn_is_first_class_metadata_client(monkeypatch):
-    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: True)
+def test_experimental_source_not_rejected_when_enabled(monkeypatch):
+    monkeypatch.setattr(registry, "is_source_enabled", lambda source: True)
+    assert registry.experimental_source_rejected("jiosaavn") is False
+
+
+def test_experimental_source_is_first_class_metadata_client(monkeypatch):
+    monkeypatch.setattr(registry, "is_source_enabled", lambda source: True)
     registry.clear_cached_metadata_clients()
     client = object()
     assert registry.get_client_for_source(
@@ -52,8 +66,8 @@ def test_jiosaavn_is_first_class_metadata_client(monkeypatch):
     ) is client
 
 
-def test_jiosaavn_client_gated_when_experimental_disabled(monkeypatch):
-    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: False)
+def test_experimental_client_gated_when_disabled(monkeypatch):
+    monkeypatch.setattr(registry, "is_source_enabled", lambda source: False)
     registry.clear_cached_metadata_clients()
     client = object()
     assert registry.get_client_for_source(
@@ -62,8 +76,8 @@ def test_jiosaavn_client_gated_when_experimental_disabled(monkeypatch):
     ) is None
 
 
-def test_primary_source_downgrades_jiosaavn_when_experimental_disabled(monkeypatch):
-    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: False)
+def test_primary_source_downgrades_disabled_experimental(monkeypatch):
+    monkeypatch.setattr(registry, "is_source_enabled", lambda source: source != "jiosaavn")
     monkeypatch.setattr(registry, "get_configured_primary_source", lambda: "jiosaavn")
     assert registry.get_primary_source() == "deezer"
 

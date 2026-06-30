@@ -455,6 +455,9 @@ class MusicDatabase:
             # Add Amazon artist ID column (migration)
             self._add_amazon_columns(cursor)
 
+            # Add JioSaavn source ID columns (migration)
+            self._add_jiosaavn_columns(cursor)
+
             # Add Similar-Artists worker tracking columns (migration)
             self._add_similar_artists_worker_columns(cursor)
 
@@ -2877,6 +2880,22 @@ class MusicDatabase:
             logger.info("Amazon columns added/verified successfully")
         except Exception as e:
             logger.error(f"Error adding Amazon columns: {e}")
+
+    def _add_jiosaavn_columns(self, cursor):
+        """Add JioSaavn external ID columns to artists, albums, and tracks."""
+        try:
+            for table in ("artists", "albums", "tracks"):
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns = [column[1] for column in cursor.fetchall()]
+                if "jiosaavn_id" not in columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN jiosaavn_id TEXT")
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_jiosaavn_id ON {table} (jiosaavn_id)"
+                )
+
+            logger.info("JioSaavn columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding JioSaavn columns: {e}")
 
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a

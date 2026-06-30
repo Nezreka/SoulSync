@@ -2578,6 +2578,11 @@ def get_status():
             'enrichment': _get_enrichment_status(),
             'active_downloads': active_dl_count,
         }
+        try:
+            from core.metadata.registry import experimental_status
+            status_data['_experimental'] = experimental_status()
+        except Exception:
+            status_data['_experimental'] = {}
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3313,9 +3318,9 @@ def handle_settings():
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import is_jiosaavn_enabled
-            if not is_jiosaavn_enabled() and config_manager.get('metadata.fallback_source') == 'jiosaavn':
-                config_manager.set('metadata.fallback_source', 'deezer')
+            from core.metadata.registry import experimental_source_rejected, METADATA_SOURCE_PRIORITY
+            if experimental_source_rejected(config_manager.get('metadata.fallback_source')):
+                config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -4093,13 +4098,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
-        from core.metadata.registry import is_jiosaavn_enabled
+        from core.metadata.registry import experimental_source_rejected, experimental_status
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
-            if service != 'jiosaavn' or is_jiosaavn_enabled()
+            if not experimental_source_rejected(service)
         }
-        result['_experimental'] = {'jiosaavn_enabled': is_jiosaavn_enabled()}
+        result['_experimental'] = experimental_status()
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -8924,11 +8929,18 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         logger.debug(f"Discogs client resolution failed: {e}")
 
     az = None
+    js = None
     try:
         from core.metadata.registry import get_amazon_client
         az = get_amazon_client()
     except Exception as e:
         logger.debug(f"Amazon client resolution failed: {e}")
+    try:
+        from core.metadata.registry import get_jiosaavn_client, is_source_enabled
+        if is_source_enabled('jiosaavn'):
+            js = get_jiosaavn_client()
+    except Exception as e:
+        logger.debug(f"JioSaavn client resolution failed: {e}")
 
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
@@ -8944,6 +8956,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         itunes_client=it,
         discogs_client=dc,
         amazon_client=az,
+        jiosaavn_client=js,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -8965,6 +8978,14 @@ def get_artist_detail(artist_id):
     try:
         source_param = (request.args.get('source', '') or '').strip().lower()
         artist_name_arg = (request.args.get('name', '') or '').strip()
+        if source_param:
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(source_param):
+                return jsonify({
+                    "success": False,
+                    "error": f"{source_param} is not enabled",
+                }), 503
+
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -21490,7 +21511,38 @@ def get_spotify_album_tracks(album_id):
             logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
     # Source override: when user clicked from a specific search tab
-    source_override = request.args.get('source', '')
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            album_data = client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+            tracks = album_data.get('tracks', [])
+            if not isinstance(tracks, list):
+                tracks = []
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+            })
+        except Exception as e:
+            logger.error(f"JioSaavn album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
 
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
@@ -21564,6 +21616,27 @@ def get_spotify_album_tracks(album_id):
 @app.route('/api/spotify/track/<track_id>', methods=['GET'])
 def get_spotify_track(track_id):
     """Fetches full track details including album data for a specific track."""
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            track_data = client.get_track_details(track_id)
+            if not track_data:
+                return jsonify({"error": "Track not found"}), 404
+            return jsonify(track_data)
+        except Exception as e:
+            logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     # Try Hydrabase first when active and track name provided
     if _is_hydrabase_active():
         track_name = request.args.get('name', '')
@@ -27561,10 +27634,9 @@ def select_my_service_credential():
 # Selectable metadata sources (mirrors the Settings <select>).
 def _qs_metadata_sources():
     """Metadata sources offered in Connections / quick-switch UI."""
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
     sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
-    if is_jiosaavn_enabled():
-        sources.append('jiosaavn')
+    sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
@@ -27651,13 +27723,12 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            if src == 'jiosaavn':
-                from core.metadata.registry import is_jiosaavn_enabled
-                if not is_jiosaavn_enabled():
-                    return jsonify({
-                        'success': False,
-                        'error': 'JioSaavn is not enabled — turn it on under Settings → Advanced → Experimental.',
-                    }), 400
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(src):
+                return jsonify({
+                    'success': False,
+                    'error': f'{src} is not enabled — turn it on under Settings → Advanced → Experimental.',
+                }), 400
             # Same composite the Settings save uses: 'spotify_free' is stored as
             # fallback_source='spotify' + metadata.spotify_free=true.
             if src == 'spotify_free':
@@ -29106,9 +29177,10 @@ def watchlist_artist_config(artist_id):
             _watchlist_meta_sources = (
                 'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
             )
-            from core.metadata.registry import is_jiosaavn_enabled
-            if is_jiosaavn_enabled():
-                _watchlist_meta_sources = _watchlist_meta_sources + ('jiosaavn',)
+            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+            )
             if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the

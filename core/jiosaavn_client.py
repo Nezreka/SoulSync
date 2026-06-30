@@ -11,9 +11,34 @@ Endpoints used:
     GET /api/search/artists
     GET /api/songs/{id}
     GET /api/albums
+    GET /api/artists/{id}
+    GET /api/artists/{id}/albums
 
 Config keys (all optional):
     jiosaavn.base_url   API base URL (default: https://saavn.sumit.co)
+
+Discography / singles
+---------------------
+The upstream API does not expose a Spotify-style singles release type. Every
+release in ``/api/artists/{id}/albums`` is labelled ``type: album`` even when
+it is a one-track single. Many standalone singles only appear under
+``/api/artists/{id}/songs`` (individual tracks), not in the albums feed.
+
+SoulSync does not synthesize a singles section from the songs feed. Artist
+discography for JioSaavn therefore surfaces **albums only** — the Singles tab
+on artist detail will be empty. Individual songs are still searchable via
+``/api/search/songs`` and openable as tracks; this limitation applies only to
+the artist discography view.
+
+Artist discography fetch
+------------------------
+``get_artist_albums`` loads releases via ``/api/search/albums?query=<name>``
+(up to ``limit``, max 200) instead of paginating ``/api/artists/{id}/albums``,
+which returns only **10 releases per page** no matter how high ``limit`` is set.
+Search hits are text-matched albums (soundtracks and compilations may appear)
+and the upstream API often returns fewer rows than the requested ``limit`` in
+one response. When the artist name cannot be resolved, the client falls back to
+the first page of ``/api/artists/{id}/albums``.
 """
 
 from __future__ import annotations
@@ -305,7 +330,7 @@ class JioSaavnClient:
 
         payload = self._get_json(
             endpoint,
-            {"query": query, "page": 0, "limit": min(limit, 50)},
+            {"query": query, "page": 0, "limit": min(limit, 200)},
         )
         raw_items = self._unwrap_results(payload)[:limit]
         parsed_items = [dataclass_from_api(item) for item in raw_items if item.get("id")]
@@ -359,6 +384,125 @@ class JioSaavnClient:
         return self._track_to_enhanced_dict(track, raw)
 
     @staticmethod
+    def _names_to_artist_dicts(names: List[str]) -> List[Dict[str, str]]:
+        return [{"name": name} for name in names if name]
+
+    @staticmethod
+    def _image_url_to_images(image_url: Optional[str]) -> List[Dict[str, str]]:
+        if not image_url:
+            return []
+        return [{"url": image_url}]
+
+    def get_artist(self, artist_id: str) -> Optional[Dict[str, Any]]:
+        artist_id = str(artist_id or "").strip()
+        if not artist_id:
+            return None
+
+        cache = get_metadata_cache()
+        cached = cache.get_entity("jiosaavn", "artist", artist_id)
+        if cached:
+            artist = Artist.from_api(cached)
+            return self._artist_to_enhanced_dict(artist, cached)
+
+        payload = self._get_json(f"/api/artists/{artist_id}")
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return None
+        cache.store_entity("jiosaavn", "artist", artist_id, data)
+        artist = Artist.from_api(data)
+        return self._artist_to_enhanced_dict(artist, data)
+
+    def get_artist_info(self, artist_id: str) -> Optional[Dict[str, Any]]:
+        """Deezer-compatible alias used by shared metadata helpers."""
+        return self.get_artist(artist_id)
+
+    def get_artist_albums(
+        self,
+        artist_id: str,
+        album_type: str = "album,single",
+        limit: int = 50,
+        **kwargs,
+    ) -> List[Album]:
+        """Return album releases for an artist via album search by name.
+
+        Uses ``/api/search/albums`` (see module docstring) because the artist
+        albums feed is capped at 10 per page. ``album_type`` is ignored.
+        """
+        artist_id = str(artist_id or "").strip()
+        if not artist_id:
+            return []
+
+        limit = max(1, min(int(limit or 50), 200))
+        artist_name = (kwargs.get("artist_name") or "").strip()
+        if not artist_name:
+            artist_info = self.get_artist(artist_id)
+            if artist_info:
+                artist_name = (artist_info.get("name") or "").strip()
+
+        if artist_name:
+            return self.search_albums(artist_name, limit=limit)
+
+        return self._get_artist_albums_page(artist_id, limit=limit)
+
+    def _get_artist_albums_page(self, artist_id: str, *, limit: int = 50, page: int = 0) -> List[Album]:
+        """First page of ``/api/artists/{id}/albums`` — fallback when name is unknown."""
+        payload = self._get_json(
+            f"/api/artists/{artist_id}/albums",
+            {"page": page, "limit": limit},
+        )
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return []
+
+        raw_albums = data.get("albums") or []
+        if not isinstance(raw_albums, list):
+            return []
+
+        cache = get_metadata_cache()
+        albums: List[Album] = []
+        entries = []
+        for raw in raw_albums:
+            if not isinstance(raw, dict) or not raw.get("id"):
+                continue
+            album_id = str(raw["id"])
+            entries.append((album_id, raw))
+            albums.append(Album.from_api(raw))
+        if entries:
+            cache.store_entities_bulk(
+                "jiosaavn",
+                "album",
+                entries,
+                skip_if_exists=True,
+            )
+        return albums
+
+    def get_album_tracks(self, album_id: str) -> Optional[Dict[str, Any]]:
+        album_data = self.get_album(album_id)
+        if not album_data:
+            return None
+        tracks = album_data.get("tracks") or []
+        if not isinstance(tracks, list):
+            tracks = []
+        return {"items": tracks, "total": len(tracks)}
+
+    @staticmethod
+    def _artist_to_enhanced_dict(artist: Artist, raw: Dict[str, Any]) -> Dict[str, Any]:
+        follower_count = raw.get("followerCount")
+        try:
+            followers_total = int(follower_count or 0)
+        except (TypeError, ValueError):
+            followers_total = 0
+        return {
+            "id": artist.id,
+            "name": artist.name,
+            "image_url": artist.image_url,
+            "images": JioSaavnClient._image_url_to_images(artist.image_url),
+            "genres": [],
+            "followers": {"total": followers_total},
+            "external_urls": artist.external_urls or {},
+        }
+
+    @staticmethod
     def _album_raw_has_songs(raw: Dict[str, Any]) -> bool:
         """True when cached/API album payload includes an actual track list."""
         songs = raw.get("songs")
@@ -385,12 +529,19 @@ class JioSaavnClient:
 
     @staticmethod
     def _track_to_enhanced_dict(track: Track, raw: Dict[str, Any]) -> Dict[str, Any]:
+        album_block = raw.get("album") if isinstance(raw.get("album"), dict) else {}
+        album_id = track.album_id or album_block.get("id")
         return {
             "id": track.id,
             "name": track.name,
-            "artists": track.artists,
-            "album": track.album,
-            "album_id": track.album_id or (raw.get("album") or {}).get("id"),
+            "artists": JioSaavnClient._names_to_artist_dicts(track.artists),
+            "album": {
+                "id": album_id,
+                "name": track.album,
+                "images": JioSaavnClient._image_url_to_images(track.image_url),
+                "release_date": track.release_date,
+            },
+            "album_id": album_id,
             "duration_ms": track.duration_ms,
             "popularity": track.popularity,
             "image_url": track.image_url,
@@ -413,7 +564,7 @@ class JioSaavnClient:
                 tracks.append({
                     "id": track.id,
                     "name": track.name,
-                    "artists": track.artists,
+                    "artists": JioSaavnClient._names_to_artist_dicts(track.artists),
                     "duration_ms": track.duration_ms,
                     "track_number": idx,
                     "disc_number": 1,
@@ -421,11 +572,12 @@ class JioSaavnClient:
         return {
             "id": album.id,
             "name": album.name,
-            "artists": album.artists,
+            "artists": JioSaavnClient._names_to_artist_dicts(album.artists),
             "release_date": album.release_date,
             "total_tracks": album.total_tracks or len(tracks),
             "album_type": album.album_type,
             "image_url": album.image_url,
+            "images": JioSaavnClient._image_url_to_images(album.image_url),
             "external_urls": album.external_urls or {},
             "language": raw.get("language"),
             "tracks": tracks,
