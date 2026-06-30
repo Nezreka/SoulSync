@@ -29730,27 +29730,32 @@ def cancel_popularity_backfill():
 
 
 def _autostart_popularity_backfill():
-    """Run the popularity backfill on its OWN a little after boot — no button. Resumable, so each
-    launch just tops up whatever similar_artists rows are still at 0. Bails when nothing's missing or
-    no source is configured. Rate-limited inside the sweep, so it never competes with real traffic."""
+    """Self-maintaining popularity fill — no button, no restart, no cost to scans.
+
+    Sweeps ~90s after boot, then re-checks hourly so new similar-artist data (added by watchlist scans)
+    tops up on its own. It's deliberately DECOUPLED from the scan worker — the worker stays fast and
+    never makes popularity lookups mid-scan; this loop fills the gaps afterwards, rate-limited inside
+    the sweep. Each tick: if there's nothing missing, or no source configured, it just sleeps again."""
     import time as _t
     _t.sleep(90)  # let the server finish its own startup work first
-    try:
-        from core.discovery import popularity_backfill as pb
-        if pb.is_running():
-            return
-        database = get_database()
-        missing = database.count_similar_artists_missing_popularity(1)
-        if missing <= 0:
-            return
-        spotify_free, lastfm, deezer = _resolve_popularity_sources()
-        if not any([spotify_free, lastfm, deezer]):
-            logger.info("Popularity backfill: %d artists missing but no source configured — skipping", missing)
-            return
-        logger.info("Popularity backfill: auto-starting in the background for %d artists", missing)
-        pb.start_background(database, spotify_free=spotify_free, lastfm=lastfm, deezer=deezer, profile_id=1)
-    except Exception as e:
-        logger.debug(f"popularity backfill autostart skipped: {e}")
+    while True:
+        try:
+            from core.discovery import popularity_backfill as pb
+            if not pb.is_running():
+                database = get_database()
+                missing = database.count_similar_artists_missing_popularity(1)
+                if missing > 0:
+                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
+                    if any([spotify_free, lastfm, deezer]):
+                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
+                        # run synchronously — this thread IS the background worker
+                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                                        deezer=deezer, profile_id=1)
+                    else:
+                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+        except Exception as e:
+            logger.debug(f"popularity backfill tick skipped: {e}")
+        _t.sleep(3600)  # re-check hourly; new artists fill within the hour
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
