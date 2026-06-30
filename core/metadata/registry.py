@@ -42,9 +42,49 @@ _dev_mode_enabled_provider: Callable[[], bool] = lambda: False
 _profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id: None
 
 
+# Experimental metadata sources: source name -> its config flag key. Each is
+# opt-in (off by default) and individually toggleable. To add a new experimental
+# provider, register it here — the gating helpers below then cover it everywhere
+# (client routing, primary-source downgrade, search fan-out, quick-switch,
+# watchlist, config-status, and the UI `_experimental` payload) automatically.
+EXPERIMENTAL_SOURCES: Dict[str, str] = {
+    "jiosaavn": "experimental.jiosaavn_enabled",
+}
+
+
+def is_experimental_source(source: Optional[str]) -> bool:
+    """True when ``source`` is an opt-in experimental metadata source."""
+    return (source or "").strip().lower() in EXPERIMENTAL_SOURCES
+
+
+def is_source_enabled(source: Optional[str]) -> bool:
+    """True unless ``source`` is an experimental source whose flag is off.
+
+    Non-experimental sources are always considered enabled.
+    """
+    flag_key = EXPERIMENTAL_SOURCES.get((source or "").strip().lower())
+    if flag_key is None:
+        return True
+    return bool(_get_config_value(flag_key, False))
+
+
+def experimental_source_rejected(source: Optional[str]) -> bool:
+    """True when ``source`` is experimental AND currently disabled.
+
+    The single gate callers use to reject an explicit request for a
+    disabled experimental source (returns False for every normal source).
+    """
+    return is_experimental_source(source) and not is_source_enabled(source)
+
+
+def experimental_status() -> Dict[str, bool]:
+    """``{'<source>_enabled': bool}`` map for the UI ``_experimental`` payload."""
+    return {f"{name}_enabled": is_source_enabled(name) for name in EXPERIMENTAL_SOURCES}
+
+
 def is_jiosaavn_enabled() -> bool:
-    """True when the experimental JioSaavn metadata source is opted in."""
-    return bool(_get_config_value("experimental.jiosaavn_enabled", False))
+    """Back-compat shim — prefer ``is_source_enabled('jiosaavn')``."""
+    return is_source_enabled("jiosaavn")
 
 
 def register_runtime_clients(
@@ -403,13 +443,13 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
 
     if is_boot_phase():
         source = get_configured_primary_source()
-        if source == "jiosaavn" and not is_jiosaavn_enabled():
+        if experimental_source_rejected(source):
             return _default
         return source
 
     source = get_configured_primary_source()
 
-    if source == "jiosaavn" and not is_jiosaavn_enabled():
+    if experimental_source_rejected(source):
         return _default
 
     if source == "spotify":
@@ -584,6 +624,10 @@ def get_client_for_source(
     """Return exact client for a source, or None if unavailable."""
     from core.boot_phase import is_boot_phase
 
+    # Disabled experimental source — never hand back a client.
+    if experimental_source_rejected(source):
+        return None
+
     if source == "spotify":
         try:
             client = get_spotify_client(client_factory=spotify_client_factory)
@@ -614,8 +658,6 @@ def get_client_for_source(
         return get_musicbrainz_client(client_factory=musicbrainz_client_factory)
 
     if source == "jiosaavn":
-        if not is_jiosaavn_enabled():
-            return None
         return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
 
     return None

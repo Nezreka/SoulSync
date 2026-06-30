@@ -247,3 +247,90 @@ def test_resolve_album_reference_searches_by_name_when_no_external_id_exists(mon
     assert resolved_id == "searched-123"
     assert resolved_source == "deezer"
     assert fake_client.calls == [("Artist One Album One", {"limit": 5})]
+
+
+def test_resolve_album_reference_prefers_stored_jiosaavn_id(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute(
+        """
+        CREATE TABLE albums (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            artist_id INTEGER,
+            jiosaavn_id TEXT
+        )
+        """
+    )
+    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Badshah')")
+    cursor.execute(
+        """
+        INSERT INTO albums (id, title, artist_id, jiosaavn_id)
+        VALUES (1, 'Jugnu', 1, '30471107')
+        """
+    )
+    conn.commit()
+
+    class _FakeDatabase:
+        def _get_connection(self):
+            return conn
+
+    monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "jiosaavn")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
+
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference(
+        "1",
+        preferred_source="jiosaavn",
+    )
+
+    assert resolved_id == "30471107"
+    assert resolved_source == "jiosaavn"
+
+
+def test_resolve_album_reference_skips_jiosaavn_client_when_disabled(monkeypatch):
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    cursor.execute(
+        """
+        CREATE TABLE albums (
+            id INTEGER PRIMARY KEY,
+            title TEXT,
+            artist_id INTEGER
+        )
+        """
+    )
+    cursor.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist One')")
+    cursor.execute("INSERT INTO albums (id, title, artist_id) VALUES (1, 'Album One', 1)")
+    conn.commit()
+
+    class _FakeDatabase:
+        def _get_connection(self):
+            return conn
+
+    class _FakeSearchClient:
+        def search_albums(self, query, **kwargs):
+            return [types.SimpleNamespace(id="js-123", name="Album One")]
+
+    fake_client = _FakeSearchClient()
+    monkeypatch.setattr("database.music_database.get_database", lambda: _FakeDatabase())
+    monkeypatch.setattr(metadata_registry, "get_primary_source", lambda spotify_client_factory=None: "jiosaavn")
+    monkeypatch.setattr(metadata_registry, "get_source_priority", lambda primary: [primary, "deezer"])
+    monkeypatch.setattr(metadata_registry, "is_source_enabled", lambda source: source != "jiosaavn")
+    monkeypatch.setattr(
+        metadata_registry,
+        "get_client_for_source",
+        lambda source, **kwargs: fake_client if source == "deezer" else None,
+    )
+
+    resolved_id, resolved_source = metadata_album_tracks.resolve_album_reference(
+        "1",
+        preferred_source="jiosaavn",
+    )
+
+    assert resolved_id == "js-123"
+    assert resolved_source == "deezer"
