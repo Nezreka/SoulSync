@@ -10607,6 +10607,49 @@ class MusicDatabase:
             logger.debug(f"get_play_counts_by_name failed: {e}")
         return out
 
+    def get_similar_artists_missing_popularity(self, limit: int = 500, profile_id: int = 1):
+        """Distinct similar artists that still need a popularity backfill (null or <= 0). Returns
+        ``[{'name', 'spotify_id', 'deezer_id'}]`` — enough to run the popularity cascade. Fail-soft."""
+        rows = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT similar_artist_name AS name, "
+                    "MAX(similar_artist_spotify_id) AS spotify_id, "
+                    "MAX(similar_artist_deezer_id) AS deezer_id "
+                    "FROM similar_artists "
+                    "WHERE (popularity IS NULL OR popularity <= 0) AND profile_id = ? "
+                    "GROUP BY similar_artist_name LIMIT ?",
+                    (profile_id, limit),
+                )
+                for r in cursor.fetchall():
+                    rows.append({'name': r['name'], 'spotify_id': r['spotify_id'], 'deezer_id': r['deezer_id']})
+        except Exception as e:
+            logger.debug(f"get_similar_artists_missing_popularity failed: {e}")
+        return rows
+
+    def update_similar_artist_popularity(self, name, popularity, profile_id: int = 1):
+        """Set popularity (0-100, stored as int) for every ``similar_artists`` row matching ``name``
+        (a candidate is the 'similar' of several seeds). Returns rows updated. Fail-soft -> 0."""
+        try:
+            pop = int(round(float(popularity)))
+        except (TypeError, ValueError):
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE similar_artists SET popularity = ? "
+                    "WHERE LOWER(similar_artist_name) = LOWER(?) AND profile_id = ?",
+                    (pop, name, profile_id),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"update_similar_artist_popularity failed: {e}")
+            return 0
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
