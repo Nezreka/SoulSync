@@ -724,7 +724,9 @@ const HYBRID_SOURCE_PROBE = {
     tidal:      () => _ssTestConn('tidal'),
     qobuz:      () => _ssJson('/api/qobuz/auth/status').then(j => j.authenticated === true),
     hifi:       () => _ssJson('/api/hifi/status').then(j => j.available === true),
-    deezer_dl:  () => _ssJson('/api/deezer-download/test').then(j => j.success === true),
+    // POST (the endpoint is POST-only) with an empty body so it tests the SAVED ARL; a GET here
+    // 405s and the probe throws -> the dot goes red even though Deezer downloads fine.
+    deezer_dl:  () => _ssJson('/api/deezer-download/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(j => j.success === true),
     amazon:     () => _ssJson('/api/amazon/test-connection').then(j => j.connected === true),
     lidarr:     () => _ssTestConn('lidarr'),
     soundcloud: () => _ssJson('/api/soundcloud/status').then(j => j.available === true && j.reachable === true),
