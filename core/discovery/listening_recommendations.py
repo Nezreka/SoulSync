@@ -282,6 +282,52 @@ def apply_adventurousness(
     )
 
 
+# ── Genre / tag affinity (aurral's missing signal) ──────────────────────────────────────────
+# Rank candidates whose genres match the genres you actually PLAY higher. Always-on, data we already
+# store (no popularity-style backfill needed). Built additively: affinity is 0 when there's no genre
+# data on either side, so it can only ever BOOST a taste-match — never penalise a genreless candidate.
+
+def build_genre_taste_profile(weighted_artists: Sequence) -> Dict[str, float]:
+    """Turn the user's played/owned artists into a normalised genre-taste profile.
+
+    ``weighted_artists``: iterable of ``(genres, weight)`` — ``genres`` is one artist's list of genre
+    strings, ``weight`` that artist's importance (e.g. play count). Returns ``{genre_lower: 0..1}``
+    with the heaviest genre at 1.0. Pure; ``{}`` when there's nothing to learn from.
+    """
+    totals: Dict[str, float] = {}
+    for entry in weighted_artists or ():
+        try:
+            genres, weight = entry
+        except (TypeError, ValueError):
+            continue
+        w = _coerce_float(weight, 1.0)   # missing weight -> 1.0, but a zero/negative one doesn't shape taste
+        if w <= 0:
+            continue
+        for g in genres or ():
+            key = _norm(g)
+            if key:
+                totals[key] = totals.get(key, 0.0) + w
+    if not totals:
+        return {}
+    mx = max(totals.values())
+    if mx <= 0:
+        return {}
+    return {g: v / mx for g, v in totals.items()}
+
+
+def genre_affinity(candidate_genres: Sequence, taste_profile: Dict[str, float]) -> float:
+    """0..1 — how well a candidate's genres match the user's taste profile (from
+    :func:`build_genre_taste_profile`): the candidate's single strongest taste-matching genre. Pure;
+    returns 0.0 when either side is empty, so a genreless candidate is never penalised.
+    """
+    if not candidate_genres or not taste_profile:
+        return 0.0
+    best = 0.0
+    for g in candidate_genres:
+        best = max(best, _coerce_float(taste_profile.get(_norm(g)), 0.0))
+    return best
+
+
 def aggregate_candidate_tracks(
     recommended_artists: Sequence[RecommendedArtist],
     top_tracks_by_artist: Dict[str, Sequence[dict]],

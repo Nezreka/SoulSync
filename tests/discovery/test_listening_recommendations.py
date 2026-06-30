@@ -5,7 +5,9 @@ from __future__ import annotations
 from core.discovery.listening_recommendations import (
     aggregate_candidate_tracks,
     apply_adventurousness,
+    build_genre_taste_profile,
     build_recency_weighted_seeds,
+    genre_affinity,
     choose_mix_fetch_source,
     names_match,
     rank_recommended_artists,
@@ -352,3 +354,34 @@ def test_adventurousness_clamps_level():
              {"name": "B", "score": 5.0, "popularity": 0}]
     assert [i["name"] for i in apply_adventurousness(items, 5.0)] == ["B", "A"]    # >1 clamps to 1
     assert [i["name"] for i in apply_adventurousness(items, -2.0)] == ["A", "B"]   # <0 clamps to 0 (no-op)
+
+
+# ── genre affinity (aurral's missing tag signal) ─────────────────────────────
+def test_taste_profile_aggregates_and_normalizes():
+    profile = build_genre_taste_profile([
+        (["Indie Rock", "Shoegaze"], 10),   # heavier artist
+        (["Indie Rock", "Pop"], 4),         # lighter
+    ])
+    assert profile["indie rock"] == 1.0                    # 10+4=14 is the heaviest -> normalized to 1
+    assert round(profile["shoegaze"], 4) == round(10 / 14, 4)
+    assert round(profile["pop"], 4) == round(4 / 14, 4)
+
+
+def test_taste_profile_empty_inputs():
+    assert build_genre_taste_profile([]) == {}
+    assert build_genre_taste_profile([([], 5), (None, 3)]) == {}
+    assert build_genre_taste_profile([(["rock"], 0)]) == {}   # zero weight -> nothing learned
+
+
+def test_genre_affinity_takes_the_best_matching_genre():
+    profile = {"indie rock": 1.0, "shoegaze": 0.7, "pop": 0.3}
+    assert genre_affinity(["Indie Rock"], profile) == 1.0          # your top genre
+    assert genre_affinity(["Shoegaze", "Metal"], profile) == 0.7   # best of the candidate's genres
+    assert genre_affinity(["Metal", "Jazz"], profile) == 0.0       # no overlap with your taste
+
+
+def test_genre_affinity_is_additive_safe():
+    # 0 whenever either side is empty -> a genreless candidate (or no taste data) is never penalized.
+    assert genre_affinity([], {"rock": 1.0}) == 0.0
+    assert genre_affinity(["rock"], {}) == 0.0
+    assert genre_affinity(None, {"rock": 1.0}) == 0.0
