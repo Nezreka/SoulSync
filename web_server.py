@@ -9761,6 +9761,38 @@ def get_artist_discography(artist_id):
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
 
+@app.route('/api/album/<album_id>/art-options', methods=['GET'])
+def get_album_art_options(album_id):
+    """Candidate cover-art images for an album, for the art picker (read-only).
+
+    Gathers from Cover Art Archive (every image for the release) + Deezer/iTunes/Spotify/AudioDB
+    (their single validated best). ``artist`` and ``album`` come from the caller — the enhanced
+    library view already has them. CAA contributes only when the album's release MBID resolves.
+    """
+    try:
+        artist = (request.args.get('artist') or '').strip()
+        album = (request.args.get('album') or '').strip()
+        if not artist or not album:
+            return jsonify({"error": "artist and album query params are required"}), 400
+
+        metadata = {}
+        try:
+            from core.metadata import album_mbid_cache
+            from core.metadata.source import normalize_album_cache_key
+            mbid = album_mbid_cache.lookup(normalize_album_cache_key(album), artist.lower())
+            if mbid:
+                metadata["musicbrainz_release_id"] = mbid
+        except Exception as exc:
+            logger.debug("[art-options] release-MBID resolve failed: %s", exc)
+
+        from core.metadata.art_lookup import gather_album_art_candidates
+        candidates = gather_album_art_candidates(artist, album, metadata)
+        return jsonify({"album_id": album_id, "count": len(candidates), "candidates": candidates})
+    except Exception as e:
+        logger.error("[art-options] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""

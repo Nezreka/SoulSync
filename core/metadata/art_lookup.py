@@ -301,3 +301,103 @@ def build_art_lookup(
         return url
 
     return lookup
+
+
+# ---------------------------------------------------------------------------
+# Candidate gathering for the cover-art PICKER. Unlike the resolver above
+# (which picks ONE url by priority), the picker wants EVERY option so the user
+# can choose. Cover Art Archive contributes all images for the release; the
+# other sources contribute their single validated best.
+# ---------------------------------------------------------------------------
+
+_COVER_ART_ARCHIVE = "https://coverartarchive.org"
+
+# Order the picker offers single-cover sources in (CAA images come first).
+_PICKER_SINGLE_SOURCES = ("deezer", "itunes", "spotify", "audiodb")
+
+
+def _parse_caa_images(data: Optional[dict]) -> List[dict]:
+    """Pure: a Cover Art Archive ``/release/{mbid}`` JSON payload -> candidate dicts.
+
+    Prefers the 1200px thumbnail (matching the resolver's ``front-1200``), falls back to the
+    full-size image. Front covers are listed before back/other art."""
+    out: List[dict] = []
+    for img in (data or {}).get("images", []) or []:
+        if not isinstance(img, dict):
+            continue
+        thumbs = img.get("thumbnails") or {}
+        url = thumbs.get("1200") or thumbs.get("large") or img.get("image") or thumbs.get("500")
+        if not url:
+            continue
+        types = img.get("types") or []
+        is_front = bool(img.get("front"))
+        kind = types[0] if types else ("Front" if is_front else "Other")
+        out.append({"url": url, "source": "caa", "type": kind, "front": is_front})
+    out.sort(key=lambda c: not c.get("front"))   # front images first, stable otherwise
+    return out
+
+
+def _fetch_caa_release(mbid: str) -> Optional[dict]:
+    import json
+    import urllib.request
+    req = urllib.request.Request(
+        f"{_COVER_ART_ARCHIVE}/release/{mbid}",
+        headers={"User-Agent": "SoulSync/1.0 (cover-art picker)"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:   # noqa: S310 (trusted host)
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _caa_art_candidates(metadata: Optional[dict], *, fetch=None) -> List[dict]:
+    """All Cover Art Archive images for the album's MusicBrainz release, or [] (never raises)."""
+    mbid = (metadata or {}).get("musicbrainz_release_id")
+    if not mbid:
+        return []
+    fetch = fetch or _fetch_caa_release
+    try:
+        return _parse_caa_images(fetch(mbid))
+    except Exception as exc:
+        logger.debug("[art] CAA candidates fetch failed: %s", exc)
+        return []
+
+
+def gather_album_art_candidates(
+    artist: Optional[str],
+    album: Optional[str],
+    metadata: Optional[dict] = None,
+    *,
+    lookup: Optional[Callable[[str], Optional[str]]] = None,
+    caa_candidates: Optional[List[dict]] = None,
+) -> List[dict]:
+    """Every cover-art option for one album, de-duplicated by URL, for the picker UI.
+
+    Cover Art Archive contributes all of the release's images; each available single-cover source
+    (Deezer/iTunes/Spotify/AudioDB) contributes its one validated best. ``lookup``/``caa_candidates``
+    are injectable for tests; in production they default to the live clients. Never raises — a failing
+    source is simply absent from the list.
+    """
+    meta = metadata or {}
+    candidates: List[dict] = []
+    seen: set = set()
+
+    def _add(url, source, kind="cover", front=False):
+        if not url or url in seen:
+            return
+        seen.add(url)
+        candidates.append({"url": url, "source": source, "type": kind, "front": front})
+
+    caa = caa_candidates if caa_candidates is not None else _caa_art_candidates(meta)
+    for c in caa:
+        _add(c.get("url"), "caa", c.get("type", "Front"), c.get("front", False))
+
+    if lookup is None:
+        lookup = build_art_lookup(artist or "", album or "", meta)
+    for src in _PICKER_SINGLE_SOURCES:
+        if not is_art_source_available(src):
+            continue
+        try:
+            _add(lookup(src), src)
+        except Exception as exc:
+            logger.debug("[art] %s picker lookup failed: %s", src, exc)
+
+    return candidates
