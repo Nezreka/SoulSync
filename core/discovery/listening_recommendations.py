@@ -342,6 +342,28 @@ def novelty_score(play_count: object, *, half_at: float = 8.0) -> float:
     return h / (h + p)
 
 
+# ── "Why this rec" chips (explainability — the flex aurral doesn't have) ─────────────────────
+# Turn the scoring signals into short human tags shown on each rec card. Pure. Only emits a tag when
+# the signal is actually meaningful, so a card shows 0-3 informative chips, never noise.
+
+def why_chips(*, genre_affinity: float = 0.0, popularity: object = None, seed_count: object = 0) -> List[dict]:
+    """Return ``[{'type', 'label'}]`` explaining why a candidate is recommended. ``type`` lets the UI
+    pick an icon. Thresholds keep it honest: genre tag only on a real taste match, 'deep cut' only on
+    a known-but-low popularity (not on unfilled 0 / -1), consensus only when 2+ of your artists agree.
+    """
+    chips: List[dict] = []
+    if _coerce_float(genre_affinity, 0.0) >= 0.45:
+        chips.append({"type": "genre", "label": "Your genres"})
+    if popularity is not None:
+        pf = _coerce_float(popularity, -1.0)
+        if 0 < pf < 30:
+            chips.append({"type": "obscure", "label": "Deep cut"})
+    sc = int(_coerce_float(seed_count, 0.0))
+    if sc >= 2:
+        chips.append({"type": "consensus", "label": f"{sc} of your artists"})
+    return chips
+
+
 def aggregate_candidate_tracks(
     recommended_artists: Sequence[RecommendedArtist],
     top_tracks_by_artist: Dict[str, Sequence[dict]],

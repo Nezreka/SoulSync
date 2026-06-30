@@ -35146,6 +35146,19 @@ div.artist-hero-badge {
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
     margin-top: 2px;
 }
+/* "Why this rec" chips on recommendation cards (the explainability flex). */
+.ya-card-why { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ya-why-chip {
+    font-size: 9.5px; font-weight: 700; line-height: 1.4;
+    padding: 2px 7px; border-radius: 10px;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: 1px solid rgba(255,255,255,0.14);
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
+.ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
+.ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
 /* Owned / missing indicator on album cards (corner badge). */
 .discover-album-badge {
     width: 20px; height: 20px; border-radius: 50%;

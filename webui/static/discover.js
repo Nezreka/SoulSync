@@ -899,6 +899,10 @@ function _listeningRecommendationReasonTitle(artist) {
     return names.length ? `You listen to: ${names.join(', ')}` : '';
 }
 
+function _whyIcon(type) {
+    return type === 'genre' ? '🎯' : type === 'obscure' ? '💎' : type === 'consensus' ? '👥' : '✨';
+}
+
 function _renderRecommendedMini(artist, source, opts) {
     const reasonFn = (opts && opts.reasonFn) || _recommendationReason;
     const titleFn = (opts && opts.titleFn) || _recommendationReasonTitle;
@@ -909,6 +913,12 @@ function _renderRecommendedMini(artist, source, opts) {
         ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
         : `<div class="recommended-card-image-fallback">🎤</div>`;
+    // "Why this rec" chips from the scoring signals — the explainability flex. When present they
+    // replace the plain reason line (they ARE the reason, just clearer); else fall back to the text.
+    const whyHtml = (artist.why && artist.why.length)
+        ? `<div class="ya-card-why">${artist.why.slice(0, 2).map(w =>
+              `<span class="ya-why-chip ya-why-${w.type}">${_whyIcon(w.type)} ${escapeHtml(w.label)}</span>`).join('')}</div>`
+        : `<div class="ya-card-sub" title="${escapeHtml(reasonTitle)}">${reason}</div>`;
     // .ya-card visual (matches Your Artists / albums) while keeping the class + data hooks the
     // watchlist handler (.recommended-card-watchlist-btn) and image enrichment
     // (.recommended-artist-card[data-artist-id] → .recommended-card-image) rely on. #discover redesign.
@@ -923,7 +933,7 @@ function _renderRecommendedMini(artist, source, opts) {
                 <div class="ya-card-gradient"></div>
                 <div class="ya-card-info">
                     <div class="ya-card-name">${escapeHtml(artist.artist_name)}</div>
-                    <div class="ya-card-sub" title="${escapeHtml(reasonTitle)}">${reason}</div>
+                    ${whyHtml}
                 </div>
             </a>
             <button class="recommended-card-watchlist-btn ya-card-reco-btn"
