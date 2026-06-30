@@ -4,7 +4,8 @@ Walks the ``similar_artists`` rows MusicMap left at popularity 0 and fills them 
 Spotify Free -> Last.fm -> Deezer cascade (``core.discovery.popularity.fetch_artist_popularity``).
 
 Safe by construction:
-- **rate-limited** — a sleep between every artist, so we never hammer the sources;
+- **rate-limited per source** — Last.fm and Deezer throttle themselves inside their own clients, so we
+  add no delay for them; only Spotify Free (no internal limiter) gets a per-artist pause. Never hammers;
 - **resumable** — each run picks up whatever is still missing;
 - **cancellable** — ``cancel()`` stops it cleanly;
 - **terminating** — a found value is floored to >= 1 (so an obscure artist that normalizes to 0 isn't
@@ -49,15 +50,23 @@ def cancel() -> None:
 
 
 def run_backfill(database, *, spotify_free=None, lastfm=None, deezer=None,
-                 profile_id: int = 1, batch_size: int = 50, sleep_s: float = 0.6,
+                 profile_id: int = 1, batch_size: int = 50, spotify_free_pace: float = 0.25,
                  max_artists: int = 0) -> int:
-    """Run the sweep synchronously (call from a background thread). Returns the count filled."""
+    """Run the sweep synchronously (call from a background thread). Returns the count filled.
+
+    Pacing: Last.fm and Deezer rate-limit themselves inside their own clients (Last.fm's @rate_limited
+    decorator, Deezer's _api_get), so we add NO delay for them. Spotify Free (the unofficial scraper)
+    has no internal limiter, so `spotify_free_pace` is the per-artist pause applied ONLY when a Spotify
+    Free client is in use — that's the slowest leg, since Spotify Free is tried first for every artist.
+    """
     with _lock:
         if _state["running"]:
             return 0
         _state.update(running=True, cancel=False, done=0, filled=0, error=None,
                       started_at=time.time(), finished_at=None,
                       total=database.count_similar_artists_missing_popularity(profile_id))
+    # Only Spotify Free needs us to pace it; the others throttle themselves, so don't double-delay them.
+    sf_pace = spotify_free_pace if spotify_free is not None else 0.0
     filled = 0
     seen = set()
     try:
@@ -96,8 +105,8 @@ def run_backfill(database, *, spotify_free=None, lastfm=None, deezer=None,
                     _state["done"] += 1
                     _state["filled"] = filled
                     done = _state["done"]
-                if sleep_s > 0:
-                    time.sleep(sleep_s)
+                if sf_pace > 0:
+                    time.sleep(sf_pace)
                 if max_artists and done >= max_artists:
                     stop = True
                     break
