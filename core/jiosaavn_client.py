@@ -338,38 +338,6 @@ class JioSaavnClient:
     def search_albums(self, query: str, limit: int = 20) -> List[Album]:
         return self._search("album", "/api/search/albums", query, limit, dataclass_from_api=Album.from_api)
 
-    def search_all(self, query: str) -> Dict[str, List[Any]]:
-        """Global search across songs, albums, artists, and playlists."""
-        query = (query or "").strip()
-        if not query:
-            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-        payload = self._get_json("/api/search", {"query": query})
-        data = payload.get("data") if isinstance(payload, dict) else {}
-        if not isinstance(data, dict):
-            return {"tracks": [], "albums": [], "artists": [], "playlists": []}
-
-        def _parse_section(key: str, factory):
-            section = data.get(key) or {}
-            results = section.get("results") if isinstance(section, dict) else []
-            if not isinstance(results, list):
-                return []
-            parsed = []
-            for item in results:
-                if isinstance(item, dict) and item.get("id"):
-                    try:
-                        parsed.append(factory(item))
-                    except Exception as exc:
-                        logger.debug("JioSaavn global search parse failed (%s): %s", key, exc)
-            return parsed
-
-        return {
-            "tracks": _parse_section("songs", Track.from_api),
-            "albums": _parse_section("albums", Album.from_api),
-            "artists": _parse_section("artists", Artist.from_api),
-            "playlists": data.get("playlists", {}).get("results") if isinstance(data.get("playlists"), dict) else [],
-        }
-
     def get_track_details(self, track_id: str) -> Optional[Dict[str, Any]]:
         track_id = str(track_id or "").strip()
         if not track_id:

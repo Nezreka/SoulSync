@@ -204,12 +204,9 @@ def _alternate_sources(primary_source: str, deps: SearchDeps) -> list[str]:
     if primary_source != 'amazon':
         alts.append('amazon')       # always available (T2Tunes, no auth)
     if primary_source != 'jiosaavn':
-        try:
-            from core.metadata.registry import is_jiosaavn_enabled
-            if is_jiosaavn_enabled():
-                alts.append('jiosaavn')     # public API when experimentally enabled
-        except Exception:
-            pass
+        from core.metadata.registry import is_jiosaavn_enabled
+        if is_jiosaavn_enabled():
+            alts.append('jiosaavn')     # public API when experimentally enabled
     alts.append('youtube_videos')   # always available (yt-dlp, no auth)
     alts.append('musicbrainz')      # always available (public API)
     return alts

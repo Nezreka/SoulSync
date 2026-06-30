@@ -144,6 +144,20 @@ def test_track_from_api_maps_fields():
     assert track.external_urls["jiosaavn"].endswith("/abc123")
 
 
+def test_album_from_api_derives_track_count_from_songids():
+    album = Album.from_api({
+        "id": "album1",
+        "name": "Brahmastra",
+        "songIds": "s1, s2 ,s3,",
+    })
+    assert album.total_tracks == 3
+
+
+def test_album_from_api_falls_back_to_unknown_artist():
+    album = Album.from_api({"id": "album1", "name": "Brahmastra"})
+    assert album.artists == ["Unknown Artist"]
+
+
 class TestJioSaavnClientSearch:
     def setup_method(self):
         self.client = JioSaavnClient(base_url="https://saavn.test", session=MagicMock())
@@ -227,28 +241,6 @@ class TestJioSaavnClientSearch:
         assert artists[0].name == "A.R. Rahman"
         assert artists[0].image_url == "https://example.com/artist.jpg"
 
-    @patch("core.jiosaavn_client._rate_limit")
-    def test_search_all_parses_sections(self, _rate_limit):
-        response = MagicMock()
-        response.json.return_value = {
-            "success": True,
-            "data": {
-                "songs": {"results": [SONG_PAYLOAD["data"]["results"][0]]},
-                "albums": {"results": [ALBUM_PAYLOAD["data"]["results"][0]]},
-                "artists": {"results": [ARTIST_PAYLOAD["data"]["results"][0]]},
-                "playlists": {"results": [{"id": "pl1", "title": "Bollywood Hits"}]},
-            },
-        }
-        response.raise_for_status.return_value = None
-        self.client.session.get.return_value = response
-
-        results = self.client.search_all("Bollywood")
-
-        assert len(results["tracks"]) == 1
-        assert len(results["albums"]) == 1
-        assert len(results["artists"]) == 1
-        assert len(results["playlists"]) == 1
-
     @patch("core.jiosaavn_client.get_metadata_cache")
     @patch("core.jiosaavn_client._rate_limit")
     def test_get_track_details_uses_entity_cache(self, _rate_limit, mock_get_cache):
@@ -266,6 +258,31 @@ class TestJioSaavnClientSearch:
         assert self.client.search_tracks("") == []
         assert self.client.search_albums("  ") == []
         assert self.client.search_artists("") == []
+
+    @patch("core.jiosaavn_client._rate_limit")
+    def test_get_json_raises_when_api_reports_failure(self, _rate_limit):
+        response = MagicMock()
+        response.json.return_value = {"success": False, "message": "bad request"}
+        response.raise_for_status.return_value = None
+        self.client.session.get.return_value = response
+
+        with pytest.raises(RuntimeError, match="bad request"):
+            self.client._get_json("/api/songs/abc123")
+
+    @patch("core.jiosaavn_client.get_metadata_cache")
+    @patch("core.jiosaavn_client._rate_limit")
+    def test_get_album_returns_none_when_payload_lacks_data(self, _rate_limit, mock_get_cache):
+        cache = MagicMock()
+        cache.get_entity.return_value = None
+        mock_get_cache.return_value = cache
+
+        response = MagicMock()
+        response.json.return_value = {"success": True, "data": None}
+        response.raise_for_status.return_value = None
+        self.client.session.get.return_value = response
+
+        assert self.client.get_album("missing") is None
+        cache.store_entity.assert_not_called()
 
     @patch("core.jiosaavn_client.get_metadata_cache")
     @patch("core.jiosaavn_client._rate_limit")
