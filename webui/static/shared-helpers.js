@@ -76,6 +76,10 @@ const SOURCE_LABELS = {
         logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
         tabClass: 'enh-tab-musicbrainz', badgeClass: 'enh-badge-musicbrainz',
     },
+    jiosaavn: {
+        text: 'JioSaavn', icon: '🎵',
+        tabClass: 'enh-tab-jiosaavn', badgeClass: 'enh-badge-jiosaavn',
+    },
     youtube_videos: {
         text: 'Music Videos', icon: '🎬',
         tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
@@ -91,7 +95,7 @@ const SOURCE_LABELS = {
 // Canonical display order for the source picker. Standard metadata sources
 // first, then YouTube Music Videos, then Soulseek (basic-file source).
 const SOURCE_ORDER = [
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz', 'jiosaavn',
     'youtube_videos', 'soulseek',
 ];
 
@@ -100,7 +104,7 @@ const SOURCE_ORDER = [
 // Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
 // /api/settings/config-status reports its real state and the picker dims it
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'youtube_videos']);
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'youtube_videos']);
 
 // Fetch /api/settings/config-status and return a map { src -> bool }
 // covering every source in SOURCE_ORDER. Sources not present in the backend
@@ -108,11 +112,17 @@ const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'youtube_vi
 // configured so the picker doesn't dim always-available sources.
 async function fetchSourceConfiguredMap() {
     const map = {};
+    let jiosaavnEnabled = false;
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
             const data = await resp.json();
+            jiosaavnEnabled = !!(data._experimental && data._experimental.jiosaavn_enabled);
             for (const src of SOURCE_ORDER) {
+                if (src === 'jiosaavn' && !jiosaavnEnabled) {
+                    map[src] = false;
+                    continue;
+                }
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
                 } else if (src === 'spotify') {
@@ -3645,6 +3655,7 @@ function getMetadataSourceLabel(source) {
     if (source === 'hydrabase') return 'Hydrabase';
     if (source === 'itunes') return 'iTunes';
     if (source === 'musicbrainz') return 'MusicBrainz';
+    if (source === 'jiosaavn') return 'JioSaavn';
     if (source === 'spotify_free') return 'Spotify (no auth)';
     if (source === 'spotify') return 'Spotify';
     return 'Unmapped';
