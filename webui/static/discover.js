@@ -183,8 +183,21 @@ async function loadAdventurousnessDial() {
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
-    // Load all sections
-    await Promise.all([
+    // The Last.fm / ListenBrainz / weekly / release-radar sections fetch from external services that
+    // can hang for tens of seconds when those services are slow or down (the LB endpoints can time out
+    // ~39s). They sit LOW in the layout, so don't let them hold the whole-page reorder hostage — start
+    // them now (concurrently) but slot them in when they actually arrive, not before the rest of the
+    // page can settle into the intended order. (#discover — fixes the late "reshuffle on load".)
+    const slowExternalLoaders = [
+        initializeLastfmRadioSection(),  // Last.fm Radio (external)
+        initializeListenBrainzTabs(),    // ListenBrainz playlists (external; can time out ~39s)
+        loadDiscoverReleaseRadar(),      // external playlist source
+        loadDiscoverWeekly(),            // external playlist source
+    ];
+
+    // Fast/local sections — settle quickly so the layout snaps into place without waiting on the
+    // external APIs above. allSettled (not all) so one failing loader can't block the reorder.
+    await Promise.allSettled([
         loadDiscoverHero(),
         loadAdventurousnessDial(),  // sets the Discover-page dial from config
         loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
@@ -194,28 +207,26 @@ async function loadDiscoverPage() {
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
-        // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
-        loadDiscoverReleaseRadar(),
-        loadDiscoverWeekly(),
-        loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
-        loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
-        loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
+        loadPersonalizedPopularPicks(),  // Popular picks from discovery pool
+        loadPersonalizedHiddenGems(),  // Hidden gems from discovery pool
+        loadDiscoveryShuffle(),  // Discovery Shuffle
         loadBecauseYouListenTo(),  // Personalized by listening stats
         loadCacheUndiscoveredAlbums(),  // From metadata cache
         loadCacheGenreNewReleases(),    // From metadata cache
         loadCacheLabelExplorer(),       // From metadata cache
         loadCacheDeepCuts(),            // From metadata cache
         loadCacheGenreExplorer(),       // From metadata cache
-        initializeLastfmRadioSection(),  // Last.fm Radio section (gated on API key)
-        initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        // loadGenreBrowserTabs(),  // REMOVED (#discover redesign): empty + redundant with Genre Explorer
-        loadListenBrainzPlaylistsFromBackend(),  // Load ListenBrainz playlist states for persistence
+        loadListenBrainzPlaylistsFromBackend(),  // local: ListenBrainz playlist states for persistence
         loadDiscoveryBlacklist()  // Blocked artists list
     ]);
 
-    // Reorder sections into the intended top-to-bottom grouping now that every loader has run.
+    // Reorder now that the fast sections are in — NOT gated on the slow external APIs above.
     _reorderDiscoverSections();
+
+    // Re-slot the slow external sections into the already-ordered layout when they finish, instead of
+    // delaying the whole page until then. allSettled so one failing source can't block the re-order.
+    Promise.allSettled(slowExternalLoaders).then(() => _reorderDiscoverSections());
 
     // Check for active syncs after page load
     checkForActiveDiscoverSyncs();
