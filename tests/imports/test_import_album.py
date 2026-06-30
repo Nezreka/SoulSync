@@ -1,14 +1,6 @@
 import core.imports.album as import_album
 
 
-class _FakeEngine:
-    def normalize_string(self, text):
-        return str(text or "").strip().lower()
-
-    def similarity_score(self, left, right):
-        return 1.0 if left == right else 0.0
-
-
 def test_resolve_album_artist_context_uses_provider_genres(monkeypatch):
     class _FakeClient:
         def get_artist(self, artist_id):
@@ -87,7 +79,6 @@ def test_build_album_import_match_payload_uses_generic_track_keys(monkeypatch, t
     staging_root.mkdir()
     (staging_root / "Song One.flac").write_text("fake")
 
-    monkeypatch.setattr(import_album, "_get_matching_engine", lambda: _FakeEngine())
     monkeypatch.setattr(
         import_album,
         "collect_staging_files",
