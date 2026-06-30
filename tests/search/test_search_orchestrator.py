@@ -328,13 +328,31 @@ def test_fanout_lists_alternate_sources_excluding_primary():
 
 def test_fanout_includes_jiosaavn_alternate_when_experimental_enabled(monkeypatch):
     import core.metadata.registry as registry_mod
-    monkeypatch.setattr(registry_mod, 'is_jiosaavn_enabled', lambda: True)
+    monkeypatch.setattr(registry_mod, 'is_source_enabled', lambda source: True)
     deps = _build_deps(
         get_metadata_fallback_source=lambda: 'deezer',
         spotify_client=_Client(authed=True),
     )
     result = orchestrator.run_enhanced_search('pink floyd', '', deps)
     assert 'jiosaavn' in result['alternate_sources']
+
+
+def test_fanout_includes_multiple_experimental_alternates_simultaneously(monkeypatch):
+    # Multiple experimental providers enabled at once must all surface together
+    # as alternates — none is mutually exclusive with another.
+    import core.metadata.registry as registry_mod
+    monkeypatch.setattr(
+        registry_mod, 'EXPERIMENTAL_SOURCES',
+        {'jiosaavn': 'experimental.jiosaavn_enabled', 'demosource': 'experimental.demosource_enabled'},
+    )
+    monkeypatch.setattr(registry_mod, 'is_source_enabled', lambda source: True)
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        spotify_client=_Client(authed=True),
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+    assert 'jiosaavn' in result['alternate_sources']
+    assert 'demosource' in result['alternate_sources']
 
 
 def test_fanout_omits_spotify_alternate_when_unauthed():

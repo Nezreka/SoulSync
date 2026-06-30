@@ -37,6 +37,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "audiodb": "audiodb_id",
         "genius": "genius_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
     "album": {
         "spotify": "spotify_album_id",
@@ -49,6 +50,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "qobuz": "qobuz_id",
         "audiodb": "audiodb_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
     "track": {
         "spotify": "spotify_track_id",
@@ -61,6 +63,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "audiodb": "audiodb_id",
         "genius": "genius_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
 }
 
