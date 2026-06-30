@@ -29729,6 +29729,30 @@ def cancel_popularity_backfill():
     return jsonify({"success": True, "state": pb.get_state()})
 
 
+def _autostart_popularity_backfill():
+    """Run the popularity backfill on its OWN a little after boot — no button. Resumable, so each
+    launch just tops up whatever similar_artists rows are still at 0. Bails when nothing's missing or
+    no source is configured. Rate-limited inside the sweep, so it never competes with real traffic."""
+    import time as _t
+    _t.sleep(90)  # let the server finish its own startup work first
+    try:
+        from core.discovery import popularity_backfill as pb
+        if pb.is_running():
+            return
+        database = get_database()
+        missing = database.count_similar_artists_missing_popularity(1)
+        if missing <= 0:
+            return
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            logger.info("Popularity backfill: %d artists missing but no source configured — skipping", missing)
+            return
+        logger.info("Popularity backfill: auto-starting in the background for %d artists", missing)
+        pb.start_background(database, spotify_free=spotify_free, lastfm=lastfm, deezer=deezer, profile_id=1)
+    except Exception as e:
+        logger.debug(f"popularity backfill autostart skipped: {e}")
+
+
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
 def get_discover_listening_recommendations():
     """#913: artists you'd love based on what you actually LISTEN to (play-weighted).
@@ -39221,6 +39245,15 @@ def start_runtime_services():
 # Module import is complete — provider clients may now perform network probes.
 from core.boot_phase import mark_boot_complete
 mark_boot_complete()
+
+# Auto-run the Discover popularity backfill in the background (no manual trigger). Self-limits: it
+# sleeps past startup, fills whatever's still missing, and exits when there's nothing left.
+try:
+    import threading as _pb_threading
+    _pb_threading.Thread(target=_autostart_popularity_backfill, daemon=True,
+                         name='PopularityBackfillAutostart').start()
+except Exception as _pb_autostart_err:
+    logger.debug(f"could not start popularity backfill autostart: {_pb_autostart_err}")
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)
