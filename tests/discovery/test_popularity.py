@@ -32,23 +32,27 @@ def test_log_normalize_custom_calibration():
 
 
 # ── resolve_popularity (the cascade) ─────────────────────────────────────────
-def test_cascade_prefers_spotify_including_zero():
-    pop, src = resolve_popularity(spotify=86, lastfm_listeners=5_000_000, deezer_fans=900_000)
+def test_cascade_official_spotify_popularity_wins_including_zero():
+    pop, src = resolve_popularity(spotify_popularity=86, spotify_followers=5_000_000,
+                                  lastfm_listeners=5_000_000, deezer_fans=900_000)
     assert (pop, src) == (86.0, "spotify")
-    # Spotify 0 is a real "this artist is obscure" value and still wins over the others.
-    assert resolve_popularity(spotify=0, lastfm_listeners=5_000_000) == (0.0, "spotify")
+    # the curated 0-100 index, including 0, is a real value and wins over the raw-count sources.
+    assert resolve_popularity(spotify_popularity=0, lastfm_listeners=5_000_000) == (0.0, "spotify")
 
 
-def test_cascade_falls_through_to_lastfm_then_deezer():
-    # spotify not found -> Last.fm
-    pop, src = resolve_popularity(spotify=None, lastfm_listeners=1_000_000, deezer_fans=10)
+def test_cascade_spotify_free_then_lastfm_then_deezer():
+    # no official popularity -> Spotify Free followers (log-normalized)
+    pop, src = resolve_popularity(spotify_followers=5_000_000, lastfm_listeners=1_000)
+    assert src == "spotify_free" and pop > 70
+    # no spotify at all -> Last.fm
+    pop, src = resolve_popularity(lastfm_listeners=1_000_000, deezer_fans=10)
     assert src == "lastfm" and pop > 70
-    # spotify + lastfm absent -> Deezer
-    pop, src = resolve_popularity(spotify=None, lastfm_listeners=None, deezer_fans=1_000_000)
+    # only deezer left
+    pop, src = resolve_popularity(deezer_fans=1_000_000)
     assert src == "deezer" and pop == 100.0
 
 
 def test_cascade_returns_none_when_nothing_usable():
     assert resolve_popularity() == (None, None)
-    assert resolve_popularity(spotify=None, lastfm_listeners=0, deezer_fans=0) == (None, None)
+    assert resolve_popularity(spotify_followers=0, lastfm_listeners=0, deezer_fans=0) == (None, None)
     assert resolve_popularity(lastfm_listeners=-5) == (None, None)
