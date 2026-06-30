@@ -450,34 +450,6 @@ def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicate
     return _albums_likely_match(wanted_album, library_album)
 
 
-def _library_track_has_file(file_path: object, resolve=None) -> bool:
-    """True when a library track's stored path resolves to a REAL file on disk.
-
-    The watchlist 'owned' check matched DB rows only — never the file. A row whose file is gone
-    (deleted, or a stale media-server entry that never reconciled) is a GHOST: the artist page reads
-    the row -> "owned", but the album page resolves the file -> "not owned", and the scanner skipped
-    the track forever (the Expedition 33 report — Sokhi had deleted the soundtrack but the rows
-    survived). Resolving via the shared resolver (which probes existence + handles Docker/NAS path
-    mapping) means a ghost row reads as NOT owned, so the track is wishlisted again.
-
-    ``resolve`` is an injectable ``path -> resolved_path_or_None`` (default: the library resolver with
-    config). Conservative on error: assume present, so a resolver hiccup never triggers a re-download.
-    Pure over ``resolve``.
-    """
-    if not file_path:
-        return False
-    if resolve is None:
-        from config.settings import config_manager
-        from core.library.path_resolver import resolve_library_file_path
-
-        def resolve(p):
-            return resolve_library_file_path(p, config_manager=config_manager)
-    try:
-        return resolve(file_path) is not None
-    except Exception:
-        return True   # resolver error -> assume present (never re-download off a hiccup)
-
-
 @dataclass
 class ScanResult:
     """Result of scanning a single artist"""
@@ -2250,32 +2222,24 @@ class WatchlistScanner:
                     if matched is not None:
                         matched_album = (matched.get('album_title') if isinstance(matched, dict)
                                          else getattr(matched, 'album_title', None)) or ''
-                        matched_file = (matched.get('file_path') if isinstance(matched, dict)
-                                        else getattr(matched, 'file_path', None))
-                        # A row whose FILE is gone is a ghost — not genuinely owned. Verify the file
-                        # actually resolves on disk before trusting the row (the artist page trusted
-                        # the row -> "owned" while the album page resolved the file -> "not owned"; the
-                        # scanner was on the wrong side). Then the existing album/allow_duplicates gate.
-                        if not _library_track_has_file(matched_file):
-                            logger.info(
-                                f"[ExtID Match] DB row matched but its file is not on disk — wishlisting "
-                                f"(ghost row): '{original_title}' (db file: {matched_file!r})"
-                            )
-                            # fall through: not really owned
-                        elif _extid_match_is_owned(album_name, matched_album, allow_duplicates):
+                        # The recording IS in the library. Only skip it when it's actually "owned for
+                        # this release" — same album, or duplicates disabled. With duplicates on, the
+                        # same recording on a DIFFERENT edition (soundtrack remix vs the bonus edition
+                        # the user owns) is one they WANT — wishlist it, and don't let the provenance
+                        # fallback below re-skip it either.
+                        if _extid_match_is_owned(album_name, matched_album, allow_duplicates):
                             logger.info(
                                 f"[ExtID Match] Track found in library by external ID: "
                                 f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
                                 f"(matched on: {', '.join(sorted(source_ids.keys()))})"
                             )
-                            return False  # in library, file present, same album / duplicates off
-                        else:
-                            logger.info(
-                                f"[ExtID Match] Same recording on a DIFFERENT album — allowing "
-                                f"(allow_duplicates): '{original_title}' (wanted: '{album_name}', "
-                                f"library: '{matched_album}')"
-                            )
-                            # fall through to the fuzzy path (same album gate), which wishlists it
+                            return False  # Track exists in library (same album / duplicates off)
+                        logger.info(
+                            f"[ExtID Match] Same recording on a DIFFERENT album — allowing "
+                            f"(allow_duplicates): '{original_title}' (wanted: '{album_name}', "
+                            f"library: '{matched_album}')"
+                        )
+                        # fall through to the fuzzy path (same album gate), which wishlists it
                     else:
                         # Second-tier fallback: provenance table. Catches the
                         # window between "SoulSync downloaded the file" and
@@ -2305,15 +2269,6 @@ class WatchlistScanner:
                     db_track, confidence = self.database.check_track_exists(query_title, artist_name, confidence_threshold=0.7, server_source=active_server, album=search_album)
 
                     if db_track and confidence >= 0.7:
-                        # Same ghost-row guard as the ExtID path: a fuzzy title hit against a row whose
-                        # file is gone isn't really owned — keep looking (other variations may hit a
-                        # real file), else fall through to wishlist.
-                        if not _library_track_has_file(getattr(db_track, 'file_path', None)):
-                            logger.info(
-                                f"[Fuzzy] DB row matched but its file is not on disk — not owned "
-                                f"(ghost row): '{original_title}'"
-                            )
-                            continue
                         # When allow_duplicates is on, only skip if we believe
                         # the library copy is on the same album the watchlist
                         # is asking about. Album name drift between Spotify
