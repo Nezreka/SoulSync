@@ -29609,19 +29609,16 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    apply_adventurousness, genre_affinity, novelty_score, why_chips)
+                    apply_adventurousness, genre_affinity, novelty_score)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
                     _base = _oc + (10.0 - _rank) * 0.1
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
+                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
                     _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
                     a['_adv_score'] = (_base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
                                        * (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - _nov)))
-                    _w = why_chips(genre_affinity=_aff, popularity=a.get('popularity'),
-                                   seed_count=len(a.get('because') or []) or int(_oc))
-                    if _w:
-                        a['why'] = _w
                 # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
                 # there), so sort by the boosted score first; the dial then layers its penalty on top.
                 result_artists.sort(key=lambda a: -a['_adv_score'])
@@ -29632,6 +29629,19 @@ def get_discover_similar_artists():
                     a.pop('_adv_score', None)
             except Exception as _adv_err:
                 logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
+
+        # "Why this rec" chips — built unconditionally so they show even when the re-rank block above
+        # was skipped (no genre data, no plays, dial 0). Deep-cut/consensus tags don't need taste.
+        try:
+            from core.discovery.listening_recommendations import why_chips
+            for a in result_artists:
+                _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                if _w:
+                    a['why'] = _w
+                a.pop('_why_genre', None)
+        except Exception as _why_err:
+            logger.debug(f"similar-artists why chips skipped: {_why_err}")
 
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
@@ -29814,19 +29824,16 @@ def get_discover_listening_recommendations():
         except Exception as _qual_err:
             logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
 
-        # Adventurousness re-rank (aurral-style): enrich popularity at request time (the stored recs
-        # don't carry it inline, so this works on existing data), then push globally-popular picks
-        # down per the user's dial. level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
+        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
+        # Popularity was already enriched in the quality block above, so don't re-fetch it here (the
+        # dial drag re-fetches this route repeatedly — one popularity query per request, not two).
+        # level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
         try:
             level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
         except (TypeError, ValueError):
             level = 0.0
         if level > 0 and stored:
             try:
-                pops = database.get_similar_artist_popularities([a.get('name') for a in stored])
-                for a in stored:
-                    if a.get('popularity') is None:
-                        a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 from core.discovery.listening_recommendations import apply_adventurousness
                 stored = apply_adventurousness(stored, level)
             except Exception as _adv_err:
