@@ -28,11 +28,33 @@ if not _os.environ.get('SOULSYNC_TEST_DB_READY'):
     _atexit.register(lambda: _shutil.rmtree(_TEST_DB_DIR, ignore_errors=True))
 
 import copy
+import os as _os
 import pytest
+import tempfile as _tempfile2
 import threading
 import time
 from flask import Flask, jsonify
 from flask_socketio import SocketIO, join_room, leave_room
+
+
+def symlinks_supported() -> bool:
+    """True when the host can create symlinks (often false on Windows without Developer Mode)."""
+    try:
+        with _tempfile2.TemporaryDirectory() as d:
+            target = _os.path.join(d, "target")
+            link = _os.path.join(d, "link")
+            with open(target, "w", encoding="utf-8"):
+                pass
+            _os.symlink("target", link)
+            return _os.path.islink(link) and _os.readlink(link) == "target"
+    except (OSError, NotImplementedError):
+        return False
+
+
+requires_symlinks = pytest.mark.skipif(
+    not symlinks_supported(),
+    reason="host OS cannot create symlinks (common on Windows without Developer Mode)",
+)
 
 
 # ---------------------------------------------------------------------------
