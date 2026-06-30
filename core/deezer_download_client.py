@@ -227,10 +227,14 @@ class DeezerDownloadClient(DownloadSourcePlugin):
         self.shutdown_check = check_callable
 
     def is_configured(self) -> bool:
-        return self._authenticated
+        # Go through is_authenticated() so the lazy ARL auth fires (post-boot) — otherwise the raw
+        # _authenticated flag is still False until something else triggers it, and the hybrid-mode
+        # gate + the green-light status (both read is_configured) silently drop Deezer even though it
+        # downloads fine as a primary source (that path calls is_authenticated). Keeps the three in sync.
+        return self.is_authenticated()
 
     def is_available(self) -> bool:
-        return self._authenticated
+        return self.is_authenticated()
 
     def is_authenticated(self) -> bool:
         if self._pending_arl and not self._authenticated:

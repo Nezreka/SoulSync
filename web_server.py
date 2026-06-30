@@ -29499,6 +29499,34 @@ def get_discover_hero():
     return _discover_hero_get()
 
 
+_discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
+_DISCOVER_GENRE_WEIGHT = 0.6          # a candidate fully in your top genre gets up to +60% score
+_DISCOVER_NOVELTY_PENALTY = 0.4       # a heavily-already-heard candidate loses up to 40% score
+
+
+def _discover_genre_taste(database, profile_id):
+    """Cached genre-taste profile for a profile — ``{genre_lower: 0..1}`` from the genres of your
+    top-played artists, weighted by plays. Cached 5 min (it changes slowly) so the live dial-drag
+    re-fetch doesn't recompute it. Fail-soft -> ``{}`` (no genre data -> no boost, never a penalty)."""
+    import time
+    now = time.time()
+    cached = _discover_taste_cache.get(profile_id)
+    if cached and now < cached[0]:
+        return cached[1]
+    profile = {}
+    try:
+        from core.discovery.listening_recommendations import build_genre_taste_profile
+        top = database.get_top_artists('all', 300) or []
+        genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
+        weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
+                     t.get('play_count', 1) or 1) for t in top]
+        profile = build_genre_taste_profile(weighted)
+    except Exception as e:
+        logger.debug(f"discover genre taste profile failed: {e}")
+    _discover_taste_cache[profile_id] = (now + 300, profile)
+    return profile
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -29565,6 +29593,56 @@ def get_discover_similar_artists():
                 artist_data["because"] = because
             result_artists.append(artist_data)
 
+        # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
+        # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
+        # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
+        # rotation order is left untouched (no regression). Fail-soft.
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
+        _pid = get_current_profile_id()
+        _taste = _discover_genre_taste(database, _pid)
+        _plays = database.get_play_counts_by_name(
+            [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
+        if result_artists and (_adv_level > 0 or _taste or _plays):
+            try:
+                from core.discovery.listening_recommendations import (
+                    apply_adventurousness, genre_affinity, novelty_score)
+                for a in result_artists:
+                    _oc = float(a.get('occurrence_count') or 0)
+                    _rank = min(float(a.get('similarity_rank') or 10), 10.0)
+                    _base = _oc + (10.0 - _rank) * 0.1
+                    _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
+                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
+                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                    a['_adv_score'] = (_base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
+                                       * (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - _nov)))
+                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
+                # there), so sort by the boosted score first; the dial then layers its penalty on top.
+                result_artists.sort(key=lambda a: -a['_adv_score'])
+                if _adv_level > 0:
+                    result_artists = apply_adventurousness(
+                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                for a in result_artists:
+                    a.pop('_adv_score', None)
+            except Exception as _adv_err:
+                logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
+
+        # "Why this rec" chips — built unconditionally so they show even when the re-rank block above
+        # was skipped (no genre data, no plays, dial 0). Deep-cut/consensus tags don't need taste.
+        try:
+            from core.discovery.listening_recommendations import why_chips
+            for a in result_artists:
+                _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                if _w:
+                    a['why'] = _w
+                a.pop('_why_genre', None)
+        except Exception as _why_err:
+            logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
             f"{active_source} after excluding {active_server} library artists"
@@ -29580,6 +29658,118 @@ def get_discover_similar_artists():
     except Exception as e:
         logger.error(f"Error getting similar artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/adventurousness', methods=['GET', 'POST'])
+def discover_adventurousness():
+    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
+    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
+    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            try:
+                v = float(data.get('value'))
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "value must be a number"}), 400
+            v = max(0.0, min(1.0, v))
+            config_manager.set('discover.adventurousness', v)
+            return jsonify({"success": True, "value": v})
+        try:
+            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            v = 0.3
+        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+    except Exception as e:
+        logger.error(f"adventurousness endpoint error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _resolve_popularity_sources():
+    """Best-effort handles for the popularity cascade — each may be None (then it's skipped)."""
+    spotify_free = lastfm = deezer = None
+    try:
+        from core.spotify_free_metadata import SpotifyFreeMetadataClient, spotify_free_installed
+        if spotify_free_installed():
+            spotify_free = SpotifyFreeMetadataClient()
+    except Exception as e:
+        logger.debug(f"spotify-free unavailable for backfill: {e}")
+    try:
+        from core.lastfm_client import LastFMClient
+        _key = config_manager.get('lastfm.api_key', '')
+        if _key:
+            lastfm = LastFMClient(api_key=_key)
+    except Exception as e:
+        logger.debug(f"lastfm unavailable for backfill: {e}")
+    try:
+        deezer = _get_deezer_client()
+    except Exception as e:
+        logger.debug(f"deezer unavailable for backfill: {e}")
+    return spotify_free, lastfm, deezer
+
+
+@app.route('/api/discover/popularity-backfill/start', methods=['POST'])
+@admin_only
+def start_popularity_backfill():
+    """Kick off the background popularity backfill (fills similar_artists.popularity via the Spotify
+    Free -> Last.fm -> Deezer cascade). Rate-limited + resumable; safe to call repeatedly."""
+    try:
+        from core.discovery import popularity_backfill as pb
+        if pb.is_running():
+            return jsonify({"success": False, "error": "Backfill already running", "state": pb.get_state()})
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            return jsonify({"success": False,
+                            "error": "No popularity source available — configure Last.fm, Spotify Free, or Deezer."})
+        pb.start_background(get_database(), spotify_free=spotify_free, lastfm=lastfm, deezer=deezer,
+                            profile_id=get_current_profile_id())
+        return jsonify({"success": True, "state": pb.get_state()})
+    except Exception as e:
+        logger.error(f"start popularity backfill error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/popularity-backfill/status', methods=['GET'])
+def popularity_backfill_status():
+    from core.discovery import popularity_backfill as pb
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+@app.route('/api/discover/popularity-backfill/cancel', methods=['POST'])
+@admin_only
+def cancel_popularity_backfill():
+    from core.discovery import popularity_backfill as pb
+    pb.cancel()
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+def _autostart_popularity_backfill():
+    """Self-maintaining popularity fill — no button, no restart, no cost to scans.
+
+    Sweeps ~90s after boot, then re-checks hourly so new similar-artist data (added by watchlist scans)
+    tops up on its own. It's deliberately DECOUPLED from the scan worker — the worker stays fast and
+    never makes popularity lookups mid-scan; this loop fills the gaps afterwards, rate-limited inside
+    the sweep. Each tick: if there's nothing missing, or no source configured, it just sleeps again."""
+    import time as _t
+    _t.sleep(90)  # let the server finish its own startup work first
+    while True:
+        try:
+            from core.discovery import popularity_backfill as pb
+            if not pb.is_running():
+                database = get_database()
+                missing = database.count_similar_artists_missing_popularity(1)
+                if missing > 0:
+                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
+                    if any([spotify_free, lastfm, deezer]):
+                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
+                        # run synchronously — this thread IS the background worker
+                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                                        deezer=deezer, profile_id=1)
+                    else:
+                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+        except Exception as e:
+            logger.debug(f"popularity backfill tick skipped: {e}")
+        _t.sleep(3600)  # re-check hourly; new artists fill within the hour
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
@@ -29604,6 +29794,51 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
+        # Quality re-rank (aurral parity, always-on): genre/tag affinity BOOSTS candidates whose
+        # genres match what you play; novelty PENALISES recs you've already heard. Both additive — no
+        # genre match / no plays leaves the score untouched, so they can only ever improve the order.
+        try:
+            from core.discovery.listening_recommendations import genre_affinity, novelty_score
+            _pid = get_current_profile_id()
+            taste = _discover_genre_taste(database, _pid)
+            _names = [a.get('name') for a in stored]
+            plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
+            pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
+            changed = False
+            for a in stored:
+                if a.get('popularity') is None:
+                    a['popularity'] = pops.get((a.get('name') or '').strip().lower())
+                aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
+                a['_why_genre'] = aff   # captured for the "why this rec" chips
+                factor = 1.0
+                if aff > 0:
+                    factor *= (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
+                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+                if nov < 1.0:
+                    factor *= (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - nov))
+                if factor != 1.0:
+                    a['score'] = float(a.get('score') or 0) * factor
+                    changed = True
+            if changed:
+                stored.sort(key=lambda a: -float(a.get('score') or 0))
+        except Exception as _qual_err:
+            logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
+
+        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
+        # Popularity was already enriched in the quality block above, so don't re-fetch it here (the
+        # dial drag re-fetches this route repeatedly — one popularity query per request, not two).
+        # level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
+        try:
+            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            level = 0.0
+        if level > 0 and stored:
+            try:
+                from core.discovery.listening_recommendations import apply_adventurousness
+                stored = apply_adventurousness(stored, level)
+            except Exception as _adv_err:
+                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
+
         result_artists = []
         for a in stored:
             name = a.get('name')
@@ -29624,6 +29859,14 @@ def get_discover_listening_recommendations():
                 "seed_count": a.get('seed_count'),
                 "source": active_source,
             }
+            try:
+                from core.discovery.listening_recommendations import why_chips
+                _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                if _why:
+                    entry["why"] = _why
+            except Exception as _why_err:
+                logger.debug(f"why chips skipped: {_why_err}")
             img = a.get('image_url')
             if img:
                 entry["image_url"] = fix_artist_image_url(img)
@@ -39030,6 +39273,15 @@ def start_runtime_services():
 # Module import is complete — provider clients may now perform network probes.
 from core.boot_phase import mark_boot_complete
 mark_boot_complete()
+
+# Auto-run the Discover popularity backfill in the background (no manual trigger). Self-limits: it
+# sleeps past startup, fills whatever's still missing, and exits when there's nothing left.
+try:
+    import threading as _pb_threading
+    _pb_threading.Thread(target=_autostart_popularity_backfill, daemon=True,
+                         name='PopularityBackfillAutostart').start()
+except Exception as _pb_autostart_err:
+    logger.debug(f"could not start popularity backfill autostart: {_pb_autostart_err}")
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)

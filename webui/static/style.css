@@ -35006,6 +35006,262 @@ div.artist-hero-badge {
 }
 .ya-card-name:hover { color: var(--accent); }
 
+/* ── Your Mixes (Spotify-style playlist cards, #discover redesign) ───────────
+   Each mix is ONE card: a 2x2 mosaic cover from its top tracks + name below, with
+   a hover play button. Click opens the track list in a modal. Replaces the old
+   full-width compact-track tables. */
+.discover-mixes-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 18px;
+}
+.discover-mix-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    padding: 12px;
+    cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), border-color 0.3s, box-shadow 0.3s, background 0.3s;
+}
+.discover-mix-card:hover {
+    transform: translateY(-5px);
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(var(--accent-rgb),0.25);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 24px rgba(var(--accent-rgb),0.12);
+}
+.mix-card-cover {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 10px;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+}
+.mix-card-tile {
+    background-size: cover;
+    background-position: center;
+    background-color: #1a1a1a;
+}
+.mix-card-play {
+    position: absolute;
+    bottom: 10px; right: 10px;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #000;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; padding-left: 2px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.45);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity 0.25s, transform 0.25s;
+    z-index: 2;
+}
+.discover-mix-card:hover .mix-card-play {
+    opacity: 1; transform: translateY(0);
+}
+.mix-card-name {
+    font-size: 14px; font-weight: 700; color: #fff;
+    margin-top: 12px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mix-card-meta {
+    font-size: 12px; color: rgba(255,255,255,0.5);
+    margin-top: 3px;
+}
+/* Solid/gradient cover for mixes with no per-track art (e.g. decades). */
+.mix-card-cover--solid {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.42), rgba(var(--accent-rgb),0.10));
+    display: flex; align-items: center; justify-content: center;
+}
+.mix-card-decade {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.mix-card-decade-icon { font-size: 34px; line-height: 1; }
+.mix-card-decade-label { font-size: 22px; font-weight: 800; letter-spacing: 0.5px; }
+/* The mix modal — opened from a mix card; holds the track list + per-mix actions. */
+.mix-modal {
+    background: #14141c; border-radius: 18px;
+    width: 760px; max-width: 94vw; max-height: 86vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.08);
+}
+.mix-modal-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 22px 24px; gap: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.mix-modal-subtitle { font-size: 12px; color: #999; }
+.mix-modal-title { font-size: 24px; font-weight: 700; color: #fff; margin: 4px 0; }
+.mix-modal-meta { font-size: 12px; color: rgba(255,255,255,0.5); }
+.mix-modal-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mix-modal-close {
+    background: none; border: none; color: rgba(255,255,255,0.5);
+    font-size: 16px; cursor: pointer; padding: 6px; line-height: 1;
+}
+.mix-modal-close:hover { color: #fff; }
+.mix-modal-body { overflow-y: auto; padding: 16px 24px 24px; }
+
+/* ── Unified Discover card grid (#discover redesign) ─────────────────────────
+   One responsive wrapping grid (fills the section width, wraps to rows — no
+   horizontal scroll) holding the same .ya-card the Your Artists section uses, so
+   every album/artist section reads as one design. */
+.discover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+}
+.discover-grid .ya-card { width: 100%; }
+/* Two same-card sections side by side (#discover redesign) — halves the scroll. The inner
+   .discover-grid auto-fits fewer columns at half width, so cards stay full-size. Collapses to a
+   single column on narrower screens. min-width:0 lets each column shrink instead of overflowing. */
+.discover-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+}
+.discover-row-2col > .discover-section { min-width: 0; }
+@media (max-width: 1100px) {
+    .discover-row-2col { grid-template-columns: 1fr; gap: 0; }
+}
+/* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
+.discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
+/* Genre cards: no cover art — square gradient tile with the genre emoji centered. */
+.discover-grid .discover-genre-card.ya-card { aspect-ratio: 1; }
+.discover-genre-card .genre-card-art {
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.38), rgba(var(--accent-rgb),0.07));
+}
+.discover-genre-card .genre-icon-large { font-size: 46px; line-height: 1; }
+/* Secondary line under the title (album → artist). */
+.ya-card-sub {
+    font-size: 11px; font-weight: 500;
+    color: rgba(255,255,255,0.72);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+    margin-top: 2px;
+}
+/* "Why this rec" chips on recommendation cards (the explainability flex). */
+.ya-card-why { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.ya-why-chip {
+    font-size: 9.5px; font-weight: 700; line-height: 1.4;
+    padding: 2px 7px; border-radius: 10px;
+    background: rgba(0,0,0,0.55); color: #fff;
+    border: 1px solid rgba(255,255,255,0.14);
+    white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+.ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
+.ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
+.ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
+/* Owned / missing indicator on album cards (corner badge). */
+.discover-album-badge {
+    width: 20px; height: 20px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+}
+.discover-album-badge.owned { background: #1DB954; color: #000; }
+.discover-album-badge.missing {
+    background: rgba(0,0,0,0.55); color: rgba(255,255,255,0.85);
+    border: 1px solid rgba(255,255,255,0.2);
+}
+/* Show all / Show less toggle under a clamped discover-grid. */
+.discover-show-all {
+    margin: 14px auto 0;
+    display: block;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: rgba(255,255,255,0.85);
+    font-size: 13px; font-weight: 600;
+    padding: 8px 20px; border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+.discover-show-all:hover {
+    background: rgba(var(--accent-rgb),0.15);
+    border-color: rgba(var(--accent-rgb),0.4);
+    color: #fff;
+}
+
+/* ── Adventurousness — living wave dial (Discover page) ──────────────────────
+   A draggable orb rides an animated line that waves calmer + greener at the left (safe)
+   and wilder + redder at the right (obscure). The path + colours are drawn each frame in
+   JS (rAF). Syncs with Settings → Discovery. */
+.adv-wave {
+    position: relative;
+    margin: 0 0 28px;
+    padding: 18px 26px 16px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.04), rgba(255,255,255,0.012));
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: 0 10px 34px rgba(0,0,0,0.30);
+    overflow: hidden;  /* contain the colour aura wash */
+}
+.adv-wave-head { display: flex; flex-direction: column; gap: 1px; position: relative; z-index: 2; }
+.adv-wave-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2.5px; color: rgba(255,255,255,0.38); }
+.adv-wave-state { font-size: 21px; font-weight: 800; letter-spacing: -0.3px; line-height: 1.15; transition: color 0.25s; }
+.adv-wave-track {
+    position: relative; height: 104px; margin: 6px 0 2px;
+    cursor: grab; touch-action: none;
+}
+.adv-wave-track:active { cursor: grabbing; }
+.adv-wave-aura {
+    position: absolute; top: 50%; left: 30%;
+    width: 360px; height: 230px; transform: translate(-50%, -50%);
+    pointer-events: none; filter: blur(14px); z-index: 0;
+    will-change: left, background;
+}
+.adv-wave-svg { width: 100%; height: 100%; display: block; overflow: visible; position: relative; z-index: 1; }
+.adv-wave-orb {
+    position: absolute; top: 50%; left: 30%; z-index: 2;
+    width: 22px; height: 22px; border-radius: 50%;
+    transform: translate(-50%, -50%);
+    background: #1DB954; color: #1DB954;
+    box-shadow: 0 0 9px 0 #1DB954, inset 0 0 0 2px rgba(255,255,255,0.5);
+    pointer-events: none;  /* the track captures the pointer; the orb is purely visual */
+    will-change: left, top;
+}
+.adv-wave-orb::after {
+    content: ''; position: absolute; inset: -5px; border-radius: 50%;
+    border: 1.5px solid currentColor; opacity: 0.4;
+    animation: adv-orb-pulse 2.8s ease-out infinite;
+}
+@keyframes adv-orb-pulse {
+    0% { transform: scale(0.75); opacity: 0.4; }
+    100% { transform: scale(1.5); opacity: 0; }
+}
+.adv-wave-ends {
+    display: flex; justify-content: space-between;
+    font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.35);
+    position: relative; z-index: 2;
+}
+
+/* Watchlist toggle on recommended-artist .ya-cards — corner pill, appears on hover,
+   stays lit when already watching. Keeps the .recommended-card-watchlist-btn hook. */
+.recommended-artist-card .recommended-card-watchlist-btn {
+    position: absolute; top: 8px; right: 8px; z-index: 3;
+    background: rgba(0,0,0,0.72); color: #fff;
+    border: 1px solid rgba(255,255,255,0.25);
+    border-radius: 14px; padding: 4px 10px;
+    font-size: 10px; font-weight: 600; cursor: pointer;
+    opacity: 0; transform: translateY(-4px);
+    transition: opacity 0.2s, transform 0.2s, background 0.2s, border-color 0.2s;
+}
+.recommended-artist-card:hover .recommended-card-watchlist-btn { opacity: 1; transform: none; }
+.recommended-artist-card .recommended-card-watchlist-btn:hover {
+    background: var(--accent); color: #000; border-color: transparent;
+}
+.recommended-artist-card .recommended-card-watchlist-btn.watching {
+    opacity: 1; transform: none;
+    background: var(--accent); color: #000; border-color: transparent;
+}
+
 /* ── Artist Info Modal ── */
 .ya-info-modal {
     background: #141420; border-radius: 18px;
