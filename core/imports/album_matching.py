@@ -656,6 +656,22 @@ def match_files_to_tracks(
 SIMILAR_ALBUM_SCORE_MARGIN = 0.08
 
 
+def albums_within_name_margin(
+    scored_results: List[Tuple[float, Any]],
+    margin: float = SIMILAR_ALBUM_SCORE_MARGIN,
+) -> List[Tuple[float, Any]]:
+    """Album hits whose name score is within ``margin`` of the top hit.
+
+    Assumes ``scored_results`` is sorted descending by name score. Single
+    source of the near-duplicate window so the worker (deciding which
+    tracklists to fetch) and ``pick_album_by_duration_fit`` agree.
+    """
+    if not scored_results:
+        return []
+    best = scored_results[0][0]
+    return [(score, result) for score, result in scored_results if score >= best - margin]
+
+
 def extract_tracks_from_album_data(album_data: Any) -> List[Dict[str, Any]]:
     """Normalize track lists from ``get_album`` / ``get_album_metadata`` payloads."""
     if not isinstance(album_data, dict):
@@ -746,11 +762,7 @@ def pick_album_by_duration_fit(
     if not scored_results:
         raise ValueError("scored_results must not be empty")
 
-    best_name_score = scored_results[0][0]
-    similar = [
-        (score, result) for score, result in scored_results
-        if score >= best_name_score - similar_margin
-    ]
+    similar = albums_within_name_margin(scored_results, similar_margin)
     if len(similar) <= 1:
         return similar[0][1], 0.0, False
 
@@ -802,6 +814,7 @@ __all__ = [
     'duration_sanity_ok',
     'match_files_to_tracks',
     'SIMILAR_ALBUM_SCORE_MARGIN',
+    'albums_within_name_margin',
     'extract_tracks_from_album_data',
     'score_album_duration_fit',
     'pick_album_by_duration_fit',
