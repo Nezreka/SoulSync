@@ -6,6 +6,7 @@ set ONLY when 'replace' is ticked.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -28,7 +29,8 @@ def test_staged_destination_keeps_ext_and_is_traceable():
     dest = staged_destination("/staging", "/lib/EP1/05 - Song.flac", 42)
     assert dest.endswith(".flac")
     assert "[reid-42]" in dest          # traceable to the track + unique per track
-    assert Path(dest).parent.as_posix() == "/staging"
+    # loose file in staging root → single candidate (os.path.join, not POSIX-only '/')
+    assert dest == os.path.join("/staging", "05 - Song [reid-42].flac")
 
 
 def test_stage_copies_not_moves(tmp_path: Path):

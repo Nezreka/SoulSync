@@ -3146,6 +3146,35 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
+                    <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
+                         calmer/greener at left (safe) and wilder/redder at right (obscure). Syncs with
+                         Settings → Discovery. -->
+                    <div class="adv-wave" id="adv-wave"
+                         title="Pushes globally-popular artists down so more obscure picks surface in your recommendations">
+                        <div class="adv-wave-head">
+                            <span class="adv-wave-label">Adventurousness</span>
+                            <span class="adv-wave-state" id="adv-wave-state">Balanced</span>
+                        </div>
+                        <div class="adv-wave-track" id="adv-wave-track">
+                            <div class="adv-wave-aura" id="adv-wave-aura"></div>
+                            <svg class="adv-wave-svg" id="adv-wave-svg" viewBox="0 0 1000 80" preserveAspectRatio="none" aria-hidden="true">
+                                <defs>
+                                    <linearGradient id="adv-wave-fill" x1="0" y1="0" x2="0" y2="1">
+                                        <stop id="adv-wave-fill-top" offset="0" stop-color="#1DB954" stop-opacity="0.32"/>
+                                        <stop offset="1" stop-color="#1DB954" stop-opacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                <path id="adv-wave-area" fill="url(#adv-wave-fill)" stroke="none"></path>
+                                <path id="adv-wave-path" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></path>
+                            </svg>
+                            <div class="adv-wave-orb" id="adv-wave-orb"></div>
+                        </div>
+                        <div class="adv-wave-ends">
+                            <span>Safe — artists you already like</span>
+                            <span>Adventurous — deep cuts</span>
+                        </div>
+                    </div>
+
                     <!-- Recommended For You Section (similar-artists graph) -->
                     <!-- #913: listening-driven recommendations (play-weighted, consensus-ranked) -->
                     <div class="discover-section" id="listening-recs-section" style="display: none;">
@@ -3155,12 +3184,24 @@
                                 <p class="discover-section-subtitle">Artists you'd love — ranked from who you actually play the most</p>
                             </div>
                         </div>
-                        <div class="discover-carousel" id="listening-recs-carousel">
+                        <div class="discover-grid" id="listening-recs-carousel">
                             <!-- Populated by JS -->
                         </div>
                     </div>
 
                     <!-- #913: Listening Mix — a playable track mix from those recommended artists -->
+                    <!-- Your Mixes — Spotify-style shelf: each mix is ONE card (mosaic cover),
+                         click opens the track list + actions in a modal (#discover redesign). -->
+                    <div class="discover-section" id="your-mixes-section" style="display: none;">
+                        <div class="discover-section-header">
+                            <div>
+                                <h2 class="discover-section-title">Your Mixes</h2>
+                                <p class="discover-section-subtitle">Fresh playlists built from your listening — open one to see the tracks</p>
+                            </div>
+                        </div>
+                        <div class="discover-mixes-grid" id="your-mixes-grid"></div>
+                    </div>
+
                     <div class="discover-section" style="display: none;">
                         <div class="discover-section-header">
                             <div>
@@ -3207,7 +3248,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="discover-carousel" id="recommended-artists-carousel">
+                        <div class="discover-grid" id="recommended-artists-carousel">
                             <!-- Populated by JS -->
                         </div>
                     </div>
@@ -3271,7 +3312,7 @@
                                 <option value="recent">Date Added</option>
                             </select>
                         </div>
-                        <div class="spotify-library-grid" id="your-albums-grid">
+                        <div class="discover-grid" id="your-albums-grid">
                             <div class="discover-loading">
                                 <div class="loading-spinner"></div>
                                 <p>Loading your albums...</p>
@@ -3286,7 +3327,7 @@
                             <h2 class="discover-section-title">Recent Releases</h2>
                             <p class="discover-section-subtitle">New music from artists you follow</p>
                         </div>
-                        <div class="discover-carousel" id="recent-releases-carousel">
+                        <div class="discover-grid" id="recent-releases-carousel">
                             <!-- Content will be populated dynamically -->
                             <div class="discover-loading">
                                 <div class="loading-spinner"></div>
@@ -3301,7 +3342,7 @@
                             <h2 class="discover-section-title" id="seasonal-albums-title">Seasonal</h2>
                             <p class="discover-section-subtitle" id="seasonal-albums-subtitle">Seasonal music</p>
                         </div>
-                        <div class="discover-carousel" id="seasonal-albums-carousel">
+                        <div class="discover-grid" id="seasonal-albums-carousel">
                             <!-- Content will be populated dynamically -->
                         </div>
                     </div>
@@ -3769,43 +3810,24 @@
                         </div>
                     </div>
 
-                    <!-- Time Machine (Tabbed by Decade) -->
-                    <div class="discover-section">
+                    <!-- Year Mixes (decade mix cards — same setup as Your Mixes) -->
+                    <div class="discover-section" id="year-mixes-section">
                         <div class="discover-section-header">
-                            <h2 class="discover-section-title">⏰ Time Machine</h2>
-                            <p class="discover-section-subtitle">Explore music from different decades</p>
-                        </div>
-
-                        <!-- Decade Tabs (will be populated dynamically) -->
-                        <div class="decade-tabs" id="decade-tabs">
-                            <div class="discover-loading">
-                                <div class="loading-spinner"></div>
-                                <p>Loading decades...</p>
+                            <div>
+                                <h2 class="discover-section-title">Year Mixes</h2>
+                                <p class="discover-section-subtitle">Jump into the sound of a decade — open one to see the tracks</p>
                             </div>
                         </div>
+
+                        <!-- Decade Tabs (hidden — replaced by the decade mix-card grid below) -->
+                        <div class="decade-tabs" id="decade-tabs" style="display:none"></div>
 
                         <!-- Decade Tab Contents (will be populated dynamically) -->
                         <div id="decade-tab-contents"></div>
                     </div>
 
-                    <!-- Browse by Genre (Tabbed by Genre) -->
-                    <div class="discover-section">
-                        <div class="discover-section-header">
-                            <h2 class="discover-section-title">🎵 Browse by Genre</h2>
-                            <p class="discover-section-subtitle">Discover music by your favorite genres</p>
-                        </div>
-
-                        <!-- Genre Tabs (will be populated dynamically) -->
-                        <div class="genre-tabs" id="genre-tabs">
-                            <div class="discover-loading">
-                                <div class="loading-spinner"></div>
-                                <p>Loading genres...</p>
-                            </div>
-                        </div>
-
-                        <!-- Genre Tab Contents (will be populated dynamically) -->
-                        <div id="genre-tab-contents"></div>
-                    </div>
+                    <!-- Browse by Genre removed (#discover redesign): it was empty (no data from
+                         /api/discover/genres/available) and redundant with the Genre Explorer pills. -->
                 </div>
             </div>
 
@@ -6207,6 +6229,30 @@
                                 </div>
                             </div>
                             </div><!-- end Listening Stats body -->
+
+                            <!-- Discovery (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Discovery</h3>
+                                <span class="settings-section-hint">How adventurous your recommendations are</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="library" style="display:none">
+                            <div class="settings-group" data-stg="library">
+                                <div class="form-group">
+                                    <label>Adventurousness</label>
+                                    <div style="display:flex; align-items:center; gap:12px; margin-top:8px">
+                                        <span style="font-size:12px; color:#999">Safe</span>
+                                        <input type="range" id="discover-adventurousness" min="0" max="1" step="0.05" value="0.3" style="flex:1"
+                                               oninput="var v=document.getElementById('discover-adventurousness-val'); if(v) v.textContent=parseFloat(this.value).toFixed(2)">
+                                        <span style="font-size:12px; color:#999">Adventurous</span>
+                                        <span id="discover-adventurousness-val" style="min-width:36px; text-align:right; font-weight:700; color:var(--accent)">0.30</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" style="margin-top:10px">
+                                        Higher pushes globally-popular artists down so more obscure, non-obvious picks surface; lower keeps recommendations safe and close to what you already know. Affects <strong>Based On Your Listening</strong>.
+                                    </div>
+                                </div>
+                            </div>
+                            </div><!-- end Discovery body -->
 
                             <!-- Security & Access (collapsible tile) -->
                             <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">

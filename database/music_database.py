@@ -10515,6 +10515,161 @@ class MusicDatabase:
             logger.error(f"Error checking similar artists freshness: {e}")
             return False  # Default to re-fetching on error
 
+    def get_similar_artist_popularities(self, names, profile_id: int = 1):
+        """Map lowercased artist name -> max stored popularity (0-100) from ``similar_artists`` for
+        the given profile. Lets the Discover routes apply the adventurousness popularity-penalty at
+        request time (the stored listening-recs don't carry popularity inline). Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in clean)
+                cursor.execute(
+                    f"""SELECT LOWER(similar_artist_name) AS n, MAX(popularity) AS pop
+                        FROM similar_artists
+                        WHERE profile_id = ? AND LOWER(similar_artist_name) IN ({placeholders})
+                        GROUP BY LOWER(similar_artist_name)""",
+                    [profile_id] + clean,
+                )
+                for row in cursor.fetchall():
+                    if row['pop'] is not None:
+                        out[row['n']] = row['pop']
+        except Exception as e:
+            logger.debug(f"get_similar_artist_popularities failed: {e}")
+        return out
+
+    def get_artist_genres_by_name(self, names):
+        """Map lowercased artist name -> genres list (from the library ``artists`` table). Feeds the
+        Discover genre-taste profile (the genres of your top-played artists). Handles both the JSON
+        array and legacy comma-separated genre encodings. Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        import json as _json
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ','.join('?' for _ in clean)
+                cursor.execute(
+                    f"SELECT LOWER(name) AS n, genres FROM artists "
+                    f"WHERE genres IS NOT NULL AND TRIM(genres) != '' AND LOWER(name) IN ({placeholders})",
+                    clean,
+                )
+                for row in cursor.fetchall():
+                    raw = (row['genres'] or '').strip()
+                    if not raw:
+                        continue
+                    try:
+                        genres = _json.loads(raw) if raw.startswith('[') else None
+                    except (ValueError, TypeError):
+                        genres = None
+                    if not isinstance(genres, list):
+                        genres = [g.strip() for g in raw.split(',') if g.strip()]
+                    genres = [str(g).strip() for g in genres if str(g).strip()]
+                    if genres:
+                        out[row['n']] = genres
+        except Exception as e:
+            logger.debug(f"get_artist_genres_by_name failed: {e}")
+        return out
+
+    def get_play_counts_by_name(self, names, profile_id: int = 1):
+        """Map lowercased artist name -> play count from ``listening_history`` for the given profile.
+        Feeds the Discover novelty signal (demote recs you've already heard). Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        placeholders = ','.join('?' for _ in clean)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # profile_id is migration-added — fall back to an unscoped count if the column isn't
+                # there yet (a fresh / pre-migration DB), so novelty still works everywhere.
+                try:
+                    cursor.execute(
+                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                        f"WHERE profile_id = ? AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                        [profile_id] + clean,
+                    )
+                except Exception:
+                    cursor.execute(
+                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                        f"WHERE LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                        clean,
+                    )
+                for row in cursor.fetchall():
+                    out[row['n']] = row['plays']
+        except Exception as e:
+            logger.debug(f"get_play_counts_by_name failed: {e}")
+        return out
+
+    def get_similar_artists_missing_popularity(self, limit: int = 500, profile_id: int = 1):
+        """Distinct similar artists that still need a popularity backfill (null or <= 0). Returns
+        ``[{'name', 'spotify_id', 'deezer_id'}]`` — enough to run the popularity cascade. Fail-soft."""
+        rows = []
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # popularity = 0 / null means "not filled". The backfill writes a real 0..100, or a
+                # -1 sentinel for "tried, no source had it" — so -1 rows are excluded and the sweep
+                # terminates instead of re-fetching the unfillable ones forever.
+                cursor.execute(
+                    "SELECT similar_artist_name AS name, "
+                    "MAX(similar_artist_spotify_id) AS spotify_id, "
+                    "MAX(similar_artist_deezer_id) AS deezer_id "
+                    "FROM similar_artists "
+                    "WHERE (popularity IS NULL OR popularity = 0) AND profile_id = ? "
+                    "GROUP BY similar_artist_name LIMIT ?",
+                    (profile_id, limit),
+                )
+                for r in cursor.fetchall():
+                    rows.append({'name': r['name'], 'spotify_id': r['spotify_id'], 'deezer_id': r['deezer_id']})
+        except Exception as e:
+            logger.debug(f"get_similar_artists_missing_popularity failed: {e}")
+        return rows
+
+    def count_similar_artists_missing_popularity(self, profile_id: int = 1) -> int:
+        """How many distinct similar artists still need a popularity backfill (for progress). -> 0 on error."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM (SELECT 1 FROM similar_artists "
+                    "WHERE (popularity IS NULL OR popularity = 0) AND profile_id = ? "
+                    "GROUP BY similar_artist_name)",
+                    (profile_id,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.debug(f"count_similar_artists_missing_popularity failed: {e}")
+            return 0
+
+    def update_similar_artist_popularity(self, name, popularity, profile_id: int = 1):
+        """Set popularity (0-100, stored as int) for every ``similar_artists`` row matching ``name``
+        (a candidate is the 'similar' of several seeds). Returns rows updated. Fail-soft -> 0."""
+        try:
+            pop = int(round(float(popularity)))
+        except (TypeError, ValueError):
+            return 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE similar_artists SET popularity = ? "
+                    "WHERE LOWER(similar_artist_name) = LOWER(?) AND profile_id = ?",
+                    (pop, name, profile_id),
+                )
+                conn.commit()
+                return cursor.rowcount
+        except Exception as e:
+            logger.debug(f"update_similar_artist_popularity failed: {e}")
+            return 0
+
     def get_top_similar_artists(
         self,
         limit: int = 50,
