@@ -18,7 +18,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 # Format quality rank by file extension (higher = better). Mirrors
-# ``auto_import_worker._quality_rank`` so lossless always outranks lossy.
+# ``album_matching.default_quality_rank`` so lossless always outranks lossy.
 _FORMAT_RANK = {
     ".flac": 10, ".wav": 9, ".aiff": 9, ".aif": 9, ".ape": 8,
     ".m4a": 7, ".ogg": 6, ".opus": 6, ".mp3": 5, ".aac": 5, ".wma": 3,

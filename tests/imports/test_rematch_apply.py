@@ -28,7 +28,7 @@ def test_staged_destination_keeps_ext_and_is_traceable():
     dest = staged_destination("/staging", "/lib/EP1/05 - Song.flac", 42)
     assert dest.endswith(".flac")
     assert "[reid-42]" in dest          # traceable to the track + unique per track
-    assert dest.startswith("/staging/")  # loose file in staging root → single candidate
+    assert Path(dest).parent.as_posix() == "/staging"
 
 
 def test_stage_copies_not_moves(tmp_path: Path):

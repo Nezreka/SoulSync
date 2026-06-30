@@ -29,7 +29,7 @@ test surface is just dicts in / dicts out.
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, List, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # Use the project's namespaced logger so diagnostic lines actually
 # land in app.log. `logging.getLogger(__name__)` would resolve to
@@ -57,6 +57,7 @@ logger = get_logger("imports.album_matching")
 
 TITLE_WEIGHT = 0.45                 # case-folded fuzzy title similarity
 ARTIST_WEIGHT = 0.15                # albumartist (or artist) similarity
+ARTIST_MISSING_PARTIAL = ARTIST_WEIGHT * 0.5  # when either side lacks artist tag
 POSITION_WEIGHT = 0.30              # exact (disc_number, track_number) match
 NEAR_POSITION_WEIGHT = 0.12         # off-by-one track number, same disc
 CROSS_DISC_POSITION_WEIGHT = 0.05   # same track_number, different disc
@@ -67,6 +68,50 @@ ALBUM_WEIGHT = 0.10                 # album tag similarity to target album
 # floor (~0.5 × 0.45 = 0.22) plus a small position consolation, so
 # files with weak title agreement still need at least one strong signal.
 MATCH_THRESHOLD = 0.4
+
+# Album-search scoring (identification phase — before tracklist fetch)
+ALBUM_SEARCH_NAME_WEIGHT = 0.5
+ALBUM_SEARCH_ARTIST_WEIGHT = 0.2
+ALBUM_SEARCH_TRACK_COUNT_WEIGHT = 0.3
+ALBUM_SEARCH_THRESHOLD = 0.4
+
+_FORMAT_QUALITY_RANK = {
+    '.flac': 10, '.wav': 9, '.aiff': 9, '.aif': 9, '.ape': 8,
+    '.m4a': 7, '.ogg': 6, '.opus': 6, '.mp3': 5, '.wma': 3, '.aac': 5,
+}
+
+
+def default_quality_rank(ext: str) -> int:
+    """Higher = better quality. Shared by auto-import and manual album import."""
+    return _FORMAT_QUALITY_RANK.get((ext or '').lower(), 1)
+
+
+def score_album_search_result(
+    album_result: Any,
+    target_album: str,
+    target_artist: Optional[str],
+    file_count: int,
+) -> float:
+    """Score a metadata-source ``search_albums`` hit against folder/tag inputs."""
+    from core.imports.text_matching import album_similarity, artist_similarity
+
+    score = 0.0
+    name = getattr(album_result, 'name', '') or ''
+    score += album_similarity(target_album, name) * ALBUM_SEARCH_NAME_WEIGHT
+
+    if target_artist:
+        artists = getattr(album_result, 'artists', None) or []
+        r_artist = artists[0] if artists else ''
+        if isinstance(r_artist, dict):
+            r_artist = r_artist.get('name', '')
+        score += artist_similarity(target_artist, str(r_artist)) * ALBUM_SEARCH_ARTIST_WEIGHT
+
+    r_tracks = getattr(album_result, 'total_tracks', 0) or 0
+    if r_tracks > 0 and file_count > 0:
+        count_ratio = 1.0 - abs(r_tracks - file_count) / max(r_tracks, file_count)
+        score += max(0.0, count_ratio) * ALBUM_SEARCH_TRACK_COUNT_WEIGHT
+
+    return score
 
 
 SimilarityFn = Callable[[str, str], float]
@@ -115,6 +160,15 @@ def dedupe_files_by_position(
     return deduped
 
 
+def _coerce_disc_number(value: Any, default: int = 1) -> int:
+    if value in (None, ''):
+        return default
+    try:
+        return int(str(value).split('/')[0].strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _extract_track_disc(track: Dict[str, Any]) -> int:
     """Pull disc number off an API track dict.
 
@@ -123,11 +177,11 @@ def _extract_track_disc(track: Dict[str, Any]) -> int:
     ``discNumber``. Default to 1 when missing so single-disc albums
     still match.
     """
-    return (
+    return _coerce_disc_number(
         track.get('disc_number')
         or track.get('disk_number')
-        or track.get('discNumber')
-        or 1
+        or track.get('discNumber'),
+        default=1,
     )
 
 
@@ -145,14 +199,29 @@ def score_file_against_track(
     track: Dict[str, Any],
     *,
     target_album: str,
-    similarity: SimilarityFn,
+    similarity: Optional[SimilarityFn] = None,
 ) -> float:
     """Compute the 0..1 confidence score for matching ``file_path``
     (with its tags) to ``track`` (an API track dict).
 
     Pure scoring — caller decides what to do with the score (compare
     against ``MATCH_THRESHOLD``, pick best-per-track, etc).
+
+    When ``similarity`` is omitted, uses ``MusicMatchingEngine`` field
+    cleaners (title / artist / album) via ``core.imports.text_matching``.
     """
+    if similarity is None:
+        from core.imports.text_matching import (
+            album_similarity,
+            artist_similarity,
+            title_similarity,
+        )
+        title_sim = title_similarity
+        artist_sim = artist_similarity
+        album_sim = album_similarity
+    else:
+        title_sim = artist_sim = album_sim = similarity
+
     score = 0.0
 
     # Title similarity (TITLE_WEIGHT). Falls back to filename stem when
@@ -162,13 +231,16 @@ def score_file_against_track(
     from core.imports.paths import strip_leading_track_number
     title = strip_leading_track_number(title)
     track_name = track.get('name', '')
-    score += similarity(title, track_name) * TITLE_WEIGHT
+    score += title_sim(title, track_name) * TITLE_WEIGHT
 
-    # Artist similarity (ARTIST_WEIGHT). Skipped if either side missing.
+    # Artist similarity (ARTIST_WEIGHT). Partial credit when either side
+    # lacks an artist tag so title-only pairs can still clear threshold.
     file_artist = file_tags.get('artist', '')
     track_artist = _extract_track_artist(track)
     if file_artist and track_artist:
-        score += similarity(file_artist, track_artist) * ARTIST_WEIGHT
+        score += artist_sim(file_artist, track_artist) * ARTIST_WEIGHT
+    else:
+        score += ARTIST_MISSING_PARTIAL
 
     # Position match (POSITION_WEIGHT / NEAR_POSITION_WEIGHT /
     # CROSS_DISC_POSITION_WEIGHT). Gates on the (disc, track) tuple
@@ -194,7 +266,7 @@ def score_file_against_track(
     # target_album name is a strong signal.
     file_album = file_tags.get('album', '')
     if file_album:
-        score += similarity(file_album, target_album) * ALBUM_WEIGHT
+        score += album_sim(file_album, target_album) * ALBUM_WEIGHT
 
     return score
 
@@ -436,8 +508,8 @@ def match_files_to_tracks(
     tracks: List[Dict[str, Any]],
     *,
     target_album: str,
-    similarity: SimilarityFn,
     quality_rank: QualityRankFn,
+    similarity: Optional[SimilarityFn] = None,
 ) -> Dict[str, Any]:
     """Match staging files to album tracks.
 
@@ -573,6 +645,141 @@ def match_files_to_tracks(
     }
 
 
+# ---------------------------------------------------------------------------
+# Album-search disambiguation (variant releases)
+# ---------------------------------------------------------------------------
+# Metadata sources often return several near-identical album hits ("3
+# Nights 4 Days" vs "3 Nights And 4 Days") with nearly the same name
+# score. When that happens, prefer the release whose track durations
+# align with the staged files.
+
+SIMILAR_ALBUM_SCORE_MARGIN = 0.08
+
+
+def extract_tracks_from_album_data(album_data: Any) -> List[Dict[str, Any]]:
+    """Normalize track lists from ``get_album`` / ``get_album_metadata`` payloads."""
+    if not isinstance(album_data, dict):
+        return []
+    if 'tracks' in album_data:
+        raw = album_data['tracks']
+        if isinstance(raw, dict) and 'items' in raw:
+            return list(raw['items'] or [])
+        if isinstance(raw, dict) and 'data' in raw:
+            return list(raw['data'] or [])
+        if isinstance(raw, list):
+            return list(raw)
+    if 'items' in album_data and isinstance(album_data['items'], list):
+        return list(album_data['items'])
+    return []
+
+
+def score_album_duration_fit(
+    file_tags_by_path: Dict[str, Dict[str, Any]],
+    tracks: List[Dict[str, Any]],
+) -> float:
+    """Return 0..1: share of staged files whose duration matches some album track.
+
+    Prefers ``(disc_number, track_number)`` alignment when tags carry
+    a position; falls back to any unused track within
+    ``DURATION_TOLERANCE_MS``.
+    """
+    tagged_files = [
+        tags for tags in file_tags_by_path.values()
+        if int(tags.get('duration_ms') or 0) > 0
+    ]
+    if not tagged_files or not tracks:
+        return 0.0
+
+    used_track_indices: Set[int] = set()
+    matches = 0
+
+    for tags in tagged_files:
+        file_dur = int(tags.get('duration_ms') or 0)
+        file_track_num = int(tags.get('track_number') or 0)
+        file_disc = _coerce_disc_number(tags.get('disc_number'), default=1)
+        matched = False
+
+        if file_track_num > 0:
+            for idx, track in enumerate(tracks):
+                if idx in used_track_indices:
+                    continue
+                track_num = int(track.get('track_number') or 0)
+                track_disc = _extract_track_disc(track)
+                if (
+                    track_num == file_track_num
+                    and track_disc == file_disc
+                    and duration_sanity_ok(file_dur, _track_duration_ms(track))
+                ):
+                    used_track_indices.add(idx)
+                    matches += 1
+                    matched = True
+                    break
+
+        if not matched:
+            for idx, track in enumerate(tracks):
+                if idx in used_track_indices:
+                    continue
+                if file_disc > 0 and _extract_track_disc(track) != file_disc:
+                    continue
+                if duration_sanity_ok(file_dur, _track_duration_ms(track)):
+                    used_track_indices.add(idx)
+                    matches += 1
+                    matched = True
+                    break
+
+    return matches / len(tagged_files)
+
+
+def pick_album_by_duration_fit(
+    scored_results: List[Tuple[float, Any]],
+    file_tags_by_path: Dict[str, Dict[str, Any]],
+    tracks_by_album_id: Dict[str, List[Dict[str, Any]]],
+    *,
+    similar_margin: float = SIMILAR_ALBUM_SCORE_MARGIN,
+) -> Tuple[Any, float, bool]:
+    """Pick the best album search hit when several score similarly on name.
+
+    ``scored_results`` is ``[(name_score, album_result), ...]`` sorted
+    descending by name_score. Returns ``(album_result, duration_fit,
+    used_duration_tiebreak)``.
+    """
+    if not scored_results:
+        raise ValueError("scored_results must not be empty")
+
+    best_name_score = scored_results[0][0]
+    similar = [
+        (score, result) for score, result in scored_results
+        if score >= best_name_score - similar_margin
+    ]
+    if len(similar) <= 1:
+        return similar[0][1], 0.0, False
+
+    has_any_duration = any(
+        int(tags.get('duration_ms') or 0) > 0
+        for tags in file_tags_by_path.values()
+    )
+    if not has_any_duration:
+        return similar[0][1], 0.0, False
+
+    scored_with_tracks: List[Tuple[float, float, Any]] = []
+    for name_score, result in similar:
+        album_id = str(getattr(result, 'id', '') or '')
+        tracks = tracks_by_album_id.get(album_id)
+        if not tracks:
+            continue
+        fit = score_album_duration_fit(file_tags_by_path, tracks)
+        scored_with_tracks.append((fit, name_score, result))
+
+    if len(scored_with_tracks) <= 1:
+        fit = scored_with_tracks[0][0] if scored_with_tracks else 0.0
+        return similar[0][1], fit, False
+
+    scored_with_tracks.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    best_fit, _best_name, best_result = scored_with_tracks[0]
+    used_tiebreak = best_result is not similar[0][1]
+    return best_result, best_fit, used_tiebreak
+
+
 __all__ = [
     'TITLE_WEIGHT',
     'ARTIST_WEIGHT',
@@ -583,9 +790,19 @@ __all__ = [
     'MATCH_THRESHOLD',
     'EXACT_MATCH_CONFIDENCE',
     'DURATION_TOLERANCE_MS',
+    'ALBUM_SEARCH_NAME_WEIGHT',
+    'ALBUM_SEARCH_ARTIST_WEIGHT',
+    'ALBUM_SEARCH_TRACK_COUNT_WEIGHT',
+    'ALBUM_SEARCH_THRESHOLD',
+    'default_quality_rank',
+    'score_album_search_result',
     'dedupe_files_by_position',
     'score_file_against_track',
     'find_exact_id_matches',
     'duration_sanity_ok',
     'match_files_to_tracks',
+    'SIMILAR_ALBUM_SCORE_MARGIN',
+    'extract_tracks_from_album_data',
+    'score_album_duration_fit',
+    'pick_album_by_duration_fit',
 ]
