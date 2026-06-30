@@ -49,7 +49,7 @@ class _FakeDBBrokenUpdate(_FakeDB):
 
 def test_backfill_fills_sentinels_and_terminates():
     db = _FakeDB(["Real1", "Real2", "Ghost"])
-    filled = run_backfill(db, spotify_free=_SpotifyFree(), sleep_s=0, batch_size=10)
+    filled = run_backfill(db, spotify_free=_SpotifyFree(), spotify_free_pace=0, batch_size=10)
 
     assert filled == 2                       # the two resolvable artists
     assert db.pop["Real1"] > 0 and db.pop["Real2"] > 0
@@ -62,7 +62,7 @@ def test_backfill_fills_sentinels_and_terminates():
 
 def test_backfill_respects_max_artists():
     db = _FakeDB([f"A{i}" for i in range(20)])
-    run_backfill(db, spotify_free=_SpotifyFree(), sleep_s=0, batch_size=5, max_artists=7)
+    run_backfill(db, spotify_free=_SpotifyFree(), spotify_free_pace=0, batch_size=5, max_artists=7)
     st = get_state()
     assert st["done"] == 7                    # stopped early at the cap
     assert db.count_similar_artists_missing_popularity() == 13
@@ -70,7 +70,7 @@ def test_backfill_respects_max_artists():
 
 def test_backfill_no_clients_sentinels_everything():
     db = _FakeDB(["X", "Y"])
-    filled = run_backfill(db, sleep_s=0)      # no sources at all
+    filled = run_backfill(db, spotify_free_pace=0)      # no sources at all
     assert filled == 0
     assert db.pop["X"] == -1 and db.pop["Y"] == -1
 
@@ -79,7 +79,7 @@ def test_backfill_obscure_artist_stored_as_floor_not_zero():
     # P0 regression: a found value that normalizes to 0 must NOT be written as 0 (which the query
     # reads as "missing" -> re-fetch forever). It's floored to >= 1, so the row is done.
     db = _FakeDB(["Tiny"])
-    run_backfill(db, spotify_free=_SpotifyFreeObscure(), sleep_s=0)
+    run_backfill(db, spotify_free=_SpotifyFreeObscure(), spotify_free_pace=0)
     assert db.pop["Tiny"] >= 1
     assert db.count_similar_artists_missing_popularity() == 0
 
@@ -88,6 +88,6 @@ def test_backfill_terminates_even_when_updates_dont_stick():
     # P0 regression: if updates never persist, the same rows keep coming back from the query. The
     # seen-guard must bail instead of looping forever (which would hammer the APIs continuously).
     db = _FakeDBBrokenUpdate(["A", "B", "C"])
-    run_backfill(db, spotify_free=_SpotifyFree(), sleep_s=0, batch_size=2)
+    run_backfill(db, spotify_free=_SpotifyFree(), spotify_free_pace=0, batch_size=2)
     assert get_state()["running"] is False
     assert db.updates <= 3            # each row attempted at most once, then it stops — no infinite loop
