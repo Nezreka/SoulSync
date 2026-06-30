@@ -29609,7 +29609,7 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    apply_adventurousness, genre_affinity, novelty_score)
+                    apply_adventurousness, genre_affinity, novelty_score, why_chips)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
@@ -29618,6 +29618,10 @@ def get_discover_similar_artists():
                     _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
                     a['_adv_score'] = (_base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
                                        * (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - _nov)))
+                    _w = why_chips(genre_affinity=_aff, popularity=a.get('popularity'),
+                                   seed_count=len(a.get('because') or []) or int(_oc))
+                    if _w:
+                        a['why'] = _w
                 # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
                 # there), so sort by the boosted score first; the dial then layers its penalty on top.
                 result_artists.sort(key=lambda a: -a['_adv_score'])
@@ -29787,14 +29791,18 @@ def get_discover_listening_recommendations():
             from core.discovery.listening_recommendations import genre_affinity, novelty_score
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
-            plays = database.get_play_counts_by_name([a.get('name') for a in stored], _pid) if stored else {}
+            _names = [a.get('name') for a in stored]
+            plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
+            pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
             changed = False
             for a in stored:
+                if a.get('popularity') is None:
+                    a['popularity'] = pops.get((a.get('name') or '').strip().lower())
+                aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
+                a['_why_genre'] = aff   # captured for the "why this rec" chips
                 factor = 1.0
-                if taste:
-                    aff = genre_affinity(a.get('genres') or [], taste)
-                    if aff > 0:
-                        factor *= (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
+                if aff > 0:
+                    factor *= (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
                 nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
                 if nov < 1.0:
                     factor *= (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - nov))
@@ -29844,6 +29852,14 @@ def get_discover_listening_recommendations():
                 "seed_count": a.get('seed_count'),
                 "source": active_source,
             }
+            try:
+                from core.discovery.listening_recommendations import why_chips
+                _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                if _why:
+                    entry["why"] = _why
+            except Exception as _why_err:
+                logger.debug(f"why chips skipped: {_why_err}")
             img = a.get('image_url')
             if img:
                 entry["image_url"] = fix_artist_image_url(img)

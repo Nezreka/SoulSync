@@ -9,6 +9,7 @@ from core.discovery.listening_recommendations import (
     build_recency_weighted_seeds,
     genre_affinity,
     novelty_score,
+    why_chips,
     choose_mix_fetch_source,
     names_match,
     rank_recommended_artists,
@@ -402,3 +403,27 @@ def test_novelty_decays_with_plays():
     assert 0.0 < heavy < 0.02                 # heavy rotation -> near zero
     # monotonically decreasing
     assert novelty_score(1) > novelty_score(5) > novelty_score(50)
+
+
+# ── why_chips (explainability) ───────────────────────────────────────────────
+def _types(chips):
+    return [c["type"] for c in chips]
+
+
+def test_why_chips_only_on_meaningful_signals():
+    chips = why_chips(genre_affinity=0.9, popularity=12, seed_count=4)
+    assert _types(chips) == ["genre", "obscure", "consensus"]
+    assert chips[2]["label"] == "4 of your artists"
+
+
+def test_why_chips_thresholds():
+    assert why_chips(genre_affinity=0.2) == []                 # weak genre match -> no tag
+    assert why_chips(popularity=50) == []                      # popular -> not a deep cut
+    assert why_chips(popularity=0) == []                       # unfilled (0) -> no deep-cut tag
+    assert why_chips(popularity=-1) == []                      # sentinel -> no tag
+    assert why_chips(seed_count=1) == []                       # a single seed isn't "consensus"
+
+
+def test_why_chips_empty_when_nothing_notable():
+    assert why_chips() == []
+    assert why_chips(genre_affinity=0.1, popularity=80, seed_count=0) == []
