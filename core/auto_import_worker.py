@@ -18,8 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
-from difflib import SequenceMatcher
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.imports.folder_artist import resolve_folder_artist
 from utils.logging_config import get_logger
@@ -175,76 +174,6 @@ def _parse_folder_name(folder_name: str):
         return parts[0].strip(), parts[1].strip()
     # Pattern: just the folder name as album
     return None, folder_name.strip()
-
-
-def _normalize(text: str) -> str:
-    if not text:
-        return ''
-    t = text.lower().strip()
-    t = re.sub(r'\(.*?\)', '', t)
-    t = re.sub(r'\[.*?\]', '', t)
-    t = re.sub(r'[^\w\s]', '', t)
-    return ' '.join(t.split())
-
-
-def _similarity(a: str, b: str) -> float:
-    if not a or not b:
-        return 0.0
-    return SequenceMatcher(None, _normalize(a), _normalize(b)).ratio()
-
-
-def _quality_rank(ext: str) -> int:
-    """Higher = better quality."""
-    ranks = {'.flac': 10, '.wav': 9, '.aiff': 9, '.aif': 9, '.ape': 8,
-             '.m4a': 7, '.ogg': 6, '.opus': 6, '.mp3': 5, '.wma': 3, '.aac': 5}
-    return ranks.get(ext.lower(), 1)
-
-
-# Weight constants for `_score_album_search_result` — exposed at module
-# level so they're greppable + bumpable in one place. Pre-fix these were
-# magic numbers inline.
-_ALBUM_NAME_WEIGHT = 0.5    # title fuzzy similarity
-_ARTIST_NAME_WEIGHT = 0.2   # primary artist fuzzy similarity (skipped when target is empty)
-_TRACK_COUNT_WEIGHT = 0.3   # how close the source's track count is to the file count
-
-
-def _score_album_search_result(album_result, target_album: str,
-                               target_artist: Optional[str],
-                               file_count: int) -> float:
-    """Pure scoring helper for `_search_metadata_source`.
-
-    Weights how well an `album_result` from a metadata source's
-    `search_albums` matches the search inputs. Returns float in [0.0, 1.0].
-    Pre-extraction this lived inline in the loop body; lifting it out
-    lets the weight math be pinned independently of the orchestrator
-    (per-source iteration, exception containment, threshold check).
-
-    `album_result` is expected to expose:
-      - `.name` (str)
-      - `.artists` (list of dict-like with 'name', optional 'id') or list[str]
-      - `.total_tracks` (int, optional)
-    """
-    score = 0.0
-
-    # Album name similarity (default 50%)
-    name = getattr(album_result, 'name', '') or ''
-    score += _similarity(target_album, name) * _ALBUM_NAME_WEIGHT
-
-    # Artist similarity (default 20%) — only when target_artist provided
-    if target_artist:
-        artists = getattr(album_result, 'artists', None) or []
-        r_artist = artists[0] if artists else ''
-        if isinstance(r_artist, dict):
-            r_artist = r_artist.get('name', '')
-        score += _similarity(target_artist, str(r_artist)) * _ARTIST_NAME_WEIGHT
-
-    # Track count match (default 30%) — only when both sides have a count
-    r_tracks = getattr(album_result, 'total_tracks', 0) or 0
-    if r_tracks > 0 and file_count > 0:
-        count_ratio = 1.0 - abs(r_tracks - file_count) / max(r_tracks, file_count)
-        score += max(0.0, count_ratio) * _TRACK_COUNT_WEIGHT
-
-    return score
 
 
 class AutoImportWorker:
@@ -1232,6 +1161,8 @@ class AutoImportWorker:
                 return None
 
             # Score results
+            from core.imports.text_matching import artist_similarity, title_similarity
+
             best_result = None
             best_score = 0
 
@@ -1243,9 +1174,9 @@ class AutoImportWorker:
                     a = r_artists[0]
                     r_artist = a.get('name', str(a)) if isinstance(a, dict) else str(a)
 
-                score = _similarity(title, r_title) * 0.6
+                score = title_similarity(title, r_title) * 0.6
                 if artist:
-                    score += _similarity(artist, r_artist) * 0.4
+                    score += artist_similarity(artist, r_artist) * 0.4
 
                 if score > best_score:
                     best_score = score
@@ -1440,23 +1371,88 @@ class AutoImportWorker:
                 # `tests/imports/test_album_search_scoring.py` so the
                 # weight math is pinned at the function boundary, not
                 # through the orchestrator path.
-                file_count = len(candidate.audio_files)
-                best_result = None
-                best_score = 0.0
-                for r in results:
-                    score = _score_album_search_result(r, album, artist, file_count)
-                    if score > best_score:
-                        best_score = score
-                        best_result = r
+                from core.imports.album_matching import (
+                    ALBUM_SEARCH_THRESHOLD,
+                    default_quality_rank,
+                    extract_tracks_from_album_data,
+                    pick_album_by_duration_fit,
+                    score_album_search_result,
+                    SIMILAR_ALBUM_SCORE_MARGIN,
+                )
 
-                if not best_result or best_score < 0.4:
-                    # Primary returned weak/no match — fall through to next source
+                file_count = len(candidate.audio_files)
+                scored_results: List[Tuple[float, Any]] = []
+                for r in results:
+                    score = score_album_search_result(r, album, artist, file_count)
+                    if score >= ALBUM_SEARCH_THRESHOLD:
+                        scored_results.append((score, r))
+                scored_results.sort(key=lambda item: item[0], reverse=True)
+
+                if not scored_results:
                     if source != primary_source:
                         logger.debug(
-                            f"Auto-import: {source} best score {best_score:.2f} "
-                            f"below threshold for '{album}', trying next source"
+                            f"Auto-import: {source} best score below threshold "
+                            f"for '{album}', trying next source"
                         )
                     continue
+
+                best_score = scored_results[0][0]
+                best_result = scored_results[0][1]
+                duration_fit = 0.0
+
+                # Near-duplicate album hits (e.g. "3 Nights 4 Days" vs
+                # "3 Nights And 4 Days") often score within a few points.
+                # Fetch tracklists and prefer the release whose durations
+                # match the staged files.
+                if len(scored_results) > 1 and hasattr(client, 'get_album'):
+                    file_tags = {
+                        f: _read_file_tags(f) for f in candidate.audio_files
+                    }
+                    if any(int(t.get('duration_ms') or 0) > 0 for t in file_tags.values()):
+                        best_name_score = scored_results[0][0]
+                        similar = [
+                            (s, r) for s, r in scored_results
+                            if s >= best_name_score - SIMILAR_ALBUM_SCORE_MARGIN
+                        ]
+                        tracks_by_album_id: Dict[str, List] = {}
+                        for _s, result in similar:
+                            album_id = str(getattr(result, 'id', '') or '')
+                            if not album_id or album_id in tracks_by_album_id:
+                                continue
+                            try:
+                                album_data = client.get_album(album_id)
+                                if album_data:
+                                    tracks_by_album_id[album_id] = (
+                                        extract_tracks_from_album_data(album_data)
+                                    )
+                            except Exception as exc:
+                                logger.debug(
+                                    "Auto-import: get_album failed for %s "
+                                    "during duration disambiguation: %s",
+                                    album_id, exc,
+                                )
+                        if tracks_by_album_id:
+                            picked, duration_fit, used_tiebreak = (
+                                pick_album_by_duration_fit(
+                                    scored_results,
+                                    file_tags,
+                                    tracks_by_album_id,
+                                )
+                            )
+                            if used_tiebreak:
+                                logger.info(
+                                    "[Auto-Import] Duration tiebreak for '%s' "
+                                    "on %s: chose %r (id %s, fit %.0f%%) over "
+                                    "%r (id %s) — near-identical name scores",
+                                    album,
+                                    source,
+                                    picked.name,
+                                    getattr(picked, 'id', ''),
+                                    duration_fit * 100,
+                                    best_result.name,
+                                    getattr(best_result, 'id', ''),
+                                )
+                                best_result = picked
 
                 # Get image
                 image_url = ''
@@ -1611,15 +1607,14 @@ class AutoImportWorker:
             # (no worker instantiation, no metadata-client mocking, no
             # _read_file_tags monkeypatch). Worker still owns I/O +
             # metadata fetch; the helper is a pure function over dicts.
-            from core.imports.album_matching import match_files_to_tracks
+            from core.imports.album_matching import default_quality_rank, match_files_to_tracks
             target_album = identification.get('album_name', '')
             match_result = match_files_to_tracks(
                 candidate.audio_files,
                 file_tags,
                 tracks,
                 target_album=target_album,
-                similarity=_similarity,
-                quality_rank=_quality_rank,
+                quality_rank=default_quality_rank,
             )
             matches = match_result['matches']
             unmatched_files = match_result['unmatched_files']
