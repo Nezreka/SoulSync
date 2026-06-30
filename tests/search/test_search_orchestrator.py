@@ -323,7 +323,18 @@ def test_fanout_lists_alternate_sources_excluding_primary():
     assert 'spotify' in alts
     assert 'youtube_videos' in alts
     assert 'musicbrainz' in alts
-    assert 'jiosaavn' in alts
+    assert 'jiosaavn' not in alts
+
+
+def test_fanout_includes_jiosaavn_alternate_when_experimental_enabled(monkeypatch):
+    import core.metadata.registry as registry_mod
+    monkeypatch.setattr(registry_mod, 'is_jiosaavn_enabled', lambda: True)
+    deps = _build_deps(
+        get_metadata_fallback_source=lambda: 'deezer',
+        spotify_client=_Client(authed=True),
+    )
+    result = orchestrator.run_enhanced_search('pink floyd', '', deps)
+    assert 'jiosaavn' in result['alternate_sources']
 
 
 def test_fanout_omits_spotify_alternate_when_unauthed():

@@ -112,11 +112,17 @@ const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn',
 // configured so the picker doesn't dim always-available sources.
 async function fetchSourceConfiguredMap() {
     const map = {};
+    let jiosaavnEnabled = false;
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
             const data = await resp.json();
+            jiosaavnEnabled = !!(data._experimental && data._experimental.jiosaavn_enabled);
             for (const src of SOURCE_ORDER) {
+                if (src === 'jiosaavn' && !jiosaavnEnabled) {
+                    map[src] = false;
+                    continue;
+                }
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
                 } else if (src === 'spotify') {
