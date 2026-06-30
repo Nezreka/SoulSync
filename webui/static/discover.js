@@ -22,12 +22,184 @@ let personalizedDiscoveryShuffle = [];
 let personalizedListeningMix = [];   // #913: the "Your Listening Mix" track playlist
 let buildPlaylistSelectedArtists = [];
 
+// ── Adventurousness — living wave dial (Discover page) ──────────────────────────────────────
+// A draggable orb rides an animated line. At the left (value 0) the line is green and waves gently
+// ("artists you already like"); dragging right shifts the colour through the spectrum to red and the
+// wave grows bigger + more erratic. Drawn each frame with rAF. Shares discover.adventurousness with
+// the Settings slider, so the two stay in sync.
+const _advWave = { value: 0.3, phase: 0, raf: null, dragging: false };
+
+function _advState(v) {
+    if (v < 0.12) return 'Playing it safe';
+    if (v < 0.40) return 'Balanced';
+    if (v < 0.70) return 'Adventurous';
+    return 'Deep cuts only';
+}
+// green (120°) → blue (220°) through cyan as the orb moves right. Blue reads "deep / exploratory"
+// rather than red's "danger / bad" — safe at the green end, adventurous at the cool blue end.
+function _advColor(v, light, alpha) {
+    const hue = 120 + 100 * Math.max(0, Math.min(1, v));
+    const l = light || 55;
+    return alpha != null ? `hsla(${hue.toFixed(0)}, 85%, ${l}%, ${alpha})` : `hsl(${hue.toFixed(0)}, 85%, ${l}%)`;
+}
+// Wave height (viewBox units, centre 40) at position u (0..1) for adventurousness v.
+// px the orb + colour aura stay inset from the track edges, so they never collide with the card's
+// overflow:hidden and get sliced (the half-orb / hard green block on the left in the v0 screenshot).
+const _ADV_ORB_PAD = 18;
+
+function _advWaveY(u, v) {
+    const amp = 4.5 + v * 10;          // real body even at rest (was a near-flat ±2 wire), lively at 1
+    const freq = 1.25 + v * 1.9;       // a few more cycles as it gets adventurous
+    let y = 40 + amp * Math.sin(freq * u * Math.PI * 2 + _advWave.phase);
+    if (v > 0) {                       // a detuned second harmonic adds a touch of wobble
+        y += v * amp * 0.38 * Math.sin(freq * 2.2 * u * Math.PI * 2 + _advWave.phase * 1.6 + 1.3);
+    }
+    return y;
+}
+function _advDraw() {
+    const path = document.getElementById('adv-wave-path');
+    const track = document.getElementById('adv-wave-track');
+    if (!path || !track) { _advWave.raf = null; return; }
+    if (track.offsetParent !== null) {  // skip the work while the Discover page is hidden
+        const v = _advWave.value;
+        _advWave.phase += 0.022 + v * 0.045;   // waves a little faster the more adventurous
+        let line = '';
+        const N = 90;
+        for (let i = 0; i <= N; i++) {
+            const u = i / N;
+            line += (i === 0 ? 'M ' : ' L ') + (u * 1000).toFixed(1) + ' ' + _advWaveY(u, v).toFixed(1);
+        }
+        path.setAttribute('d', line);
+        // the luminous filled area = the wave closed down to the baseline
+        const area = document.getElementById('adv-wave-area');
+        if (area) area.setAttribute('d', line + ' L 1000 80 L 0 80 Z');
+        const orb = document.getElementById('adv-wave-orb');
+        if (orb) {
+            // Sample the wave at the orb's INSET x (not raw v) so the handle still sits exactly on the
+            // line after we pulled its travel in from the edges.
+            const W = track.clientWidth || 1;
+            const uOrb = (_ADV_ORB_PAD + v * (W - 2 * _ADV_ORB_PAD)) / W;
+            orb.style.top = (_advWaveY(uOrb, v) / 80 * 100).toFixed(2) + '%';  // orb rides the wave
+        }
+    }
+    _advWave.raf = requestAnimationFrame(_advDraw);
+}
+function _advApply(v) {
+    v = Math.max(0, Math.min(1, v));
+    _advWave.value = v;
+    const c = _advColor(v, 55);
+    const cBright = _advColor(v, 62);
+    // Line stroke + its colour glow (set on change, not every frame, so the rAF stays cheap).
+    const path = document.getElementById('adv-wave-path');
+    if (path) { path.setAttribute('stroke', c); path.style.filter = `drop-shadow(0 0 7px ${c})`; }
+    const fillTop = document.getElementById('adv-wave-fill-top');
+    if (fillTop) fillTop.setAttribute('stop-color', c);   // luminous filled area
+    const orb = document.getElementById('adv-wave-orb');
+    if (orb) {
+        orb.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
+        orb.style.color = c;                              // currentColor for the pulsing ring
+        orb.style.background = cBright;
+        orb.style.boxShadow = `0 0 9px 0 ${c}, inset 0 0 0 2px rgba(255,255,255,0.5)`;
+    }
+    const aura = document.getElementById('adv-wave-aura');   // colour wash that follows the orb
+    if (aura) {
+        aura.style.left = `calc(${_ADV_ORB_PAD}px + ${v.toFixed(4)} * (100% - ${2 * _ADV_ORB_PAD}px))`;
+        aura.style.background = `radial-gradient(circle, ${_advColor(v, 50, 0.16)} 0%, transparent 72%)`;
+    }
+    const stateEl = document.getElementById('adv-wave-state');
+    if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }
+}
+async function _advCommitNow(v) {
+    try {
+        await fetch('/api/discover/adventurousness', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: v }),
+        });
+    } catch (e) { console.debug('adventurousness save failed', e); }
+    // Re-fetch the two rec rows so the dial is felt immediately. Use refresh() (which bypasses the
+    // controller's load() coalesce) so the LATEST dial value always re-fetches — load() would fold a
+    // rapid drag into an in-flight request that used an earlier value and render stale.
+    try {
+        if (_listeningRecsCtrl && _listeningRecsCtrl.refresh) _listeningRecsCtrl.refresh();
+        else if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (_recommendedSectionCtrl && _recommendedSectionCtrl.refresh) _recommendedSectionCtrl.refresh();
+        else if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    } catch (e) {
+        if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    }
+}
+let _advLastLive = 0;
+function _advCommitLive(v) {
+    // Throttled while dragging so both rec columns visibly re-rank in real time (not just on release).
+    const now = Date.now();
+    if (now - _advLastLive < 450) return;
+    _advLastLive = now;
+    _advCommitNow(v);
+}
+function _advInitDrag() {
+    const track = document.getElementById('adv-wave-track');
+    if (!track || track._advWired) return;
+    track._advWired = true;
+    const fromX = (clientX) => {
+        const r = track.getBoundingClientRect();
+        return r.width ? (clientX - r.left) / r.width : 0;
+    };
+    track.addEventListener('pointerdown', (e) => {
+        _advWave.dragging = true;
+        try { track.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        _advApply(fromX(e.clientX));
+    });
+    track.addEventListener('pointermove', (e) => {
+        if (!_advWave.dragging) return;
+        _advApply(fromX(e.clientX));
+        _advCommitLive(_advWave.value);   // live update as you drag (throttled)
+    });
+    const end = (e) => {
+        if (!_advWave.dragging) return;
+        _advWave.dragging = false;
+        _advApply(fromX(e.clientX));
+        _advLastLive = 0;                 // reset the throttle so the final value always commits
+        _advCommitNow(_advWave.value);
+    };
+    track.addEventListener('pointerup', end);
+    track.addEventListener('pointercancel', end);
+}
+async function loadAdventurousnessDial() {
+    const track = document.getElementById('adv-wave-track');
+    if (!track) return;
+    _advInitDrag();
+    try {
+        const resp = await fetch('/api/discover/adventurousness');
+        if (resp.ok) {
+            const data = await resp.json();
+            if (typeof data.value === 'number') _advWave.value = data.value;
+        }
+    } catch (e) { /* non-fatal */ }
+    _advApply(_advWave.value);
+    if (!_advWave.raf) _advWave.raf = requestAnimationFrame(_advDraw);
+}
+
 async function loadDiscoverPage() {
     console.log('Loading discover page...');
 
-    // Load all sections
-    await Promise.all([
+    // The Last.fm / ListenBrainz / weekly / release-radar sections fetch from external services that
+    // can hang for tens of seconds when those services are slow or down (the LB endpoints can time out
+    // ~39s). They sit LOW in the layout, so don't let them hold the whole-page reorder hostage — start
+    // them now (concurrently) but slot them in when they actually arrive, not before the rest of the
+    // page can settle into the intended order. (#discover — fixes the late "reshuffle on load".)
+    const slowExternalLoaders = [
+        initializeLastfmRadioSection(),  // Last.fm Radio (external)
+        initializeListenBrainzTabs(),    // ListenBrainz playlists (external; can time out ~39s)
+        loadDiscoverReleaseRadar(),      // external playlist source
+        loadDiscoverWeekly(),            // external playlist source
+    ];
+
+    // Fast/local sections — settle quickly so the layout snaps into place without waiting on the
+    // external APIs above. allSettled (not all) so one failing loader can't block the reorder.
+    await Promise.allSettled([
         loadDiscoverHero(),
+        loadAdventurousnessDial(),  // sets the Discover-page dial from config
         loadListeningRecommendations(),  // #913: play-weighted, consensus-ranked picks
         loadPersonalizedListeningMix(),  // #913: playable track mix from those picks
         loadRecommendedArtistsSection(),
@@ -35,28 +207,90 @@ async function loadDiscoverPage() {
         loadYourAlbums(),
         loadDiscoverRecentReleases(),
         loadSeasonalContent(),  // Seasonal discovery
-        // loadPersonalizedDailyMixes(),  // NEW: Daily Mix playlists (HIDDEN)
-        loadDiscoverReleaseRadar(),
-        loadDiscoverWeekly(),
-        loadPersonalizedPopularPicks(),  // NEW: Popular picks from discovery pool
-        loadPersonalizedHiddenGems(),  // NEW: Hidden gems from discovery pool
-        loadDiscoveryShuffle(),  // NEW: Discovery Shuffle
+        loadPersonalizedPopularPicks(),  // Popular picks from discovery pool
+        loadPersonalizedHiddenGems(),  // Hidden gems from discovery pool
+        loadDiscoveryShuffle(),  // Discovery Shuffle
         loadBecauseYouListenTo(),  // Personalized by listening stats
         loadCacheUndiscoveredAlbums(),  // From metadata cache
         loadCacheGenreNewReleases(),    // From metadata cache
         loadCacheLabelExplorer(),       // From metadata cache
         loadCacheDeepCuts(),            // From metadata cache
         loadCacheGenreExplorer(),       // From metadata cache
-        initializeLastfmRadioSection(),  // Last.fm Radio section (gated on API key)
-        initializeListenBrainzTabs(),  // ListenBrainz playlists (tabbed)
         loadDecadeBrowserTabs(),  // Time Machine (tabbed by decade)
-        loadGenreBrowserTabs(),  // Browse by Genre (tabbed by genre)
-        loadListenBrainzPlaylistsFromBackend(),  // Load ListenBrainz playlist states for persistence
+        loadListenBrainzPlaylistsFromBackend(),  // local: ListenBrainz playlist states for persistence
         loadDiscoveryBlacklist()  // Blocked artists list
     ]);
 
+    // Reorder now that the fast sections are in — NOT gated on the slow external APIs above.
+    _reorderDiscoverSections();
+
+    // Re-slot the slow external sections into the already-ordered layout when they finish, instead of
+    // delaying the whole page until then. allSettled so one failing source can't block the re-order.
+    Promise.allSettled(slowExternalLoaders).then(() => _reorderDiscoverSections());
+
     // Check for active syncs after page load
     checkForActiveDiscoverSyncs();
+}
+
+// #discover redesign: sections were authored in code-order (and several inject into a mid-page
+// sub-container, #discover-bylt-sections), so the page reads as a jumble. After all loaders run,
+// move each section into the intended Spotify-style order. appendChild MOVES nodes — including ones
+// nested in #discover-bylt-sections — into .discover-container, so the cache sections get pulled out
+// to their own slots while the BYLT container keeps just its "Because you listen to" rows. Hidden /
+// collapsed sections (old mix tables, Daily Mixes) are left untouched and stay invisible. The hero
+// and the Artist Map hub are left in place near the top.
+function _reorderDiscoverSections() {
+    const container = document.querySelector('.discover-container');
+    if (!container) return;
+    const sectionByTitle = (t) => Array.from(
+        document.querySelectorAll('.discover-container .discover-section, #discover-bylt-sections .discover-section'))
+        .find(s => (s.querySelector('.discover-section-title')?.textContent || '').toLowerCase().includes(t));
+    const resolve = (spec) => {
+        if (!spec) return null;
+        if (spec.id) return document.getElementById(spec.id);
+        if (spec.el) return document.querySelector(spec.el);
+        if (spec.title) return sectionByTitle(spec.title);
+        return null;
+    };
+    const isShown = (s) => s && s.style.display !== 'none';
+    // top → bottom. `pair` = two same-card sections side by side (collapses to 1-up on narrow); the
+    // dial sits right above its two targets so the user sees both react. Everything else full-width.
+    const LAYOUT = [
+        { id: 'cache-genre-explorer' },                                                   // quick browse
+        { id: 'your-mixes-section' },                                                     // made for you
+        { id: 'year-mixes-section' },
+        { el: '#adv-wave' },                                                              // the dial
+        { pair: [{ id: 'listening-recs-section' }, { id: 'recommended-artists-section' }] },  // its targets
+        { pair: [{ title: 'recent releases' }, { id: 'cache-genre-releases' }] },         // new
+        { pair: [{ id: 'seasonal-albums-section' }, { id: 'cache-undiscovered' }] },
+        { pair: [{ id: 'cache-label-explorer' }, { id: 'your-albums-section' }] },
+        { id: 'your-artists-section' },                                                   // your library
+        { id: 'discover-bylt-sections' },                                                 // because you listen
+        { id: 'cache-deep-cuts' },
+        { title: 'last.fm radio' },                                                       // stations & tools
+        { title: 'listenbrainz' },
+        { title: 'build a playlist' },
+    ];
+    // Re-runs on every navigation — unwrap any prior 2-col rows first (their children get re-resolved
+    // and re-placed below), so we never nest or duplicate.
+    container.querySelectorAll('.discover-row-2col').forEach(row => {
+        while (row.firstChild) container.appendChild(row.firstChild);
+        row.remove();
+    });
+    LAYOUT.forEach(item => {
+        if (item.pair) {
+            const members = item.pair.map(resolve).filter(isShown);  // skip empty/hidden sections
+            if (!members.length) return;
+            if (members.length === 1) { container.appendChild(members[0]); return; }  // lone → full width
+            const row = document.createElement('div');
+            row.className = 'discover-row-2col';
+            members.forEach(m => row.appendChild(m));
+            container.appendChild(row);
+        } else {
+            const node = resolve(item);
+            if (node && node.parentElement) container.appendChild(node);
+        }
+    });
 }
 
 async function checkForActiveDiscoverSyncs() {
@@ -695,38 +929,48 @@ function _listeningRecommendationReasonTitle(artist) {
     return names.length ? `You listen to: ${names.join(', ')}` : '';
 }
 
+function _whyIcon(type) {
+    return type === 'genre' ? '🎯' : type === 'obscure' ? '💎' : type === 'consensus' ? '👥' : '✨';
+}
+
 function _renderRecommendedMini(artist, source, opts) {
     const reasonFn = (opts && opts.reasonFn) || _recommendationReason;
     const titleFn = (opts && opts.titleFn) || _recommendationReasonTitle;
     const artistSource = artist.source || source || '';
     const reason = reasonFn(artist);
     const reasonTitle = titleFn(artist);
-    const genreTags = (artist.genres || []).slice(0, 2).map(g =>
-        `<span class="recommended-card-genre">${escapeHtml(g)}</span>`
-    ).join('');
     const img = artist.image_url
         ? `<img src="${artist.image_url}" alt="${escapeHtml(artist.artist_name)}" loading="lazy"
                 onerror="this.parentElement.innerHTML='<div class=\\'recommended-card-image-fallback\\'>🎤</div>';">`
         : `<div class="recommended-card-image-fallback">🎤</div>`;
+    // "Why this rec" chips from the scoring signals — the explainability flex. When present they
+    // replace the plain reason line (they ARE the reason, just clearer); else fall back to the text.
+    const whyHtml = (artist.why && artist.why.length)
+        ? `<div class="ya-card-why">${artist.why.slice(0, 2).map(w =>
+              `<span class="ya-why-chip ya-why-${w.type}">${_whyIcon(w.type)} ${escapeHtml(w.label)}</span>`).join('')}</div>`
+        : `<div class="ya-card-sub" title="${escapeHtml(reasonTitle)}">${reason}</div>`;
+    // .ya-card visual (matches Your Artists / albums) while keeping the class + data hooks the
+    // watchlist handler (.recommended-card-watchlist-btn) and image enrichment
+    // (.recommended-artist-card[data-artist-id] → .recommended-card-image) rely on. #discover redesign.
     return `
-        <div class="recommended-artist-card recommended-card--carousel"
+        <div class="ya-card recommended-artist-card"
              data-artist-name="${escapeHtml(artist.artist_name).toLowerCase()}"
              data-artist-id="${artist.artist_id}"
              data-artist-source="${escapeHtml(artistSource)}">
-            <button class="recommended-card-watchlist-btn"
+            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
+               style="display:block;text-decoration:none;color:inherit;">
+                <div class="ya-card-img recommended-card-image">${img}</div>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${escapeHtml(artist.artist_name)}</div>
+                    ${whyHtml}
+                </div>
+            </a>
+            <button class="recommended-card-watchlist-btn ya-card-reco-btn"
                     data-artist-id="${artist.artist_id}"
                     data-artist-name="${escapeHtml(artist.artist_name)}">
                 Add to Watchlist
             </button>
-            <a class="recommended-card-link" href="${buildArtistDetailPath(artist.artist_id, artistSource || null)}"
-               style="display:block;text-decoration:none;color:inherit;">
-                <div class="recommended-card-image">${img}</div>
-                <div class="recommended-card-info">
-                    <span class="recommended-card-name">${escapeHtml(artist.artist_name)}</span>
-                    <span class="recommended-card-similarity" title="${escapeHtml(reasonTitle)}">${reason}</span>
-                    <div class="recommended-card-genres">${genreTags}</div>
-                </div>
-            </a>
         </div>`;
 }
 
@@ -790,6 +1034,7 @@ async function loadRecommendedArtistsSection() {
                 }
                 const source = (data && data.source) || 'spotify';
                 _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source);
+                _clampGrid(carousel);
             },
             loadingMessage: 'Finding recommendations...',
             emptyMessage: 'No recommendations yet — let the Similar Artists worker run',
@@ -832,6 +1077,7 @@ async function loadListeningRecommendations() {
                 }
                 const source = (data && data.source) || 'spotify';
                 _enrichRecommendedCarouselCards((data && data.artists || []).slice(0, 18), source, 'listening-recs-carousel');
+                _clampGrid(carousel);
             },
             loadingMessage: 'Reading your listening...',
             emptyMessage: 'Play more music and run a watchlist scan to see picks based on your listening',
@@ -1008,15 +1254,18 @@ let _recentReleasesCtrl = null;
 
 function _renderRecentReleaseCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
+    // Unified Discover card — same .ya-card the Your Artists section uses (full-bleed cover,
+    // gradient, name overlaid), square so the album art isn't cropped. #discover redesign.
     return `
-        <div class="discover-card" onclick="openDownloadModalForRecentAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForRecentAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                <p class="discover-card-meta">${album.release_date}</p>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -1043,7 +1292,8 @@ async function loadDiscoverRecentReleases() {
             showErrorToast: true,
         });
     }
-    return _recentReleasesCtrl.load();
+    await _recentReleasesCtrl.load();
+    _clampGrid(document.getElementById('recent-releases-carousel'));
 }
 
 // ===============================
@@ -1182,22 +1432,19 @@ function _renderYourAlbumsGrid(albums) {
     let html = '';
     albums.forEach((album, index) => {
         const coverUrl = album.image_url || '/static/placeholder-album.png';
-        const year = album.release_date ? album.release_date.substring(0, 4) : '';
         const badgeClass = album.in_library ? 'owned' : 'missing';
         const badgeIcon = album.in_library ? '\u2713' : '\u2193';
-        const trackInfo = album.total_tracks ? `${album.total_tracks} tracks` : '';
-        const meta = [year, trackInfo].filter(Boolean).join(' \u00B7 ');
-        const sources = (album.source_services || []).join(', ');
         html += `
-            <div class="spotify-library-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
-                <div class="spotify-library-card-img">
-                    <img src="${coverUrl}" alt="${escapeHtml(album.album_name)}" loading="lazy">
-                    <div class="spotify-library-card-badge ${badgeClass}">${badgeIcon}</div>
+            <div class="ya-card discover-album-card" onclick="openYourAlbumDownload(${index})" title="${escapeHtml(album.album_name)} \u2014 ${escapeHtml(album.artist_name)}">
+                <div class="ya-card-img">
+                    <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                    <div class="ya-card-placeholder" style="display:none">&#9835;</div>
                 </div>
-                <div class="spotify-library-card-info">
-                    <p class="spotify-library-card-title">${escapeHtml(album.album_name)}</p>
-                    <p class="spotify-library-card-artist">${escapeHtml(album.artist_name)}</p>
-                    <p class="spotify-library-card-meta">${escapeHtml(meta)}</p>
+                <div class="ya-card-gradient"></div>
+                <div class="ya-card-badges"><div class="discover-album-badge ${badgeClass}">${badgeIcon}</div></div>
+                <div class="ya-card-info">
+                    <div class="ya-card-name">${_esc(album.album_name)}</div>
+                    <div class="ya-card-sub">${_esc(album.artist_name)}</div>
                 </div>
             </div>`;
     });
@@ -1788,11 +2035,7 @@ async function loadDiscoverReleaseRadar() {
             contentEl: '#release-radar-playlist',
             fetchUrl: '/api/discover/release-radar',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverReleaseRadarTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverReleaseRadarTracks = items; return ''; },
             loadingMessage: 'Loading release radar...',
             emptyMessage: 'No new releases available',
             errorMessage: 'Failed to load release radar',
@@ -1800,7 +2043,16 @@ async function loadDiscoverReleaseRadar() {
             showErrorToast: true,
         });
     }
-    return _releaseRadarCtrl.load();
+    await _releaseRadarCtrl.load();
+    const c = document.querySelector('#release-radar-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverReleaseRadarTracks && discoverReleaseRadarTracks.length) {
+        _upsertMixCard({
+            key: 'release_radar', title: 'Fresh Tape',
+            subtitle: 'New releases from artists you follow',
+            tracks: discoverReleaseRadarTracks, syncKey: 'release_radar',
+        });
+    }
 }
 
 let _weeklyCtrl = null;
@@ -1812,11 +2064,7 @@ async function loadDiscoverWeekly() {
             contentEl: '#discovery-weekly-playlist',
             fetchUrl: '/api/discover/weekly',
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverWeeklyTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverWeeklyTracks = items; return ''; },
             loadingMessage: 'Curating your discovery playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load discovery weekly',
@@ -1824,7 +2072,16 @@ async function loadDiscoverWeekly() {
             showErrorToast: true,
         });
     }
-    return _weeklyCtrl.load();
+    await _weeklyCtrl.load();
+    const c = document.querySelector('#discovery-weekly-playlist');
+    if (c) _collapseOldMixSection(c);
+    if (discoverWeeklyTracks && discoverWeeklyTracks.length) {
+        _upsertMixCard({
+            key: 'discovery_weekly', title: 'The Archives',
+            subtitle: 'A weekly dig through artists across your library',
+            tracks: discoverWeeklyTracks, syncKey: 'discovery_weekly',
+        });
+    }
 }
 
 // ===============================
@@ -1929,15 +2186,14 @@ let genreTracks = [];
 function _renderGenreCard(genre) {
     const icon = getGenreIcon(genre.name);
     const displayName = capitalizeGenre(genre.name);
+    // Genres have no cover art — a gradient .ya-card with the emoji, so they match the grid. #discover redesign
     return `
-        <div class="discover-card genre-card-modern" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
-            <div class="discover-card-image genre-card-image">
-                <div class="genre-icon-large">${icon}</div>
-            </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${displayName}</h4>
-                <p class="discover-card-subtitle">${genre.track_count} tracks</p>
-                <p class="discover-card-meta">Curated</p>
+        <div class="ya-card discover-genre-card" onclick="openGenrePlaylist('${escapeForInlineJs(genre.name)}')">
+            <div class="ya-card-img genre-card-art"><div class="genre-icon-large">${icon}</div></div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${displayName}</div>
+                <div class="ya-card-sub">${genre.track_count} tracks</div>
             </div>
         </div>
     `;
@@ -2359,7 +2615,44 @@ function _renderTabbedTrackList(tracks) {
 }
 
 async function loadDecadeBrowserTabs() {
-    return _getDecadeBrowserTabsCtrl().loadTabs();
+    // #discover redesign: Time Machine is now a shelf of decade mix cards (each opens its tracks in
+    // the shared modal) instead of a tabbed track table. Tracks load lazily on open.
+    const grid = document.getElementById('decade-tab-contents');
+    if (!grid) return;
+    const tabs = document.getElementById('decade-tabs');
+    if (tabs) tabs.style.display = 'none';
+    try {
+        const resp = await fetch('/api/discover/decades/available');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (!data.success || !Array.isArray(data.decades) || !data.decades.length) {
+            grid.closest('.discover-section')?.style.setProperty('display', 'none');
+            return;
+        }
+        grid.className = 'discover-grid';
+        const mixes = data.decades.map(d => {
+            const year = d.year;
+            return {
+                key: `decade_${year}`,
+                title: `${year}s`,
+                subtitle: `${year}s Classics`,
+                trackCount: d.track_count,
+                statusBase: `decade-${year}`,
+                actions: [
+                    { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDecade(${year})` },
+                    { label: 'Sync', primary: true, isSync: true, onclick: `startDecadeSync(${year})` },
+                ],
+                // Populate decadeTracksCache like the old tab fetch did so startDecadeSync works.
+                fetchTracks: () => fetch(`/api/discover/decade/${year}`).then(r => r.json()).then(dd => {
+                    const tracks = (dd && dd.tracks) || [];
+                    decadeTracksCache[year] = tracks;
+                    activeDecade = year;
+                    return tracks;
+                }),
+            };
+        });
+        _renderMixGrid(grid, mixes);
+    } catch (e) { console.debug('Decade browser:', e); }
 }
 
 function switchDecadeTab(decade) {
@@ -3253,84 +3546,59 @@ function groupListenBrainzPlaylists(playlists) {
 }
 
 function buildListenBrainzPlaylistsHtml(playlists, tabId) {
-    let html = '';
-    playlists.forEach((playlist, index) => {
+    // #discover redesign: each playlist is a mix card (opens its tracks + actions in the shared
+    // modal) instead of a full-width track-table subsection. Shared by Last.fm Radio + ListenBrainz.
+    const mixes = playlists.map(playlist => {
         const playlistData = playlist.playlist || playlist;
         const identifier = playlistData.identifier?.split('/').pop() || '';
-        console.log(`📋 Playlist ${index}:`, {
-            title: playlistData.title,
-            fullIdentifier: playlistData.identifier,
-            extractedIdentifier: identifier
-        });
         const title = playlistData.title || 'Untitled Playlist';
         const creator = playlistData.creator || 'ListenBrainz';
-
         let trackCount = 50;
         if (playlistData.annotation?.track_count && playlistData.annotation.track_count > 0) {
             trackCount = playlistData.annotation.track_count;
         } else if (playlistData.track && Array.isArray(playlistData.track) && playlistData.track.length > 0) {
             trackCount = playlistData.track.length;
         }
-
-        const playlistId = `discover-lb-playlist-${identifier}`;  // Use consistent MBID-based ID
-        const virtualPlaylistId = `discover_lb_${tabId}_${identifier}`;
-
-        html += `
-            <div class="discover-section-subsection">
-                <div class="discover-section-header">
-                    <div>
-                        <h3 class="discover-section-subtitle-large">${title}</h3>
-                        <p class="discover-section-meta" id="${playlistId}-meta">by ${creator} • Loading tracks...</p>
-                    </div>
-                    <div class="discover-section-actions">
-                        <button class="action-button secondary"
-                                onclick="openDownloadModalForListenBrainzPlaylist('${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download missing tracks">
-                            <span class="button-icon">↓</span>
-                            <span class="button-text">Download</span>
-                        </button>
-                        <span class="wing-it-wrap">
-                        <button class="action-button wing-it-btn-sm"
-                                onclick="_toggleWingItDropdownLB(this, '${identifier}', '${escapeForInlineJs(title)}')"
-                                title="Download or sync using raw track names — no metadata discovery">
-                            <span class="button-icon">⚡</span>
-                            <span class="button-text">Wing It</span>
-                        </button>
-                        </span>
-                        <button class="action-button primary"
-                                id="${playlistId}-sync-btn"
-                                onclick="startListenBrainzPlaylistSync('${identifier}')"
-                                title="Sync to media server"
-                                style="display: none;">
-                            <span class="button-icon">⟳</span>
-                            <span class="button-text">Sync</span>
-                        </button>
+        const escTitle = escapeForInlineJs(title);
+        // playlistId is the status base startListenBrainzPlaylistSync targets; LB uses its own
+        // -sync-total/-sync-matched spans, so we hand the modal a matching statusHtml block.
+        const playlistId = `discover-lb-playlist-${identifier}`;
+        const statusHtml = `
+            <div class="discover-sync-status" id="${playlistId}-sync-status" style="display:none">
+                <div class="sync-status-content">
+                    <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                    <div class="sync-status-stats">
+                        <span class="sync-stat">&#9834; <span id="${playlistId}-sync-total">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10003; <span id="${playlistId}-sync-matched">0</span></span>
+                        <span class="sync-separator">/</span>
+                        <span class="sync-stat">&#10007; <span id="${playlistId}-sync-failed">0</span></span>
+                        <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
                     </div>
                 </div>
-                <!-- Sync Status Display -->
-                <div class="discover-sync-status" id="${playlistId}-sync-status" style="display: none;">
-                    <div class="sync-status-content">
-                        <div class="sync-status-label">
-                            <span class="sync-icon">⟳</span>
-                            <span>Syncing to media server...</span>
-                        </div>
-                        <div class="sync-status-stats">
-                            <span class="sync-stat">♪ <span id="${playlistId}-sync-total">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✓ <span id="${playlistId}-sync-matched">0</span></span>
-                            <span class="sync-separator">/</span>
-                            <span class="sync-stat">✗ <span id="${playlistId}-sync-failed">0</span></span>
-                            <span class="sync-stat">(<span id="${playlistId}-sync-percentage">0</span>%)</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="discover-playlist-container compact" id="${playlistId}-playlist">
-                    <div class="discover-loading"><div class="loading-spinner"></div><p>Loading tracks...</p></div>
-                </div>
-            </div>
-        `;
+            </div>`;
+        return {
+            key: `lb-${tabId}-${identifier}`,
+            title, subtitle: `by ${creator}`, trackCount,
+            statusBase: playlistId,
+            statusHtml,
+            actions: [
+                { label: 'Download', closeFirst: true, onclick: `openDownloadModalForListenBrainzPlaylist('${identifier}', '${escTitle}')` },
+                { label: 'Sync', primary: true, isSync: true, onclick: `startListenBrainzPlaylistSync('${identifier}')` },
+            ],
+            // Tracks load lazily on open; cache them where displayListenBrainzTracks would so reuse works.
+            fetchTracks: () => fetch(`/api/discover/listenbrainz/playlist/${identifier}`).then(r => r.json()).then(d => {
+                const tracks = (d && d.tracks) || [];
+                listenbrainzTracksCache[identifier] = tracks;
+                return tracks;
+            }),
+        };
     });
-    return html;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    // Caller injects this HTML synchronously; hydrate covers + tracks on the next tick so the cards
+    // exist in the DOM. Background-fetches each playlist's tracks → real mosaic + instant modal.
+    setTimeout(() => _hydrateMixCovers(mixes), 0);
+    return `<div class="discover-grid">${mixes.map(_buildMixCard).join('')}</div>`;
 }
 
 function loadTracksForPlaylists(playlists) {
@@ -3998,14 +4266,15 @@ async function loadSeasonalContent() {
 function _renderSeasonalAlbumCard(album, index) {
     const coverUrl = album.album_cover_url || '/static/placeholder-album.png';
     return `
-        <div class="discover-card" onclick="openDownloadModalForSeasonalAlbum(${index})" style="cursor: pointer;">
-            <div class="discover-card-image">
-                <img src="${coverUrl}" alt="${album.album_name}" loading="lazy">
+        <div class="ya-card discover-album-card" onclick="openDownloadModalForSeasonalAlbum(${index})">
+            <div class="ya-card-img">
+                <img src="${coverUrl}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                <div class="ya-card-placeholder" style="display:none">&#9835;</div>
             </div>
-            <div class="discover-card-info">
-                <h4 class="discover-card-title">${album.album_name}</h4>
-                <p class="discover-card-subtitle">${album.artist_name}</p>
-                ${album.release_date ? `<p class="discover-card-meta">${album.release_date}</p>` : ''}
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(album.album_name)}</div>
+                <div class="ya-card-sub">${_esc(album.artist_name)}</div>
             </div>
         </div>
     `;
@@ -4040,7 +4309,8 @@ async function loadSeasonalAlbums(seasonData) {
         verboseErrors: true,
             showErrorToast: true,
     });
-    return ctrl.load();
+    await ctrl.load();
+    _clampGrid(document.getElementById('seasonal-albums-carousel'));
 }
 
 let _seasonalPlaylistCtrl = null;
@@ -4050,23 +4320,6 @@ async function loadSeasonalPlaylist(seasonData) {
     const playlistContainer = document.getElementById('seasonal-playlist');
     if (!playlistContainer) return;
 
-    // Show seasonal playlist section
-    const seasonalPlaylistSection = document.getElementById('seasonal-playlist-section');
-    if (seasonalPlaylistSection) {
-        seasonalPlaylistSection.style.display = 'block';
-    }
-
-    // Update header
-    const playlistTitle = document.getElementById('seasonal-playlist-title');
-    const playlistSubtitle = document.getElementById('seasonal-playlist-subtitle');
-
-    if (playlistTitle) {
-        playlistTitle.textContent = `${seasonData.icon} ${seasonData.name} Mix`;
-    }
-    if (playlistSubtitle) {
-        playlistSubtitle.textContent = `Curated playlist for ${seasonData.name.toLowerCase()}`;
-    }
-
     // Re-create the controller when the season key changes so the
     // fetchUrl always points at the active season's endpoint.
     if (!_seasonalPlaylistCtrl || _seasonalPlaylistCtrlKey !== currentSeasonKey) {
@@ -4075,11 +4328,7 @@ async function loadSeasonalPlaylist(seasonData) {
             contentEl: '#seasonal-playlist',
             fetchUrl: `/api/discover/seasonal/${currentSeasonKey}/playlist`,
             extractItems: (data) => data.tracks || [],
-            renderItems: (items) => {
-                discoverSeasonalTracks = items;
-                const rows = items.map((t, i) => _renderCompactTrackRow(t, i)).join('');
-                return `<div class="discover-playlist-tracks-compact">${rows}</div>`;
-            },
+            renderItems: (items) => { discoverSeasonalTracks = items; return ''; },
             loadingMessage: 'Loading playlist...',
             emptyMessage: 'No tracks available yet',
             errorMessage: 'Failed to load playlist',
@@ -4088,7 +4337,16 @@ async function loadSeasonalPlaylist(seasonData) {
         });
         _seasonalPlaylistCtrlKey = currentSeasonKey;
     }
-    return _seasonalPlaylistCtrl.load();
+    await _seasonalPlaylistCtrl.load();
+    _collapseOldMixSection(playlistContainer);
+    if (discoverSeasonalTracks && discoverSeasonalTracks.length) {
+        _upsertMixCard({
+            key: 'seasonal_playlist',
+            title: `${seasonData.icon} ${seasonData.name} Mix`,
+            subtitle: `Curated playlist for ${seasonData.name.toLowerCase()}`,
+            tracks: discoverSeasonalTracks, syncKey: 'seasonal_playlist',
+        });
+    }
 }
 
 function hideSeasonalSections() {
@@ -4278,8 +4536,12 @@ async function loadPersonalizedPopularPicks() {
         }
 
         personalizedPopularPicks = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'popular_picks', title: 'Popular Picks',
+            subtitle: 'Popular tracks from artists you love',
+            tracks: data.tracks, syncKey: 'popular_picks',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading popular picks:', error);
@@ -4301,8 +4563,12 @@ async function loadPersonalizedHiddenGems() {
         }
 
         personalizedHiddenGems = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'hidden_gems', title: 'Hidden Gems',
+            subtitle: 'Deeper cuts you might have missed',
+            tracks: data.tracks, syncKey: 'hidden_gems',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading hidden gems:', error);
@@ -4327,8 +4593,14 @@ async function loadPersonalizedListeningMix() {
         }
 
         personalizedListeningMix = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        // Spotify-style: collapse this mix into a card in the "Your Mixes" shelf; its
+        // track list + actions live in the modal you open from the card (#discover redesign).
+        _upsertMixCard({
+            key: 'listening_mix', title: 'Your Listening Mix',
+            subtitle: 'From artists matched to your listening',
+            tracks: data.tracks, syncKey: 'listening_mix',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading listening mix:', error);
@@ -4350,57 +4622,62 @@ async function loadPersonalizedDailyMixes() {
         }
 
         personalizedDailyMixes = data.mixes;
-
-        // Render Daily Mix cards
-        let html = '';
+        // Fold each daily mix into the unified "Your Mixes" shelf (#discover redesign).
+        // (Their old open action was a no-op stub; opening to the track list is an upgrade.)
         data.mixes.forEach((mix, index) => {
-            const coverUrl = mix.tracks && mix.tracks.length > 0 ?
-                (mix.tracks[0].album_cover_url || '/static/placeholder-album.png') :
-                '/static/placeholder-album.png';
-
-            html += `
-                <div class="discover-playlist-card" onclick="openDailyMix(${index})">
-                    <div class="discover-playlist-cover">
-                        <img src="${coverUrl}" alt="${mix.name}" loading="lazy">
-                        <div class="playlist-play-overlay">▶</div>
-                    </div>
-                    <div class="discover-playlist-info">
-                        <h4 class="discover-playlist-name">${mix.name}</h4>
-                        <p class="discover-playlist-description">${mix.description}</p>
-                        <p class="discover-playlist-count">${mix.track_count} tracks</p>
-                    </div>
-                </div>
-            `;
+            _upsertMixCard({
+                key: `daily_mix_${index}`, title: mix.name,
+                subtitle: mix.description || 'Daily Mix',
+                tracks: mix.tracks || [],
+            });
         });
-
-        container.innerHTML = html;
-        container.closest('.discover-section').style.display = 'block';
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading daily mixes:', error);
     }
 }
 
+// Tracks come in two shapes across the discovery sources: flat (track_name/artist_name/…) for the
+// personalized mixes, or nested under track_data_json (name/artists[]/album/…) for the decade,
+// ListenBrainz + Last.fm playlists. Normalize both so renderers don't print "undefined". #discover
+function _normalizeTrack(track) {
+    // track_data_json when present, else the track itself (decade/Spotify-shaped rows carry
+    // name/artists[]/album at the top level — same fallback _renderTabbedTrackList uses).
+    const td = (track && track.track_data_json) || track || {};
+    const a0 = td.artists && td.artists[0];
+    return {
+        name: td.name || td.track_name || track.track_name || 'Unknown Track',
+        artist: (a0 && (a0.name || a0)) || td.artist_name || track.artist_name || 'Unknown Artist',
+        // album/duration are optional (ListenBrainz recording playlists carry neither) — leave blank
+        // rather than printing "Unknown Album" / "0:00".
+        album: (td.album && td.album.name) || td.album_name || track.album_name || '',
+        cover: (td.album && td.album.images && td.album.images[0] && td.album.images[0].url) || track.album_cover_url || '',
+        durationMs: td.duration_ms || track.duration_ms || 0,
+    };
+}
+
 function renderCompactPlaylist(container, tracks) {
     let html = '<div class="discover-playlist-tracks-compact">';
 
     tracks.forEach((track, index) => {
-        const coverUrl = track.album_cover_url || '/static/placeholder-album.png';
-        const durationMin = Math.floor(track.duration_ms / 60000);
-        const durationSec = Math.floor((track.duration_ms % 60000) / 1000);
-        const duration = `${durationMin}:${durationSec.toString().padStart(2, '0')}`;
+        const t = _normalizeTrack(track);
+        const coverUrl = t.cover || '/static/placeholder-album.png';
+        const durationMin = Math.floor(t.durationMs / 60000);
+        const durationSec = Math.floor((t.durationMs % 60000) / 1000);
+        const duration = t.durationMs > 0 ? `${durationMin}:${durationSec.toString().padStart(2, '0')}` : '';
 
         html += `
             <div class="discover-playlist-track-compact" data-track-index="${index}">
                 <div class="track-compact-number">${index + 1}</div>
                 <div class="track-compact-image">
-                    <img src="${coverUrl}" alt="${track.album_name}" loading="lazy">
+                    <img src="${coverUrl}" alt="${_esc(t.album)}" loading="lazy">
                 </div>
                 <div class="track-compact-info">
-                    <div class="track-compact-name">${track.track_name}</div>
-                    <div class="track-compact-artist">${track.artist_name}</div>
+                    <div class="track-compact-name">${_esc(t.name)}</div>
+                    <div class="track-compact-artist">${_esc(t.artist)}</div>
                 </div>
-                <div class="track-compact-album">${track.album_name}</div>
+                <div class="track-compact-album">${_esc(t.album)}</div>
                 <div class="track-compact-duration">${duration}</div>
             </div>
         `;
@@ -4408,6 +4685,195 @@ function renderCompactPlaylist(container, tracks) {
 
     html += '</div>';
     container.innerHTML = html;
+}
+
+// ── Your Mixes shelf (#discover redesign) ───────────────────────────────────
+// Each mix is ONE card (a 2x2 mosaic cover from its top tracks); clicking it opens
+// the track list + actions in a modal. The old per-mix full-width tables collapse
+// into these cards (the table now lives inside the opened mix, where it belongs).
+const _discoverMixRegistry = {};
+// Keys that belong to the shared "Your Mixes" shelf specifically. The registry above also holds
+// other sections' mixes (decades, Last.fm, ListenBrainz) for openMixModalByKey, so the shelf must
+// render only its own keys — not Object.values(registry), or those sections leak in.
+const _yourMixKeys = [];
+
+function _buildMixCard(mix) {
+    let cover;
+    if (mix.coverHtml) {
+        // Sections with no per-track art (e.g. decades) supply their own cover (a gradient + label).
+        cover = `<div class="mix-card-cover mix-card-cover--solid">${mix.coverHtml}<div class="mix-card-play">&#9654;</div></div>`;
+    } else {
+        const covers = [];
+        for (const t of (mix.tracks || [])) {
+            const c = _normalizeTrack(t).cover;
+            if (c && !covers.includes(c)) covers.push(c);
+            if (covers.length >= 4) break;
+        }
+        while (covers.length < 4) covers.push('/static/placeholder-album.png');
+        const mosaic = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('');
+        cover = `<div class="mix-card-cover">${mosaic}<div class="mix-card-play">&#9654;</div></div>`;
+    }
+    const count = mix.tracks ? mix.tracks.length : (mix.trackCount || 0);
+    return `
+        <div class="discover-mix-card" data-mix-key="${mix.key}" onclick="openMixModalByKey('${mix.key}')">
+            ${cover}
+            <div class="mix-card-name">${_esc(mix.title)}</div>
+            <div class="mix-card-meta">${count} tracks</div>
+        </div>
+    `;
+}
+
+// Render a set of mix cards into ANY section grid (Time Machine, Last.fm Radio, ListenBrainz…) and
+// register them so openMixModalByKey can find them. Unlike _upsertMixCard this targets a given
+// container rather than the shared "Your Mixes" shelf, so each section keeps its own header.
+// For sections whose tracks load lazily (decades, Last.fm, ListenBrainz), fetch each mix's tracks in
+// the background and upgrade its card from the placeholder to a real 2x2 mosaic — and stash the
+// tracks on the mix so opening the modal is instant. #discover redesign
+function _hydrateMixCovers(mixes) {
+    mixes.forEach(mix => {
+        if (mix.tracks || !mix.fetchTracks) return;
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const card = document.querySelector(`.discover-mix-card[data-mix-key="${mix.key}"]`);
+            if (!card) return;
+            const meta = card.querySelector('.mix-card-meta');
+            if (meta) meta.textContent = `${mix.tracks.length} tracks`;
+            const covers = [];
+            for (const t of mix.tracks) {
+                const c = _normalizeTrack(t).cover;
+                if (c && !covers.includes(c)) covers.push(c);
+                if (covers.length >= 4) break;
+            }
+            if (!covers.length) return;  // no art — leave the placeholder cover
+            while (covers.length < 4) covers.push('/static/placeholder-album.png');
+            const coverEl = card.querySelector('.mix-card-cover');
+            if (coverEl) {
+                coverEl.className = 'mix-card-cover';
+                coverEl.innerHTML = covers.map(c => `<div class="mix-card-tile" style="background-image:url('${c}')"></div>`).join('')
+                    + '<div class="mix-card-play">&#9654;</div>';
+            }
+        }).catch(() => {});
+    });
+}
+
+function _renderMixGrid(container, mixes) {
+    if (!container) return;
+    mixes.forEach(m => { _discoverMixRegistry[m.key] = m; });
+    container.innerHTML = mixes.map(_buildMixCard).join('');
+    _clampGrid(container);
+    _hydrateMixCovers(mixes);
+}
+
+// Register/refresh a mix's card in the "Your Mixes" shelf and reveal the section.
+function _upsertMixCard(mix) {
+    _discoverMixRegistry[mix.key] = mix;
+    if (!_yourMixKeys.includes(mix.key)) _yourMixKeys.push(mix.key);
+    const shelf = document.getElementById('your-mixes-grid');
+    if (!shelf) return;
+    shelf.innerHTML = _yourMixKeys.map(k => _buildMixCard(_discoverMixRegistry[k])).join('');
+    const section = document.getElementById('your-mixes-section');
+    if (section) section.style.display = 'block';
+}
+
+// Collapse a now-redundant per-mix table section out of view, and strip its sync-status +
+// sync-button so their ids can't shadow the modal's (the modal owns the live sync display
+// now). Keeps the container so each loader's "already loaded?" guard still works on refresh.
+function _collapseOldMixSection(container) {
+    const section = container.closest('.discover-section');
+    if (!section) return;
+    section.querySelectorAll('.discover-sync-status, [id$="-sync-btn"]').forEach(el => el.remove());
+    section.style.display = 'none';
+}
+
+function openMixModalByKey(key) {
+    const mix = _discoverMixRegistry[key];
+    if (mix) openMixModal(mix);
+}
+
+function openMixModal(mix) {
+    document.getElementById('mix-modal-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'mix-modal-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    // statusBase mirrors startDiscoverPlaylistSync's id convention (underscores → hyphens) so
+    // the sync's live-progress updates land on THIS modal's status elements (the old hidden
+    // section's duplicates are stripped in _collapseOldMixSection so there's no id clash).
+    // A mix either uses the built-in syncKey path (Download + Sync via startDiscoverPlaylistSync)
+    // or supplies a custom `actions` list + `statusBase` (decades, ListenBrainz, Last.fm radio) so
+    // any playlist section can reuse this modal. statusBase drives the live sync-status element ids.
+    const base = mix.statusBase || (mix.syncKey ? mix.syncKey.replace(/_/g, '-') : '');
+    const closeFirst = "document.getElementById('mix-modal-overlay').remove(); ";
+    let actionList = mix.actions;
+    if (!actionList && mix.syncKey) {
+        // Download opens its own modal beneath this one — close this first so it's interactable.
+        actionList = [
+            { label: 'Download', closeFirst: true, onclick: `openDownloadModalForDiscoverPlaylist('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+            { label: 'Sync', primary: true, isSync: true, onclick: `startDiscoverPlaylistSync('${mix.syncKey}', '${escapeForInlineJs(mix.title)}')` },
+        ];
+    }
+    const actions = (actionList || []).map(a => {
+        const cls = a.primary ? 'btn btn--sm btn--primary' : 'btn btn--sm btn--secondary';
+        const idAttr = (a.isSync && base) ? ` id="${base}-sync-btn"` : '';
+        const oc = (a.closeFirst ? closeFirst : '') + a.onclick;
+        return `<button class="${cls}"${idAttr} onclick="${oc}">${_esc(a.label)}</button>`;
+    }).join('');
+    // A section can supply its own status markup (e.g. ListenBrainz uses -sync-total/-sync-matched
+    // spans instead of the generic -sync-completed/-sync-pending). Otherwise use the generic block.
+    const syncStatus = mix.statusHtml || (base ? `
+        <div class="discover-sync-status" id="${base}-sync-status" style="display:none">
+            <div class="sync-status-content">
+                <div class="sync-status-label"><span class="sync-icon">&#10227;</span><span>Syncing to media server...</span></div>
+                <div class="sync-status-stats">
+                    <span class="sync-stat">&#10003; <span id="${base}-sync-completed">0</span></span>
+                    <span class="sync-stat">&#9203; <span id="${base}-sync-pending">0</span></span>
+                    <span class="sync-stat">&#10007; <span id="${base}-sync-failed">0</span></span>
+                    <span class="sync-stat">(<span id="${base}-sync-percentage">0</span>%)</span>
+                </div>
+            </div>
+        </div>` : '');
+    overlay.innerHTML = `
+        <div class="mix-modal">
+            <div class="mix-modal-header">
+                <div>
+                    <div class="mix-modal-subtitle">${_esc(mix.subtitle || 'Mix')}</div>
+                    <h2 class="mix-modal-title">${_esc(mix.title)}</h2>
+                    <div class="mix-modal-meta">${mix.tracks ? mix.tracks.length + ' tracks' : ''}</div>
+                </div>
+                <div class="mix-modal-actions">
+                    ${actions}
+                    <button class="mix-modal-close" onclick="document.getElementById('mix-modal-overlay').remove()">&#10005;</button>
+                </div>
+            </div>
+            ${syncStatus}
+            <div class="mix-modal-body" id="mix-modal-tracks"></div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    const body = document.getElementById('mix-modal-tracks');
+    if (mix.tracks) {
+        renderCompactPlaylist(body, mix.tracks);
+    } else if (mix.fetchTracks) {
+        // Lazy sections (e.g. decades) load their tracks on open; fetch then fill in the count.
+        body.innerHTML = '<div class="discover-empty"><p>Loading tracks…</p></div>';
+        Promise.resolve(mix.fetchTracks()).then(tracks => {
+            mix.tracks = tracks || [];
+            const metaEl = overlay.querySelector('.mix-modal-meta');
+            if (metaEl) metaEl.textContent = `${mix.tracks.length} tracks`;
+            renderCompactPlaylist(body, mix.tracks);
+        }).catch(() => { body.innerHTML = '<div class="discover-empty"><p>Failed to load tracks</p></div>'; });
+    }
+
+    // If a sync for this mix is already in flight (the modal was closed mid-sync), reveal the
+    // live status + disable the button so re-opening picks the progress back up — the next
+    // poll/WebSocket tick refills the counters onto this fresh modal's elements.
+    const pollerKey = mix.pollerKey || mix.syncKey;
+    if (pollerKey && discoverSyncPollers[pollerKey]) {
+        const statusEl = document.getElementById(`${base}-sync-status`);
+        if (statusEl) statusEl.style.display = 'block';
+        const btnEl = document.getElementById(`${base}-sync-btn`);
+        if (btnEl) { btnEl.disabled = true; btnEl.style.opacity = '0.5'; btnEl.style.cursor = 'not-allowed'; }
+    }
 }
 
 async function blockDiscoveryArtist(artistName) {
@@ -7975,8 +8441,12 @@ async function loadDiscoveryShuffle() {
         }
 
         personalizedDiscoveryShuffle = data.tracks;
-        renderCompactPlaylist(container, data.tracks);
-        container.closest('.discover-section').style.display = 'block';
+        _upsertMixCard({
+            key: 'discovery_shuffle', title: 'Discovery Shuffle',
+            subtitle: 'A shuffle across everything we discovered for you',
+            tracks: data.tracks, syncKey: 'discovery_shuffle',
+        });
+        _collapseOldMixSection(container);
 
     } catch (error) {
         console.error('Error loading discovery shuffle:', error);
@@ -7999,19 +8469,26 @@ function _renderByltSection(section, idx) {
                     </div>
                 </div>
             </div>
-            <div class="discover-carousel" id="bylt-carousel-${idx}"></div>
+            <div class="discover-grid" id="bylt-carousel-${idx}"></div>
         </div>
     `;
 }
 
 function _renderByltTrackCard(t) {
+    const img = t.image_url
+        ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+        : '';
     return `
-        <div class="discover-card">
-            <div class="discover-card-image">
-                ${t.image_url ? `<img src="${t.image_url}" alt="" loading="lazy" onerror="this.src='/static/placeholder-album.png'">` : '<div class="discover-card-placeholder">🎵</div>'}
+        <div class="ya-card discover-album-card">
+            <div class="ya-card-img">
+                ${img}
+                <div class="ya-card-placeholder" style="display:${t.image_url ? 'none' : 'flex'}">&#9835;</div>
             </div>
-            <div class="discover-card-title">${_esc(t.name)}</div>
-            <div class="discover-card-artist">${_esc(t.artist)}</div>
+            <div class="ya-card-gradient"></div>
+            <div class="ya-card-info">
+                <div class="ya-card-name">${_esc(t.name)}</div>
+                <div class="ya-card-sub">${_esc(t.artist)}</div>
+            </div>
         </div>
     `;
 }
@@ -8054,6 +8531,7 @@ async function loadBecauseYouListenTo() {
                     const carousel = document.getElementById(`bylt-carousel-${idx}`);
                     if (!carousel) return;
                     carousel.innerHTML = section.tracks.map(t => _renderByltTrackCard(t)).join('');
+                    _clampGrid(carousel);
                 });
             },
         });
@@ -8073,18 +8551,20 @@ function _cacheDiscoverCard(item, type, sectionKey, index) {
     const coverUrl = item.image_url || '/static/placeholder-album.png';
     const title = item.name || '';
     const subtitle = item.artist_name || '';
-    const meta = item.release_date ? item.release_date.substring(0, 10) : (item.label || '');
     const onclick = `openCacheDiscoverAlbum('${sectionKey}',${index})`;
-    const libBadge = item.in_library ? '<div class="discover-card-lib-badge">In Library</div>' : '';
-    return `<div class="discover-card" onclick="${onclick}" style="cursor:pointer">
-        <div class="discover-card-image">
-            <img src="${_esc(coverUrl)}" alt="${_esc(title)}" loading="lazy" onerror="this.src='/static/placeholder-album.png'">
-            ${libBadge}
+    // Unified Discover album card (#discover redesign) — same .ya-card as Your Artists, square.
+    const libBadge = item.in_library
+        ? '<div class="ya-card-badges"><div class="discover-album-badge owned">&#10003;</div></div>' : '';
+    return `<div class="ya-card discover-album-card" onclick="${onclick}">
+        <div class="ya-card-img">
+            <img src="${_esc(coverUrl)}" alt="" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+            <div class="ya-card-placeholder" style="display:none">&#9835;</div>
         </div>
-        <div class="discover-card-info">
-            <h4 class="discover-card-title">${_esc(title)}</h4>
-            <p class="discover-card-subtitle">${_esc(subtitle)}</p>
-            ${meta ? `<p class="discover-card-meta">${_esc(meta)}</p>` : ''}
+        <div class="ya-card-gradient"></div>
+        ${libBadge}
+        <div class="ya-card-info">
+            <div class="ya-card-name">${_esc(title)}</div>
+            <div class="ya-card-sub">${_esc(subtitle)}</div>
         </div>
     </div>`;
 }
@@ -8229,7 +8709,32 @@ async function openCacheDiscoverAlbum(sectionKey, index) {
     }
 }
 
-function _insertCacheSection(id, title, subtitle, html, position) {
+// Cap a wrapping discover-grid to `limit` cards (≈ a couple rows) with a Show all / Show less
+// toggle, so a 30-item section doesn't become a wall (#discover redesign). Idempotent.
+function _clampGrid(gridEl, limit = 12) {
+    if (!gridEl) return;
+    const cards = Array.from(gridEl.children);
+    // tidy any previous toggle so re-renders don't stack buttons
+    if (gridEl.nextElementSibling && gridEl.nextElementSibling.classList.contains('discover-show-all')) {
+        gridEl.nextElementSibling.remove();
+    }
+    if (cards.length <= limit) {
+        cards.forEach(c => { c.style.display = ''; });
+        return;
+    }
+    let expanded = false;
+    const btn = document.createElement('button');
+    btn.className = 'discover-show-all';
+    const apply = () => {
+        cards.forEach((c, i) => { c.style.display = (expanded || i < limit) ? '' : 'none'; });
+        btn.textContent = expanded ? 'Show less' : `Show all ${cards.length}`;
+    };
+    btn.onclick = () => { expanded = !expanded; apply(); };
+    gridEl.after(btn);
+    apply();
+}
+
+function _insertCacheSection(id, title, subtitle, html, position, wrapGrid = true) {
     const container = document.getElementById('discover-bylt-sections') || document.querySelector('.discover-container');
     if (!container) return;
     let section = document.getElementById(id);
@@ -8256,8 +8761,9 @@ function _insertCacheSection(id, title, subtitle, html, position) {
                 <h3 class="discover-section-title">${title}</h3>
             </div>
         </div>
-        <div class="discover-carousel">${html}</div>
+        ${wrapGrid ? `<div class="discover-grid">${html}</div>` : html}
     `;
+    if (wrapGrid) _clampGrid(section.querySelector('.discover-grid'));
 }
 
 async function loadCacheUndiscoveredAlbums() {
@@ -8327,7 +8833,7 @@ async function loadCacheGenreExplorer() {
             </div>
         `).join('')}</div>`;
         _insertCacheSection('cache-genre-explorer',
-            'Genre Explorer', 'Tap a genre to explore', html, 'top');
+            'Genre Explorer', 'Tap a genre to explore', html, 'top', false);
     } catch (e) { console.debug('Cache genre explorer:', e); }
 }
 

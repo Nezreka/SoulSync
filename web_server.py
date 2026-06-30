@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.2"
+_SOULSYNC_BASE_VERSION = "2.8.3"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -2244,6 +2244,7 @@ SERVICE_CONFIG_REGISTRY = {
     'deezer':       {'always': True},   # anon search works, premium ARL is optional
     'musicbrainz':  {'always': True},   # public API, no credentials required
     'amazon':       {'always': True},   # T2Tunes proxy, no credentials required
+    'jiosaavn':     {'always': True},   # public proxy API, no credentials required
     'discogs':      {'required': ['token']},
     'tidal':        {'custom': lambda _svc: _tidal_has_auth_token()},
     'qobuz':        {'any_of': [['email', 'password'], ['token'], ['user_auth_token']]},
@@ -2828,6 +2829,7 @@ def generate_playlist_m3u():
         # contention) — which is exactly why "Export M3U" hung with nothing in the
         # logs. One WAL-concurrent read can't be starved that way.
         from collections import defaultdict
+        from core.text.title_match import choose_best_title_candidate
         lib_by_artist = defaultdict(list)
         for row in db.get_tracks_for_m3u_resolution(server_source=active_server):
             lib_by_artist[_clean(row['artist'])].append(
@@ -2846,15 +2848,12 @@ def generate_playlist_m3u():
                 file_path_map[idx] = None
                 continue
             s_norm, s_clean = _norm(name), _clean(name)
-            matched_path = None
-            for db_n, db_c, fp in candidates:
-                if s_norm == db_n or s_clean == db_c:
-                    matched_path = fp
-                    break
-                if max(SequenceMatcher(None, s_norm, db_n).ratio(),
-                       SequenceMatcher(None, s_clean, db_c).ratio()) >= 0.7:
-                    matched_path = fp
-                    break
+            matched_path = choose_best_title_candidate(
+                s_norm,
+                s_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
             file_path_map[idx] = matched_path
 
         # --- build M3U content ---
@@ -3309,10 +3308,14 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
+
+            from core.metadata.registry import is_jiosaavn_enabled
+            if not is_jiosaavn_enabled() and config_manager.get('metadata.fallback_source') == 'jiosaavn':
+                config_manager.set('metadata.fallback_source', 'deezer')
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -4090,10 +4093,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
+        from core.metadata.registry import is_jiosaavn_enabled
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
+            if service != 'jiosaavn' or is_jiosaavn_enabled()
         }
+        result['_experimental'] = {'jiosaavn_enabled': is_jiosaavn_enabled()}
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -10349,16 +10355,13 @@ def library_check_tracks():
 
         def _match_title(search_norm, search_clean, candidates):
             """Find best matching track from a list of (norm, clean, db_track) candidates."""
-            for db_norm, db_clean, db_track in candidates:
-                if search_norm == db_norm or search_clean == db_clean:
-                    return db_track
-                sim = max(
-                    SequenceMatcher(None, search_norm, db_norm).ratio(),
-                    SequenceMatcher(None, search_clean, db_clean).ratio()
-                )
-                if sim >= 0.7:
-                    return db_track
-            return None
+            from core.text.title_match import choose_best_title_candidate
+            return choose_best_title_candidate(
+                search_norm,
+                search_clean,
+                candidates,
+                lambda left, right: SequenceMatcher(None, left, right).ratio(),
+            )
 
         # Split DB tracks by album if album-aware matching is active
         album_entries = []
@@ -23563,6 +23566,11 @@ def _get_metadata_fallback_client():
         if hydrabase_client and hydrabase_client.is_connected():
             return hydrabase_client
         return _get_itunes_client()
+    if source == 'jiosaavn':
+        from core.metadata.registry import get_jiosaavn_client
+        client = get_jiosaavn_client()
+        if client is not None:
+            return client
     return _get_itunes_client()
 
 @app.route('/api/deezer/arl-status', methods=['GET'])
@@ -27551,7 +27559,13 @@ def select_my_service_credential():
 # ==================================================================================
 
 # Selectable metadata sources (mirrors the Settings <select>).
-_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+def _qs_metadata_sources():
+    """Metadata sources offered in Connections / quick-switch UI."""
+    from core.metadata.registry import is_jiosaavn_enabled
+    sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+    if is_jiosaavn_enabled():
+        sources.append('jiosaavn')
+    return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
 _QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
@@ -27606,7 +27620,7 @@ def get_active_sources():
                 # with the sidebar/Settings status.
                 'active': meta_active,
                 'effective': meta_effective,
-                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
+                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _qs_metadata_sources()],
             },
             'server': {
                 'active': config_manager.get_active_media_server(),
@@ -27635,8 +27649,15 @@ def set_active_sources():
 
         if 'metadata_source' in data:
             src = data['metadata_source']
-            if src not in _QS_METADATA_SOURCES:
+            if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
+            if src == 'jiosaavn':
+                from core.metadata.registry import is_jiosaavn_enabled
+                if not is_jiosaavn_enabled():
+                    return jsonify({
+                        'success': False,
+                        'error': 'JioSaavn is not enabled — turn it on under Settings → Advanced → Experimental.',
+                    }), 400
             # Same composite the Settings save uses: 'spotify_free' is stored as
             # fallback_source='spotify' + metadata.spotify_free=true.
             if src == 'spotify_free':
@@ -29082,7 +29103,13 @@ def watchlist_artist_config(artist_id):
                 lookback_days = int(lookback_days) if lookback_days != '' else None
             preferred_metadata_source = data.get('preferred_metadata_source', None)
             # Validate — only accept known sources, empty string means clear override
-            if preferred_metadata_source == '' or preferred_metadata_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            _watchlist_meta_sources = (
+                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
+            )
+            from core.metadata.registry import is_jiosaavn_enabled
+            if is_jiosaavn_enabled():
+                _watchlist_meta_sources = _watchlist_meta_sources + ('jiosaavn',)
+            if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.
@@ -29499,6 +29526,34 @@ def get_discover_hero():
     return _discover_hero_get()
 
 
+_discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
+# Genre/novelty weights now come from adventurousness_weights(dial) (core.discovery) — the dial blends
+# them, single source of truth — instead of the old fixed _DISCOVER_GENRE_WEIGHT / _NOVELTY_PENALTY.
+
+
+def _discover_genre_taste(database, profile_id):
+    """Cached genre-taste profile for a profile — ``{genre_lower: 0..1}`` from the genres of your
+    top-played artists, weighted by plays. Cached 5 min (it changes slowly) so the live dial-drag
+    re-fetch doesn't recompute it. Fail-soft -> ``{}`` (no genre data -> no boost, never a penalty)."""
+    import time
+    now = time.time()
+    cached = _discover_taste_cache.get(profile_id)
+    if cached and now < cached[0]:
+        return cached[1]
+    profile = {}
+    try:
+        from core.discovery.listening_recommendations import build_genre_taste_profile
+        top = database.get_top_artists('all', 300) or []
+        genres_by_name = database.get_artist_genres_by_name([t.get('name') for t in top if t.get('name')])
+        weighted = [(genres_by_name.get((t.get('name') or '').strip().lower(), []),
+                     t.get('play_count', 1) or 1) for t in top]
+        profile = build_genre_taste_profile(weighted)
+    except Exception as e:
+        logger.debug(f"discover genre taste profile failed: {e}")
+    _discover_taste_cache[profile_id] = (now + 300, profile)
+    return profile
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -29565,6 +29620,57 @@ def get_discover_similar_artists():
                 artist_data["because"] = because
             result_artists.append(artist_data)
 
+        # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
+        # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
+        # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
+        # rotation order is left untouched (no regression). Fail-soft.
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
+        _pid = get_current_profile_id()
+        _taste = _discover_genre_taste(database, _pid)
+        _plays = database.get_play_counts_by_name(
+            [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
+        if result_artists and (_adv_level > 0 or _taste or _plays):
+            try:
+                from core.discovery.listening_recommendations import (
+                    adventurousness_weights, apply_adventurousness, genre_affinity, novelty_score)
+                _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
+                for a in result_artists:
+                    _oc = float(a.get('occurrence_count') or 0)
+                    _rank = min(float(a.get('similarity_rank') or 10), 10.0)
+                    _base = _oc + (10.0 - _rank) * 0.1
+                    _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
+                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
+                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                    a['_adv_score'] = (_base * (1.0 + _w['genre'] * _aff)
+                                       * (1.0 - _w['novelty'] * (1.0 - _nov)))
+                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
+                # there), so sort by the boosted score first; the dial then layers its penalty on top.
+                result_artists.sort(key=lambda a: -a['_adv_score'])
+                if _adv_level > 0:
+                    result_artists = apply_adventurousness(
+                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                for a in result_artists:
+                    a.pop('_adv_score', None)
+            except Exception as _adv_err:
+                logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
+
+        # "Why this rec" chips — built unconditionally so they show even when the re-rank block above
+        # was skipped (no genre data, no plays, dial 0). Deep-cut/consensus tags don't need taste.
+        try:
+            from core.discovery.listening_recommendations import why_chips
+            for a in result_artists:
+                _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                if _w:
+                    a['why'] = _w
+                a.pop('_why_genre', None)
+        except Exception as _why_err:
+            logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
             f"{active_source} after excluding {active_server} library artists"
@@ -29580,6 +29686,118 @@ def get_discover_similar_artists():
     except Exception as e:
         logger.error(f"Error getting similar artists: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/adventurousness', methods=['GET', 'POST'])
+def discover_adventurousness():
+    """Get/set the global Discover adventurousness dial (0..1). Shares the config key
+    ``discover.adventurousness`` with the Settings -> Discovery slider, so the two controls stay in
+    sync (change one, the other reflects it on next load). Read-only-safe; clamps to [0, 1]."""
+    try:
+        if request.method == 'POST':
+            data = request.get_json(silent=True) or {}
+            try:
+                v = float(data.get('value'))
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": "value must be a number"}), 400
+            v = max(0.0, min(1.0, v))
+            config_manager.set('discover.adventurousness', v)
+            return jsonify({"success": True, "value": v})
+        try:
+            v = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            v = 0.3
+        return jsonify({"success": True, "value": max(0.0, min(1.0, v))})
+    except Exception as e:
+        logger.error(f"adventurousness endpoint error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+def _resolve_popularity_sources():
+    """Best-effort handles for the popularity cascade — each may be None (then it's skipped)."""
+    spotify_free = lastfm = deezer = None
+    try:
+        from core.spotify_free_metadata import SpotifyFreeMetadataClient, spotify_free_installed
+        if spotify_free_installed():
+            spotify_free = SpotifyFreeMetadataClient()
+    except Exception as e:
+        logger.debug(f"spotify-free unavailable for backfill: {e}")
+    try:
+        from core.lastfm_client import LastFMClient
+        _key = config_manager.get('lastfm.api_key', '')
+        if _key:
+            lastfm = LastFMClient(api_key=_key)
+    except Exception as e:
+        logger.debug(f"lastfm unavailable for backfill: {e}")
+    try:
+        deezer = _get_deezer_client()
+    except Exception as e:
+        logger.debug(f"deezer unavailable for backfill: {e}")
+    return spotify_free, lastfm, deezer
+
+
+@app.route('/api/discover/popularity-backfill/start', methods=['POST'])
+@admin_only
+def start_popularity_backfill():
+    """Kick off the background popularity backfill (fills similar_artists.popularity via the Spotify
+    Free -> Last.fm -> Deezer cascade). Rate-limited + resumable; safe to call repeatedly."""
+    try:
+        from core.discovery import popularity_backfill as pb
+        if pb.is_running():
+            return jsonify({"success": False, "error": "Backfill already running", "state": pb.get_state()})
+        spotify_free, lastfm, deezer = _resolve_popularity_sources()
+        if not any([spotify_free, lastfm, deezer]):
+            return jsonify({"success": False,
+                            "error": "No popularity source available — configure Last.fm, Spotify Free, or Deezer."})
+        pb.start_background(get_database(), spotify_free=spotify_free, lastfm=lastfm, deezer=deezer,
+                            profile_id=get_current_profile_id())
+        return jsonify({"success": True, "state": pb.get_state()})
+    except Exception as e:
+        logger.error(f"start popularity backfill error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/discover/popularity-backfill/status', methods=['GET'])
+def popularity_backfill_status():
+    from core.discovery import popularity_backfill as pb
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+@app.route('/api/discover/popularity-backfill/cancel', methods=['POST'])
+@admin_only
+def cancel_popularity_backfill():
+    from core.discovery import popularity_backfill as pb
+    pb.cancel()
+    return jsonify({"success": True, "state": pb.get_state()})
+
+
+def _autostart_popularity_backfill():
+    """Self-maintaining popularity fill — no button, no restart, no cost to scans.
+
+    Sweeps ~90s after boot, then re-checks hourly so new similar-artist data (added by watchlist scans)
+    tops up on its own. It's deliberately DECOUPLED from the scan worker — the worker stays fast and
+    never makes popularity lookups mid-scan; this loop fills the gaps afterwards, rate-limited inside
+    the sweep. Each tick: if there's nothing missing, or no source configured, it just sleeps again."""
+    import time as _t
+    _t.sleep(90)  # let the server finish its own startup work first
+    while True:
+        try:
+            from core.discovery import popularity_backfill as pb
+            if not pb.is_running():
+                database = get_database()
+                missing = database.count_similar_artists_missing_popularity(1)
+                if missing > 0:
+                    spotify_free, lastfm, deezer = _resolve_popularity_sources()
+                    if any([spotify_free, lastfm, deezer]):
+                        logger.info("Popularity backfill: filling %d artist(s) in the background", missing)
+                        # run synchronously — this thread IS the background worker
+                        pb.run_backfill(database, spotify_free=spotify_free, lastfm=lastfm,
+                                        deezer=deezer, profile_id=1)
+                    else:
+                        logger.debug("Popularity backfill: %d missing but no source configured", missing)
+        except Exception as e:
+            logger.debug(f"popularity backfill tick skipped: {e}")
+        _t.sleep(3600)  # re-check hourly; new artists fill within the hour
 
 
 @app.route('/api/discover/listening-recommendations', methods=['GET'])
@@ -29604,6 +29822,54 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
+        try:
+            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            level = 0.0
+
+        # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
+        # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty
+        # penalises recs you've already heard (pull tightens). Additive — no genre match / no plays
+        # leaves the score untouched, and at the default dial the weights equal the old constants.
+        try:
+            from core.discovery.listening_recommendations import (
+                adventurousness_weights, genre_affinity, novelty_score)
+            _w = adventurousness_weights(level)
+            _pid = get_current_profile_id()
+            taste = _discover_genre_taste(database, _pid)
+            _names = [a.get('name') for a in stored]
+            plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
+            pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
+            changed = False
+            for a in stored:
+                if a.get('popularity') is None:
+                    a['popularity'] = pops.get((a.get('name') or '').strip().lower())
+                aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
+                a['_why_genre'] = aff   # captured for the "why this rec" chips
+                factor = 1.0
+                if aff > 0:
+                    factor *= (1.0 + _w['genre'] * aff)
+                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+                if nov < 1.0:
+                    factor *= (1.0 - _w['novelty'] * (1.0 - nov))
+                if factor != 1.0:
+                    a['score'] = float(a.get('score') or 0) * factor
+                    changed = True
+            if changed:
+                stored.sort(key=lambda a: -float(a.get('score') or 0))
+        except Exception as _qual_err:
+            logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
+
+        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
+        # Popularity was already enriched in the quality block above; `level` was read there too (one
+        # popularity query per request, not two). level 0 -> unchanged. Fail-soft: leaves the order.
+        if level > 0 and stored:
+            try:
+                from core.discovery.listening_recommendations import apply_adventurousness
+                stored = apply_adventurousness(stored, level)
+            except Exception as _adv_err:
+                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
+
         result_artists = []
         for a in stored:
             name = a.get('name')
@@ -29624,6 +29890,14 @@ def get_discover_listening_recommendations():
                 "seed_count": a.get('seed_count'),
                 "source": active_source,
             }
+            try:
+                from core.discovery.listening_recommendations import why_chips
+                _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                if _why:
+                    entry["why"] = _why
+            except Exception as _why_err:
+                logger.debug(f"why chips skipped: {_why_err}")
             img = a.get('image_url')
             if img:
                 entry["image_url"] = fix_artist_image_url(img)
@@ -39030,6 +39304,15 @@ def start_runtime_services():
 # Module import is complete — provider clients may now perform network probes.
 from core.boot_phase import mark_boot_complete
 mark_boot_complete()
+
+# Auto-run the Discover popularity backfill in the background (no manual trigger). Self-limits: it
+# sleeps past startup, fills whatever's still missing, and exits when there's nothing left.
+try:
+    import threading as _pb_threading
+    _pb_threading.Thread(target=_autostart_popularity_backfill, daemon=True,
+                         name='PopularityBackfillAutostart').start()
+except Exception as _pb_autostart_err:
+    logger.debug(f"could not start popularity backfill autostart: {_pb_autostart_err}")
 
 
 # Direct execution: python web_server.py (dev/Windows fallback)

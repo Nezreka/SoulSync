@@ -123,11 +123,16 @@ def test_materialize_from_batch_all_owned(tmp_path: Path):
     }
     cfg = _Cfg(str(tmp_path / "Playlists"))
     summary = materialize_playlist_from_batch(batch, {}, cfg)
-    assert summary is not None and summary.linked == 2
+    assert summary is not None and summary.linked + summary.copied == 2
     pdir = Path(summary.playlist_dir)
     assert pdir == tmp_path / "Playlists" / "Smack That"
-    assert (pdir / "A.mp3").resolve() == Path(owned[0]).resolve()
-    assert (pdir / "B.mp3").resolve() == Path(owned[1]).resolve()
+    for name, orig in [("A.mp3", owned[0]), ("B.mp3", owned[1])]:
+        entry = pdir / name
+        assert entry.is_file()
+        if entry.is_symlink():
+            assert entry.resolve() == Path(orig).resolve()
+        else:
+            assert entry.read_bytes() == Path(orig).read_bytes()
 
 
 def test_materialize_from_batch_owned_plus_downloaded(tmp_path: Path):
@@ -164,7 +169,7 @@ def test_reconcile_organize_batch_rebuilds_from_library(tmp_path: Path):
     results = reconcile_batch_playlists(db, batch, {}, cfg)
     assert len(results) == 1
     name, s = results[0]
-    assert name == "Mix" and s.linked == 1        # A owned; Gone not in library → skipped
+    assert name == "Mix" and s.linked + s.copied == 1        # A owned; Gone not in library → skipped
     assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
 
 
@@ -267,7 +272,7 @@ def test_rebuild_from_db_only_organized_and_owned(tmp_path: Path):
     results = rebuild_organized_playlists_from_db(db, cfg, profile_id=1)
     assert len(results) == 1                         # only Mix (organize on)
     name, s = results[0]
-    assert name == "Mix" and s.linked == 1           # only A owned; Gone skipped
+    assert name == "Mix" and s.linked + s.copied == 1           # only A owned; Gone skipped
     assert (tmp_path / "Playlists" / "Mix" / "A.mp3").exists()
     assert not (tmp_path / "Playlists" / "Off").exists()
 

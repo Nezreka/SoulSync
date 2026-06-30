@@ -22,6 +22,7 @@ from difflib import SequenceMatcher
 
 from core.imports.album_matching import (
     ALBUM_WEIGHT,
+    ARTIST_MISSING_PARTIAL,
     ARTIST_WEIGHT,
     CROSS_DISC_POSITION_WEIGHT,
     MATCH_THRESHOLD,
@@ -46,7 +47,7 @@ def _sim(a: str, b: str) -> float:
 
 
 def _qrank(ext: str) -> int:
-    """Mirror of the worker's _quality_rank."""
+    """Mirror of ``album_matching.default_quality_rank``."""
     ranks = {'.flac': 100, '.alac': 95, '.wav': 80, '.aac': 60,
              '.ogg': 50, '.opus': 50, '.m4a': 60, '.mp3': 30, '.wma': 20}
     return ranks.get((ext or '').lower(), 0)
@@ -159,8 +160,8 @@ def test_score_position_match_requires_both_disc_and_track():
         '/a/file.flac', tags, track,
         target_album='', similarity=_sim,
     )
-    # Title weight (1.0) + cross-disc consolation (0.05) + nothing else
-    expected = TITLE_WEIGHT + CROSS_DISC_POSITION_WEIGHT
+    # Title weight (1.0) + cross-disc consolation (0.05) + partial artist
+    expected = TITLE_WEIGHT + CROSS_DISC_POSITION_WEIGHT + ARTIST_MISSING_PARTIAL
     assert abs(score - expected) < 0.001
 
 
@@ -234,7 +235,7 @@ def test_score_near_position_only_when_same_disc():
     score_same = score_file_against_track(
         '/a/f.flac', same_disc, track, target_album='', similarity=_sim,
     )
-    expected_same = TITLE_WEIGHT + NEAR_POSITION_WEIGHT
+    expected_same = TITLE_WEIGHT + NEAR_POSITION_WEIGHT + ARTIST_MISSING_PARTIAL
     assert abs(score_same - expected_same) < 0.001
 
     diff_disc = _tags(title='Y', track=6, disc=2)  # off by 1, different disc
@@ -242,31 +243,30 @@ def test_score_near_position_only_when_same_disc():
         '/a/f.flac', diff_disc, track, target_album='', similarity=_sim,
     )
     # No position bonus at all (off-by-one + cross-disc)
-    expected_diff = TITLE_WEIGHT
+    expected_diff = TITLE_WEIGHT + ARTIST_MISSING_PARTIAL
     assert abs(score_diff - expected_diff) < 0.001
 
 
 def test_score_handles_missing_track_artist():
-    """Track with no artists list — artist component just contributes 0."""
+    """Track with no artists list — partial artist credit applies."""
     track = {'name': 'Z', 'track_number': 1, 'disc_number': 1, 'artists': []}
     tags = _tags(title='Z', artist='Real Artist', track=1, disc=1)
     score = score_file_against_track(
         '/a/f.flac', tags, track, target_album='', similarity=_sim,
     )
-    # Title (1.0) + position (0.30) + no artist bonus + no album
-    expected = TITLE_WEIGHT + POSITION_WEIGHT
+    expected = TITLE_WEIGHT + POSITION_WEIGHT + ARTIST_MISSING_PARTIAL
     assert abs(score - expected) < 0.001
 
 
 def test_score_handles_missing_file_artist():
-    """File with no artist tag — same as missing track artist, no bonus."""
+    """File with no artist tag — partial artist credit applies."""
     track = {'name': 'Z', 'track_number': 1, 'disc_number': 1,
              'artists': [{'name': 'Artist'}]}
     tags = _tags(title='Z', artist='', track=1, disc=1)
     score = score_file_against_track(
         '/a/f.flac', tags, track, target_album='', similarity=_sim,
     )
-    expected = TITLE_WEIGHT + POSITION_WEIGHT
+    expected = TITLE_WEIGHT + POSITION_WEIGHT + ARTIST_MISSING_PARTIAL
     assert abs(score - expected) < 0.001
 
 
@@ -279,8 +279,8 @@ def test_score_disc_field_aliases():
         score = score_file_against_track(
             '/a/f.flac', tags, track, target_album='', similarity=_sim,
         )
-        # Should get full POSITION bonus
-        expected = TITLE_WEIGHT + POSITION_WEIGHT
+        # Should get full POSITION bonus + partial artist credit
+        expected = TITLE_WEIGHT + POSITION_WEIGHT + ARTIST_MISSING_PARTIAL
         assert abs(score - expected) < 0.001, (
             f"Disc field '{disc_field}' should be recognised (score={score})"
         )
@@ -295,8 +295,8 @@ def test_score_filename_fallback_when_title_tag_missing():
         '/a/Filename Title.flac', tags, track,
         target_album='', similarity=_sim,
     )
-    # Title fallback gives perfect match → TITLE_WEIGHT
-    assert abs(score - TITLE_WEIGHT) < 0.001
+    # Title fallback gives perfect match → TITLE_WEIGHT + partial artist
+    assert abs(score - (TITLE_WEIGHT + ARTIST_MISSING_PARTIAL)) < 0.001
 
 
 # ---------------------------------------------------------------------------
