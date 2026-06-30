@@ -35116,6 +35116,19 @@ div.artist-hero-badge {
     gap: 16px;
 }
 .discover-grid .ya-card { width: 100%; }
+/* Two same-card sections side by side (#discover redesign) — halves the scroll. The inner
+   .discover-grid auto-fits fewer columns at half width, so cards stay full-size. Collapses to a
+   single column on narrower screens. min-width:0 lets each column shrink instead of overflowing. */
+.discover-row-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    align-items: start;
+}
+.discover-row-2col > .discover-section { min-width: 0; }
+@media (max-width: 1100px) {
+    .discover-row-2col { grid-template-columns: 1fr; gap: 0; }
+}
 /* Albums are square, so don't crop the cover with the artist card's 0.85 portrait ratio. */
 .discover-grid .discover-album-card.ya-card { aspect-ratio: 1; }
 /* Genre cards: no cover art — square gradient tile with the genre emoji centered. */
