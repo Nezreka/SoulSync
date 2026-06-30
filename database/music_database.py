@@ -10576,6 +10576,37 @@ class MusicDatabase:
             logger.debug(f"get_artist_genres_by_name failed: {e}")
         return out
 
+    def get_play_counts_by_name(self, names, profile_id: int = 1):
+        """Map lowercased artist name -> play count from ``listening_history`` for the given profile.
+        Feeds the Discover novelty signal (demote recs you've already heard). Fail-soft -> {}."""
+        out = {}
+        clean = [str(n).strip().lower() for n in (names or []) if str(n or '').strip()]
+        if not clean:
+            return out
+        placeholders = ','.join('?' for _ in clean)
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                # profile_id is migration-added — fall back to an unscoped count if the column isn't
+                # there yet (a fresh / pre-migration DB), so novelty still works everywhere.
+                try:
+                    cursor.execute(
+                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                        f"WHERE profile_id = ? AND LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                        [profile_id] + clean,
+                    )
+                except Exception:
+                    cursor.execute(
+                        f"SELECT LOWER(artist) AS n, COUNT(*) AS plays FROM listening_history "
+                        f"WHERE LOWER(artist) IN ({placeholders}) GROUP BY LOWER(artist)",
+                        clean,
+                    )
+                for row in cursor.fetchall():
+                    out[row['n']] = row['plays']
+        except Exception as e:
+            logger.debug(f"get_play_counts_by_name failed: {e}")
+        return out
+
     def get_top_similar_artists(
         self,
         limit: int = 50,

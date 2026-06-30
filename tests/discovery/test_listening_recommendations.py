@@ -8,6 +8,7 @@ from core.discovery.listening_recommendations import (
     build_genre_taste_profile,
     build_recency_weighted_seeds,
     genre_affinity,
+    novelty_score,
     choose_mix_fetch_source,
     names_match,
     rank_recommended_artists,
@@ -385,3 +386,19 @@ def test_genre_affinity_is_additive_safe():
     assert genre_affinity([], {"rock": 1.0}) == 0.0
     assert genre_affinity(["rock"], {}) == 0.0
     assert genre_affinity(None, {"rock": 1.0}) == 0.0
+
+
+# ── novelty (aurral's "unheard" signal) ──────────────────────────────────────
+def test_novelty_unheard_is_fully_novel():
+    assert novelty_score(0) == 1.0            # never played -> baseline, never penalized
+    assert novelty_score(None) == 1.0         # no play data -> treated as unheard
+    assert novelty_score(-5) == 1.0           # negative clamps to 0
+
+
+def test_novelty_decays_with_plays():
+    assert novelty_score(8) == 0.5            # half_at default = 8 plays -> half novel
+    assert novelty_score(8, half_at=20) > novelty_score(8)   # a higher half_at = slower decay
+    heavy = novelty_score(1000)
+    assert 0.0 < heavy < 0.02                 # heavy rotation -> near zero
+    # monotonically decreasing
+    assert novelty_score(1) > novelty_score(5) > novelty_score(50)

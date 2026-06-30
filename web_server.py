@@ -29501,6 +29501,7 @@ def get_discover_hero():
 
 _discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
 _DISCOVER_GENRE_WEIGHT = 0.6          # a candidate fully in your top genre gets up to +60% score
+_DISCOVER_NOVELTY_PENALTY = 0.4       # a heavily-already-heard candidate loses up to 40% score
 
 
 def _discover_genre_taste(database, profile_id):
@@ -29601,18 +29602,24 @@ def get_discover_similar_artists():
             _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
         except (TypeError, ValueError):
             _adv_level = 0.0
-        _taste = _discover_genre_taste(database, get_current_profile_id())
-        if result_artists and (_adv_level > 0 or _taste):
+        _pid = get_current_profile_id()
+        _taste = _discover_genre_taste(database, _pid)
+        _plays = database.get_play_counts_by_name(
+            [a.get('artist_name') for a in result_artists], _pid) if result_artists else {}
+        if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
-                from core.discovery.listening_recommendations import apply_adventurousness, genre_affinity
+                from core.discovery.listening_recommendations import (
+                    apply_adventurousness, genre_affinity, novelty_score)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
                     _base = _oc + (10.0 - _rank) * 0.1
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
-                    a['_adv_score'] = _base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
-                # The genre boost must reorder even at dial 0 (apply_adventurousness no-ops there), so
-                # sort by the boosted score first; the dial then layers its popularity penalty on top.
+                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                    a['_adv_score'] = (_base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
+                                       * (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - _nov)))
+                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
+                # there), so sort by the boosted score first; the dial then layers its penalty on top.
                 result_artists.sort(key=lambda a: -a['_adv_score'])
                 if _adv_level > 0:
                     result_artists = apply_adventurousness(
@@ -29686,20 +29693,31 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
-        # Genre/tag affinity boost (aurral parity, always-on): candidates whose genres match the
-        # genres you actually PLAY rank higher. Additive — affinity 0 (no match / no genre data)
-        # leaves the score untouched, so it can only ever surface a taste match, never bury anything.
+        # Quality re-rank (aurral parity, always-on): genre/tag affinity BOOSTS candidates whose
+        # genres match what you play; novelty PENALISES recs you've already heard. Both additive — no
+        # genre match / no plays leaves the score untouched, so they can only ever improve the order.
         try:
-            taste = _discover_genre_taste(database, get_current_profile_id())
-            if taste and stored:
-                from core.discovery.listening_recommendations import genre_affinity
-                for a in stored:
+            from core.discovery.listening_recommendations import genre_affinity, novelty_score
+            _pid = get_current_profile_id()
+            taste = _discover_genre_taste(database, _pid)
+            plays = database.get_play_counts_by_name([a.get('name') for a in stored], _pid) if stored else {}
+            changed = False
+            for a in stored:
+                factor = 1.0
+                if taste:
                     aff = genre_affinity(a.get('genres') or [], taste)
                     if aff > 0:
-                        a['score'] = float(a.get('score') or 0) * (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
-                stored.sort(key=lambda a: -float(a.get('score') or 0))   # reorder by the boosted score
-        except Exception as _ga_err:
-            logger.debug(f"genre-affinity boost skipped: {_ga_err}")
+                        factor *= (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
+                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+                if nov < 1.0:
+                    factor *= (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - nov))
+                if factor != 1.0:
+                    a['score'] = float(a.get('score') or 0) * factor
+                    changed = True
+            if changed:
+                stored.sort(key=lambda a: -float(a.get('score') or 0))
+        except Exception as _qual_err:
+            logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
 
         # Adventurousness re-rank (aurral-style): enrich popularity at request time (the stored recs
         # don't carry it inline, so this works on existing data), then push globally-popular picks
