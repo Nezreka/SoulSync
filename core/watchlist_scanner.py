@@ -431,6 +431,25 @@ def _albums_likely_match(spotify_album: str, lib_album: str, threshold: float = 
     return SequenceMatcher(None, norm_a, norm_b).ratio() >= threshold
 
 
+def _extid_match_is_owned(wanted_album: str, library_album: str, allow_duplicates: bool) -> bool:
+    """Whether an external-ID (recording MBID / ISRC) library hit counts as 'already owned' for THIS
+    watchlist request — i.e. whether to skip adding it to the wishlist.
+
+    A recording-ID hit normally means we have the track. But with ``allow_duplicates`` on the user
+    WANTS per-album copies, and soundtrack editions reuse the SAME recordings across releases — the
+    Expedition 33 'Original Soundtrack (original remix)' shares recording MBIDs with the 'Nos vies en
+    Lumière (Bonus Edition)' a user already owns. So when duplicates are allowed and the owned copy is
+    on a DIFFERENT album/edition, it's NOT owned for this release — let it be wishlisted. This mirrors
+    the album gate the fuzzy ``[AllowDup]`` path already applies; the ExtID short-circuit was skipping
+    it entirely. Pure.
+    """
+    if not allow_duplicates:
+        return True   # duplicates off -> any owned recording is 'owned', album-agnostic (prior behaviour)
+    if not wanted_album or not library_album:
+        return True   # nothing to compare -> conservative: treat as owned (prior behaviour)
+    return _albums_likely_match(wanted_album, library_album)
+
+
 @dataclass
 class ScanResult:
     """Result of scanning a single artist"""
@@ -2201,31 +2220,45 @@ class WatchlistScanner:
                         server_source=active_server,
                     )
                     if matched is not None:
-                        logger.info(
-                            f"[ExtID Match] Track found in library by external ID: "
-                            f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
-                            f"(matched on: {', '.join(sorted(source_ids.keys()))})"
-                        )
-                        return False  # Track exists in library
-
-                    # Second-tier fallback: provenance table. Catches the
-                    # window between "SoulSync downloaded the file" and
-                    # "media-server scan + sync populated the tracks row
-                    # with IDs". File still has to exist on disk —
-                    # otherwise a user who deleted a file would never get
-                    # it back.
-                    prov = find_provenance_by_external_id(
-                        self.database, external_ids=source_ids,
-                    )
-                    if prov is not None:
-                        prov_path = prov.get('file_path')
-                        if prov_path and _os_local.path.exists(prov_path):
+                        matched_album = (matched.get('album_title') if isinstance(matched, dict)
+                                         else getattr(matched, 'album_title', None)) or ''
+                        # The recording IS in the library. Only skip it when it's actually "owned for
+                        # this release" — same album, or duplicates disabled. With duplicates on, the
+                        # same recording on a DIFFERENT edition (soundtrack remix vs the bonus edition
+                        # the user owns) is one they WANT — wishlist it, and don't let the provenance
+                        # fallback below re-skip it either.
+                        if _extid_match_is_owned(album_name, matched_album, allow_duplicates):
                             logger.info(
-                                f"[Provenance Match] Track found in download provenance: "
+                                f"[ExtID Match] Track found in library by external ID: "
                                 f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
                                 f"(matched on: {', '.join(sorted(source_ids.keys()))})"
                             )
-                            return False
+                            return False  # Track exists in library (same album / duplicates off)
+                        logger.info(
+                            f"[ExtID Match] Same recording on a DIFFERENT album — allowing "
+                            f"(allow_duplicates): '{original_title}' (wanted: '{album_name}', "
+                            f"library: '{matched_album}')"
+                        )
+                        # fall through to the fuzzy path (same album gate), which wishlists it
+                    else:
+                        # Second-tier fallback: provenance table. Catches the
+                        # window between "SoulSync downloaded the file" and
+                        # "media-server scan + sync populated the tracks row
+                        # with IDs". File still has to exist on disk —
+                        # otherwise a user who deleted a file would never get
+                        # it back. Only when there's NO library row (above).
+                        prov = find_provenance_by_external_id(
+                            self.database, external_ids=source_ids,
+                        )
+                        if prov is not None:
+                            prov_path = prov.get('file_path')
+                            if prov_path and _os_local.path.exists(prov_path):
+                                logger.info(
+                                    f"[Provenance Match] Track found in download provenance: "
+                                    f"'{original_title}' by '{artists_to_search[0] if artists_to_search else 'Unknown'}' "
+                                    f"(matched on: {', '.join(sorted(source_ids.keys()))})"
+                                )
+                                return False
             except Exception as ext_id_err:
                 logger.debug(f"External-ID match probe failed (falling through to fuzzy): {ext_id_err}")
 
