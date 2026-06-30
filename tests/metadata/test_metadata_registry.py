@@ -33,13 +33,39 @@ def test_musicbrainz_is_first_class_metadata_client():
     ) is client
 
 
-def test_jiosaavn_is_first_class_metadata_client():
+def test_jiosaavn_disabled_by_default(monkeypatch):
+    monkeypatch.setattr(
+        registry,
+        "_get_config_value",
+        lambda key, default=None: default if key == "experimental.jiosaavn_enabled" else None,
+    )
+    assert registry.is_jiosaavn_enabled() is False
+
+
+def test_jiosaavn_is_first_class_metadata_client(monkeypatch):
+    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: True)
     registry.clear_cached_metadata_clients()
     client = object()
     assert registry.get_client_for_source(
         "jiosaavn",
         jiosaavn_client_factory=lambda: client,
     ) is client
+
+
+def test_jiosaavn_client_gated_when_experimental_disabled(monkeypatch):
+    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: False)
+    registry.clear_cached_metadata_clients()
+    client = object()
+    assert registry.get_client_for_source(
+        "jiosaavn",
+        jiosaavn_client_factory=lambda: client,
+    ) is None
+
+
+def test_primary_source_downgrades_jiosaavn_when_experimental_disabled(monkeypatch):
+    monkeypatch.setattr(registry, "is_jiosaavn_enabled", lambda: False)
+    monkeypatch.setattr(registry, "get_configured_primary_source", lambda: "jiosaavn")
+    assert registry.get_primary_source() == "deezer"
 
 
 def test_metadata_source_label_falls_back_to_unmapped():

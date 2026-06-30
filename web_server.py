@@ -3310,10 +3310,14 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists']:
+            for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
+
+            from core.metadata.registry import is_jiosaavn_enabled
+            if not is_jiosaavn_enabled() and config_manager.get('metadata.fallback_source') == 'jiosaavn':
+                config_manager.set('metadata.fallback_source', 'deezer')
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -4091,10 +4095,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
+        from core.metadata.registry import is_jiosaavn_enabled
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
+            if service != 'jiosaavn' or is_jiosaavn_enabled()
         }
+        result['_experimental'] = {'jiosaavn_enabled': is_jiosaavn_enabled()}
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -27557,7 +27564,13 @@ def select_my_service_credential():
 # ==================================================================================
 
 # Selectable metadata sources (mirrors the Settings <select>).
-_QS_METADATA_SOURCES = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz', 'jiosaavn']
+def _qs_metadata_sources():
+    """Metadata sources offered in Connections / quick-switch UI."""
+    from core.metadata.registry import is_jiosaavn_enabled
+    sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
+    if is_jiosaavn_enabled():
+        sources.append('jiosaavn')
+    return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
 _QS_DOWNLOAD_SOURCES = ['soulseek', 'youtube', 'tidal', 'qobuz', 'hifi', 'torrent', 'usenet']
@@ -27612,7 +27625,7 @@ def get_active_sources():
                 # with the sidebar/Settings status.
                 'active': meta_active,
                 'effective': meta_effective,
-                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _QS_METADATA_SOURCES],
+                'options': [{'id': s, 'available': _qs_metadata_available(s)} for s in _qs_metadata_sources()],
             },
             'server': {
                 'active': config_manager.get_active_media_server(),
@@ -27641,8 +27654,15 @@ def set_active_sources():
 
         if 'metadata_source' in data:
             src = data['metadata_source']
-            if src not in _QS_METADATA_SOURCES:
+            if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
+            if src == 'jiosaavn':
+                from core.metadata.registry import is_jiosaavn_enabled
+                if not is_jiosaavn_enabled():
+                    return jsonify({
+                        'success': False,
+                        'error': 'JioSaavn is not enabled — turn it on under Settings → Advanced → Experimental.',
+                    }), 400
             # Same composite the Settings save uses: 'spotify_free' is stored as
             # fallback_source='spotify' + metadata.spotify_free=true.
             if src == 'spotify_free':
@@ -29088,9 +29108,13 @@ def watchlist_artist_config(artist_id):
                 lookback_days = int(lookback_days) if lookback_days != '' else None
             preferred_metadata_source = data.get('preferred_metadata_source', None)
             # Validate — only accept known sources, empty string means clear override
-            if preferred_metadata_source == '' or preferred_metadata_source not in (
-                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz', 'jiosaavn',
-            ):
+            _watchlist_meta_sources = (
+                'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
+            )
+            from core.metadata.registry import is_jiosaavn_enabled
+            if is_jiosaavn_enabled():
+                _watchlist_meta_sources = _watchlist_meta_sources + ('jiosaavn',)
+            if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the
             # field keeps auto-downloading.

@@ -251,12 +251,17 @@ function _renderWelcome(el) {
 // ---- Step 2: Metadata Source ----
 
 function _renderMetadata(el) {
-    const sources = [
+    const allSources = [
         { id: 'deezer', name: 'Deezer', badge: 'Recommended', desc: 'No authentication required. Rich metadata with album art.' },
-        { id: 'jiosaavn', name: 'JioSaavn', badge: '', desc: 'No authentication required. Strong for Indian and Bollywood catalogs.' },
+        { id: 'jiosaavn', name: 'JioSaavn', badge: 'Experimental', desc: 'No authentication required. Strong for Indian and Bollywood catalogs. Enable under Settings → Advanced → Experimental.' },
         { id: 'spotify', name: 'Spotify', badge: '', desc: 'Requires API credentials. Best for playlist sync.' },
         { id: 'itunes', name: 'iTunes', badge: '', desc: 'No authentication required. Apple Music catalog.' },
     ];
+    const jiosaavnEnabled = window._settingsPayload?.experimental?.jiosaavn_enabled === true;
+    const sources = allSources.filter((s) => s.id !== 'jiosaavn' || jiosaavnEnabled);
+    if (_wizardSettings.metadata_source === 'jiosaavn' && !jiosaavnEnabled) {
+        _wizardSettings.metadata_source = 'deezer';
+    }
 
     el.innerHTML = `
         <div class="setup-card">

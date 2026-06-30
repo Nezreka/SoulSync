@@ -42,6 +42,11 @@ _dev_mode_enabled_provider: Callable[[], bool] = lambda: False
 _profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id: None
 
 
+def is_jiosaavn_enabled() -> bool:
+    """True when the experimental JioSaavn metadata source is opted in."""
+    return bool(_get_config_value("experimental.jiosaavn_enabled", False))
+
+
 def register_runtime_clients(
     *,
     spotify_client: Any = _UNSET,
@@ -394,11 +399,18 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     """Return configured primary metadata source."""
     from core.boot_phase import is_boot_phase
 
-    if is_boot_phase():
-        return get_configured_primary_source()
-
     _default = METADATA_SOURCE_PRIORITY[0]
+
+    if is_boot_phase():
+        source = get_configured_primary_source()
+        if source == "jiosaavn" and not is_jiosaavn_enabled():
+            return _default
+        return source
+
     source = get_configured_primary_source()
+
+    if source == "jiosaavn" and not is_jiosaavn_enabled():
+        return _default
 
     if source == "spotify":
         try:
@@ -602,6 +614,8 @@ def get_client_for_source(
         return get_musicbrainz_client(client_factory=musicbrainz_client_factory)
 
     if source == "jiosaavn":
+        if not is_jiosaavn_enabled():
+            return None
         return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
 
     return None
