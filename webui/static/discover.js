@@ -106,9 +106,18 @@ async function _advCommitNow(v) {
             body: JSON.stringify({ value: v }),
         });
     } catch (e) { console.debug('adventurousness save failed', e); }
-    // Re-fetch the two rec rows so the dial is felt immediately (the routes re-rank live).
-    if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
-    if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    // Re-fetch the two rec rows so the dial is felt immediately. Use refresh() (which bypasses the
+    // controller's load() coalesce) so the LATEST dial value always re-fetches — load() would fold a
+    // rapid drag into an in-flight request that used an earlier value and render stale.
+    try {
+        if (_listeningRecsCtrl && _listeningRecsCtrl.refresh) _listeningRecsCtrl.refresh();
+        else if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (_recommendedSectionCtrl && _recommendedSectionCtrl.refresh) _recommendedSectionCtrl.refresh();
+        else if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    } catch (e) {
+        if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+        if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+    }
 }
 let _advLastLive = 0;
 function _advCommitLive(v) {
