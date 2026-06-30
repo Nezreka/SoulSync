@@ -328,6 +328,20 @@ def genre_affinity(candidate_genres: Sequence, taste_profile: Dict[str, float]) 
     return best
 
 
+# ── Novelty (aurral's "unheard" signal) ─────────────────────────────────────────────────────
+# Both rows already exclude what you OWN, so the extra lever is demoting recs you've already HEARD
+# (played but never added). 0 plays -> fully novel (1.0); the more you've played a candidate, the less
+# novel it is. The caller applies it as a soft penalty so an unheard candidate is the baseline.
+
+def novelty_score(play_count: object, *, half_at: float = 8.0) -> float:
+    """0..1 — how unheard a candidate is to you. ``0`` plays -> ``1.0`` (fully novel); ``half_at``
+    plays -> ``0.5``; heavy rotation -> ~0. Negative / non-numeric play counts are treated as 0
+    (fully novel), so a candidate with no play data is never penalised. Pure."""
+    p = max(0.0, _coerce_float(play_count, 0.0))
+    h = max(1e-9, float(half_at))
+    return h / (h + p)
+
+
 def aggregate_candidate_tracks(
     recommended_artists: Sequence[RecommendedArtist],
     top_tracks_by_artist: Dict[str, Sequence[dict]],
