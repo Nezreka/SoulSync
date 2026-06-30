@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.discovery.listening_recommendations import (
+    adventurousness_weights,
     aggregate_candidate_tracks,
     apply_adventurousness,
     build_genre_taste_profile,
@@ -394,6 +395,35 @@ def test_novelty_unheard_is_fully_novel():
     assert novelty_score(0) == 1.0            # never played -> baseline, never penalized
     assert novelty_score(None) == 1.0         # no play data -> treated as unheard
     assert novelty_score(-5) == 1.0           # negative clamps to 0
+
+
+def test_adventurousness_weights_anchored_at_default():
+    # At the historical default the blend equals the old fixed constants -> zero ranking change for
+    # anyone who never moves the dial.
+    w = adventurousness_weights(0.3)
+    assert round(w["genre"], 6) == 0.6
+    assert round(w["novelty"], 6) == 0.4
+    assert round(w["popularity"], 6) == round(0.3 * 0.7, 6)
+
+
+def test_adventurousness_weights_monotonic():
+    lo, mid, hi = (adventurousness_weights(x) for x in (0.0, 0.5, 1.0))
+    assert lo["genre"] > mid["genre"] > hi["genre"]          # genre leash loosens
+    assert lo["novelty"] < mid["novelty"] < hi["novelty"]    # novelty pull tightens
+    assert lo["popularity"] < mid["popularity"] < hi["popularity"]
+
+
+def test_adventurousness_weights_endpoints_and_clamps():
+    assert adventurousness_weights(0.0)["popularity"] == 0.0
+    assert round(adventurousness_weights(1.0)["popularity"], 6) == 0.7
+    for lvl in (-5, 0, 0.5, 1, 5):
+        w = adventurousness_weights(lvl)
+        assert w["genre"] >= 0.0
+        assert 0.0 <= w["novelty"] <= 1.0
+        assert 0.0 <= w["popularity"] <= 0.7
+    assert adventurousness_weights(-1) == adventurousness_weights(0.0)   # clamp low
+    assert adventurousness_weights(2) == adventurousness_weights(1.0)    # clamp high
+    assert adventurousness_weights("nonsense") == adventurousness_weights(0.3)  # bad input -> default
 
 
 def test_novelty_decays_with_plays():
