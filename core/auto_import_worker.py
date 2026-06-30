@@ -1373,11 +1373,11 @@ class AutoImportWorker:
                 # through the orchestrator path.
                 from core.imports.album_matching import (
                     ALBUM_SEARCH_THRESHOLD,
+                    albums_within_name_margin,
                     default_quality_rank,
                     extract_tracks_from_album_data,
                     pick_album_by_duration_fit,
                     score_album_search_result,
-                    SIMILAR_ALBUM_SCORE_MARGIN,
                 )
 
                 file_count = len(candidate.audio_files)
@@ -1398,7 +1398,6 @@ class AutoImportWorker:
 
                 best_score = scored_results[0][0]
                 best_result = scored_results[0][1]
-                duration_fit = 0.0
 
                 # Near-duplicate album hits (e.g. "3 Nights 4 Days" vs
                 # "3 Nights And 4 Days") often score within a few points.
@@ -1409,11 +1408,7 @@ class AutoImportWorker:
                         f: _read_file_tags(f) for f in candidate.audio_files
                     }
                     if any(int(t.get('duration_ms') or 0) > 0 for t in file_tags.values()):
-                        best_name_score = scored_results[0][0]
-                        similar = [
-                            (s, r) for s, r in scored_results
-                            if s >= best_name_score - SIMILAR_ALBUM_SCORE_MARGIN
-                        ]
+                        similar = albums_within_name_margin(scored_results)
                         tracks_by_album_id: Dict[str, List] = {}
                         for _s, result in similar:
                             album_id = str(getattr(result, 'id', '') or '')
