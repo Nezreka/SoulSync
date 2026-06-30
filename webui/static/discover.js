@@ -99,20 +99,24 @@ function _advApply(v) {
     const stateEl = document.getElementById('adv-wave-state');
     if (stateEl) { stateEl.textContent = _advState(v); stateEl.style.color = cBright; }
 }
-let _advCommitTimer = null;
-function _advCommit(v) {
-    clearTimeout(_advCommitTimer);
-    _advCommitTimer = setTimeout(async () => {
-        try {
-            await fetch('/api/discover/adventurousness', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ value: v }),
-            });
-        } catch (e) { console.debug('adventurousness save failed', e); }
-        // Re-fetch the two rec rows so the dial is felt immediately (the routes re-rank live).
-        if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
-        if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
-    }, 220);
+async function _advCommitNow(v) {
+    try {
+        await fetch('/api/discover/adventurousness', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ value: v }),
+        });
+    } catch (e) { console.debug('adventurousness save failed', e); }
+    // Re-fetch the two rec rows so the dial is felt immediately (the routes re-rank live).
+    if (typeof loadListeningRecommendations === 'function') loadListeningRecommendations();
+    if (typeof loadRecommendedArtistsSection === 'function') loadRecommendedArtistsSection();
+}
+let _advLastLive = 0;
+function _advCommitLive(v) {
+    // Throttled while dragging so both rec columns visibly re-rank in real time (not just on release).
+    const now = Date.now();
+    if (now - _advLastLive < 450) return;
+    _advLastLive = now;
+    _advCommitNow(v);
 }
 function _advInitDrag() {
     const track = document.getElementById('adv-wave-track');
@@ -127,12 +131,17 @@ function _advInitDrag() {
         try { track.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
         _advApply(fromX(e.clientX));
     });
-    track.addEventListener('pointermove', (e) => { if (_advWave.dragging) _advApply(fromX(e.clientX)); });
+    track.addEventListener('pointermove', (e) => {
+        if (!_advWave.dragging) return;
+        _advApply(fromX(e.clientX));
+        _advCommitLive(_advWave.value);   // live update as you drag (throttled)
+    });
     const end = (e) => {
         if (!_advWave.dragging) return;
         _advWave.dragging = false;
         _advApply(fromX(e.clientX));
-        _advCommit(_advWave.value);
+        _advLastLive = 0;                 // reset the throttle so the final value always commits
+        _advCommitNow(_advWave.value);
     };
     track.addEventListener('pointerup', end);
     track.addEventListener('pointercancel', end);
@@ -203,31 +212,54 @@ async function loadDiscoverPage() {
 function _reorderDiscoverSections() {
     const container = document.querySelector('.discover-container');
     if (!container) return;
-    const ORDER = [
-        { id: 'cache-genre-explorer' },          // Genre Explorer (pills) — quick browse
-        { id: 'your-mixes-section' },            // Made for you
+    const sectionByTitle = (t) => Array.from(
+        document.querySelectorAll('.discover-container .discover-section, #discover-bylt-sections .discover-section'))
+        .find(s => (s.querySelector('.discover-section-title')?.textContent || '').toLowerCase().includes(t));
+    const resolve = (spec) => {
+        if (!spec) return null;
+        if (spec.id) return document.getElementById(spec.id);
+        if (spec.el) return document.querySelector(spec.el);
+        if (spec.title) return sectionByTitle(spec.title);
+        return null;
+    };
+    const isShown = (s) => s && s.style.display !== 'none';
+    // top → bottom. `pair` = two same-card sections side by side (collapses to 1-up on narrow); the
+    // dial sits right above its two targets so the user sees both react. Everything else full-width.
+    const LAYOUT = [
+        { id: 'cache-genre-explorer' },                                                   // quick browse
+        { id: 'your-mixes-section' },                                                     // made for you
         { id: 'year-mixes-section' },
-        { id: 'listening-recs-section' },        // For you
-        { id: 'recommended-artists-section' },
-        { id: 'discover-bylt-sections' },        // Because You Listen To (cache sections pulled out below)
-        { title: 'recent releases' },            // New
-        { id: 'cache-genre-releases' },          // New In Your Genres
-        { id: 'seasonal-albums-section' },
-        { id: 'your-artists-section' },          // Your library
-        { id: 'your-albums-section' },
-        { id: 'cache-undiscovered' },            // Deeper digs
-        { id: 'cache-label-explorer' },          // From Your Labels
+        { el: '#adv-wave' },                                                              // the dial
+        { pair: [{ id: 'listening-recs-section' }, { id: 'recommended-artists-section' }] },  // its targets
+        { pair: [{ title: 'recent releases' }, { id: 'cache-genre-releases' }] },         // new
+        { pair: [{ id: 'seasonal-albums-section' }, { id: 'cache-undiscovered' }] },
+        { pair: [{ id: 'cache-label-explorer' }, { id: 'your-albums-section' }] },
+        { id: 'your-artists-section' },                                                   // your library
+        { id: 'discover-bylt-sections' },                                                 // because you listen
         { id: 'cache-deep-cuts' },
-        { title: 'last.fm radio' },              // Stations & tools
+        { title: 'last.fm radio' },                                                       // stations & tools
         { title: 'listenbrainz' },
         { title: 'build a playlist' },
     ];
-    const byTitle = (t) => Array.from(
-        document.querySelectorAll('.discover-container .discover-section, #discover-bylt-sections .discover-section'))
-        .find(s => (s.querySelector('.discover-section-title')?.textContent || '').toLowerCase().includes(t));
-    ORDER.forEach(spec => {
-        const node = spec.id ? document.getElementById(spec.id) : byTitle(spec.title);
-        if (node && node.parentElement) container.appendChild(node);
+    // Re-runs on every navigation — unwrap any prior 2-col rows first (their children get re-resolved
+    // and re-placed below), so we never nest or duplicate.
+    container.querySelectorAll('.discover-row-2col').forEach(row => {
+        while (row.firstChild) container.appendChild(row.firstChild);
+        row.remove();
+    });
+    LAYOUT.forEach(item => {
+        if (item.pair) {
+            const members = item.pair.map(resolve).filter(isShown);  // skip empty/hidden sections
+            if (!members.length) return;
+            if (members.length === 1) { container.appendChild(members[0]); return; }  // lone → full width
+            const row = document.createElement('div');
+            row.className = 'discover-row-2col';
+            members.forEach(m => row.appendChild(m));
+            container.appendChild(row);
+        } else {
+            const node = resolve(item);
+            if (node && node.parentElement) container.appendChild(node);
+        }
     });
 }
 
