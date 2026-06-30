@@ -746,7 +746,11 @@ class ConfigManager:
             },
             "content_filter": {
                 "allow_explicit": True
-            }
+            },
+            "experimental": {
+                # JioSaavn is opt-in only — see Settings → Advanced → Experimental.
+                "jiosaavn_enabled": False,
+            },
         }
 
     def _load_config(self):

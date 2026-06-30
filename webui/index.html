@@ -3987,7 +3987,8 @@
                                             • <strong>Spotify (no auth)</strong> — the same Spotify catalog with no account needed. It's unofficial and best-effort (may break if Spotify changes its site) and can't read your personal library or playlists.<br>
                                             • <strong>Deezer</strong> / <strong>iTunes</strong> — free, no account.<br>
                                             • <strong>MusicBrainz</strong> — free, but limited to 1 request/sec.<br>
-                                            • <strong>Discogs</strong> — needs a personal access token.<br><br>
+                                            • <strong>Discogs</strong> — needs a personal access token.<br>
+                                            • <strong>JioSaavn</strong> — opt in under Advanced → Experimental. Strong for Indian and Bollywood catalogs.<br><br>
                                             Tip: if you pick <strong>Spotify (no auth)</strong> and later connect a real Spotify account, it uses the official account normally and only falls back to no-auth while Spotify is rate-limited — then switches back automatically.</div>
                                     </div>
                                 </div>
@@ -6812,6 +6813,35 @@
                                 </div>
                             </div>
                             </div><!-- end Developer Mode body -->
+
+                            <div class="settings-experimental-break" data-stg="advanced" role="separator" aria-label="Experimental features">
+                                <span class="settings-experimental-break__line" aria-hidden="true"></span>
+                                <span class="settings-experimental-break__label">Experimental — proceed with caution</span>
+                                <span class="settings-experimental-break__line" aria-hidden="true"></span>
+                            </div>
+
+                            <!-- Experimental (collapsible tile) -->
+                            <div class="settings-section-header collapsed" data-stg="advanced" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
+                                <span class="settings-section-arrow">&#9660;</span>
+                                <h3>Experimental</h3>
+                                <span class="settings-section-hint">Opt-in preview features</span>
+                            </div>
+                            <div class="settings-section-body collapsed" data-stg="advanced">
+<div class="settings-group" data-stg="advanced">
+                                <p class="settings-experimental-intro">Features in this section are optional, may change without notice, and are not held to the same support standard as core metadata sources.</p>
+                                <div class="form-group">
+                                    <div class="setting-row" style="flex:1;min-width:0;">
+                                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:normal;margin:0;">
+                                            <input type="checkbox" id="experimental-jiosaavn-enabled" style="width:auto;margin:0;" onchange="onExperimentalJiosaavnToggle(this)">
+                                            <span>Enable JioSaavn metadata source</span>
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-text setting-help-body" hidden>Exposes JioSaavn as a primary metadata source on the Connections tab and in search. Free, no account — strong for Indian and Bollywood catalogs; limited to 1 request/sec via the public proxy API. Off by default.</div>
+                                </div>
+                            </div>
+                            </div><!-- end Experimental body -->
                         </div>
                     </div>
 
@@ -8624,6 +8654,29 @@
                     onclick="resolveConfirmDialog(false)">Cancel</button>
                 <button class="modal-button modal-button--primary" id="confirm-modal-confirm"
                     onclick="resolveConfirmDialog(true)">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Experimental feature enable acknowledgment -->
+    <div class="modal-overlay hidden" id="experimental-enable-modal-overlay">
+        <div class="confirm-modal experimental-enable-modal">
+            <div class="confirm-modal-header">
+                <h2 id="experimental-enable-modal-title">Enable experimental feature</h2>
+                <button class="confirm-modal-close" type="button" onclick="resolveExperimentalEnableDialog(false)">✕</button>
+            </div>
+            <div class="confirm-modal-content">
+                <p id="experimental-enable-modal-message"></p>
+                <label class="experimental-enable-ack">
+                    <input type="checkbox" id="experimental-enable-ack-checkbox">
+                    <span>I understand the implications of enabling this experimental feature.</span>
+                </label>
+            </div>
+            <div class="confirm-modal-actions">
+                <button class="modal-button modal-button--secondary" type="button"
+                    onclick="resolveExperimentalEnableDialog(false)">Cancel</button>
+                <button class="modal-button modal-button--primary" type="button" id="experimental-enable-confirm-btn"
+                    onclick="resolveExperimentalEnableDialog(true)" disabled>Enable</button>
             </div>
         </div>
     </div>
