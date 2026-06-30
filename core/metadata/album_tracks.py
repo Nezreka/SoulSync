@@ -480,8 +480,9 @@ def get_artist_albums_for_source(
         kwargs = {
             'album_type': album_type,
             'limit': limit,
-            'artist_name': artist_name,
         }
+        if source == 'jiosaavn':
+            kwargs['artist_name'] = artist_name
         if source == 'spotify':
             kwargs['allow_fallback'] = False
             kwargs['skip_cache'] = skip_cache
