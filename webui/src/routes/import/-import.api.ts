@@ -67,6 +67,10 @@ export async function matchImportAlbum(input: {
         album_artist: input.albumArtist || '',
         ...(input.filePaths?.length ? { file_paths: input.filePaths } : {}),
       },
+      // #957: building the match payload fetches the tracklist + reads every staging file's tags.
+      // On a slow NAS / large album that exceeds ky's default 10s and aborts with "Request timed
+      // out" even though the server is still working. Same long bound the import-process calls use.
+      timeout: IMPORT_REQUEST_TIMEOUT_MS,
     }),
   );
 }
@@ -184,10 +188,20 @@ export async function clearCompletedAutoImportResults(): Promise<number> {
   return payload.count ?? 0;
 }
 
+// #957: scanning the staging folder is expensive (a 6k-file library takes a long time). Its contents
+// only change when an import moves files out — and that path already invalidates these queries. So
+// cache the result across tab/page switches instead of letting react-query's default staleTime:0 +
+// refetchOnMount/refetchOnWindowFocus refetch (and re-scan the whole folder) on every tab change.
+// Manual Refresh + the post-import flow still invalidate -> refetch -> fresh scan (the backend's own
+// 6s TTL is short, so an invalidated refetch genuinely re-scans); gcTime keeps the cache alive while
+// the user is on another page so coming back doesn't re-scan either.
+const STAGING_CACHE = { staleTime: 30 * 60_000, gcTime: 60 * 60_000 } as const;
+
 export function importStagingFilesQueryOptions() {
   return queryOptions({
     queryKey: [...IMPORT_QUERY_KEY, 'staging-files'],
     queryFn: fetchImportStagingFiles,
+    ...STAGING_CACHE,
   });
 }
 
@@ -195,6 +209,7 @@ export function importStagingGroupsQueryOptions() {
   return queryOptions({
     queryKey: [...IMPORT_QUERY_KEY, 'staging-groups'],
     queryFn: fetchImportStagingGroups,
+    ...STAGING_CACHE,
   });
 }
 
@@ -202,6 +217,7 @@ export function importStagingSuggestionsQueryOptions() {
   return queryOptions({
     queryKey: [...IMPORT_QUERY_KEY, 'staging-suggestions'],
     queryFn: fetchImportStagingSuggestions,
+    ...STAGING_CACHE,
   });
 }
 
