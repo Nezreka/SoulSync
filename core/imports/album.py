@@ -384,11 +384,15 @@ def build_album_import_match_payload(
         target_album=album_name_for_match,
         quality_rank=default_quality_rank,
     )
-    match_by_track_id = {m["track"]["id"]: m for m in match_result["matches"]}
+    # Re-map matches back to tracks by object identity, NOT track["id"]. match_files_to_tracks stores
+    # the same track object on each match (both the exact-id and fuzzy phases), so identity is exact +
+    # unique. Keying on track["id"] collided when a source omitted track ids — every id-less track
+    # ("") mapped to one match, pairing several tracks to the same file.
+    match_by_track = {id(m["track"]): m for m in match_result["matches"]}
 
     matches: List[Dict[str, Any]] = []
     for track in normalized_tracks:
-        hit = match_by_track_id.get(track["id"])
+        hit = match_by_track.get(id(track))
         matches.append(
             {
                 "track": track,
