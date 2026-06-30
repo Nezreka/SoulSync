@@ -1105,6 +1105,15 @@ class MusicDatabase:
             except Exception as qp_err:
                 logger.error(f"Quality-profile migration failed: {qp_err}")
 
+            # Library Manager v2 schema (opt-in parallel library). Idempotent and
+            # additive — only creates lib2_* tables, never touches legacy tables.
+            try:
+                from core.library2.schema import ensure_library_v2_schema
+                ensure_library_v2_schema(conn)
+                self._record_migration(cursor, 'library_v2_schema')
+            except Exception as lib2_err:
+                logger.error(f"Library v2 schema init failed: {lib2_err}")
+
             self._ensure_core_media_schema_columns(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
@@ -1192,6 +1201,7 @@ class MusicDatabase:
         'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
         'quality_profiles_schema':  ('table', 'quality_profiles'),
+        'library_v2_schema':        ('table', 'lib2_artists'),
     }
 
     def _record_migration(self, cursor, name):

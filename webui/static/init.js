@@ -526,6 +526,10 @@ function isPageAllowed(pageId) {
     if (currentProfile.id === 1) return true;
     const normalizedPageId = normalizeProfilePageId(pageId);
     if (normalizedPageId === 'help' || normalizedPageId === 'issues') return true;
+    // Library v2 is an experimental opt-in gated by the features.library_v2 flag
+    // (the nav entry only shows when enabled), so don't also gate it on per-profile
+    // page permissions — treat it as reachable like help/issues.
+    if (normalizedPageId === 'library-v2') return true;
     if (normalizedPageId === 'settings') return currentProfile.is_admin;
     if (normalizedPageId === 'artist-detail') {
         const ap = normalizeProfilePageList(currentProfile.allowed_pages);
@@ -2861,6 +2865,21 @@ async function _continueAppInit() {
 
     initApp();
 }
+
+// Reveal the experimental "Library v2" nav entry only when the
+// features.library_v2 flag is enabled. Self-contained + fail-safe: any error
+// just leaves the entry hidden (its default), never blocking app init.
+function revealLibraryV2NavIfEnabled() {
+    const navEl = document.getElementById('library-v2-nav');
+    if (!navEl) return;
+    fetch('/api/library/v2/enabled')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+            if (data && data.enabled) navEl.style.display = '';
+        })
+        .catch(() => { /* leave hidden */ });
+}
+document.addEventListener('DOMContentLoaded', revealLibraryV2NavIfEnabled);
 
 function initApp() {
     // Unlocked / authenticated — reveal the app (the lock screens hide it via

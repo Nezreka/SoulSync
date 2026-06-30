@@ -7118,8 +7118,8 @@ def start_download():
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
-                # Per-download check overrides: skip AcoustID and/or
-                # quality-quarantine checks on request.
+                # Per-download check overrides (Library v2 interactive search passes
+                # these): skip AcoustID and/or quality-quarantine checks on request.
                 _skip_checks = []
                 if data.get('skip_acoustid'):
                     _skip_checks.append('acoustid')
@@ -7143,6 +7143,25 @@ def start_download():
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
+
+                # Audit a user-initiated override: record which profile-enforced
+                # checks were skipped so cleanup/repair jobs (and the user) know it
+                # was a deliberate manual choice (#library-v2).
+                if _skip_checks:
+                    try:
+                        import json as _json
+                        _db = get_database()
+                        with _db._get_connection() as _c:
+                            _c.execute(
+                                "INSERT INTO lib2_manual_skips "
+                                "(content_key, title, artist, skipped_checks, reason) "
+                                "VALUES (?,?,?,?, 'manual_download')",
+                                (context_key, data.get('title'), data.get('artist'),
+                                 _json.dumps(_skip_checks)),
+                            )
+                            _c.commit()
+                    except Exception as _se:
+                        logger.debug("manual-skip audit write failed: %s", _se)
 
                 # Extract track name from filename for activity
                 track_name = filename.split('/')[-1] if '/' in filename else filename.split('\\')[-1] if '\\' in filename else filename
@@ -40505,6 +40524,17 @@ try:
     _ensure_video_download_monitor(_get_video_db)
 except Exception:
     logger.warning("could not start the video download monitor at boot", exc_info=True)
+
+# Library Manager v2 (opt-in) — UI-facing read API mounted on /api/library/v2/*.
+# Gated on features.library_v2; no-op surface when the flag is off.
+from api.library_v2 import register_library_v2_routes as _register_library_v2_routes
+_register_library_v2_routes(
+    app,
+    get_database=get_database,
+    config_get=lambda key, default=None: config_manager.get(key, default),
+    config_manager=config_manager,
+    profile_id_getter=get_current_profile_id,
+)
 
 
 def _emit_rate_monitor_loop():

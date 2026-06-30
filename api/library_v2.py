@@ -1,0 +1,488 @@
+"""Library Manager v2 — UI-facing API (opt-in, Lidarr-style).
+
+Routes are mounted directly on the Flask ``app`` under ``/api/library/v2/*`` and
+gated on the ``features.library_v2`` config flag.
+
+Design notes:
+- **Artwork is media-server-independent.** Image URLs returned here point at the
+  local ``/api/library/v2/artwork/<kind>/<id>`` endpoint, which resolves art from the
+  files' own embedded covers (or metadata providers) and caches it on local disk —
+  never from Plex/Jellyfin/Navidrome (see ``core/library2/artwork.py``).
+- **Monitoring mirrors the existing systems.** Toggling an artist's monitor flag
+  also adds/removes it from the WATCHLIST; an album/single/track monitor mirrors to
+  the WISHLIST — via internal DB calls, so existing scan/auto-download keeps working.
+
+Registered from ``web_server.py`` via ``register_library_v2_routes(app, ...)``.
+"""
+
+from __future__ import annotations
+
+import json
+import threading
+from typing import Any, Callable, Dict, List, Optional
+
+from flask import jsonify, request, send_file
+
+from utils.logging_config import get_logger
+
+logger = get_logger("api.library_v2")
+
+# In-process import job state (single library, single job at a time).
+_import_lock = threading.Lock()
+_import_state: Dict[str, Any] = {"running": False, "stage": None, "current": 0,
+                                 "total": 0, "stats": None, "error": None,
+                                 "finished_at": None}
+
+_MONITOR_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
+_PROFILE_TABLES = {"artists": "lib2_artists", "albums": "lib2_albums", "tracks": "lib2_tracks"}
+
+
+def _artwork_url(kind: str, entity_id: int) -> str:
+    return f"/api/library/v2/artwork/{kind}/{int(entity_id)}"
+
+
+def _apply_artwork_urls(data: Any, kind: str) -> Any:
+    """Point a serialized entity's ``image_url`` at the local artwork endpoint."""
+    if isinstance(data, dict) and "id" in data:
+        data["image_url"] = _artwork_url(kind, data["id"])
+    return data
+
+
+def register_library_v2_routes(app, *, get_database: Callable[[], Any],
+                               config_get: Callable[..., Any],
+                               config_manager: Any = None,
+                               profile_id_getter: Optional[Callable[[], int]] = None) -> None:
+    """Attach the Library v2 routes to ``app``.
+
+    ``get_database`` → shared ``MusicDatabase``; ``config_get(key, default)`` reads
+    config (feature flag); ``config_manager`` is passed to the artwork/path resolver;
+    ``profile_id_getter`` resolves the active profile (defaults to 1).
+    """
+
+    def _enabled() -> bool:
+        return config_get("features.library_v2", False) is True
+
+    def _guard():
+        if not _enabled():
+            return jsonify({"success": False, "error": "Library v2 is disabled"}), 403
+        return None
+
+    def _conn():
+        return get_database()._get_connection()
+
+    def _profile() -> int:
+        try:
+            return int(profile_id_getter()) if profile_id_getter else 1
+        except Exception:
+            return 1
+
+    # -- read endpoints -------------------------------------------------------
+
+    @app.route("/api/library/v2/enabled")
+    def lib2_enabled():
+        return jsonify({"success": True, "enabled": _enabled()})
+
+    @app.route("/api/library/v2/artists")
+    def lib2_list_artists():
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        search = request.args.get("search", "")
+        sort = request.args.get("sort", "name")
+        monitored = request.args.get("monitored", "all")
+        page = int(request.args.get("page", 1))
+        limit = int(request.args.get("limit", 75))
+        conn = _conn()
+        try:
+            artists, total = Q.list_artists(conn, search=search, sort=sort,
+                                            monitored=monitored, page=page, limit=limit)
+        finally:
+            conn.close()
+        for a in artists:
+            _apply_artwork_urls(a, "artist")
+        total_pages = (total + limit - 1) // limit if limit else 0
+        return jsonify({
+            "success": True,
+            "artists": artists,
+            "pagination": {
+                "page": page, "limit": limit, "total_count": total,
+                "total_pages": total_pages,
+                "has_prev": page > 1, "has_next": page < total_pages,
+            },
+        })
+
+    @app.route("/api/library/v2/artists/<int:artist_id>")
+    def lib2_get_artist(artist_id):
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        conn = _conn()
+        try:
+            data = Q.get_artist(conn, artist_id)
+        finally:
+            conn.close()
+        if data is None:
+            return jsonify({"success": False, "error": "Artist not found"}), 404
+        _apply_artwork_urls(data, "artist")
+        for entry in data.get("albums", []) + data.get("singles", []):
+            _apply_artwork_urls(entry, "album")
+        return jsonify({"success": True, "artist": data})
+
+    @app.route("/api/library/v2/albums/<int:album_id>")
+    def lib2_get_album(album_id):
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        conn = _conn()
+        try:
+            data = Q.get_album(conn, album_id)
+        finally:
+            conn.close()
+        if data is None:
+            return jsonify({"success": False, "error": "Album not found"}), 404
+        _apply_artwork_urls(data, "album")
+        return jsonify({"success": True, "album": data})
+
+    @app.route("/api/library/v2/tracks/<int:track_id>")
+    def lib2_get_track(track_id):
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        conn = _conn()
+        try:
+            data = Q.get_track(conn, track_id)
+        finally:
+            conn.close()
+        if data is None:
+            return jsonify({"success": False, "error": "Track not found"}), 404
+        return jsonify({"success": True, "track": data})
+
+    @app.route("/api/library/v2/quality-profiles/sync", methods=["POST"])
+    def lib2_sync_quality_profiles():
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2.profiles_sync import sync_settings_presets
+        synced = sync_settings_presets(get_database())
+        return jsonify({"success": True, "synced": synced})
+
+    @app.route("/api/library/v2/quality-profiles")
+    def lib2_quality_profiles():
+        guard = _guard()
+        if guard:
+            return guard
+        from core.library2 import queries as Q
+        conn = _conn()
+        try:
+            profiles = Q.list_quality_profiles(conn)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "profiles": profiles})
+
+    # -- artwork (media-server-independent, disk-cached) ----------------------
+
+    def _send_art(path):
+        resp = send_file(str(path), mimetype="image/jpeg", conditional=True)
+        resp.headers["Cache-Control"] = "public, max-age=604800, immutable"
+        return resp
+
+    @app.route("/api/library/v2/artwork/<kind>/<int:eid>")
+    def lib2_artwork(kind, eid):
+        guard = _guard()
+        if guard:
+            return guard
+        if kind not in ("artist", "album"):
+            return "", 404
+        from core.library2.artwork import (
+            artwork_file, build_artwork, thumb_file, _write_thumbnail,
+        )
+        db = get_database()
+        want_thumb = request.args.get("size") == "thumb"
+        force = request.args.get("force") == "1"
+        # Fast path: serve the cached file directly with NO database/resolve work.
+        if not force:
+            target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
+            if target.exists():
+                return _send_art(target)
+            full = artwork_file(db, kind, eid)
+            if want_thumb and full.exists():
+                _write_thumbnail(full, target)
+                if target.exists():
+                    return _send_art(target)
+        # Slow path: resolve + cache (opens a DB connection).
+        conn = db._get_connection()
+        try:
+            path = build_artwork(db, conn, config_manager, kind, eid, force=force)
+        finally:
+            conn.close()
+        if not path:
+            return "", 404
+        target = thumb_file(db, kind, eid) if want_thumb else artwork_file(db, kind, eid)
+        return _send_art(target if target.exists() else artwork_file(db, kind, eid))
+
+    # -- monitoring (mirrors watchlist / wishlist) ----------------------------
+
+    def _mirror_artist_watchlist(db, conn, artist_id: int, monitored: bool) -> None:
+        row = conn.execute(
+            "SELECT name, spotify_id, musicbrainz_id FROM lib2_artists WHERE id=?", (artist_id,)
+        ).fetchone()
+        if not row:
+            return
+        ext = row["spotify_id"] or row["musicbrainz_id"]
+        if not ext:
+            return  # no external id → stays lib2-local only
+        source = "spotify" if row["spotify_id"] else "musicbrainz"
+        try:
+            if monitored:
+                db.add_artist_to_watchlist(ext, row["name"], _profile(), source)
+            else:
+                db.remove_artist_from_watchlist(ext, _profile())
+        except Exception as e:  # noqa: BLE001
+            logger.debug("watchlist mirror failed (artist %s): %s", artist_id, e)
+
+    def _track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
+        t = conn.execute(
+            """SELECT t.spotify_id, t.title, al.title album_title, al.spotify_id album_spotify,
+                      al.track_count, al.album_type,
+                      EXISTS(SELECT 1 FROM lib2_track_files tf
+                             WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> '') has_file
+               FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+               WHERE t.id = ?""",
+            (track_id,),
+        ).fetchone()
+        if not t or not t["spotify_id"]:
+            return None
+        artists = [r["name"] for r in conn.execute(
+            """SELECT ar.name FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
+               WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,))]
+        return {
+            "id": t["spotify_id"], "name": t["title"],
+            "artists": [{"name": n} for n in artists],
+            "album": {"name": t["album_title"], "id": t["album_spotify"],
+                      "total_tracks": t["track_count"] or 1},
+            "_album_type": t["album_type"],
+            "_has_file": bool(t["has_file"]),
+        }
+
+    def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool) -> int:
+        mirrored = 0
+        for tid in track_ids:
+            payload = _track_wishlist_payload(conn, tid)
+            if not payload:
+                continue
+            stype = "single" if payload.pop("_album_type", "") == "single" else "album"
+            has_file = bool(payload.pop("_has_file", False))
+            try:
+                if monitored:
+                    if has_file:
+                        continue
+                    db.add_to_wishlist(payload, source_type=stype, user_initiated=True,
+                                       profile_id=_profile())
+                else:
+                    db.remove_from_wishlist(payload["id"], _profile())
+                mirrored += 1
+            except Exception as e:  # noqa: BLE001
+                logger.debug("wishlist mirror failed (track %s): %s", tid, e)
+        return mirrored
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/monitor", methods=["POST"])
+    def lib2_set_monitored(entity, eid):
+        guard = _guard()
+        if guard:
+            return guard
+        table = _MONITOR_TABLES.get(entity)
+        if not table:
+            return jsonify({"success": False, "error": "Unknown entity"}), 400
+        monitored = bool((request.json or {}).get("monitored", True))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"UPDATE {table} SET monitored=? WHERE id=?", (1 if monitored else 0, eid))
+            if not cur.rowcount:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            track_ids: List[int] = []
+            if entity == "albums":
+                track_ids = [r["id"] for r in conn.execute(
+                    "SELECT id FROM lib2_tracks WHERE album_id=?", (eid,))]
+                cur.execute("UPDATE lib2_tracks SET monitored=? WHERE album_id=?",
+                            (1 if monitored else 0, eid))
+            elif entity == "tracks":
+                track_ids = [eid]
+            # Commit the lib2 flag FIRST so the write lock is released before the
+            # watchlist/wishlist mirror opens its own connections (avoids SQLite
+            # "database is locked" from nested writers).
+            conn.commit()
+            # Mirror to the existing watchlist / wishlist systems (reads via conn,
+            # writes via db.* on their own connections).
+            mirrored = 0
+            if entity == "artists":
+                _mirror_artist_watchlist(db, conn, eid, monitored)
+            elif track_ids:
+                mirrored = _mirror_tracks_wishlist(db, conn, track_ids, monitored)
+        finally:
+            conn.close()
+        return jsonify({"success": True, "monitored": monitored, "mirrored": mirrored})
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/quality-profile", methods=["POST"])
+    def lib2_set_quality_profile(entity, eid):
+        guard = _guard()
+        if guard:
+            return guard
+        table = _PROFILE_TABLES.get(entity)
+        if not table:
+            return jsonify({"success": False, "error": "Unknown entity"}), 400
+        profile_id = int((request.json or {}).get("quality_profile_id") or 0)
+        cascade = bool((request.json or {}).get("cascade", True))
+        conn = _conn()
+        try:
+            profile = conn.execute(
+                "SELECT id, upgrade_policy, repair_job_id, repair_settings "
+                "FROM lib2_quality_profiles WHERE id=?",
+                (profile_id,),
+            ).fetchone()
+            if profile is None:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            cur = conn.cursor()
+            cur.execute(f"UPDATE {table} SET quality_profile_id=? WHERE id=?", (profile_id, eid))
+            if not cur.rowcount:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            updated = cur.rowcount
+            if cascade and entity == "artists":
+                cur.execute(
+                    "UPDATE lib2_albums SET quality_profile_id=? WHERE primary_artist_id=?",
+                    (profile_id, eid),
+                )
+                updated += cur.rowcount
+                cur.execute(
+                    "UPDATE lib2_tracks SET quality_profile_id=? "
+                    "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
+                    (profile_id, eid),
+                )
+                updated += cur.rowcount
+            elif cascade and entity == "albums":
+                cur.execute(
+                    "UPDATE lib2_tracks SET quality_profile_id=? WHERE album_id=?",
+                    (profile_id, eid),
+                )
+                updated += cur.rowcount
+            conn.commit()
+            settings = json.loads(profile["repair_settings"] or "{}")
+        finally:
+            conn.close()
+        return jsonify({
+            "success": True,
+            "quality_profile_id": profile_id,
+            "updated": updated,
+            "upgrade_policy": profile["upgrade_policy"],
+            "repair_job": {
+                "id": profile["repair_job_id"],
+                "settings": settings,
+                "requires_top_target": bool(settings.get("require_top_target")),
+            },
+        })
+
+    # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])
+    def lib2_refresh(entity, eid):
+        guard = _guard()
+        if guard:
+            return guard
+        if entity not in ("artists", "albums"):
+            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            # Collect the album ids in scope, then bust their cached artwork so the
+            # next artwork request re-resolves from the (possibly retagged) files.
+            if entity == "albums":
+                album_ids = [eid]
+            else:
+                album_ids = [r["id"] for r in conn.execute(
+                    """SELECT al.id FROM lib2_album_artists aa JOIN lib2_albums al ON al.id=aa.album_id
+                       WHERE aa.artist_id=?""", (eid,))]
+            from core.library2.artwork import artwork_file
+            for aid in album_ids:
+                f = artwork_file(db, "album", aid)
+                if f.exists():
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+            if entity == "artists":
+                af = artwork_file(db, "artist", eid)
+                if af.exists():
+                    try:
+                        af.unlink()
+                    except OSError:
+                        pass
+        finally:
+            conn.close()
+        return jsonify({"success": True, "refreshed_albums": len(album_ids)})
+
+    # -- importer -------------------------------------------------------------
+
+    @app.route("/api/library/v2/import", methods=["POST"])
+    def lib2_import():
+        guard = _guard()
+        if guard:
+            return guard
+        reset = bool((request.json or {}).get("reset")) if request.is_json else False
+        with _import_lock:
+            if _import_state["running"]:
+                return jsonify({"success": False, "error": "Import already running"}), 409
+            _import_state.update(running=True, stage="starting", current=0, total=0,
+                                 stats=None, error=None, finished_at=None)
+
+        def _run():
+            from core.library2.importer import import_legacy_library
+            import time as _t
+
+            def _progress(stage, current, total):
+                _import_state.update(stage=stage, current=current, total=total)
+
+            try:
+                stats = import_legacy_library(get_database(), reset=reset, progress=_progress)
+                _import_state.update(stats=stats, stage="done")
+            except Exception as e:  # noqa: BLE001
+                logger.error("Library v2 import failed: %s", e, exc_info=True)
+                _import_state.update(error=str(e), stage="failed")
+            finally:
+                _import_state.update(running=False, finished_at=_t.time())
+            # Warm the artwork cache + resolve missing-track titles in the
+            # background so the UI is fast and shows real titles (Lidarr-style).
+            try:
+                from core.library2.artwork import precache_all_artwork
+                precache_all_artwork(get_database(), config_manager)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("artwork precache failed: %s", e)
+            try:
+                from core.library2.completeness import precache_tracklists
+                precache_tracklists(get_database(), config_manager)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("tracklist precache failed: %s", e)
+            try:
+                from core.library2.profiles_sync import sync_settings_presets
+                sync_settings_presets(get_database())
+            except Exception as e:  # noqa: BLE001
+                logger.debug("profile preset sync failed: %s", e)
+
+        threading.Thread(target=_run, name="lib2-import", daemon=True).start()
+        return jsonify({"success": True, "started": True})
+
+    @app.route("/api/library/v2/import/status")
+    def lib2_import_status():
+        guard = _guard()
+        if guard:
+            return guard
+        return jsonify({"success": True, **_import_state})
+
+    logger.info("Library v2 routes registered (/api/library/v2/*)")
+
+
+__all__ = ["register_library_v2_routes"]

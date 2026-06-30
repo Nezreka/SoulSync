@@ -72,5 +72,9 @@
   },
   "listenbrainz": {
     "token": "LISTENBRAINZ_TOKEN"
+  },
+  "features": {
+    "_comment": "Experimental opt-in features. Off by default.",
+    "library_v2": false
   }
 }

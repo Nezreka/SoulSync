@@ -6432,7 +6432,7 @@ function _gsUpdateVisibility() {
     if (!bar) return;
     // Hide on pages where global search doesn't belong, and always on the
     // video side (the global/music search is music-only).
-    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import']);
+    const _gsHidePages = new Set(['search', 'downloads', 'settings', 'help', 'issues', 'import', 'library-v2']);
     const onVideoSide = document.body.getAttribute('data-side') === 'video';
     const onHidePage = onVideoSide || (typeof currentPage !== 'undefined' && _gsHidePages.has(currentPage));
     bar.style.display = onHidePage ? 'none' : '';
