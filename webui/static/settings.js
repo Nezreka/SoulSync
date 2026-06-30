@@ -183,11 +183,12 @@ function resolveExperimentalEnableDialog(confirmed) {
     const overlay = document.getElementById('experimental-enable-modal-overlay');
     const ack = document.getElementById('experimental-enable-ack-checkbox');
     const confirmBtn = document.getElementById('experimental-enable-confirm-btn');
+    const ok = confirmed && ack?.checked;
+
     if (overlay) overlay.classList.add('hidden');
     if (ack) ack.checked = false;
     if (confirmBtn) confirmBtn.disabled = true;
 
-    const ok = confirmed && ack?.checked;
     if (_experimentalEnableResolver) {
         _experimentalEnableResolver(ok);
         _experimentalEnableResolver = null;
