@@ -29500,8 +29500,8 @@ def get_discover_hero():
 
 
 _discover_taste_cache = {}            # profile_id -> (expiry_ts, {genre: 0..1})
-_DISCOVER_GENRE_WEIGHT = 0.6          # a candidate fully in your top genre gets up to +60% score
-_DISCOVER_NOVELTY_PENALTY = 0.4       # a heavily-already-heard candidate loses up to 40% score
+# Genre/novelty weights now come from adventurousness_weights(dial) (core.discovery) — the dial blends
+# them, single source of truth — instead of the old fixed _DISCOVER_GENRE_WEIGHT / _NOVELTY_PENALTY.
 
 
 def _discover_genre_taste(database, profile_id):
@@ -29609,7 +29609,8 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    apply_adventurousness, genre_affinity, novelty_score)
+                    adventurousness_weights, apply_adventurousness, genre_affinity, novelty_score)
+                _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
@@ -29617,8 +29618,8 @@ def get_discover_similar_artists():
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
                     a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
                     _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
-                    a['_adv_score'] = (_base * (1.0 + _DISCOVER_GENRE_WEIGHT * _aff)
-                                       * (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - _nov)))
+                    a['_adv_score'] = (_base * (1.0 + _w['genre'] * _aff)
+                                       * (1.0 - _w['novelty'] * (1.0 - _nov)))
                 # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
                 # there), so sort by the boosted score first; the dial then layers its penalty on top.
                 result_artists.sort(key=lambda a: -a['_adv_score'])
@@ -29794,11 +29795,19 @@ def get_discover_listening_recommendations():
         except (ValueError, TypeError):
             stored = []
 
-        # Quality re-rank (aurral parity, always-on): genre/tag affinity BOOSTS candidates whose
-        # genres match what you play; novelty PENALISES recs you've already heard. Both additive — no
-        # genre match / no plays leaves the score untouched, so they can only ever improve the order.
         try:
-            from core.discovery.listening_recommendations import genre_affinity, novelty_score
+            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            level = 0.0
+
+        # Quality re-rank (aurral parity, always-on): the adventurousness dial BLENDS the weights —
+        # genre/tag affinity boosts on-taste candidates (leash loosens as you get adventurous); novelty
+        # penalises recs you've already heard (pull tightens). Additive — no genre match / no plays
+        # leaves the score untouched, and at the default dial the weights equal the old constants.
+        try:
+            from core.discovery.listening_recommendations import (
+                adventurousness_weights, genre_affinity, novelty_score)
+            _w = adventurousness_weights(level)
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
             _names = [a.get('name') for a in stored]
@@ -29812,10 +29821,10 @@ def get_discover_listening_recommendations():
                 a['_why_genre'] = aff   # captured for the "why this rec" chips
                 factor = 1.0
                 if aff > 0:
-                    factor *= (1.0 + _DISCOVER_GENRE_WEIGHT * aff)
+                    factor *= (1.0 + _w['genre'] * aff)
                 nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
                 if nov < 1.0:
-                    factor *= (1.0 - _DISCOVER_NOVELTY_PENALTY * (1.0 - nov))
+                    factor *= (1.0 - _w['novelty'] * (1.0 - nov))
                 if factor != 1.0:
                     a['score'] = float(a.get('score') or 0) * factor
                     changed = True
@@ -29825,13 +29834,8 @@ def get_discover_listening_recommendations():
             logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
 
         # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
-        # Popularity was already enriched in the quality block above, so don't re-fetch it here (the
-        # dial drag re-fetches this route repeatedly — one popularity query per request, not two).
-        # level 0 -> unchanged. Fail-soft: any hiccup leaves the order.
-        try:
-            level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            level = 0.0
+        # Popularity was already enriched in the quality block above; `level` was read there too (one
+        # popularity query per request, not two). level 0 -> unchanged. Fail-soft: leaves the order.
         if level > 0 and stored:
             try:
                 from core.discovery.listening_recommendations import apply_adventurousness

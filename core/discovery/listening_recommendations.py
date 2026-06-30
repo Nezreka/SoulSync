@@ -248,6 +248,37 @@ def rank_recommended_artists(
 # pushed down so the obscure / non-obvious picks surface. Pure + reusable across both rec rows.
 _MAX_POP_PENALTY = 0.7  # at level 1.0 a popularity-100 candidate loses 70% of its score
 
+# Multi-dimensional adventurousness: the dial blends THREE exploration axes, not just popularity.
+# Anchored at the historical default (0.3) so anyone who never touches the dial sees the exact same
+# ranking as before — the dial only changes behaviour as you move away from 0.3.
+_DIAL_DEFAULT = 0.3
+_GENRE_AT_DEFAULT = 0.6      # genre-affinity boost weight at the default (was the fixed constant)
+_NOVELTY_AT_DEFAULT = 0.4    # novelty (already-heard) penalty weight at the default (ditto)
+# Per-unit-of-dial slopes. Genre LOOSENS as you get adventurous (negative); novelty TIGHTENS.
+_GENRE_SLOPE = -0.55        # dial 0 -> ~0.77 (very on-taste); dial 1 -> ~0.22 (out-of-taste allowed)
+_NOVELTY_SLOPE = 0.45       # dial 0 -> ~0.27 (familiar OK);   dial 1 -> ~0.72 (strongly prefer unheard)
+
+
+def adventurousness_weights(level: object) -> dict:
+    """Map the 0..1 adventurousness dial to per-signal weights. Pure — the SINGLE source of truth for
+    how the dial blends the three exploration axes, so both rec routes stay consistent.
+
+    - ``genre``: STRONG at dial 0 (stay on your genres) -> RELAXED at dial 1 (allow out-of-taste).
+    - ``novelty``: GENTLE at dial 0 -> STRONG at dial 1 (prefer the unheard).
+    - ``popularity``: 0 at dial 0 -> ``_MAX_POP_PENALTY`` at dial 1 (the existing penalty).
+
+    Linear + monotonic, and pivoted on the default (0.3) so the weights there equal the previous fixed
+    constants exactly — i.e. zero ranking change for anyone who leaves the dial alone.
+    """
+    lvl = max(0.0, min(1.0, _coerce_float(level, _DIAL_DEFAULT)))
+    genre = _GENRE_AT_DEFAULT + _GENRE_SLOPE * (lvl - _DIAL_DEFAULT)
+    novelty = _NOVELTY_AT_DEFAULT + _NOVELTY_SLOPE * (lvl - _DIAL_DEFAULT)
+    return {
+        "genre": max(0.0, genre),
+        "novelty": max(0.0, min(1.0, novelty)),
+        "popularity": lvl * _MAX_POP_PENALTY,
+    }
+
 
 def apply_adventurousness(
     items: Sequence[dict],
