@@ -3404,15 +3404,19 @@ function closeHelperSearch() {
 const WHATS_NEW = {
     // Convention: keep only the CURRENT release here, plus a single brief
     // "Earlier versions" summary entry. Don't accumulate old per-version blocks.
-    '2.8.2': [
-        { date: 'June 2026 — 2.8.2 release' },
-        { title: 'Spotify Docker boot hang fixed (#949)', desc: 'with Spotify as your primary metadata source, an unreachable Spotify API could block the gunicorn worker at startup — the container bound port 8008 but never served the Web UI. provider auth probes are deferred during boot (and capped with a timeout) so startup can\'t hang on a slow Spotify; same guard for Qobuz/Deezer/Tidal. (thanks HellRa1SeR.)', page: 'settings' },
-        { title: '"Re-auth didn\'t stick" fixed', desc: 'the OAuth callback wrote your Spotify token to one cache while the app read another, so re-authenticating could silently fail validation. unified on one token store — re-auth takes effect now.', page: 'settings' },
-        { title: 'Sync to Spotify works', desc: 'exporting a mirrored playlist to Spotify now asks for playlist-write permission once, on-demand, the first time you use it. your normal Spotify login is untouched, so upgrading never forces a re-auth.', page: 'playlists' },
-        { title: 'The "slow after update" fix (#948)', desc: 'the real cause of post-update lag was browser password managers (Bitwarden/1Password/etc.) rebuilding their autofill overlay on every DOM change — and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields left alone). ~110x less main-thread blocking in the reporter\'s benchmark. (thanks @nick2000713.)', page: 'dashboard' },
-        { title: 'Max Performance mode', desc: 'Settings → Appearance. one switch kills the worker orbs, particles, all blur/shadows and every animation, and greys out the individual effect toggles. for software-rendered / no-GPU setups (Docker, remote desktop) where even simple animations cost real CPU.', page: 'settings' },
-        { title: 'Large-library imports no longer time out (#947)', desc: 'dropping a whole library into staging used to make the import page scan every file synchronously and hit the request timeout — so it never loaded. the scan now runs in the background with a live "Scanning N of M…" progress, and the page fills in automatically when done. (thanks @ramonskie.)', page: 'downloads' },
-        { title: 'Earlier versions', desc: '2.8.1 added playlist export to Spotify & Deezer (#945), a Rename-only Library Reorganize (#875), broader lossless + DSD handling, and a refined reduce-visual-effects pass. 2.8.0 brought the Unverified-queue cleanup (#934) + dashboard performance work; 2.7.9 added best-quality downloads + the Wing It Pool; 2.7.0 made multi-user real.' },
+    '2.8.3': [
+        { date: 'June 2026 — 2.8.3 release' },
+        { title: 'Discover, rebuilt', desc: 'a Spotify-level redesign — consistent cards everywhere, "mix" cards that open into full track-list modals (sync or download a mix from there), year + decade mixes, Last.fm Radio / ListenBrainz folded in, and a 2-column layout so you scroll less.', page: 'discover' },
+        { title: 'The Adventurousness dial', desc: 'an animated "living wave" you drag to set how exploratory your recommendations are. turning it up loosens the genre leash (lets in artists outside your usual taste), leans into the unheard, and demotes the famous — all at once. synced with a slider in Settings → Discovery.', page: 'discover' },
+        { title: 'Recommendations that know you', desc: 'both rec rows ("Based On Your Listening" + "Recommended For You") are now scored on genre/tag affinity (matches what you actually play), novelty (already-heard picks pushed down), and a popularity penalty driven by the dial.', page: 'discover' },
+        { title: '"Why this rec" chips', desc: 'every recommendation card now shows why it surfaced — Your genres, Deep cut, or N of your artists — so the picks aren\'t a black box.', page: 'discover' },
+        { title: 'Self-filling popularity data', desc: 'a background job quietly fills artist popularity from Spotify Free → Last.fm → Deezer (rate-limited, resumable, runs on its own) so the dial has real data to push against. nothing to click.', page: 'discover' },
+        { title: 'Lyrics Filler false "missing" fixed (#955)', desc: 'on Docker / path-mapped setups the scan flagged tracks that already had .lrc files, because it checked the raw database path instead of the real on-disk one. it resolves the path now. (thanks @diegocade1.)', page: 'downloads' },
+        { title: 'Import page caching + match timeout (#957)', desc: 'switching tabs on the import page re-scanned your whole staging folder every time — now cached, so tab switches are instant (Refresh still forces a fresh scan). and the album-match call no longer times out on a slow NAS / big album. (thanks @ramonskie.)', page: 'downloads' },
+        { title: 'Library matching prefers exact titles (#958)', desc: 'a bare "Ratata" could match "Ratata (Afro Bros Remix)" when both were in your library. matching now ranks an exact title above a stripped-qualifier fallback. (#960 — thanks @ramonskie.)', page: 'playlists' },
+        { title: 'One matcher for imports (#954)', desc: 'auto-import and manual album import now share the same matching engine the rest of the app uses (consistent initials/unicode/version handling), plus album-variant disambiguation that picks the right release by matching track durations. (thanks HellRa1SeR.)', page: 'downloads' },
+        { title: 'JioSaavn metadata — experimental (#956)', desc: 'an opt-in metadata source for Bollywood / Asian catalogs that Spotify & Deezer cover poorly. off by default; enable under Settings → Advanced → Experimental. (thanks HellRa1SeR.)', page: 'settings' },
+        { title: 'Earlier versions', desc: '2.8.2 fixed the Spotify Docker boot hang (#949), the "slow after update" password-manager lag (#948) + added Max Performance mode, and large-library imports that timed out (#947). 2.8.1 added playlist export to Spotify & Deezer (#945) + a Rename-only Library Reorganize (#875); 2.8.0 brought the Unverified-queue cleanup (#934); 2.7.0 made multi-user real.' },
     ],
 };
 
@@ -3443,28 +3447,49 @@ const WHATS_NEW = {
 //                  usage_note?: 'optional hint shown at the bottom' }
 const VERSION_MODAL_SECTIONS = [
     {
-        title: "Spotify, reliably",
-        description: "the Docker boot hang and the \"logged out / re-auth won't stick\" issues are fixed.",
+        title: "Discover, rebuilt",
+        description: "a full Spotify-level redesign — and a real recommendation engine behind it.",
         features: [
-            "#949 — with Spotify as your primary source, an unreachable Spotify API could block the gunicorn worker at startup (the container bound :8008 but never served the UI). auth probes are deferred during boot + capped with a timeout so startup can't hang; same guard for Qobuz/Deezer/Tidal. thanks HellRa1SeR",
-            "\"re-auth didn't stick\" — the OAuth callback wrote your token to one cache while the app read another; unified on a single token store, so re-authenticating actually takes effect",
-            "Sync to Spotify works — exporting a mirrored playlist to Spotify asks for write permission once, on-demand, the first time you use it; your normal login is untouched, so upgrading never forces a re-auth",
+            "consistent cards everywhere, \"mix\" cards that open into full track-list modals (sync or download a mix from there), year + decade mixes, Last.fm Radio / ListenBrainz folded in, and a 2-column layout so you scroll less",
+            "the Adventurousness dial — an animated \"living wave\" you drag to set how exploratory your recs are. turn it up and it loosens the genre leash (artists outside your usual taste), leans into the unheard, and demotes the famous, all at once. synced with a slider in Settings → Discovery",
+        ],
+        usage_note: "drag the wave on the Discover page (or the Settings → Discovery slider) — left = safe / on-taste, right = obscure / exploratory.",
+    },
+    {
+        title: "Recommendations that actually know you",
+        description: "both rec rows are scored on what you really listen to — and they show their work.",
+        features: [
+            "genre/tag affinity (matches what you play), novelty (already-heard picks pushed down), and a popularity penalty driven by the dial — across \"Based On Your Listening\" + \"Recommended For You\"",
+            "\"why this rec\" chips on every card — Your genres / Deep cut / N of your artists — so the picks aren't a black box",
+            "a background job quietly fills artist popularity from Spotify Free → Last.fm → Deezer (rate-limited, resumable, runs on its own) so the dial has real data to push against — nothing to click",
         ],
     },
     {
-        title: "The \"slow after update\" fix",
-        description: "the post-update lag wasn't us — it was your password manager.",
+        title: "Fixes this release",
+        description: "lyrics, imports, and library matching.",
         features: [
-            "#948 — browser password managers (Bitwarden/1Password/etc.) rebuild their autofill overlay on every DOM change, and soulsync mutates the DOM constantly. non-credential fields are now marked so managers skip them (login fields untouched) — ~110x less main-thread blocking, ~20 → ~96 FPS in the reporter's benchmark. thanks @nick2000713",
-            "new Max Performance mode (Settings → Appearance) — one switch kills orbs, particles, all blur/shadows and every animation, for software-rendered / no-GPU setups (Docker, remote desktop)",
+            "#955 — Lyrics Filler no longer flags tracks that already have .lrc files on Docker / path-mapped setups (it now resolves the real on-disk path). thanks @diegocade1",
+            "#957 — the import page stops re-scanning your whole staging folder on every tab switch (now cached), and album-match no longer times out on a slow NAS / big album. thanks @ramonskie",
+            "#958/#960 — library matching prefers an exact title over a remix variant, so a bare \"Ratata\" no longer grabs \"Ratata (Afro Bros Remix)\". thanks @ramonskie",
+            "Deezer no longer drops from hybrid downloads or shows a false red status dot",
         ],
     },
     {
-        title: "Large-library imports no longer time out",
-        description: "migrate a whole library into staging without the page choking.",
+        title: "Community contributions",
+        description: "great PRs from contributors this release.",
         features: [
-            "#947 — dropping thousands of files into staging used to scan every file synchronously and hit the request timeout, so the import page never loaded (and every reload re-timed-out)",
-            "the scan now runs in the background with a live \"Scanning N of M…\" progress, and the page fills in automatically when it's done. auto-import remains the hands-off path for matching. thanks @ramonskie",
+            "#954 — auto-import + manual import now share one matcher, with album-variant disambiguation by track duration. thanks HellRa1SeR",
+            "#956 — an experimental, opt-in JioSaavn metadata source for Bollywood / Asian catalogs (Settings → Advanced → Experimental, off by default). thanks HellRa1SeR",
+            "#953 — the unit suite now passes on Windows dev machines too. thanks HellRa1SeR",
+        ],
+    },
+    {
+        title: "Earlier in 2.8.2",
+        description: "2.8.2 was a stability + performance release.",
+        features: [
+            "Spotify Docker boot hang fixed (#949) — deferred auth probes so a slow Spotify can't block startup; \"re-auth didn't stick\" + Sync to Spotify fixed too",
+            "the \"slow after update\" fix (#948) — it was browser password managers, not soulsync; non-credential fields are now marked so they skip them, plus a new Max Performance mode",
+            "large-library imports no longer time out (#947) — the staging scan runs in the background with live \"Scanning N of M…\" progress",
         ],
     },
     {
