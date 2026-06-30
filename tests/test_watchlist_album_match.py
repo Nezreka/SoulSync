@@ -78,6 +78,7 @@ def _stub_imports():
 from core.watchlist_scanner import (  # noqa: E402
     _albums_likely_match,
     _extid_match_is_owned,
+    _library_track_has_file,
     _normalize_album_for_match,
 )
 
@@ -327,3 +328,29 @@ def test_extid_owned_when_no_album_to_compare():
     # missing album on either side -> conservative: treat as owned (don't change prior behaviour)
     assert _extid_match_is_owned("", "Some Album", allow_duplicates=True) is True
     assert _extid_match_is_owned("Some Album", "", allow_duplicates=True) is True
+
+
+# ── _library_track_has_file (Expedition 33 ghost-row guard) ──────────────────
+# The wishlist 'owned' check matched DB rows only, never the file. A row whose file is gone (deleted /
+# stale media-server entry) was treated as owned forever -> tracks never re-wishlisted. Now ownership
+# requires the file to actually resolve on disk.
+
+def test_library_track_has_file_present_is_owned():
+    assert _library_track_has_file("/lib/x.flac", resolve=lambda p: "/real/x.flac") is True
+
+
+def test_library_track_has_file_ghost_row_not_owned():
+    # resolver finds nothing (file deleted / unresolvable) -> ghost -> NOT owned, so it gets wishlisted
+    assert _library_track_has_file("/lib/gone.flac", resolve=lambda p: None) is False
+
+
+def test_library_track_has_file_empty_path_not_owned():
+    assert _library_track_has_file("", resolve=lambda p: "/x") is False
+    assert _library_track_has_file(None, resolve=lambda p: "/x") is False
+
+
+def test_library_track_has_file_resolver_error_assumes_present():
+    # a resolver hiccup must NOT flip a track to "missing" and trigger a re-download
+    def boom(_p):
+        raise RuntimeError("resolver blew up")
+    assert _library_track_has_file("/lib/x.flac", resolve=boom) is True
