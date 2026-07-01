@@ -458,6 +458,9 @@ class MusicDatabase:
             # Add Amazon artist ID column (migration)
             self._add_amazon_columns(cursor)
 
+            # Add JioSaavn source ID columns (migration)
+            self._add_jiosaavn_columns(cursor)
+
             # Add Similar-Artists worker tracking columns (migration)
             self._add_similar_artists_worker_columns(cursor)
 
@@ -2880,6 +2883,22 @@ class MusicDatabase:
             logger.info("Amazon columns added/verified successfully")
         except Exception as e:
             logger.error(f"Error adding Amazon columns: {e}")
+
+    def _add_jiosaavn_columns(self, cursor):
+        """Add JioSaavn external ID columns to artists, albums, and tracks."""
+        try:
+            for table in ("artists", "albums", "tracks"):
+                cursor.execute(f"PRAGMA table_info({table})")
+                columns = [column[1] for column in cursor.fetchall()]
+                if "jiosaavn_id" not in columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN jiosaavn_id TEXT")
+                cursor.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_jiosaavn_id ON {table} (jiosaavn_id)"
+                )
+
+            logger.info("JioSaavn columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding JioSaavn columns: {e}")
 
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
@@ -6995,6 +7014,45 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
+
+    def get_all_library_tracks_for_export(self) -> List[Dict[str, Any]]:
+        """All library tracks that have a file, for playlist/M3U export.
+
+        Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
+        ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.file_path AS path, t.title AS title, ar.name AS artist,
+                       t.duration AS duration_ms, t.track_number AS track_number
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                ORDER BY ar.name COLLATE NOCASE, al.title COLLATE NOCASE, t.track_number
+            """)
+            out: List[Dict[str, Any]] = []
+            for row in cursor.fetchall():
+                dur_ms = row['duration_ms']
+                try:
+                    secs = int(int(dur_ms) / 1000) if dur_ms else 0
+                except (TypeError, ValueError):
+                    secs = 0
+                out.append({
+                    'path': row['path'],
+                    'title': row['title'],
+                    'artist': row['artist'],
+                    'duration': secs,
+                })
+            return out
+        except Exception as e:
+            logger.error(f"Error enumerating tracks for export: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
 
     def get_album_by_spotify_album_id(self, spotify_album_id: str) -> Optional[DatabaseAlbum]:
         """Fetch a single album by its (enriched) Spotify album id, or None.
@@ -12089,6 +12147,26 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error updating artist {artist_id}: {e}")
             return {'success': False, 'error': str(e)}
+
+    def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
+        """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
+        every enrichment worker fills art only ``WHERE thumb_url IS NULL OR = ''``, so none will
+        overwrite a user pick. Returns True when a row was updated."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (thumb_url, album_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"set_album_thumb_url failed for album {album_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
 
     def update_album_fields(self, album_id, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update album metadata fields. Only whitelisted fields are accepted."""

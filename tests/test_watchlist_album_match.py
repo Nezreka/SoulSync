@@ -77,6 +77,7 @@ def _stub_imports():
 # Imports happen lazily so the stubs above are in place first.
 from core.watchlist_scanner import (  # noqa: E402
     _albums_likely_match,
+    _extid_match_is_owned,
     _normalize_album_for_match,
 )
 
@@ -292,3 +293,37 @@ def test_decimal_volume_markers_block_match(spotify_name, lib_name) -> None:
 )
 def test_same_decimal_volume_still_matches(spotify_name, lib_name) -> None:
     assert _albums_likely_match(spotify_name, lib_name)
+
+
+# ── _extid_match_is_owned (Expedition 33 shared-recording-across-editions bug) ──
+# The external-ID (recording MBID) short-circuit in is_track_missing_from_library skipped any track
+# whose recording was in the library, ignoring allow_duplicates + album. Soundtrack editions reuse the
+# same recordings across releases, so the 'Original Soundtrack (original remix)' tracks were silently
+# skipped because their recordings exist on the 'Nos vies en Lumière (Bonus Edition)' the user owns.
+
+def test_extid_owned_allows_shared_recording_on_a_different_edition():
+    # the exact reported case: same recording, DIFFERENT edition, duplicates on -> NOT owned (wishlist it)
+    assert _extid_match_is_owned(
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        "Clair Obscur: Expedition 33 - Nos vies en Lumière (Bonus Edition)",
+        allow_duplicates=True,
+    ) is False
+
+
+def test_extid_owned_when_same_album():
+    assert _extid_match_is_owned(
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        "Clair Obscur: Expedition 33: Original Soundtrack",
+        allow_duplicates=True,
+    ) is True
+
+
+def test_extid_owned_when_duplicates_disabled_is_album_agnostic():
+    # duplicates off -> a recording-ID match is 'owned' no matter the album (prior behaviour preserved)
+    assert _extid_match_is_owned("Album A", "Totally Different Album B", allow_duplicates=False) is True
+
+
+def test_extid_owned_when_no_album_to_compare():
+    # missing album on either side -> conservative: treat as owned (don't change prior behaviour)
+    assert _extid_match_is_owned("", "Some Album", allow_duplicates=True) is True
+    assert _extid_match_is_owned("Some Album", "", allow_duplicates=True) is True

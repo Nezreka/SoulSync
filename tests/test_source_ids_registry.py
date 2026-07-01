@@ -99,4 +99,5 @@ def test_source_id_field_unchanged_after_registry_refactor():
         "hydrabase": "soul_id",
         "musicbrainz": "musicbrainz_id",
         "amazon": "amazon_id",
+        "jiosaavn": "jiosaavn_id",
     }

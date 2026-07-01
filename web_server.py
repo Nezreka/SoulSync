@@ -2582,6 +2582,11 @@ def get_status():
             'enrichment': _get_enrichment_status(),
             'active_downloads': active_dl_count,
         }
+        try:
+            from core.metadata.registry import experimental_status
+            status_data['_experimental'] = experimental_status()
+        except Exception:
+            status_data['_experimental'] = {}
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3317,9 +3322,9 @@ def handle_settings():
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import is_jiosaavn_enabled
-            if not is_jiosaavn_enabled() and config_manager.get('metadata.fallback_source') == 'jiosaavn':
-                config_manager.set('metadata.fallback_source', 'deezer')
+            from core.metadata.registry import experimental_source_rejected, METADATA_SOURCE_PRIORITY
+            if experimental_source_rejected(config_manager.get('metadata.fallback_source')):
+                config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -4097,13 +4102,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
-        from core.metadata.registry import is_jiosaavn_enabled
+        from core.metadata.registry import experimental_source_rejected, experimental_status
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
-            if service != 'jiosaavn' or is_jiosaavn_enabled()
+            if not experimental_source_rejected(service)
         }
-        result['_experimental'] = {'jiosaavn_enabled': is_jiosaavn_enabled()}
+        result['_experimental'] = experimental_status()
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -8928,11 +8933,18 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         logger.debug(f"Discogs client resolution failed: {e}")
 
     az = None
+    js = None
     try:
         from core.metadata.registry import get_amazon_client
         az = get_amazon_client()
     except Exception as e:
         logger.debug(f"Amazon client resolution failed: {e}")
+    try:
+        from core.metadata.registry import get_jiosaavn_client, is_source_enabled
+        if is_source_enabled('jiosaavn'):
+            js = get_jiosaavn_client()
+    except Exception as e:
+        logger.debug(f"JioSaavn client resolution failed: {e}")
 
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
@@ -8948,6 +8960,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         itunes_client=it,
         discogs_client=dc,
         amazon_client=az,
+        jiosaavn_client=js,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -8969,6 +8982,14 @@ def get_artist_detail(artist_id):
     try:
         source_param = (request.args.get('source', '') or '').strip().lower()
         artist_name_arg = (request.args.get('name', '') or '').strip()
+        if source_param:
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(source_param):
+                return jsonify({
+                    "success": False,
+                    "error": f"{source_param} is not enabled",
+                }), 503
+
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -9743,6 +9764,137 @@ def get_artist_discography(artist_id):
     except Exception as e:
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
+
+_ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
+_ART_OPTIONS_CACHE_LOCK = threading.Lock()
+_ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+
+
+@app.route('/api/album/<album_id>/art-options', methods=['GET'])
+def get_album_art_options(album_id):
+    """Candidate cover-art images for an album, for the art picker (read-only).
+
+    Gathers from Cover Art Archive (a front cover per edition across the release-group) +
+    Deezer/iTunes/Spotify/AudioDB (their single validated best), fanned out concurrently. ``artist``
+    and ``album`` come from the caller — the enhanced library view already has them. Results are
+    cached briefly since the gather is several slow external calls.
+    """
+    try:
+        artist = (request.args.get('artist') or '').strip()
+        album = (request.args.get('album') or '').strip()
+        if not artist or not album:
+            return jsonify({"error": "artist and album query params are required"}), 400
+
+        cache_key = (artist.lower(), album.lower())
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                return jsonify({"album_id": album_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
+
+        metadata = {}
+        try:
+            from core.metadata import album_mbid_cache
+            from core.metadata.source import normalize_album_cache_key
+            mbid = album_mbid_cache.lookup(normalize_album_cache_key(album), artist.lower())
+            if mbid:
+                metadata["musicbrainz_release_id"] = mbid
+        except Exception as exc:
+            logger.debug("[art-options] release-MBID resolve failed: %s", exc)
+
+        from core.metadata.art_lookup import gather_album_art_candidates
+        candidates = gather_album_art_candidates(artist, album, metadata)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
+        return jsonify({"album_id": album_id, "count": len(candidates), "candidates": candidates})
+    except Exception as e:
+        logger.error("[art-options] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _derive_album_folder(db, album_id):
+    """The album's folder on disk, from the first resolvable track path (Docker-safe). None if no
+    track file can be located (e.g. paths aren't mapped in this container)."""
+    try:
+        tracks = db.get_tracks_by_album(int(album_id))
+    except Exception:
+        return None
+    for tr in (tracks or []):
+        raw = getattr(tr, 'file_path', None)
+        if not raw:
+            continue
+        resolved = _resolve_library_file_path(raw) or raw
+        if resolved and os.path.exists(resolved):
+            return os.path.dirname(resolved)
+    return None
+
+
+def _overwrite_cover_jpg(url, folder):
+    """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
+    existing-file guard in download_cover_art doesn't apply). Returns True on success."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
+    with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+        data = resp.read()
+    if not data:
+        return False
+    with open(os.path.join(folder, "cover.jpg"), "wb") as handle:
+        handle.write(data)
+    return True
+
+
+@app.route('/api/album/<album_id>/art', methods=['POST'])
+def set_album_art(album_id):
+    """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
+    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
+    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        if not db.set_album_thumb_url(album_id, url):
+            return jsonify({"error": "Album not found"}), 404
+
+        # Invalidate the cached options for this album's art so a re-open reflects the change.
+        cover_written = False
+        folder = _derive_album_folder(db, album_id)
+        if folder:
+            try:
+                cover_written = _overwrite_cover_jpg(url, folder)
+                logger.info("[set-art] album %s cover.jpg -> %s", album_id, folder)
+            except Exception as exc:
+                logger.warning("[set-art] cover.jpg write failed for album %s: %s", album_id, exc)
+        else:
+            logger.info("[set-art] no on-disk folder for album %s — DB art updated only", album_id)
+
+        return jsonify({"success": True, "album_id": album_id, "thumb_url": url,
+                        "cover_written": cover_written})
+    except Exception as e:
+        logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/library/export/m3u', methods=['GET'])
+def export_library_m3u():
+    """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
+    try:
+        db = get_database()
+        entries = db.get_all_library_tracks_for_export()
+        from core.library.m3u_export import build_m3u
+        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        return Response(
+            content,
+            mimetype='audio/x-mpegurl',
+            headers={'Content-Disposition': 'attachment; filename="soulsync_library.m3u"'},
+        )
+    except Exception as e:
+        logger.error("[library-m3u] export failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
@@ -16494,6 +16646,23 @@ def _db_update_artist_callback(artist_name, success, details, album_count, track
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
     global _db_update_automation_id
+    # Library extras: keep the whole-library M3U in sync with the DB. Every scan type (deep,
+    # incremental, full refresh) converges on this callback, so writing here keeps it current.
+    # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
+    # guarded — a playlist write must never disturb scan completion.
+    try:
+        if config_manager.get('m3u_export.library_enabled', False):
+            from core.library.m3u_export import write_library_m3u
+            _entries = get_database().get_all_library_tracks_for_export()
+            _dest = (config_manager.get('m3u_export.library_path', '') or '').strip() \
+                or config_manager.get('soulseek.transfer_path', './Transfer')
+            _dest = docker_resolve_path(_dest)
+            _base = config_manager.get('m3u_export.entry_base_path', '') or ''
+            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            if _written:
+                logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+    except Exception as _m3u_err:
+        logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -21513,7 +21682,38 @@ def get_spotify_album_tracks(album_id):
             logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
     # Source override: when user clicked from a specific search tab
-    source_override = request.args.get('source', '')
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            album_data = client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+            tracks = album_data.get('tracks', [])
+            if not isinstance(tracks, list):
+                tracks = []
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+            })
+        except Exception as e:
+            logger.error(f"JioSaavn album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
 
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
@@ -21587,6 +21787,27 @@ def get_spotify_album_tracks(album_id):
 @app.route('/api/spotify/track/<track_id>', methods=['GET'])
 def get_spotify_track(track_id):
     """Fetches full track details including album data for a specific track."""
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            track_data = client.get_track_details(track_id)
+            if not track_data:
+                return jsonify({"error": "Track not found"}), 404
+            return jsonify(track_data)
+        except Exception as e:
+            logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     # Try Hydrabase first when active and track name provided
     if _is_hydrabase_active():
         track_name = request.args.get('name', '')
@@ -27584,10 +27805,9 @@ def select_my_service_credential():
 # Selectable metadata sources (mirrors the Settings <select>).
 def _qs_metadata_sources():
     """Metadata sources offered in Connections / quick-switch UI."""
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
     sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
-    if is_jiosaavn_enabled():
-        sources.append('jiosaavn')
+    sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
@@ -27674,13 +27894,12 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            if src == 'jiosaavn':
-                from core.metadata.registry import is_jiosaavn_enabled
-                if not is_jiosaavn_enabled():
-                    return jsonify({
-                        'success': False,
-                        'error': 'JioSaavn is not enabled — turn it on under Settings → Advanced → Experimental.',
-                    }), 400
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(src):
+                return jsonify({
+                    'success': False,
+                    'error': f'{src} is not enabled — turn it on under Settings → Advanced → Experimental.',
+                }), 400
             # Same composite the Settings save uses: 'spotify_free' is stored as
             # fallback_source='spotify' + metadata.spotify_free=true.
             if src == 'spotify_free':
@@ -29129,9 +29348,10 @@ def watchlist_artist_config(artist_id):
             _watchlist_meta_sources = (
                 'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
             )
-            from core.metadata.registry import is_jiosaavn_enabled
-            if is_jiosaavn_enabled():
-                _watchlist_meta_sources = _watchlist_meta_sources + ('jiosaavn',)
+            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+            )
             if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the

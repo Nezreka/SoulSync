@@ -6692,6 +6692,25 @@
                                 </div>
 
                                 <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="library-m3u-enabled">
+                                        Auto-generate a whole-library M3U (updates on every scan)
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>
+                                    Keeps a single <code>soulsync_library.m3u</code> of your entire library, rewritten after every scan (deep, incremental, or full refresh) so it stays in sync with the database.
+                                </div>
+                                <div class="form-group">
+                                    <label>Whole-library M3U output folder:</label>
+                                    <input type="text" id="library-m3u-path" class="form-input" placeholder="leave empty for the Transfer folder">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="help-text setting-help-body" hidden>
+                                        Where the whole-library M3U is written. Leave empty to use your Transfer folder.
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
                                     <label>Sync mode:</label>
                                     <select id="playlist-sync-mode" class="form-select">
                                         <option value="replace">Replace — recreate the playlist each sync (default)</option>
