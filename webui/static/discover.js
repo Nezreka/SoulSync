@@ -6738,7 +6738,9 @@ function _artWebEnsurePanel() {
     if (p) return p;
     const container = document.getElementById('artist-web-container');
     if (!container) return null;
-    if (!container.style.position) container.style.position = 'relative';
+    // NOTE: do NOT set container.style.position — .artist-map-container is `position:fixed; inset:0`
+    // in CSS, which already anchors this absolute panel. An inline `relative` would clobber the CSS
+    // `fixed`, collapse the fullscreen overlay, and displace the sigma canvas (clicks freeze).
     p = document.createElement('div');
     p.id = 'artweb-panel';
     p.style.cssText = 'position:absolute;top:66px;right:14px;width:300px;max-height:calc(100% - 88px);'
