@@ -453,7 +453,28 @@ def gather_album_art_candidates(
     are injectable for tests; in production they default to the live clients. Never raises — a failing
     source is simply absent from the list.
     """
+    from concurrent.futures import ThreadPoolExecutor
+
     meta = metadata or {}
+    if lookup is None:
+        lookup = build_art_lookup(artist or "", album or "", meta)
+    srcs = [s for s in _PICKER_SINGLE_SOURCES if is_art_source_available(s)]
+
+    def _safe(fn, *a):
+        try:
+            return fn(*a)
+        except Exception as exc:
+            logger.debug("[art] picker task failed: %s", exc)
+            return None
+
+    # Fan out the CAA/MusicBrainz path and every single-cover source concurrently — a picker click
+    # shouldn't wait for them in series (that was ~15s of sequential network). Total ≈ slowest call.
+    with ThreadPoolExecutor(max_workers=len(srcs) + 1) as ex:
+        caa_future = None if caa_candidates is not None else ex.submit(_safe, _caa_candidates_for, meta)
+        single_futures = [(s, ex.submit(_safe, lookup, s)) for s in srcs]
+        caa = caa_candidates if caa_candidates is not None else (caa_future.result() or [])
+        singles = [(s, f.result()) for s, f in single_futures]
+
     candidates: List[dict] = []
     seen: set = set()
 
@@ -463,18 +484,9 @@ def gather_album_art_candidates(
         seen.add(url)
         candidates.append({"url": url, "source": source, "type": kind, "front": front})
 
-    caa = caa_candidates if caa_candidates is not None else _caa_candidates_for(meta)
-    for c in caa:
+    for c in caa or []:
         _add(c.get("url"), "caa", c.get("type", "Front"), c.get("front", False))
-
-    if lookup is None:
-        lookup = build_art_lookup(artist or "", album or "", meta)
-    for src in _PICKER_SINGLE_SOURCES:
-        if not is_art_source_available(src):
-            continue
-        try:
-            _add(lookup(src), src)
-        except Exception as exc:
-            logger.debug("[art] %s picker lookup failed: %s", src, exc)
+    for s, url in singles:
+        _add(url, s)
 
     return candidates
