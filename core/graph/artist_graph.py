@@ -12,6 +12,7 @@ ID — done once in memory here (a SQL self-join over 75k rows is too slow).
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # Row shape from similar_artists:
@@ -91,4 +92,72 @@ def build_taste_map(
         for norm_name, label in node_label.items()
     ]
     edges = [{"source": a, "target": b, "weight": w} for (a, b), w in edge_weight.items()]
+    return {"nodes": nodes, "edges": edges}
+
+
+def _primary_genre(genres: Any) -> Optional[str]:
+    """First genre from an artist's ``genres`` value (a JSON array string, or already a list)."""
+    if not genres:
+        return None
+    arr = genres
+    if isinstance(genres, str):
+        try:
+            arr = json.loads(genres)
+        except (ValueError, TypeError):
+            return None
+    if isinstance(arr, list) and arr:
+        first = str(arr[0]).strip()
+        return first or None
+    return None
+
+
+def build_genre_grouped_map(
+    artists: Iterable[Tuple[Any, Any, Any]],
+    rows: Iterable[Row],
+    owned_names: set,
+    artist_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, List[dict]]:
+    """Genre-anchored Taste Map: EVERY library artist as a node, grouped by genre + wired by similarity.
+
+    ``artists`` is ``(name, genres, thumb_url)`` for every library artist (``genres`` a JSON-array
+    string). This includes the ~3.8k artists that have no owned<->owned similarity edge — they'd be
+    dropped by :func:`build_taste_map` — by attaching each artist to a per-genre "hub" node so a
+    force layout clusters them by genre. Similarity edges (owned<->owned) are reused verbatim.
+
+    Node kinds:
+      * ``artist`` — ``{key, label, kind, owned, primary_genre, popularity, thumb}``
+      * ``genre``  — ``{key, label, kind, genre}`` (one hub per distinct primary genre)
+    Edge kinds: ``similarity`` (from :func:`build_taste_map`) and ``membership`` (artist -> its genre).
+    """
+    base = build_taste_map(rows, owned_names, artist_meta)
+    pop_by = {n["key"]: n.get("popularity", 0) for n in base["nodes"]}
+
+    nodes: List[dict] = []
+    edges: List[dict] = [{**e, "kind": "similarity"} for e in base["edges"]]
+    seen_artist: set = set()
+    genre_labels: Dict[str, str] = {}
+
+    for name, genres, thumb in artists:
+        key = _norm(name)
+        if not key or key in seen_artist:
+            continue
+        seen_artist.add(key)
+        prim = _primary_genre(genres)
+        nodes.append({
+            "key": key,
+            "label": name,
+            "kind": "artist",
+            "owned": True,
+            "primary_genre": prim,
+            "popularity": pop_by.get(key, 0),
+            "thumb": thumb,
+        })
+        if prim:
+            gkey = "genre::" + prim.strip().lower()
+            genre_labels.setdefault(gkey, prim)
+            edges.append({"source": key, "target": gkey, "weight": 1, "kind": "membership"})
+
+    for gkey, glabel in genre_labels.items():
+        nodes.append({"key": gkey, "label": glabel, "kind": "genre", "genre": glabel})
+
     return {"nodes": nodes, "edges": edges}
