@@ -6765,8 +6765,11 @@ function _artWebShowArtist(node) {
     const color = a.baseColor || '#1db954';
     const conn = g.degree(node);
     const pop = Math.max(0, Math.min(100, Math.round(a.popularity || 0)));
+    // These are all owned library artists, so the detail page is the library route:
+    // /artist-detail/library/<db id>. (a.source is the server name e.g. 'plex' — NOT a valid
+    // detail source, which is what produced the broken /artist-detail/plex/... link.)
     const detailPath = (a.artistId != null && typeof buildArtistDetailPath === 'function')
-        ? buildArtistDetailPath(a.artistId, a.source) : null;
+        ? buildArtistDetailPath(a.artistId, 'library') : null;
 
     document.getElementById('artweb-panel-body').innerHTML = `
         <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
