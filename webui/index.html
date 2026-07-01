@@ -3183,6 +3183,41 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
+                    <!-- Artist Web Hub (sigma.js similarity graph — sibling of the canvas Artist Map) -->
+                    <div class="artmap-hub">
+                        <div class="artmap-hub-bg"></div>
+                        <div class="artmap-hub-content">
+                            <div class="artmap-hub-header">
+                                <svg class="artmap-hub-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg>
+                                <div>
+                                    <h2 class="artmap-hub-title">Artist Web</h2>
+                                    <p class="artmap-hub-subtitle">Your library as an interactive similarity graph</p>
+                                </div>
+                            </div>
+                            <div class="artmap-hub-cards">
+                                <div class="artmap-hub-card" onclick="openArtistWeb()">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><circle cx="7" cy="8" r="1.5"/><circle cx="17" cy="8" r="1.5"/><circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><line x1="12" y1="12" x2="7" y2="8"/><line x1="12" y1="12" x2="17" y2="8"/><line x1="12" y1="12" x2="8" y2="16"/><line x1="12" y1="12" x2="16" y2="16"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Taste Map</h3><p>Every artist in your library, wired together by similarity</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Artist Web (fullscreen sigma graph, hidden by default) -->
+                    <div class="artist-map-container" id="artist-web-container" style="display:none;">
+                        <div class="artist-map-toolbar">
+                            <div class="artmap-nav-left">
+                                <button class="artmap-back" onclick="closeArtistWeb()" title="Back to Discover (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+                                <div class="artmap-brand"><svg class="artmap-brand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg><span class="artmap-brand-text">Artist Web</span></div>
+                                <div class="artmap-stats" id="artist-web-stats"></div>
+                            </div>
+                        </div>
+                        <div class="artmap-content-row">
+                            <div id="artist-web-canvas" style="flex:1; min-width:0; min-height:0;"></div>
+                        </div>
+                    </div>
+
                     <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
                          calmer/greener at left (safe) and wilder/redder at right (obscure). Syncs with
                          Settings → Discovery. -->
@@ -8804,6 +8839,11 @@
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
+         graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
+    <script src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/graphology-library/dist/graphology-library.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
     <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>

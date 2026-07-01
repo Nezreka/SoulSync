@@ -6365,6 +6365,78 @@ function _artMapPanelArtistById(id) {
     _artMapEmitRipple(n.x, n.y, n._hue);
 }
 
+// ===== Artist Web — sigma.js similarity graph (sibling of the canvas Artist Map) ===============
+// Scaffold: opens the pseudo-page (same takeover as openArtistMap), fetches /api/graph/library, and
+// does a BASIC sigma render with random node positions. The real work — forceAtlas2 layout, reducer
+// styling, hover/expand interactions — gets built on top of this.
+let _artistWeb = { sigma: null, graph: null, onKey: null };
+
+async function openArtistWeb() {
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+
+    // Pseudo-page takeover: hide the other discover sections, show the web container.
+    document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
+        el._prevDisplay = el.style.display;
+        el.style.display = 'none';
+    });
+    container.style.display = 'flex';
+
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
+
+    // Esc closes (mirrors the artist map).
+    _artistWeb.onKey = (e) => { if (e.key === 'Escape') closeArtistWeb(); };
+    document.addEventListener('keydown', _artistWeb.onKey);
+
+    // Resolve the CDN globals. graphology's UMD default export IS the Graph class.
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph || !window.Sigma) {
+        host.innerHTML = '<div style="padding:24px;color:#f88">graphology / sigma didn\'t load — check the CDN &lt;script&gt; tags.</div>';
+        return;
+    }
+
+    try {
+        const data = await (await fetch('/api/graph/library')).json();
+        const nodes = data.nodes || [], edges = data.edges || [];
+        if (statsEl) statsEl.textContent = `${nodes.length} artists · ${edges.length} connections`;
+
+        const graph = new Graph();
+        nodes.forEach(n => {
+            graph.addNode(n.key, {
+                label: n.label,
+                x: Math.random(), y: Math.random(),          // scaffold — real layout (forceAtlas2) next
+                size: 3 + Math.sqrt(n.popularity || 0) / 2,
+                color: '#1db954',
+            });
+        });
+        edges.forEach(e => {
+            if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+                graph.addEdge(e.source, e.target, { weight: e.weight, size: 0.6, color: 'rgba(255,255,255,0.08)' });
+            }
+        });
+
+        host.innerHTML = '';
+        if (_artistWeb.sigma) _artistWeb.sigma.kill();
+        _artistWeb.graph = graph;
+        _artistWeb.sigma = new window.Sigma(graph, host, { renderLabels: true });
+    } catch (err) {
+        console.error('[Artist Web] load failed', err);
+        host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
+    }
+}
+
+function closeArtistWeb() {
+    const container = document.getElementById('artist-web-container');
+    if (container) container.style.display = 'none';
+    document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
+        if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
+    });
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
+}
+
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (!container) return;
