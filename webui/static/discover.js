@@ -6507,11 +6507,11 @@ async function openArtistWeb() {
                 const membership = e.kind === 'membership';
                 // Edge inherits its artist endpoint's cluster color (low alpha) -> the glowing web look.
                 const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
-                const alpha = membership ? 0.07 : 0.22;   // membership faintly tints clusters; similarity brighter
                 graph.addEdge(e.source, e.target, {
                     weight: e.weight,
                     size: membership ? 0.35 : 0.7,
-                    color: _webHexToRgba(base, alpha),
+                    color: _webHexToRgba(base, 0.22),
+                    kind: e.kind,   // 'membership' (layout-only, never drawn) | 'similarity' (drawn)
                 });
             }
         });
@@ -6617,6 +6617,10 @@ function _artWebNodeReducer(node, data) {
 function _artWebEdgeReducer(edge, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
+    // Membership edges are a layout scaffold only. Drawing them starbursts big hubs (1000+ faint
+    // spokes overlapping accumulate to solid white), so never render them — clustering is already
+    // conveyed by node position + color. Only similarity edges are drawn.
+    if (data.kind === 'membership') { res.hidden = true; return res; }
     const g = _artistWeb.graph;
     if (st.genreFilter && g) {
         const sg = g.getNodeAttribute(g.source(edge), 'genre');
