@@ -95,20 +95,28 @@ def build_taste_map(
     return {"nodes": nodes, "edges": edges}
 
 
-def _primary_genre(genres: Any) -> Optional[str]:
-    """First genre from an artist's ``genres`` value (a JSON array string, or already a list)."""
+def _genre_list(genres: Any) -> List[str]:
+    """An artist's genres as a clean list of strings (from a JSON array string, or already a list)."""
     if not genres:
-        return None
+        return []
     arr = genres
     if isinstance(genres, str):
         try:
             arr = json.loads(genres)
         except (ValueError, TypeError):
-            return None
-    if isinstance(arr, list) and arr:
-        first = str(arr[0]).strip()
-        return first or None
-    return None
+            return []
+    if not isinstance(arr, list):
+        return []
+    return [s for s in (str(g).strip() for g in arr) if s]
+
+
+def _primary_genre(genres: Any) -> Optional[str]:
+    """First genre from an artist's ``genres`` value."""
+    gl = _genre_list(genres)
+    return gl[0] if gl else None
+
+
+OTHER_GENRE = "Other"
 
 
 def build_genre_grouped_map(
@@ -116,22 +124,39 @@ def build_genre_grouped_map(
     rows: Iterable[Row],
     owned_names: set,
     artist_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+    max_hubs: int = 16,
 ) -> Dict[str, List[dict]]:
     """Genre-anchored Taste Map: EVERY library artist as a node, grouped by genre + wired by similarity.
 
     ``artists`` is ``(name, genres, thumb_url[, id, source])`` for every library artist (``genres`` a
     JSON-array string; ``id``/``source`` optional, used by the frontend to link to the artist page).
     This includes the ~3.8k artists that have no owned<->owned similarity edge — they'd be dropped by
-    :func:`build_taste_map` — by attaching each artist to a per-genre "hub" node so a force layout
-    clusters them by genre. Similarity edges (owned<->owned) are reused verbatim.
+    :func:`build_taste_map` — by attaching each artist to a genre "hub" node so a force layout clusters
+    them into legible islands. Similarity edges (owned<->owned) are reused verbatim.
+
+    To keep the layout readable we DON'T make a hub per distinct genre (there are ~436, mostly tiny).
+    Instead we keep the ``max_hubs`` most common primary genres as anchors and route every artist to
+    the first of *its* genres that is an anchor (so a "Lo-fi house / Rap/Hip Hop" artist lands in the
+    Rap/Hip Hop island even though its primary is the rare one). Anything with genres but no anchor
+    match falls into a single ``Other`` hub; artists with no genre at all get no hub.
 
     Node kinds:
-      * ``artist`` — ``{key, label, kind, owned, primary_genre, popularity, thumb, id, source}``
-      * ``genre``  — ``{key, label, kind, genre}`` (one hub per distinct primary genre)
-    Edge kinds: ``similarity`` (from :func:`build_taste_map`) and ``membership`` (artist -> its genre).
+      * ``artist`` — ``{key, label, kind, owned, primary_genre, cluster, popularity, thumb, id, source}``
+        where ``cluster`` is the anchor genre it was grouped under (drives color + membership).
+      * ``genre``  — ``{key, label, kind, genre}`` (one hub per anchor genre, plus ``Other``)
+    Edge kinds: ``similarity`` (from :func:`build_taste_map`) and ``membership`` (artist -> its cluster).
     """
     base = build_taste_map(rows, owned_names, artist_meta)
     pop_by = {n["key"]: n.get("popularity", 0) for n in base["nodes"]}
+    artists = list(artists)
+
+    # Pass 1: rank primary genres by frequency; the top ``max_hubs`` become the anchor set.
+    prim_counts: Dict[str, int] = {}
+    for row in artists:
+        prim = _primary_genre(row[1])
+        if prim:
+            prim_counts[prim] = prim_counts.get(prim, 0) + 1
+    anchor_set = set(sorted(prim_counts, key=lambda g: (-prim_counts[g], g))[:max_hubs])
 
     nodes: List[dict] = []
     edges: List[dict] = [{**e, "kind": "similarity"} for e in base["edges"]]
@@ -146,21 +171,29 @@ def build_genre_grouped_map(
         if not key or key in seen_artist:
             continue
         seen_artist.add(key)
-        prim = _primary_genre(genres)
+
+        gl = _genre_list(genres)
+        prim = gl[0] if gl else None
+        # Cluster = first of the artist's genres that's an anchor; else Other (only if it has genres).
+        cluster = next((g for g in gl if g in anchor_set), None)
+        if cluster is None and gl:
+            cluster = OTHER_GENRE
+
         nodes.append({
             "key": key,
             "label": name,
             "kind": "artist",
             "owned": True,
             "primary_genre": prim,
+            "cluster": cluster,
             "popularity": pop_by.get(key, 0),
             "thumb": thumb,
             "id": artist_id,
             "source": source,
         })
-        if prim:
-            gkey = "genre::" + prim.strip().lower()
-            genre_labels.setdefault(gkey, prim)
+        if cluster:
+            gkey = "genre::" + cluster.strip().lower()
+            genre_labels.setdefault(gkey, cluster)
             edges.append({"source": key, "target": gkey, "weight": 1, "kind": "membership"})
 
     for gkey, glabel in genre_labels.items():
