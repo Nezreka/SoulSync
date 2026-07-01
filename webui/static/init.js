@@ -2919,13 +2919,14 @@ function toggleNavSection(label) {
 }
 function restoreNavSections() {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { return; }
+    try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { saved = {}; }
     const path = window.location.pathname;
     document.querySelectorAll('.nav-section-label').forEach(label => {
-        if (!saved[label.dataset.section]) return;
-        // Keep the section that contains the current page expanded, so the active item is never hidden.
-        const hasCurrent = _navSectionItems(label).some(it => it.getAttribute('href') === path);
-        if (!hasCurrent) _setNavSectionCollapsed(label, true);
+        // Collapsed by default to save space; expanded only when the user explicitly expanded it.
+        let collapsed = saved[label.dataset.section] !== false;
+        // Never collapse the section holding the current page — the active item must stay visible.
+        if (_navSectionItems(label).some(it => it.getAttribute('href') === path)) collapsed = false;
+        _setNavSectionCollapsed(label, collapsed);
     });
 }
 
