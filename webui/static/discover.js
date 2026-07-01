@@ -6392,7 +6392,7 @@ let _artistWeb = {
     // Cursor force-field: nodes near the pointer nudge away, then spring back to their layout home.
     cursorFX: true,
     cursor: null, cursorActive: false, cursorRAF: null,
-    cursorRadius: 0, cursorPush: 0, home: null,
+    cursorRadius: 0, cursorPush: 0, home: null, hoverNode: null,
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6745,12 +6745,21 @@ function _artWebCursorTick() {
     const active = st.cursorActive && st.cursor;
     const cx = active ? st.cursor.x : 0, cy = active ? st.cursor.y : 0;
     const R = st.cursorRadius, PUSH = st.cursorPush, EASE = 0.2;
+
+    // The node nearest the pointer is exempt from the push (stays home) so it never flees your click;
+    // everything else parts around it.
+    let nearest = null;
+    if (active) {
+        let nd = Infinity;
+        g.forEachNode((k, a) => { const dx = a.x - cx, dy = a.y - cy, d = dx * dx + dy * dy; if (d < nd) { nd = d; nearest = k; } });
+    }
+
     let moving = false;
     g.forEachNode((k, a) => {
         const h = home[k];
         if (!h) return;
         let tx = h.x, ty = h.y;
-        if (active) {
+        if (active && k !== nearest && k !== st.hoverNode) {
             const dx = h.x - cx, dy = h.y - cy;          // measure from HOME → stable, no feedback jitter
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < R && dist > 0.0001) {
@@ -6964,6 +6973,7 @@ function artWebFitToView() {
 // ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
 function _artWebHover(node) {
     const st = _artistWeb;
+    st.hoverNode = node || null;   // pin the hovered node so the force-field can't shove it out of reach
     if (!st.sigma || st.pathMode) return;   // no hover-dim while tracing a path
     if (node) {
         const set = new Set([node]);
