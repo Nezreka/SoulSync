@@ -6366,10 +6366,36 @@ function _artMapPanelArtistById(id) {
 }
 
 // ===== Artist Web — sigma.js similarity graph (sibling of the canvas Artist Map) ===============
-// Scaffold: opens the pseudo-page (same takeover as openArtistMap), fetches /api/graph/library, and
-// does a BASIC sigma render with random node positions. The real work — forceAtlas2 layout, reducer
-// styling, hover/expand interactions — gets built on top of this.
-let _artistWeb = { sigma: null, graph: null, onKey: null };
+// A genre-clustered force graph of the whole library. Interaction is driven by REDUCERS: we keep a
+// little UI state here (search matches, hovered/selected node) and node/edge reducers read it to
+// recolor/dim per frame — the graph data is never mutated for visual state.
+let _artistWeb = {
+    sigma: null, graph: null, onKey: null,
+    genreColor: null,                 // (genre) -> color, set at render
+    index: [],                        // [{key,label}] artist nodes, for client-side search
+    searchMatch: null,                // Set<key> of search hits, or null when search is empty
+};
+
+// White pill label (black text, 10px padding) — custom sigma labelRenderer, per Boulder's spec.
+function _webDrawLabel(context, data, settings) {
+    if (!data.label) return;
+    const size = settings.labelSize || 12;
+    const font = settings.labelFont || 'Arial';
+    const weight = settings.labelWeight || 'normal';
+    context.font = `${weight} ${size}px ${font}`;
+    const pad = 10;
+    const tw = context.measureText(data.label).width;
+    const boxW = tw + pad * 2, boxH = size + pad * 2;
+    const x = Math.round(data.x + data.size + 4);   // sits just right of the node
+    const y = Math.round(data.y - boxH / 2);
+    context.fillStyle = '#ffffff';
+    if (context.roundRect) { context.beginPath(); context.roundRect(x, y, boxW, boxH, 6); context.fill(); }
+    else context.fillRect(x, y, boxW, boxH);
+    context.fillStyle = '#000000';
+    context.textBaseline = 'middle';
+    context.textAlign = 'left';
+    context.fillText(data.label, x + pad, data.y);
+}
 
 // Distinct colors for the most-common genres; everything in the long tail falls back to gray.
 const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
@@ -6420,6 +6446,9 @@ async function openArtistWeb() {
         if (statsEl) statsEl.textContent = `${c.artists ?? nodes.length} artists · ${c.genres ?? 0} genres · ${simCount} similarity links`;
 
         const { color: genreColor, counts: genreCounts } = _webGenreColorMap(nodes);
+        _artistWeb.genreColor = genreColor;
+        _artistWeb.index = [];
+        _artistWeb.searchMatch = null;
 
         const graph = new Graph();
         nodes.forEach(n => {
@@ -6430,16 +6459,22 @@ async function openArtistWeb() {
                     x: Math.random(), y: Math.random(),
                     size: 6 + Math.sqrt(members) * 1.5,      // hub size scales with how many artists it holds
                     color: genreColor(n.genre),
+                    baseColor: genreColor(n.genre),           // reducers restore from this
                     forceLabel: true,                         // genre hubs are always labeled
-                    isGenre: true,
+                    kind: 'genre', genre: n.genre,
                 });
             } else {
+                const color = genreColor(n.primary_genre);
                 graph.addNode(n.key, {
                     label: n.label,
                     x: Math.random(), y: Math.random(),      // random seed; forceAtlas2 places them below
                     size: 2 + Math.sqrt(n.popularity || 0) / 3,
-                    color: genreColor(n.primary_genre),
+                    color: color, baseColor: color,
+                    kind: 'artist', genre: n.primary_genre,
+                    popularity: n.popularity || 0, thumb: n.thumb || null,
+                    artistId: n.id != null ? n.id : null, source: n.source || null,
                 });
+                _artistWeb.index.push({ key: n.key, label: n.label });
             }
         });
         edges.forEach(e => {
@@ -6467,6 +6502,10 @@ async function openArtistWeb() {
         _artistWeb.sigma = new window.Sigma(graph, host, {
             renderLabels: true,
             labelRenderedSizeThreshold: 20,   // only large nodes (genre hubs) label by default; artists on zoom
+            labelRenderer: _webDrawLabel,     // white pill labels
+            // Reducers: recolor/dim per frame from UI state (search now; hover/select later). Data is untouched.
+            nodeReducer: (node, data) => _artWebNodeReducer(node, data),
+            edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
         });
     } catch (err) {
         console.error('[Artist Web] load failed', err);
@@ -6482,7 +6521,119 @@ function closeArtistWeb() {
     });
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
 }
+
+// ---- Artist Web reducers: the single place UI state turns into per-frame styling -------------
+const _WEB_DIM_NODE = 'rgba(120,120,130,0.12)';
+const _WEB_DIM_EDGE = 'rgba(255,255,255,0.02)';
+
+function _artWebNodeReducer(node, data) {
+    const st = _artistWeb;
+    const res = Object.assign({}, data);
+    // Search: matched nodes pop (labeled), everything else dims out.
+    if (st.searchMatch) {
+        if (st.searchMatch.has(node)) {
+            res.color = data.baseColor || data.color;
+            res.forceLabel = true;
+            res.zIndex = 2;
+        } else {
+            res.color = _WEB_DIM_NODE;
+            res.label = '';
+        }
+    }
+    return res;
+}
+
+function _artWebEdgeReducer(edge, data) {
+    const st = _artistWeb;
+    const res = Object.assign({}, data);
+    if (st.searchMatch && _artistWeb.graph) {
+        const g = _artistWeb.graph;
+        const s = g.source(edge), t = g.target(edge);
+        if (!(st.searchMatch.has(s) || st.searchMatch.has(t))) res.color = _WEB_DIM_EDGE;
+    }
+    return res;
+}
+
+// ---- Artist Web search: client-side over loaded artist nodes (instant), mirrors Artist Map UX --
+function artWebSearch(query) {
+    const results = document.getElementById('artist-web-search-results');
+    if (!results) return;
+    const q = (query || '').trim().toLowerCase();
+
+    if (q.length < 2) {
+        results.style.display = 'none';
+        results.innerHTML = '';
+        _artistWeb.searchMatch = null;
+        if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+        return;
+    }
+
+    const hits = _artistWeb.index.filter(n => n.label.toLowerCase().includes(q));
+    // Dim everything that isn't a hit.
+    _artistWeb.searchMatch = new Set(hits.map(n => n.key));
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+
+    results.style.display = 'block';
+    if (!hits.length) {
+        results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">No artists found</div>';
+        return;
+    }
+    results.innerHTML = hits.slice(0, 8).map(n =>
+        `<div class="artist-map-search-item" onclick="artWebFocusNode('${escapeForInlineJs(n.key)}')">
+            <span class="artist-map-search-type similar">○</span>
+            ${escapeHtml(n.label)}
+            <span class="artist-map-search-go">Focus &rarr;</span>
+        </div>`
+    ).join('');
+}
+
+// Enter key → jump to the first match.
+function artWebSearchEnter() {
+    if (_artistWeb.searchMatch && _artistWeb.searchMatch.size) {
+        artWebFocusNode(_artistWeb.searchMatch.values().next().value);
+    }
+}
+
+// Center the camera on a node and pulse it (also closes the dropdown).
+function artWebFocusNode(key) {
+    const sig = _artistWeb.sigma, graph = _artistWeb.graph;
+    if (!sig || !graph || !graph.hasNode(key)) return;
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+
+    // Isolate this node as the single search match so it stands out.
+    _artistWeb.searchMatch = new Set([key]);
+    sig.refresh();
+
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) {
+        sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+    }
+}
+
+// ---- Artist Web camera controls ---------------------------------------------------------------
+function artWebZoom(factor) {
+    if (!_artistWeb.sigma) return;
+    const cam = _artistWeb.sigma.getCamera();
+    cam.animate({ ratio: cam.ratio * factor }, { duration: 250 });
+}
+
+function artWebFitToView() {
+    if (!_artistWeb.sigma) return;
+    _artistWeb.sigma.getCamera().animatedReset({ duration: 400 });
+    // Clear any search focus so the whole web is visible again.
+    const input = document.getElementById('artist-web-search');
+    if (input) input.value = '';
+    _artistWeb.searchMatch = null;
+    _artistWeb.sigma.refresh();
+}
+
+// Filter-by-genre lives in a later phase; stubs keep the toolbar buttons inert-but-safe for now.
+function artWebToggleFilter() { /* Phase C */ }
+function artWebFilterGenreList() { /* Phase C */ }
 
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
