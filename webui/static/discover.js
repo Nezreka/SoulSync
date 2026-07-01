@@ -6774,8 +6774,8 @@ function _artWebShowArtist(node) {
     document.getElementById('artweb-panel-body').innerHTML = `
         <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
         <div style="text-align:center;">
-            <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
-                ${a.thumb ? `<img src="${escapeHtml(a.thumb)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '<span style="font-size:34px;opacity:0.5;">&#9835;</span>'}
+            <div id="artweb-avatar" style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                <span style="font-size:34px;opacity:0.5;">&#9835;</span>
             </div>
             <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
             ${a.genre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.genre)}</div>` : ''}
@@ -6792,6 +6792,21 @@ function _artWebShowArtist(node) {
             ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
         </div>`;
     p.style.display = 'flex';
+
+    // Resolve the artist photo via the app's image resolver (thumb_url is a Plex path, not loadable
+    // directly). Guarded by selectedKey so a fast re-click doesn't drop the wrong image in.
+    if (a.artistId != null) {
+        const forNode = node;
+        fetch(`/api/artist/${encodeURIComponent(a.artistId)}/image?name=${encodeURIComponent(a.label || '')}`)
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.success || !d.image_url) return;
+                if (_artistWeb.selectedKey !== forNode) return;   // selection moved on
+                const el = document.getElementById('artweb-avatar');
+                if (el) el.innerHTML = `<img src="${escapeHtml(d.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">`;
+            })
+            .catch(() => {});
+    }
 }
 
 function _artWebShowGenre(node) {
