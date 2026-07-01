@@ -1327,6 +1327,82 @@ async function handleWishlistDownloadNow() {
     registerArtistDownload(artist, album, virtualPlaylistId, albumType);
 }
 
+/** Playlist-modal ids that should NOT receive playlist-folder wishlist provenance. */
+const MODAL_ALBUM_WISHLIST_PREFIXES = [
+    'artist_album_', 'discover_album_', 'enhanced_search_album_', 'seasonal_album_',
+    'spotify_library_', 'beatport_release_', 'discover_cache_',
+];
+const MODAL_SINGLE_TRACK_WISHLIST_PREFIXES = [
+    'enhanced_search_track_', 'gsearch_track_',
+];
+const MODAL_NON_PLAYLIST_WISHLIST_PREFIXES = [
+    'issue_download_', 'library_redownload_', 'redownload_',
+];
+
+function isModalPlaylistWishlistContext(playlistId) {
+    const id = String(playlistId || '');
+    if (!id || id === 'wishlist' || id.startsWith('wishlist_')) {
+        return false;
+    }
+    if (MODAL_ALBUM_WISHLIST_PREFIXES.some((p) => id.startsWith(p))) {
+        return false;
+    }
+    if (MODAL_SINGLE_TRACK_WISHLIST_PREFIXES.some((p) => id.startsWith(p))) {
+        return false;
+    }
+    if (MODAL_NON_PLAYLIST_WISHLIST_PREFIXES.some((p) => id.startsWith(p))) {
+        return false;
+    }
+    return true;
+}
+
+function resolveModalWishlistSourceType(playlistId) {
+    return isModalPlaylistWishlistContext(playlistId) ? 'playlist' : 'album';
+}
+
+/**
+ * Build source_context for wishlist rows added from a download modal.
+ * Playlist modals include playlist_id/name so wishlist requeue can use playlist-folder layout.
+ */
+function buildModalWishlistSourceContext(playlistId, process, trackAlbum, trackArtist, trackAlbumType) {
+    const timestamp = new Date().toISOString();
+    if (!isModalPlaylistWishlistContext(playlistId)) {
+        return {
+            album_name: trackAlbum?.name,
+            artist_name: trackArtist?.name,
+            album_type: trackAlbumType || 'album',
+            added_from: 'download_modal',
+            timestamp,
+        };
+    }
+
+    const playlistName = process.playlist?.name || process.playlistName || 'Unknown Playlist';
+    const organizeSource = typeof playlistOrganizeSourceForRef === 'function'
+        ? playlistOrganizeSourceForRef(playlistId)
+        : 'spotify';
+    const resolveRef = typeof normalizePlaylistOrganizeRef === 'function'
+        ? normalizePlaylistOrganizeRef(playlistId, organizeSource)
+        : playlistId;
+    const organizeEnabled = typeof isPlaylistOrganizeEnabled === 'function'
+        ? isPlaylistOrganizeEnabled(playlistId)
+        : false;
+
+    const context = {
+        playlist_name: playlistName,
+        playlist_id: resolveRef,
+        playlist_source: organizeSource,
+        added_from: 'download_modal',
+        timestamp,
+    };
+    if (organizeEnabled) {
+        context.organize_by_playlist = true;
+    }
+    if (resolveRef !== playlistId) {
+        context.ui_playlist_ref = playlistId;
+    }
+    return context;
+}
+
 /**
  * Add all tracks from any download modal to the wishlist
  * Universal handler for all modal types (artist albums, playlists, YouTube, Tidal, etc.)
@@ -1363,8 +1439,12 @@ async function addModalTracksToWishlist(playlistId) {
     // not for playlists, so we must NOT use it as a blanket default.
     const processArtist = process.artist || null;
     const album = process.album || process.playlist || { name: 'Playlist', id: playlistId };
+    const wishlistSourceType = resolveModalWishlistSourceType(playlistId);
 
-    console.log(`🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist (process artist: ${processArtist?.name || 'per-track'})`);
+    console.log(
+        `🔄 Adding ${tracks.length} tracks from "${album.name}" to wishlist `
+        + `(source: ${wishlistSourceType}, process artist: ${processArtist?.name || 'per-track'})`
+    );
 
     // Disable the button to prevent double-clicks
     const wishlistBtn = document.getElementById(`add-to-wishlist-btn-${playlistId}`);
@@ -1407,7 +1487,7 @@ async function addModalTracksToWishlist(playlistId) {
                         }
                     });
                 } else {
-                    formattedArtists = [{ name: artist.name }];
+                    formattedArtists = [{ name: 'Unknown Artist' }];
                 }
 
                 const formattedTrack = {
@@ -1460,6 +1540,14 @@ async function addModalTracksToWishlist(playlistId) {
                     trackArtist = { name: 'Unknown Artist', id: null };
                 }
 
+                const sourceContext = buildModalWishlistSourceContext(
+                    playlistId,
+                    process,
+                    trackAlbum,
+                    trackArtist,
+                    trackAlbumType,
+                );
+
                 const response = await fetch('/api/add-album-to-wishlist', {
                     method: 'POST',
                     headers: {
@@ -1469,12 +1557,8 @@ async function addModalTracksToWishlist(playlistId) {
                         track: formattedTrack,
                         artist: trackArtist,
                         album: trackAlbum,
-                        source_type: 'album',
-                        source_context: {
-                            album_name: trackAlbum.name,
-                            artist_name: trackArtist.name,
-                            album_type: trackAlbumType
-                        }
+                        source_type: wishlistSourceType,
+                        source_context: sourceContext,
                     })
                 });
 
