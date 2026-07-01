@@ -3227,6 +3227,11 @@
                                     <button class="artweb-lens-btn active" data-lens="genre" onclick="artWebSetLens('genre')">Genre</button>
                                     <button class="artweb-lens-btn" data-lens="community" onclick="artWebSetLens('community')">Communities</button>
                                 </div>
+                                <div class="artweb-lens-toggle" title="Size nodes by">
+                                    <button class="artweb-lens-btn artweb-size-btn active" data-size="popularity" onclick="artWebSetSize('popularity')">Popular</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="connections" onclick="artWebSetSize('connections')">Links</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="influence" onclick="artWebSetSize('influence')" title="Betweenness — who bridges the network">Influence</button>
+                                </div>
                                 <button class="artmap-tool-btn" id="artweb-path-btn" onclick="artWebTogglePathMode()" title="Trace how two artists connect">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M7 6h6a4 4 0 0 1 4 4v4" stroke-dasharray="1 3"/></svg>
                                     <span>Path</span>
