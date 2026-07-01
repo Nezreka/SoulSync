@@ -6382,20 +6382,21 @@ let _artistWeb = {
     genreCounts: null,                // {genre: artistCount} for the filter sidebar
 };
 
-// White pill label (black text, 10px padding) — custom sigma labelRenderer, per Boulder's spec.
+// White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
+// rendered size, so a small artist gets a small tag and a big genre hub gets a big one.
 function _webDrawLabel(context, data, settings) {
     if (!data.label) return;
-    const size = settings.labelSize || 12;
     const font = settings.labelFont || 'Arial';
     const weight = settings.labelWeight || 'normal';
-    context.font = `${weight} ${size}px ${font}`;
-    const pad = 10;
+    const fontSize = Math.max(8, Math.min(18, (data.size || 6) * 0.85));   // scale to node size, clamped
+    const pad = Math.max(3, Math.round(fontSize * 0.45));
+    context.font = `${weight} ${fontSize}px ${font}`;
     const tw = context.measureText(data.label).width;
-    const boxW = tw + pad * 2, boxH = size + pad * 2;
+    const boxW = tw + pad * 2, boxH = fontSize + pad * 2;
     const x = Math.round(data.x + data.size + 4);   // sits just right of the node
     const y = Math.round(data.y - boxH / 2);
     context.fillStyle = '#ffffff';
-    if (context.roundRect) { context.beginPath(); context.roundRect(x, y, boxW, boxH, 6); context.fill(); }
+    if (context.roundRect) { context.beginPath(); context.roundRect(x, y, boxW, boxH, 5); context.fill(); }
     else context.fillRect(x, y, boxW, boxH);
     context.fillStyle = '#000000';
     context.textBaseline = 'middle';
