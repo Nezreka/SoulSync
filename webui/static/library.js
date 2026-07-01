@@ -9296,6 +9296,7 @@ async function openArtistExportModal(initialScope) {
                 '<div class="arec-actions">' +
                     '<button class="arec-btn" id="wlx-copy">Copy</button>' +
                     '<button class="arec-btn" id="wlx-download">Download</button>' +
+                    '<button class="arec-btn arec-btn-m3u" id="wlx-m3u" style="display:none;">Download M3U</button>' +
                 '</div>' +
             '</div>' +
             '<div class="arec-body" id="wlx-body"><div class="arec-loading">Building export…</div></div>' +
@@ -9309,6 +9310,9 @@ async function openArtistExportModal(initialScope) {
     const applyScopeUI = () => {
         // "library counts" only applies to the library roster.
         document.getElementById('wlx-contents-wrap').style.display = (scope === 'library') ? '' : 'none';
+        // The library M3U (a track-level export) only makes sense for the library, not the watchlist.
+        const m3uBtn = document.getElementById('wlx-m3u');
+        if (m3uBtn) m3uBtn.style.display = (scope === 'library') ? '' : 'none';
         if (scope !== 'library') {
             contents = false;
             const cb = document.getElementById('wlx-contents');
@@ -9370,6 +9374,16 @@ async function openArtistExportModal(initialScope) {
     document.getElementById('wlx-links').addEventListener('change', (e) => { links = e.target.checked; refresh(); });
     document.getElementById('wlx-contents').addEventListener('change', (e) => { contents = e.target.checked; refresh(); });
     document.getElementById('wlx-copy').onclick = () => _arecCopy(content, 'Export copied');
+    document.getElementById('wlx-m3u').onclick = () => {
+        // A whole-library track playlist — built fresh by the server, independent of the roster export.
+        const a = document.createElement('a');
+        a.href = '/api/library/export/m3u';
+        a.download = 'soulsync_library.m3u';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (typeof showToast === 'function') showToast('Building library M3U…', 'info');
+    };
     document.getElementById('wlx-download').onclick = () => {
         const ext = fmt;
         const mime = fmt === 'json' ? 'application/json' : (fmt === 'csv' ? 'text/csv' : 'text/plain');

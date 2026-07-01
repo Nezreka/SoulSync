@@ -6964,6 +6964,45 @@ class MusicDatabase:
             logger.error(f"Error getting tracks for album {album_id}: {e}")
             return []
 
+    def get_all_library_tracks_for_export(self) -> List[Dict[str, Any]]:
+        """All library tracks that have a file, for playlist/M3U export.
+
+        Returns ``[{path, title, artist, duration}]`` ordered by artist / album / track number.
+        ``duration`` is converted to SECONDS here (the schema stores milliseconds)."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.file_path AS path, t.title AS title, ar.name AS artist,
+                       t.duration AS duration_ms, t.track_number AS track_number
+                FROM tracks t
+                LEFT JOIN artists ar ON ar.id = t.artist_id
+                LEFT JOIN albums al ON al.id = t.album_id
+                WHERE t.file_path IS NOT NULL AND t.file_path != ''
+                ORDER BY ar.name COLLATE NOCASE, al.title COLLATE NOCASE, t.track_number
+            """)
+            out: List[Dict[str, Any]] = []
+            for row in cursor.fetchall():
+                dur_ms = row['duration_ms']
+                try:
+                    secs = int(int(dur_ms) / 1000) if dur_ms else 0
+                except (TypeError, ValueError):
+                    secs = 0
+                out.append({
+                    'path': row['path'],
+                    'title': row['title'],
+                    'artist': row['artist'],
+                    'duration': secs,
+                })
+            return out
+        except Exception as e:
+            logger.error(f"Error enumerating tracks for export: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
     def get_album_by_spotify_album_id(self, spotify_album_id: str) -> Optional[DatabaseAlbum]:
         """Fetch a single album by its (enriched) Spotify album id, or None.
 
