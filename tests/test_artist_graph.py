@@ -83,6 +83,26 @@ def test_grouped_carries_id_and_source_when_provided():
     assert b["id"] is None and b["source"] is None       # 3-tuple still works (back-compat)
 
 
+def test_grouped_consolidates_to_top_hubs_and_reroutes_via_secondary():
+    # Rock x3, Pop x2 are the top-2; Jazz/Blues are long-tail. max_hubs=2.
+    artists = [
+        ("A", '["Rock"]', None), ("B", '["Rock"]', None), ("C", '["Rock"]', None),
+        ("D", '["Pop"]', None), ("E", '["Pop"]', None),
+        ("F", '["Lofi", "Rock"]', None),   # primary Lofi (tail) -> reroute to Rock (anchor)
+        ("G", '["Jazz"]', None),           # no anchor in list -> Other
+    ]
+    g = build_genre_grouped_map(artists, [], {"a", "b", "c", "d", "e", "f", "gg", "g"}, max_hubs=2)
+    hubs = {n["genre"] for n in g["nodes"] if n["kind"] == "genre"}
+    assert hubs == {"Rock", "Pop", "Other"}                 # only top-2 anchors + Other
+    clusters = {n["key"]: n["cluster"] for n in g["nodes"] if n["kind"] == "artist"}
+    assert clusters["f"] == "Rock"                          # rerouted via its secondary genre
+    assert clusters["g"] == "Other"                         # long-tail-only -> Other
+    assert clusters["a"] == "Rock" and clusters["d"] == "Pop"
+    # F's true primary is preserved even though it clustered under Rock.
+    f = next(n for n in g["nodes"] if n["key"] == "f")
+    assert f["primary_genre"] == "Lofi"
+
+
 def test_grouped_shares_genre_hub_and_dedups_artists():
     artists = [("A", '["Rock"]', None), ("B", '["Rock"]', None), ("A", '["Rock"]', None)]  # dup A
     g = build_genre_grouped_map(artists, [], {"a", "b"})

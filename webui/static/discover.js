@@ -6418,13 +6418,14 @@ function _webHexToRgba(hex, alpha) {
     return `rgba(${r},${g},${b},${alpha})`;
 }
 
-// Map the top-N genres (by artist count) to palette colors; return a lookup + the per-genre counts.
+// Map each genre CLUSTER (anchor) to a palette color; "Other" + unknowns are gray. Return the lookup
+// + per-cluster counts (used for hub sizing + the filter list).
 function _webGenreColorMap(nodes) {
     const counts = {};
-    nodes.forEach(n => { if (n.kind === 'artist' && n.primary_genre) counts[n.primary_genre] = (counts[n.primary_genre] || 0) + 1; });
-    const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, WEB_PALETTE.length);
-    const map = {};
-    top.forEach((g, i) => { map[g] = WEB_PALETTE[i]; });
+    nodes.forEach(n => { if (n.kind === 'artist' && n.cluster) counts[n.cluster] = (counts[n.cluster] || 0) + 1; });
+    const ranked = Object.keys(counts).filter(g => g !== 'Other').sort((a, b) => counts[b] - counts[a]);
+    const map = { 'Other': WEB_GENRE_FALLBACK };
+    ranked.forEach((g, i) => { if (i < WEB_PALETTE.length) map[g] = WEB_PALETTE[i]; });
     return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
 }
 
@@ -6487,13 +6488,14 @@ async function openArtistWeb() {
                     kind: 'genre', genre: n.genre,
                 });
             } else {
-                const color = genreColor(n.primary_genre);
+                const color = genreColor(n.cluster);            // color by the cluster it grouped under
                 graph.addNode(n.key, {
                     label: n.label,
                     x: Math.random(), y: Math.random(),      // random seed; forceAtlas2 places them below
                     size: 2 + Math.sqrt(n.popularity || 0) / 3,
                     color: color, baseColor: color,
-                    kind: 'artist', genre: n.primary_genre,
+                    kind: 'artist', genre: n.cluster,          // `genre` = cluster (drives filter + edge color)
+                    primaryGenre: n.primary_genre,             // true genre, shown in the panel
                     popularity: n.popularity || 0, thumb: n.thumb || null,
                     artistId: n.id != null ? n.id : null, source: n.source || null,
                 });
@@ -6514,10 +6516,25 @@ async function openArtistWeb() {
             }
         });
 
-        // Settle the random blob into genre clusters. Barnes-Hut keeps the ~5k-node layout tractable.
+        // Settle the random blob into SEPARATED genre islands. LinLog + outbound-attraction pushes
+        // clusters apart (vs one round hairball); Barnes-Hut keeps the ~5k-node layout tractable.
+        // Tuning knobs if it drifts: gravity (higher = tighter to center), scalingRatio (higher =
+        // more space between islands), iterations (more = more settled).
         const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
         if (fa2) {
-            fa2.assign(graph, { iterations: 250, settings: { ...fa2.inferSettings(graph), barnesHutOptimize: true } });
+            fa2.assign(graph, {
+                iterations: 400,
+                settings: {
+                    ...fa2.inferSettings(graph),
+                    barnesHutOptimize: true,
+                    linLogMode: true,                      // clusters separate into islands
+                    outboundAttractionDistribution: true,  // spread the hubs out
+                    adjustSizes: true,                     // don't overlap node circles
+                    gravity: 1.2,
+                    scalingRatio: 3,
+                    slowDown: 4,                           // stability with linLog
+                },
+            });
         } else {
             console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions');
         }
@@ -6788,7 +6805,7 @@ function _artWebShowArtist(node) {
                 <span style="font-size:34px;opacity:0.5;">&#9835;</span>
             </div>
             <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
-            ${a.genre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.genre)}</div>` : ''}
+            ${a.primaryGenre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.primaryGenre)}</div>` : ''}
         </div>
         <div style="display:flex;gap:8px;margin-top:16px;">
             ${_miniStat('Popularity', pop, 270)}
