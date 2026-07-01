@@ -69753,16 +69753,32 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     border-color: rgb(var(--accent-rgb)) !important;
 }
 
-/* Sidebar nav section labels (grouping: Find / Acquire / Library / Extras / System) */
+/* Sidebar nav section headers — collapsible groups (Find / Get / Library / Tools / System) */
 .nav-section-label {
-    padding: 16px 18px 5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 15px 18px 5px;
+    background: none;
+    border: none;
+    font-family: inherit;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.09em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.30);
+    cursor: pointer;
     user-select: none;
-    pointer-events: none;
-    white-space: nowrap;
-    overflow: hidden;
+    text-align: left;
+    transition: color .15s ease;
 }
+.nav-section-label:hover { color: rgba(255, 255, 255, 0.6); }
+.nav-section-chevron {
+    flex: 0 0 auto;
+    opacity: 0.45;
+    transition: transform .2s ease, opacity .15s ease;
+}
+.nav-section-label:hover .nav-section-chevron { opacity: 0.8; }
+.nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
+.nav-item-hidden { display: none !important; }
