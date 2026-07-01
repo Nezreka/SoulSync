@@ -6453,6 +6453,17 @@ function _webGenreColorMap(nodes) {
     return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
 }
 
+// The top-N most popular artists — always labeled + a size tier, so they anchor the map as landmarks.
+const WEB_STAR_COUNT = 20;
+const WEB_STAR_SIZE = 8;
+function _webTopArtists(artistNodes, n) {
+    return new Set(artistNodes
+        .filter(a => (a.popularity || 0) > 0)
+        .sort((x, y) => (y.popularity || 0) - (x.popularity || 0))
+        .slice(0, n)
+        .map(a => a.key));
+}
+
 async function openArtistWeb() {
     const container = document.getElementById('artist-web-container');
     if (!container) return;
@@ -6562,7 +6573,7 @@ function _artWebApplySize(mode) {
     g.forEachNode((k, a) => {
         if (a.kind !== 'artist') return;   // genre hubs stay sized by member count
         const size = 2 + Math.sqrt(metric(k, a) / max) * 3.5;   // 2..5.5 — matches the original build scale
-        g.setNodeAttribute(k, 'size', size);
+        g.setNodeAttribute(k, 'size', a.isStar ? Math.max(size, 6) : size);   // stars stay landmark-sized
     });
     if (st.sigma) st.sigma.refresh();
 }
@@ -6624,6 +6635,7 @@ function _artWebRenderLens() {
 function _artWebBuildGenre(data, Graph) {
     const nodes = data.nodes || [], edges = data.edges || [];
     const { color: colorOf, counts } = _webGenreColorMap(nodes);
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
     const graph = new Graph();
     nodes.forEach(n => {
         if (n.kind === 'genre') {
@@ -6636,13 +6648,15 @@ function _artWebBuildGenre(data, Graph) {
             });
         } else {
             const color = colorOf(n.cluster);
+            const star = stars.has(n.key);
             graph.addNode(n.key, {
                 label: n.label, x: Math.random(), y: Math.random(),
-                size: 2 + Math.sqrt(n.popularity || 0) / 3,
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3,
                 color: color, baseColor: color,
                 kind: 'artist', genre: n.cluster, primaryGenre: n.primary_genre,
                 popularity: n.popularity || 0, thumb: n.thumb || null,
                 artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star, forceLabel: star,   // top artists are always-labeled landmarks
             });
             _artistWeb.index.push({ key: n.key, label: n.label });
         }
@@ -6672,17 +6686,20 @@ function _artWebBuildCommunity(data, Graph) {
     const simEdges = edges.filter(e => e.kind === 'similarity');
     const artistByKey = {};
     nodes.forEach(n => { if (n.kind === 'artist') artistByKey[n.key] = n; });
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
 
     const graph = new Graph();
     // Only artists with at least one similarity link — the discoverable "taste" core.
     simEdges.forEach(e => [e.source, e.target].forEach(k => {
         if (!graph.hasNode(k) && artistByKey[k]) {
             const n = artistByKey[k];
+            const star = stars.has(k);
             graph.addNode(k, {
                 label: n.label, x: Math.random(), y: Math.random(),
-                size: 2 + Math.sqrt(n.popularity || 0) / 3, kind: 'artist',
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3, kind: 'artist',
                 primaryGenre: n.primary_genre, popularity: n.popularity || 0, thumb: n.thumb || null,
                 artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star,
             });
         }
     }));
@@ -6717,8 +6734,10 @@ function _artWebBuildCommunity(data, Graph) {
         const rep = repOf[cid];
         const color = colorByRep[rep] || WEB_GENRE_FALLBACK;
         const isRep = graph.getNodeAttribute(k, '_rep') === true;
+        const isStar = graph.getNodeAttribute(k, 'isStar') === true;
         graph.mergeNodeAttributes(k, {
-            color, baseColor: color, genre: rep, forceLabel: isRep,
+            color, baseColor: color, genre: rep,
+            forceLabel: isRep || isStar,   // community leaders AND top artists are labeled landmarks
             size: isRep ? Math.max(8, graph.getNodeAttribute(k, 'size')) : graph.getNodeAttribute(k, 'size'),
         });
         _artistWeb.index.push({ key: k, label: graph.getNodeAttribute(k, 'label') });
