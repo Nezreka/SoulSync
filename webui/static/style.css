@@ -69753,31 +69753,35 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     border-color: rgb(var(--accent-rgb)) !important;
 }
 
-/* Sidebar nav section headers — collapsible groups (Find / Get / Library / Tools / System) */
+/* Sidebar nav section headers — share the .nav-button chassis (height/width/radius) so they read as
+   the same family as Dashboard, distinguished by the uppercase label + collapse chevron. */
 .nav-section-label {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    width: calc(100% - 20px);
-    margin: 7px 10px 3px;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.035);
-    border: none;
-    border-radius: 8px;
+    box-sizing: border-box;
+    width: 216px;
+    height: 44px;
+    margin: 8px 0 1px;
+    padding: 0 14px 0 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid transparent;
+    border-radius: 12px;
     font-family: inherit;
-    font-size: 10.5px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.52);
+    color: rgba(255, 255, 255, 0.5);
     cursor: pointer;
     user-select: none;
     text-align: left;
-    transition: background .15s ease, color .15s ease;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
 }
 .nav-section-label:hover {
     background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.06);
     color: rgba(255, 255, 255, 0.92);
 }
 .nav-section-chevron {
