@@ -474,7 +474,9 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
 
     The legacy library import only sees downloaded/scanned files. A user can have
     wishlist tracks for artists with zero local files; those still need lib2 rows
-    so the Lidarr-style UI can show them as monitored + missing.
+    so the Lidarr-style UI can show the concrete songs as monitored + missing.
+    Importantly, a wishlisted song must not make the whole artist monitored:
+    artist-level monitoring is the watchlist's job.
     """
     if not _table_exists(cursor, "wishlist_tracks"):
         return 0
@@ -522,7 +524,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
             UPDATE lib2_artists
                SET spotify_id = COALESCE(NULLIF(spotify_id, ''), ?),
                    image_url = COALESCE(NULLIF(image_url, ''), image_url),
-                   monitored = 1,
+                   monitored = 0,
                    updated_at = CURRENT_TIMESTAMP
              WHERE id = ?
             """,
@@ -556,7 +558,6 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
                        image_url=COALESCE(NULLIF(image_url, ''), ?),
                        track_count=COALESCE(track_count, ?),
                        expected_track_count=MAX(COALESCE(expected_track_count, 0), ?),
-                       monitored=1,
                        updated_at=CURRENT_TIMESTAMP
                  WHERE id=?
                 """,
@@ -569,7 +570,7 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
                 INSERT INTO lib2_albums(primary_artist_id, title, album_type,
                     release_date, year, spotify_id, image_url, track_count,
                     expected_track_count, monitored)
-                VALUES(?,?,?,?,?,?,?,?,?,1)
+                VALUES(?,?,?,?,?,?,?,?,?,0)
                 """,
                 album_fields,
             )
@@ -650,9 +651,12 @@ def seed_wishlist_tracks(cursor, resolver: _ArtistResolver) -> int:
             spotify_id = _artist_spotify_from_payload(artist_payload)
             if spotify_id:
                 cursor.execute(
-                    "UPDATE lib2_artists SET spotify_id=COALESCE(NULLIF(spotify_id, ''), ?) WHERE id=?",
+                    "UPDATE lib2_artists SET spotify_id=COALESCE(NULLIF(spotify_id, ''), ?), "
+                    "monitored=0 WHERE id=?",
                     (spotify_id, aid),
                 )
+            else:
+                cursor.execute("UPDATE lib2_artists SET monitored=0 WHERE id=?", (aid,))
             cursor.execute(
                 "INSERT OR IGNORE INTO lib2_track_artists(track_id, artist_id, role, position) "
                 "VALUES(?,?,?,?)",
@@ -673,12 +677,16 @@ def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
     Monitoring is the same concept as the existing systems:
     - an artist is monitored iff it's on the **watchlist** (matched by external id
       or name),
-    - a track is monitored iff it's on the **wishlist** (matched by Spotify id),
-    - an album is monitored iff any of its tracks is.
+    - a track found on the **wishlist** is monitored (matched by Spotify id).
 
-    So a freshly imported, fully-downloaded library starts mostly *un*monitored
-    (nothing is "wanted"), and toggling a monitor mirrors back to watchlist/wishlist
-    (see api/library_v2.py). No-op when those tables are absent (unit-test DBs).
+    Album/single monitor flags are explicit Library-v2 state. Toggling an album
+    in the UI still mirrors its tracks to the wishlist, but importing an existing
+    wishlisted song does not turn the parent release into an album-level monitor.
+
+    Artist flags follow the watchlist table. Track flags are Library-v2 state:
+    wishlist rows turn tracks on, but successful downloads or explicit user
+    choices must not be turned off just because the wishlist row disappeared.
+    No-op when those tables are absent (unit-test DBs).
     """
     # Artists ← watchlist
     if _table_exists(cursor, "watchlist_artists"):
@@ -697,9 +705,9 @@ def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
         for nm in names:
             cursor.execute("UPDATE lib2_artists SET monitored=1 WHERE lower(name)=?", (nm,))
 
-    # Tracks ← wishlist; albums ← any monitored track
+    # Tracks ← wishlist. Do not reset non-wishlist tracks: monitored also powers
+    # Lidarr-style upgrade checks after a file has already been downloaded.
     if _table_exists(cursor, "wishlist_tracks"):
-        cursor.execute("UPDATE lib2_tracks SET monitored=0")
         wanted = {
             str(r[0]).split("::", 1)[0]
             for r in cursor.execute(
@@ -709,14 +717,9 @@ def apply_monitoring_from_watchlist_wishlist(cursor) -> None:
         }
         for sid in wanted:
             cursor.execute("UPDATE lib2_tracks SET monitored=1 WHERE spotify_id=?", (sid,))
-        cursor.execute("UPDATE lib2_albums SET monitored=0")
-        cursor.execute(
-            "UPDATE lib2_albums SET monitored=1 WHERE id IN "
-            "(SELECT DISTINCT album_id FROM lib2_tracks WHERE monitored=1)"
-        )
         # NOTE: an artist is monitored ONLY when on the watchlist — never just
         # because one of its tracks is wishlisted. A wishlisted song marks the
-        # *track* (and its album) as wanted, not the whole artist.
+        # *track* as wanted, not the whole artist.
 
 
 __all__ = [

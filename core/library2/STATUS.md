@@ -10,7 +10,9 @@ tests `tests/library2/`.
 - **DB is the source of truth**; every file's location is stored per file.
 - **Monitoring mirrors the existing systems**: artist monitor ⇄ **watchlist**;
   album/single/track monitor ⇄ **wishlist** (internal DB calls). An artist is
-  monitored **only** when on the watchlist (a wishlisted song marks the *track*).
+  monitored **only** when on the watchlist. Importing a wishlisted song marks the
+  *track* only; it must not auto-monitor the artist or parent release. Track
+  monitoring must survive successful downloads when it is needed for upgrades.
 - **Reuse SoulSync functions**, don't reinvent (search/download/tag/repair/quality).
 
 ## DONE & verified (in Docker against a real ~285-track library)
@@ -34,7 +36,12 @@ tests `tests/library2/`.
 
 ### Missing tracks
 - `completeness.py`: fetch canonical tracklist (Spotify id → Deezer search), cache in
-  `lib2_albums.tracklist_json`; album detail shows missing tracks **with real titles**.
+  `lib2_albums.tracklist_json`; provider tracklist entries are persisted as fileless
+  `lib2_tracks` rows, so missing tracks have real titles **and monitor buttons**.
+- Album/single/track monitor toggles mirror missing rows into the legacy Wishlist even
+  when the row has no Spotify id, using stable `lib2-track:<id>` keys. Wishlist
+  `source_info` carries the assigned Library-v2 quality profile so the next worker can
+  honor per-item quality settings.
 
 ### Interactive Search → download  (Phase B)
 - Reuses `/api/search` (multi-source, configured priorities) + `/api/download`.
@@ -56,18 +63,30 @@ tests `tests/library2/`.
   downloads so later cleanup/repair jobs respect the override.
 
 ## TODO (next)
-1. **Phase D M2 — auto-upgrade**: wire `upgrade_candidate` tracks to a "Search upgrades"
-   action + a periodic scheduler (profiles already carry `repair_job_id='quality_upgrade'`).
-2. **Refresh & Scan should read file tags** (sample_rate/bit_depth, present-tags) into
+1. **Profile-scoped monitoring/import**: the importer currently reads all
+   `watchlist_artists` / `wishlist_tracks` rows it can see. Before multi-profile use,
+   pass the active `profile_id` into the import/sync path so Library v2 does not
+   leak another profile's wanted/monitored state into the current view.
+2. **Phase D M2 — lib2 auto-upgrade**: `upgrade_candidate` is evaluated on read only
+   for monitored tracks, and assigning an `until_top` profile auto-monitors the
+   affected tracks and queues missing/upgrade-candidate rows into the Wishlist. The
+   existing `quality_upgrade` worker still scans the legacy `tracks` table and global
+   Settings quality profile; add a lib2-aware scan path that consumes the stored
+   Wishlist `source_info.quality_profile_id` / per track `quality_profile_id`, especially
+   `upgrade_policy='until_top'`.
+3. **Refresh & Scan should read file tags** (sample_rate/bit_depth, present-tags) into
    `lib2_track_files` so hi-res quality targets + metadata gaps are exact (currently the
    importer only stores format+bitrate; eval falls back to format-based).
-3. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
+4. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
    `write-tags-batch`), Metadata Gap Fill / Fix Unknown Artist / Album Tag Consistency
    (scoped `RepairJob.scan`), Manual Import from staging (`core/imports/`), all → `lib2`.
-4. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`), Manage
+5. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`), Manage
    Tracks, Edit, Delete (with confirm) — the toolbar buttons are placeholders today.
-5. **Auto-link new downloads into lib2** (today: download via pipeline → Refresh/import).
-6. **Optional**: in-library quality-profile editor (ranked_targets) instead of only
+6. **Auto-link new downloads into lib2** (today: download via pipeline → Refresh/import).
+7. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
+   independently from track-level wishlist monitoring, add provenance/mode columns
+   instead of deriving parent release flags from child tracks.
+8. **Optional**: in-library quality-profile editor (ranked_targets) instead of only
    Settings + sync; cleanup job that consumes `lib2_manual_skips`.
 
 ## Run / verify (no Node/Flask locally — use Docker)

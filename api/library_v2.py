@@ -244,47 +244,113 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         except Exception as e:  # noqa: BLE001
             logger.debug("watchlist mirror failed (artist %s): %s", artist_id, e)
 
+    def _wishlist_profile_id() -> int:
+        """The legacy wishlist/watchlist profile is the active SoulSync user profile."""
+        return _profile()
+
     def _track_wishlist_payload(conn, track_id: int) -> Optional[Dict[str, Any]]:
         t = conn.execute(
-            """SELECT t.spotify_id, t.title, al.title album_title, al.spotify_id album_spotify,
-                      al.track_count, al.album_type,
+            """SELECT t.id AS track_id, t.spotify_id, t.title, t.track_number,
+                      t.disc_number, t.duration, t.quality_profile_id,
+                      al.id AS album_id, al.title album_title, al.spotify_id album_spotify,
+                      al.track_count, al.expected_track_count, al.album_type,
+                      qp.name AS quality_profile_name, qp.upgrade_policy,
+                      qp.ranked_targets,
                       EXISTS(SELECT 1 FROM lib2_track_files tf
                              WHERE tf.track_id = t.id AND tf.path IS NOT NULL AND tf.path <> '') has_file
                FROM lib2_tracks t JOIN lib2_albums al ON al.id = t.album_id
+               LEFT JOIN lib2_quality_profiles qp ON qp.id = t.quality_profile_id
                WHERE t.id = ?""",
             (track_id,),
         ).fetchone()
-        if not t or not t["spotify_id"]:
+        if not t:
             return None
         artists = [r["name"] for r in conn.execute(
             """SELECT ar.name FROM lib2_track_artists ta JOIN lib2_artists ar ON ar.id = ta.artist_id
                WHERE ta.track_id = ? ORDER BY ta.position""", (track_id,))]
+        source_track_id = t["spotify_id"] or f"lib2-track:{t['track_id']}"
+        source_album_id = t["album_spotify"] or f"lib2-album:{t['album_id']}"
+        file_row = conn.execute(
+            "SELECT * FROM lib2_track_files WHERE track_id = ? ORDER BY id LIMIT 1",
+            (track_id,),
+        ).fetchone()
+        file_info = dict(file_row) if file_row else None
+        profile_info = {
+            "id": t["quality_profile_id"],
+            "name": t["quality_profile_name"] or "",
+            "upgrade_policy": t["upgrade_policy"] or "acceptable",
+            "ranked_targets": t["ranked_targets"] or "[]",
+        }
+
+        should_queue = not bool(t["has_file"])
+        if t["has_file"] and profile_info["upgrade_policy"] == "until_top":
+            try:
+                from core.library2.quality_eval import evaluate_file, profile_targets
+                targets, upgrade_policy = profile_targets(profile_info)
+                should_queue = bool(evaluate_file(file_info, targets, upgrade_policy)["upgrade_candidate"])
+            except Exception as e:  # noqa: BLE001
+                logger.debug("quality-profile upgrade check failed (track %s): %s", track_id, e)
+                should_queue = False
+
         return {
-            "id": t["spotify_id"], "name": t["title"],
+            "id": source_track_id, "name": t["title"],
+            "provider": "spotify" if t["spotify_id"] else "library_v2",
+            "source": "library_v2",
             "artists": [{"name": n} for n in artists],
-            "album": {"name": t["album_title"], "id": t["album_spotify"],
-                      "total_tracks": t["track_count"] or 1},
+            "album": {
+                "name": t["album_title"],
+                "id": source_album_id,
+                "total_tracks": t["expected_track_count"] or t["track_count"] or 1,
+                "album_type": t["album_type"],
+            },
+            "track_number": t["track_number"],
+            "disc_number": t["disc_number"],
+            "duration_ms": t["duration"],
+            "quality_profile_id": t["quality_profile_id"],
+            "quality_profile": profile_info,
             "_album_type": t["album_type"],
             "_has_file": bool(t["has_file"]),
+            "_should_queue": should_queue,
+            "_source_album_id": source_album_id,
+            "_source_info": {
+                "source": "library_v2",
+                "lib2_track_id": t["track_id"],
+                "lib2_album_id": t["album_id"],
+                "quality_profile_id": t["quality_profile_id"],
+                "quality_profile_name": profile_info["name"],
+                "upgrade_policy": profile_info["upgrade_policy"],
+                "upgrade_check": bool(t["has_file"]),
+            },
         }
 
     def _mirror_tracks_wishlist(db, conn, track_ids: List[int], monitored: bool) -> int:
         mirrored = 0
+        profile_id = _wishlist_profile_id()
         for tid in track_ids:
             payload = _track_wishlist_payload(conn, tid)
             if not payload:
                 continue
             stype = "single" if payload.pop("_album_type", "") == "single" else "album"
-            has_file = bool(payload.pop("_has_file", False))
+            should_queue = bool(payload.pop("_should_queue", False))
+            source_album_id = payload.pop("_source_album_id", "")
+            source_info = payload.pop("_source_info", {})
+            payload.pop("_has_file", None)
             try:
                 if monitored:
-                    if has_file:
+                    if not should_queue:
                         continue
-                    db.add_to_wishlist(payload, source_type=stype, user_initiated=True,
-                                       profile_id=_profile())
+                    ok = db.add_to_wishlist(payload, source_type=stype,
+                                            source_info=source_info,
+                                            user_initiated=True,
+                                            profile_id=profile_id)
                 else:
-                    db.remove_from_wishlist(payload["id"], _profile())
-                mirrored += 1
+                    ok = db.remove_from_wishlist(payload["id"], profile_id)
+                    if source_album_id:
+                        ok = db.remove_from_wishlist(
+                            f"{payload['id']}::{source_album_id}", profile_id
+                        ) or ok
+                if ok:
+                    mirrored += 1
             except Exception as e:  # noqa: BLE001
                 logger.debug("wishlist mirror failed (track %s): %s", tid, e)
         return mirrored
@@ -338,7 +404,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             return jsonify({"success": False, "error": "Unknown entity"}), 400
         profile_id = int((request.json or {}).get("quality_profile_id") or 0)
         cascade = bool((request.json or {}).get("cascade", True))
-        conn = _conn()
+        db = get_database()
+        conn = db._get_connection()
         try:
             profile = conn.execute(
                 "SELECT id, upgrade_policy, repair_job_id, repair_settings "
@@ -370,7 +437,36 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
                     (profile_id, eid),
                 )
                 updated += cur.rowcount
+            auto_monitored = 0
+            auto_monitor_track_ids: List[int] = []
+            if profile["upgrade_policy"] == "until_top":
+                if entity == "artists":
+                    auto_monitor_track_ids = [r["id"] for r in conn.execute(
+                        "SELECT id FROM lib2_tracks "
+                        "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
+                        (eid,),
+                    )]
+                    cur.execute(
+                        "UPDATE lib2_tracks SET monitored=1 "
+                        "WHERE album_id IN (SELECT id FROM lib2_albums WHERE primary_artist_id=?)",
+                        (eid,),
+                    )
+                    auto_monitored = cur.rowcount
+                elif entity == "albums":
+                    auto_monitor_track_ids = [r["id"] for r in conn.execute(
+                        "SELECT id FROM lib2_tracks WHERE album_id=?",
+                        (eid,),
+                    )]
+                    cur.execute("UPDATE lib2_tracks SET monitored=1 WHERE album_id=?", (eid,))
+                    auto_monitored = cur.rowcount
+                elif entity == "tracks":
+                    auto_monitor_track_ids = [eid]
+                    cur.execute("UPDATE lib2_tracks SET monitored=1 WHERE id=?", (eid,))
+                    auto_monitored = cur.rowcount
             conn.commit()
+            mirrored = 0
+            if auto_monitor_track_ids:
+                mirrored = _mirror_tracks_wishlist(db, conn, auto_monitor_track_ids, True)
             settings = json.loads(profile["repair_settings"] or "{}")
         finally:
             conn.close()
@@ -379,6 +475,8 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
             "quality_profile_id": profile_id,
             "updated": updated,
             "upgrade_policy": profile["upgrade_policy"],
+            "auto_monitored": auto_monitored,
+            "mirrored": mirrored,
             "repair_job": {
                 "id": profile["repair_job_id"],
                 "settings": settings,
@@ -448,29 +546,37 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
 
             try:
                 stats = import_legacy_library(get_database(), reset=reset, progress=_progress)
-                _import_state.update(stats=stats, stage="done")
+                _import_state.update(stats=stats, stage="tracklists")
+
+                # Resolve missing-track titles before artwork: cached tracklists
+                # can immediately become real, monitorable rows, while
+                # artwork/provider lookup can be slow.
+                try:
+                    from core.library2.completeness import precache_tracklists
+                    precache_tracklists(get_database(), config_manager, progress=_progress)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("tracklist precache failed: %s", e)
+
+                _import_state.update(stage="artwork")
+                try:
+                    from core.library2.artwork import precache_all_artwork
+                    precache_all_artwork(get_database(), config_manager)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("artwork precache failed: %s", e)
+
+                _import_state.update(stage="profiles")
+                try:
+                    from core.library2.profiles_sync import sync_settings_presets
+                    sync_settings_presets(get_database())
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("profile preset sync failed: %s", e)
+
+                _import_state.update(stage="done")
             except Exception as e:  # noqa: BLE001
                 logger.error("Library v2 import failed: %s", e, exc_info=True)
                 _import_state.update(error=str(e), stage="failed")
             finally:
                 _import_state.update(running=False, finished_at=_t.time())
-            # Warm the artwork cache + resolve missing-track titles in the
-            # background so the UI is fast and shows real titles (Lidarr-style).
-            try:
-                from core.library2.artwork import precache_all_artwork
-                precache_all_artwork(get_database(), config_manager)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("artwork precache failed: %s", e)
-            try:
-                from core.library2.completeness import precache_tracklists
-                precache_tracklists(get_database(), config_manager)
-            except Exception as e:  # noqa: BLE001
-                logger.debug("tracklist precache failed: %s", e)
-            try:
-                from core.library2.profiles_sync import sync_settings_presets
-                sync_settings_presets(get_database())
-            except Exception as e:  # noqa: BLE001
-                logger.debug("profile preset sync failed: %s", e)
 
         threading.Thread(target=_run, name="lib2-import", daemon=True).start()
         return jsonify({"success": True, "started": True})

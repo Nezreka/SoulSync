@@ -38,5 +38,7 @@ bin/
 .tool-versions
 Staging/
 Transfer/
+docker-compose.local-image.yml
+*-container-inspect.json
 # Any hidden folders
 **/.*/

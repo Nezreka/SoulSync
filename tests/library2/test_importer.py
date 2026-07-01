@@ -170,8 +170,8 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     conn.close()
 
     assert stats["wishlist_tracks"] == 1
-    assert artist["monitored"] == 1
-    assert album["monitored"] == 1
+    assert artist["monitored"] == 0
+    assert album["monitored"] == 0
     assert album["track_count"] == 1
     assert album["expected_track_count"] == 1
     assert track["monitored"] == 1
@@ -185,3 +185,66 @@ def test_wishlist_only_track_seeds_missing_monitored_library_rows(legacy_db):
     assert detail["track_count"] == 1
     assert detail["tracks_missing"] == 1
     assert [t["title"] for t in detail["tracks"]] == ["Only Wanted Song"]
+    assert detail["monitored"] is False
+    assert detail["tracks"][0]["monitored"] is True
+
+
+def test_watchlist_artist_monitoring_is_independent_from_wishlist_tracks(legacy_db):
+    conn = sqlite3.connect(legacy_db.path)
+    conn.execute("""
+        CREATE TABLE watchlist_artists(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            artist_name TEXT NOT NULL,
+            spotify_artist_id TEXT,
+            musicbrainz_artist_id TEXT
+        )
+    """)
+    conn.execute(
+        "INSERT INTO watchlist_artists(artist_name, spotify_artist_id) VALUES(?, ?)",
+        ("Drake", "sp1"),
+    )
+    conn.execute("""
+        CREATE TABLE wishlist_tracks(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spotify_track_id TEXT NOT NULL,
+            spotify_data TEXT NOT NULL,
+            source_type TEXT DEFAULT 'manual',
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    payload = {
+        "id": "sp_track_2",
+        "name": "Wishlist Only",
+        "artists": [{"id": "sp_artist_2", "name": "Other Wishlist Artist"}],
+        "album": {
+            "id": "sp_album_2",
+            "name": "Wishlist Only Single",
+            "album_type": "single",
+            "total_tracks": 1,
+            "artists": [{"id": "sp_artist_2", "name": "Other Wishlist Artist"}],
+        },
+        "track_number": 1,
+    }
+    conn.execute(
+        "INSERT INTO wishlist_tracks(spotify_track_id, spotify_data, source_type) VALUES(?,?,?)",
+        ("sp_track_2", json.dumps(payload), "manual"),
+    )
+    conn.commit()
+    conn.close()
+
+    import_legacy_library(legacy_db, reset=True)
+
+    conn = sqlite3.connect(legacy_db.path)
+    conn.row_factory = sqlite3.Row
+    drake = conn.execute("SELECT monitored FROM lib2_artists WHERE name='Drake'").fetchone()
+    wishlist_artist = conn.execute(
+        "SELECT monitored FROM lib2_artists WHERE name='Other Wishlist Artist'"
+    ).fetchone()
+    wishlist_track = conn.execute(
+        "SELECT monitored FROM lib2_tracks WHERE title='Wishlist Only'"
+    ).fetchone()
+    conn.close()
+
+    assert drake["monitored"] == 1
+    assert wishlist_artist["monitored"] == 0
+    assert wishlist_track["monitored"] == 1

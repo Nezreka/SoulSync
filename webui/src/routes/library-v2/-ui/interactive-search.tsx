@@ -28,11 +28,26 @@ function resultSize(r: SourceSearchResult): number | null | undefined {
   return r.result_type === 'album' ? r.total_size : r.size;
 }
 
+function firstTrackNumber(r: SourceSearchResult, key: 'bit_depth' | 'sample_rate' | 'bitrate'): number | null {
+  for (const track of r.tracks ?? []) {
+    const value = track[key];
+    if (typeof value === 'number' && value > 0) return value;
+  }
+  return null;
+}
+
 function resultQuality(r: SourceSearchResult): string {
-  if (r.result_type === 'album') return (r.dominant_quality ?? '').toUpperCase() || '—';
-  const fmt = (r.quality ?? '').toUpperCase();
-  const kbps = r.bitrate ? (r.bitrate > 5000 ? Math.round(r.bitrate / 1000) : r.bitrate) : null;
-  return [fmt, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || '—';
+  const fmt = ((r.result_type === 'album' ? r.dominant_quality : r.quality) ?? '').toUpperCase();
+  const bitrate = r.bitrate ?? firstTrackNumber(r, 'bitrate');
+  const rawSampleRate = r.sample_rate ?? firstTrackNumber(r, 'sample_rate');
+  const rawBitDepth = r.bit_depth ?? firstTrackNumber(r, 'bit_depth');
+  const kbps = bitrate ? (bitrate > 5000 ? Math.round(bitrate / 1000) : bitrate) : null;
+  const bitDepth = rawBitDepth ? `${rawBitDepth}-bit` : null;
+  const sampleRate = rawSampleRate
+    ? `${Number((rawSampleRate / 1000).toFixed(rawSampleRate % 1000 === 0 ? 0 : 1))} kHz`
+    : null;
+  const resolution = [bitDepth, sampleRate].filter(Boolean).join('/');
+  return [fmt, resolution || null, kbps ? `${kbps} kbps` : null].filter(Boolean).join(' / ') || '—';
 }
 
 function resultKey(r: SourceSearchResult): string {
