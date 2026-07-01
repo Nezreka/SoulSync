@@ -119,13 +119,14 @@ def build_genre_grouped_map(
 ) -> Dict[str, List[dict]]:
     """Genre-anchored Taste Map: EVERY library artist as a node, grouped by genre + wired by similarity.
 
-    ``artists`` is ``(name, genres, thumb_url)`` for every library artist (``genres`` a JSON-array
-    string). This includes the ~3.8k artists that have no owned<->owned similarity edge — they'd be
-    dropped by :func:`build_taste_map` — by attaching each artist to a per-genre "hub" node so a
-    force layout clusters them by genre. Similarity edges (owned<->owned) are reused verbatim.
+    ``artists`` is ``(name, genres, thumb_url[, id, source])`` for every library artist (``genres`` a
+    JSON-array string; ``id``/``source`` optional, used by the frontend to link to the artist page).
+    This includes the ~3.8k artists that have no owned<->owned similarity edge — they'd be dropped by
+    :func:`build_taste_map` — by attaching each artist to a per-genre "hub" node so a force layout
+    clusters them by genre. Similarity edges (owned<->owned) are reused verbatim.
 
     Node kinds:
-      * ``artist`` — ``{key, label, kind, owned, primary_genre, popularity, thumb}``
+      * ``artist`` — ``{key, label, kind, owned, primary_genre, popularity, thumb, id, source}``
       * ``genre``  — ``{key, label, kind, genre}`` (one hub per distinct primary genre)
     Edge kinds: ``similarity`` (from :func:`build_taste_map`) and ``membership`` (artist -> its genre).
     """
@@ -137,7 +138,10 @@ def build_genre_grouped_map(
     seen_artist: set = set()
     genre_labels: Dict[str, str] = {}
 
-    for name, genres, thumb in artists:
+    for row in artists:
+        name, genres, thumb = row[0], row[1], row[2]
+        artist_id = row[3] if len(row) > 3 else None
+        source = row[4] if len(row) > 4 else None
         key = _norm(name)
         if not key or key in seen_artist:
             continue
@@ -151,6 +155,8 @@ def build_genre_grouped_map(
             "primary_genre": prim,
             "popularity": pop_by.get(key, 0),
             "thumb": thumb,
+            "id": artist_id,
+            "source": source,
         })
         if prim:
             gkey = "genre::" + prim.strip().lower()

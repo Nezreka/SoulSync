@@ -6374,6 +6374,10 @@ let _artistWeb = {
     genreColor: null,                 // (genre) -> color, set at render
     index: [],                        // [{key,label}] artist nodes, for client-side search
     searchMatch: null,                // Set<key> of search hits, or null when search is empty
+    focusSet: null,                   // Set<key> currently emphasized (hover node+neighbors, or selection)
+    focusRoot: null,                  // the node at the center of the focus (gets a halo)
+    selectedKey: null,                // click-selected node (survives hover-out)
+    selectedFocus: null,              // the focus set to restore when hover clears
 };
 
 // White pill label (black text, 10px padding) — custom sigma labelRenderer, per Boulder's spec.
@@ -6436,8 +6440,13 @@ async function openArtistWeb() {
     const statsEl = document.getElementById('artist-web-stats');
     host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
 
-    // Esc closes (mirrors the artist map).
-    _artistWeb.onKey = (e) => { if (e.key === 'Escape') closeArtistWeb(); };
+    // Esc: dismiss an open detail panel first, otherwise leave the web (mirrors the artist map).
+    _artistWeb.onKey = (e) => {
+        if (e.key !== 'Escape') return;
+        const p = document.getElementById('artweb-panel');
+        if (p && p.style.display !== 'none') _artWebClearSelection();
+        else closeArtistWeb();
+    };
     document.addEventListener('keydown', _artistWeb.onKey);
 
     // Resolve the CDN globals. graphology's UMD default export IS the Graph class.
@@ -6512,14 +6521,23 @@ async function openArtistWeb() {
         host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow (reference look)
         if (_artistWeb.sigma) _artistWeb.sigma.kill();
         _artistWeb.graph = graph;
+        _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
+        _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
         _artistWeb.sigma = new window.Sigma(graph, host, {
             renderLabels: true,
             labelRenderedSizeThreshold: 20,   // only large nodes (genre hubs) label by default; artists on zoom
             labelRenderer: _webDrawLabel,     // white pill labels
-            // Reducers: recolor/dim per frame from UI state (search now; hover/select later). Data is untouched.
+            // Reducers: recolor/dim per frame from UI state (search / hover / selection). Data is untouched.
             nodeReducer: (node, data) => _artWebNodeReducer(node, data),
             edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
         });
+
+        // Interaction: hover highlights a node + its neighbors; click opens the side panel.
+        const sig = _artistWeb.sigma;
+        sig.on('enterNode', ({ node }) => _artWebHover(node));
+        sig.on('leaveNode', () => _artWebHover(null));
+        sig.on('clickNode', ({ node }) => _artWebClickNode(node));
+        sig.on('clickStage', () => _artWebClearSelection());
     } catch (err) {
         console.error('[Artist Web] load failed', err);
         host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
@@ -6536,6 +6554,7 @@ function closeArtistWeb() {
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
     if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    _artWebClosePanel();
 }
 
 // ---- Artist Web reducers: the single place UI state turns into per-frame styling -------------
@@ -6545,15 +6564,17 @@ const _WEB_DIM_EDGE = 'rgba(255,255,255,0.02)';
 function _artWebNodeReducer(node, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
-    // Search: matched nodes pop (labeled), everything else dims out.
-    if (st.searchMatch) {
-        if (st.searchMatch.has(node)) {
+    const active = st.focusSet || st.searchMatch;   // focus (hover/select) wins over search
+    if (active) {
+        if (active.has(node)) {
             res.color = data.baseColor || data.color;
             res.forceLabel = true;
             res.zIndex = 2;
+            if (node === st.focusRoot) res.highlighted = true;   // sigma draws a halo on the root
         } else {
             res.color = _WEB_DIM_NODE;
             res.label = '';
+            res.zIndex = 0;
         }
     }
     return res;
@@ -6562,10 +6583,14 @@ function _artWebNodeReducer(node, data) {
 function _artWebEdgeReducer(edge, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
-    if (st.searchMatch && _artistWeb.graph) {
+    const active = st.focusSet || st.searchMatch;
+    if (active && _artistWeb.graph) {
         const g = _artistWeb.graph;
         const s = g.source(edge), t = g.target(edge);
-        if (!(st.searchMatch.has(s) || st.searchMatch.has(t))) res.color = _WEB_DIM_EDGE;
+        // Focus (hover/select): show only edges fully inside the set → clean neighborhood.
+        // Search: show any edge touching a match.
+        const show = st.focusSet ? (active.has(s) && active.has(t)) : (active.has(s) || active.has(t));
+        if (show) res.zIndex = 1; else res.color = _WEB_DIM_EDGE;
     }
     return res;
 }
@@ -6642,6 +6667,134 @@ function artWebFitToView() {
     if (input) input.value = '';
     _artistWeb.searchMatch = null;
     _artistWeb.sigma.refresh();
+}
+
+// ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
+function _artWebHover(node) {
+    const st = _artistWeb;
+    if (!st.sigma) return;
+    if (node) {
+        const set = new Set([node]);
+        st.graph.forEachNeighbor(node, nb => set.add(nb));
+        st.focusSet = set;
+        st.focusRoot = node;
+    } else {
+        // Hover-out restores the click-selection's highlight (if any), else clears.
+        st.focusSet = st.selectedFocus || null;
+        st.focusRoot = st.selectedKey || null;
+    }
+    st.sigma.refresh();
+}
+
+function _artWebClickNode(node) {
+    const st = _artistWeb;
+    if (!st.graph || !st.graph.hasNode(node)) return;
+    const set = new Set([node]);
+    st.graph.forEachNeighbor(node, nb => set.add(nb));
+    st.selectedKey = node; st.selectedFocus = set;
+    st.focusSet = set; st.focusRoot = node;
+    st.searchMatch = null;                      // a click supersedes a search dim
+    st.sigma.refresh();
+    if (st.graph.getNodeAttribute(node, 'kind') === 'genre') _artWebShowGenre(node);
+    else _artWebShowArtist(node);
+}
+
+function _artWebClearSelection() {
+    const st = _artistWeb;
+    st.selectedKey = st.selectedFocus = st.focusSet = st.focusRoot = null;
+    if (st.sigma) st.sigma.refresh();
+    _artWebClosePanel();
+}
+
+// Focus the camera on an artist and open its card (used by the genre panel's member list).
+function _artWebGoToArtist(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph.hasNode(key)) return;
+    _artWebClickNode(key);
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+}
+
+// ---- Artist Web side panel (mirrors the Artist Map card design/interactions) -------------------
+function _artWebEnsurePanel() {
+    let p = document.getElementById('artweb-panel');
+    if (p) return p;
+    const container = document.getElementById('artist-web-container');
+    if (!container) return null;
+    if (!container.style.position) container.style.position = 'relative';
+    p = document.createElement('div');
+    p.id = 'artweb-panel';
+    p.style.cssText = 'position:absolute;top:66px;right:14px;width:300px;max-height:calc(100% - 88px);'
+        + 'background:rgba(20,18,26,0.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'border:1px solid rgba(255,255,255,0.1);border-radius:16px;display:none;flex-direction:column;'
+        + 'overflow:hidden;z-index:20;box-shadow:0 14px 44px rgba(0,0,0,0.55);';
+    p.innerHTML = '<div id="artweb-panel-body" style="flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch;"></div>';
+    container.appendChild(p);
+    return p;
+}
+
+function _artWebClosePanel() {
+    const p = document.getElementById('artweb-panel');
+    if (p) p.style.display = 'none';
+}
+
+function _artWebShowArtist(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = a.baseColor || '#1db954';
+    const conn = g.degree(node);
+    const pop = Math.max(0, Math.min(100, Math.round(a.popularity || 0)));
+    const detailPath = (a.artistId != null && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(a.artistId, a.source) : null;
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${a.thumb ? `<img src="${escapeHtml(a.thumb)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'">` : '<span style="font-size:34px;opacity:0.5;">&#9835;</span>'}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            ${a.genre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.genre)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            ${_miniStat('Popularity', pop, 270)}
+            ${_miniStat('Connections', conn)}
+        </div>
+        <div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pop}%;background:${color};"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            <button onclick="artMapExploreArtist('${escapeForInlineJs(a.label)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
+        </div>`;
+    p.style.display = 'flex';
+}
+
+function _artWebShowGenre(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const genre = g.getNodeAttribute(node, 'genre') || 'Genre';
+    const color = g.getNodeAttribute(node, 'baseColor') || '#1db954';
+    const members = [];
+    g.forEachNeighbor(node, (nb, attrs) => { if (attrs.kind === 'artist') members.push({ key: nb, label: attrs.label, pop: attrs.popularity || 0 }); });
+    members.sort((x, y) => y.pop - x.pop);
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Genre</div>
+        <div style="font-size:20px;font-weight:800;color:${color};margin-top:2px;">${escapeHtml(genre)}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.55);margin-top:6px;">${members.length} artist${members.length === 1 ? '' : 's'} in your library</div>
+        <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:16px 2px 8px;">Top artists</div>
+        ${members.slice(0, 30).map((m, i) => `
+            <div onclick="_artWebGoToArtist('${escapeForInlineJs(m.key)}')" style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:9px;cursor:pointer;"
+                 onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+                <span style="width:18px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);">${i + 1}</span>
+                <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.label)}</span>
+            </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
+    p.style.display = 'flex';
 }
 
 // Filter-by-genre lives in a later phase; stubs keep the toolbar buttons inert-but-safe for now.
