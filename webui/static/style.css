@@ -35519,6 +35519,19 @@ div.artist-hero-badge {
     position: fixed; inset: 0; z-index: 100;
     background: #0a0a14; flex-direction: column;
 }
+/* Artist Web "Group by" lens toggle (Genre | Communities) */
+.artweb-lens-toggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px; padding: 2px;
+}
+.artweb-lens-btn {
+    border: none; background: transparent; color: rgba(255,255,255,0.6);
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.artweb-lens-btn:hover { color: #fff; }
+.artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);
