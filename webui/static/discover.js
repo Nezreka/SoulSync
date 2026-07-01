@@ -6382,6 +6382,8 @@ let _artistWeb = {
     selectedFocus: null,              // the focus set to restore when hover clears
     genreFilter: null,                // Set<genre> persistent filter (dims everything outside it)
     genreCounts: null,                // {genre: artistCount} for the filter sidebar
+    sizeBy: 'popularity',             // node-size metric: popularity | connections | influence(betweenness)
+    betweenCache: null,               // cached betweenness scores (computed once on the similarity graph)
     // Shortest-path mode: click two artists to trace how they connect (via the similarity graph).
     pathMode: false,
     pathSource: null, pathTarget: null,
@@ -6486,6 +6488,7 @@ async function openArtistWeb() {
     try {
         _artistWeb.data = await (await fetch('/api/graph/library')).json();
         _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
+        _artistWeb.betweenCache = null;
         _artistWeb.lens = _artistWeb.lens || 'genre';
         _artWebSyncLensButtons();
         _artWebRenderLens();
@@ -6510,6 +6513,60 @@ function _artWebSyncLensButtons() {
         b.classList.toggle('active', b.dataset.lens === _artistWeb.lens));
 }
 
+// ---- "Size by" toggle: scale nodes by popularity | connections (degree) | influence (betweenness) --
+function _artWebSyncSizeButtons() {
+    document.querySelectorAll('.artweb-size-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.size === _artistWeb.sizeBy));
+}
+
+// Betweenness = "influence" (who bridges the taste network). Computed on the SIMILARITY graph (small,
+// ~1k nodes → fast) not the 5k display graph, and cached — a genre-hub-laden graph would be slow.
+function _artWebBetweenness() {
+    if (_artistWeb.betweenCache) return _artistWeb.betweenCache;
+    const g = _artWebSimGraph();
+    const c = window.graphologyLibrary && window.graphologyLibrary.metrics && window.graphologyLibrary.metrics.centrality;
+    const fn = c && (c.betweenness || c.betweennessCentrality);
+    let res = {};
+    if (fn && g) { try { res = fn(g); } catch (e) { res = {}; } }
+    _artistWeb.betweenCache = res;
+    return res;
+}
+
+function artWebSetSize(mode) {
+    if (_artistWeb.sizeBy === mode || !_artistWeb.graph) return;
+    // Influence needs a (one-time) betweenness pass — show a hint + defer so it paints first.
+    if (mode === 'influence' && !_artistWeb.betweenCache) {
+        _artistWeb.sizeBy = mode; _artWebSyncSizeButtons();
+        _artWebPathHint('Computing influence…');
+        setTimeout(() => { _artWebApplySize(mode); _artWebHidePathHint(); }, 30);
+    } else {
+        _artWebApplySize(mode);
+    }
+}
+
+function _artWebApplySize(mode) {
+    const st = _artistWeb, g = st.graph;
+    if (!g) return;
+    st.sizeBy = mode;
+    _artWebSyncSizeButtons();
+    const sg = (mode === 'connections') ? _artWebSimGraph() : null;
+    const btw = (mode === 'influence') ? _artWebBetweenness() : null;
+    const metric = (k, a) => {
+        if (mode === 'connections') return (sg && sg.hasNode(k)) ? sg.degree(k) : 0;
+        if (mode === 'influence') return btw[k] || 0;
+        return a.popularity || 0;   // popularity
+    };
+    let max = 0;
+    g.forEachNode((k, a) => { if (a.kind === 'artist') { const v = metric(k, a); if (v > max) max = v; } });
+    max = max || 1;
+    g.forEachNode((k, a) => {
+        if (a.kind !== 'artist') return;   // genre hubs stay sized by member count
+        const size = 2 + Math.sqrt(metric(k, a) / max) * 11;   // 2..13
+        g.setNodeAttribute(k, 'size', size);
+    });
+    if (st.sigma) st.sigma.refresh();
+}
+
 // (Re)build the graph for the current lens, run the layout, and mount sigma.
 function _artWebRenderLens() {
     const host = document.getElementById('artist-web-canvas');
@@ -6525,6 +6582,8 @@ function _artWebRenderLens() {
     _artistWeb.pathSource = _artistWeb.pathTarget = _artistWeb.pathResult = null;
     _artistWeb.pathNodes = _artistWeb.pathPairs = null;
     _artistWeb.genreFilter = null;
+    _artistWeb.sizeBy = 'popularity';   // build sizes by popularity; user can re-pick per view
+    _artWebSyncSizeButtons();
     _artistWeb.index = [];
     _artWebClosePanel();
     const sidebar = document.getElementById('artweb-genre-sidebar');
