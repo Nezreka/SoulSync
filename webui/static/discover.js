@@ -6412,6 +6412,15 @@ const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00
 const WEB_GENRE_FALLBACK = '#5a5a66';
 const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
 
+// Edge opacity scales with weight (consensus): weak links stay faint so they don't clutter; strong,
+// high-agreement links come forward. Capped so nothing gets fully opaque at rest.
+function _webEdgeAlpha(weight) {
+    return Math.min(0.4, 0.08 + (weight || 1) * 0.025);
+}
+function _webEdgeSize(weight) {
+    return 0.35 + Math.min(1.3, Math.sqrt(weight || 1) * 0.3);
+}
+
 // '#rrggbb' -> 'rgba(r,g,b,a)' so edges can inherit a cluster color at low alpha (the glowing web).
 function _webHexToRgba(hex, alpha) {
     const h = (hex || '').replace('#', '');
@@ -6554,8 +6563,11 @@ function _artWebBuildGenre(data, Graph) {
             const membership = e.kind === 'membership';
             const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
             graph.addEdge(e.source, e.target, {
-                weight: e.weight, size: membership ? 0.35 : 0.7,
-                color: _webHexToRgba(base, 0.22), kind: e.kind,
+                weight: e.weight,
+                size: membership ? 0.35 : _webEdgeSize(e.weight),
+                color: _webHexToRgba(base, _webEdgeAlpha(e.weight)),
+                baseColor: base,   // hex kept so the reducer can brighten it on focus
+                kind: e.kind,
             });
         }
     });
@@ -6624,7 +6636,12 @@ function _artWebBuildCommunity(data, Graph) {
     });
     graph.forEachEdge((edge, attrs, s) => {
         const base = graph.getNodeAttribute(s, 'baseColor') || WEB_GENRE_FALLBACK;
-        graph.setEdgeAttribute(edge, 'color', _webHexToRgba(base, 0.22));
+        const w = attrs.weight || 1;
+        graph.mergeEdgeAttributes(edge, {
+            color: _webHexToRgba(base, _webEdgeAlpha(w)),
+            baseColor: base,
+            size: _webEdgeSize(w),
+        });
     });
 
     const stats = `${graph.order} connected artists · ${commIds.length} communities · ${graph.size} links`;
@@ -6736,7 +6753,14 @@ function _artWebEdgeReducer(edge, data) {
         // Focus (hover/select): show only edges fully inside the set → clean neighborhood.
         // Search: show any edge touching a match.
         const show = st.focusSet ? (active.has(s) && active.has(t)) : (active.has(s) || active.has(t));
-        if (show) res.zIndex = 1; else res.color = _WEB_DIM_EDGE;
+        if (show) {
+            // Brighten + thicken the focused neighborhood's links so relationships read clearly.
+            res.zIndex = 1;
+            res.color = _webHexToRgba(data.baseColor || '#888888', 0.75);
+            res.size = (data.size || 0.7) * 1.7;
+        } else {
+            res.color = _WEB_DIM_EDGE;
+        }
     }
     return res;
 }
