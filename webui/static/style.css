@@ -69753,8 +69753,9 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     border-color: rgb(var(--accent-rgb)) !important;
 }
 
-/* Sidebar nav section headers — share the .nav-button chassis (height/width/radius) so they read as
-   the same family as Dashboard, distinguished by the uppercase label + collapse chevron. */
+/* Sidebar nav section headers — styled exactly like .nav-button (transparent, same hover: gradient +
+   slide + shadow) so they're one family with Dashboard; distinguished only by the uppercase label +
+   collapse chevron. */
 .nav-section-label {
     display: flex;
     align-items: center;
@@ -69765,7 +69766,7 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     height: 44px;
     margin: 8px 0 1px;
     padding: 0 14px 0 16px;
-    background: rgba(255, 255, 255, 0.04);
+    background: transparent;
     border: 1px solid transparent;
     border-radius: 12px;
     font-family: inherit;
@@ -69777,12 +69778,18 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     cursor: pointer;
     user-select: none;
     text-align: left;
-    transition: background .12s ease, border-color .12s ease, color .12s ease;
+    transition: background 0.1s ease, border-color 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease, color 0.1s ease;
 }
-.nav-section-label:hover {
-    background: rgba(255, 255, 255, 0.09);
-    border-color: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.92);
+.nav-section-label:hover { color: rgba(255, 255, 255, 0.92); }
+body:not(.reduce-effects) .nav-section-label:hover {
+    background: linear-gradient(135deg,
+            rgba(255, 255, 255, 0.06) 0%,
+            rgba(255, 255, 255, 0.03) 100%);
+    border-color: rgba(255, 255, 255, 0.08);
+    transform: translateX(4px);
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.2),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .nav-section-chevron {
     flex: 0 0 auto;
