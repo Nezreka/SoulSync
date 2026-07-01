@@ -6389,6 +6389,10 @@ let _artistWeb = {
     pathPairs: null,                  // Set<"a|b"> consecutive path edges (highlighted)
     pathResult: null,                 // the node-key array, once complete
     simGraph: null,                   // cached similarity-only graph for pathfinding (lens-independent)
+    // Cursor force-field: nodes near the pointer nudge away, then spring back to their layout home.
+    cursorFX: true,
+    cursor: null, cursorActive: false, cursorRAF: null,
+    cursorRadius: 0, cursorPush: 0, home: null,
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6539,6 +6543,22 @@ function _artWebRenderLens() {
     if (sbHeader) sbHeader.textContent = _artistWeb.lens === 'community' ? 'Communities' : 'Genres';
 
     _artWebRunLayout(built.graph);
+
+    // Capture resting ("home") positions + size the cursor force-field to the layout's coordinate
+    // range (FA2 output scale is unknown up front), so radius/push are proportional, not guessed.
+    const home = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    built.graph.forEachNode((k, a) => {
+        home[k] = { x: a.x, y: a.y };
+        if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+        if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+    });
+    const span = Math.max(maxX - minX, maxY - minY) || 1;
+    _artistWeb.home = home;
+    _artistWeb.cursorRadius = span * 0.05;   // ~5% of the graph span
+    _artistWeb.cursorPush = span * 0.02;     // nudge up to ~2% — subtle, so hover/click still land
+    _artistWeb.cursor = null; _artistWeb.cursorActive = false;
+
     _artWebMountSigma(host, built.graph);
 }
 
@@ -6680,6 +6700,7 @@ function _artWebRunLayout(graph) {
 function _artWebMountSigma(host, graph) {
     host.innerHTML = '';
     host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow
+    if (_artistWeb.cursorRAF) { cancelAnimationFrame(_artistWeb.cursorRAF); _artistWeb.cursorRAF = null; }
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     _artistWeb.graph = graph;
     _artistWeb.sigma = new window.Sigma(graph, host, {
@@ -6698,6 +6719,56 @@ function _artWebMountSigma(host, graph) {
         if (_artistWeb.pathMode) { _artWebClearPath(); _artWebPathHint('Click an artist, then a second one, to trace how they connect.'); }
         else _artWebClearSelection();
     });
+
+    // Cursor force-field: track the pointer in graph space; the rAF loop nudges nearby nodes.
+    if (_artistWeb.cursorFX) {
+        sig.getMouseCaptor().on('mousemovebody', (e) => {
+            try { _artistWeb.cursor = sig.viewportToGraph({ x: e.x, y: e.y }); } catch (_) { return; }
+            _artistWeb.cursorActive = true;
+            _artWebStartCursorFX();
+        });
+        host.addEventListener('mouseleave', () => { _artistWeb.cursorActive = false; _artWebStartCursorFX(); });
+    }
+}
+
+// Cursor force-field loop: nodes within radius get pushed away from the pointer (relative to their
+// home), and ease back home when the pointer moves off. Purely visual — never touches the data/layout.
+function _artWebStartCursorFX() {
+    if (!_artistWeb.cursorRAF) _artistWeb.cursorRAF = requestAnimationFrame(_artWebCursorTick);
+}
+
+function _artWebCursorTick() {
+    const st = _artistWeb;
+    st.cursorRAF = null;
+    if (!st.sigma || !st.cursorFX || !st.home || !st.graph) return;
+    const g = st.graph, home = st.home;
+    const active = st.cursorActive && st.cursor;
+    const cx = active ? st.cursor.x : 0, cy = active ? st.cursor.y : 0;
+    const R = st.cursorRadius, PUSH = st.cursorPush, EASE = 0.2;
+    let moving = false;
+    g.forEachNode((k, a) => {
+        const h = home[k];
+        if (!h) return;
+        let tx = h.x, ty = h.y;
+        if (active) {
+            const dx = h.x - cx, dy = h.y - cy;          // measure from HOME → stable, no feedback jitter
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < R && dist > 0.0001) {
+                const force = (1 - dist / R) * PUSH;      // closer to pointer → stronger push
+                tx = h.x + (dx / dist) * force;
+                ty = h.y + (dy / dist) * force;
+            }
+        }
+        const nx = a.x + (tx - a.x) * EASE;
+        const ny = a.y + (ty - a.y) * EASE;
+        if (Math.abs(nx - a.x) > 0.0005 || Math.abs(ny - a.y) > 0.0005) {
+            g.setNodeAttribute(k, 'x', nx);
+            g.setNodeAttribute(k, 'y', ny);
+            moving = true;
+        }
+    });
+    if (moving) st.sigma.refresh();
+    if (moving || active) st.cursorRAF = requestAnimationFrame(_artWebCursorTick);   // else settled → stop
 }
 
 function closeArtistWeb() {
@@ -6709,6 +6780,8 @@ function closeArtistWeb() {
     document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
         if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
     });
+    if (_artistWeb.cursorRAF) { cancelAnimationFrame(_artistWeb.cursorRAF); _artistWeb.cursorRAF = null; }
+    _artistWeb.cursorActive = false;
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
