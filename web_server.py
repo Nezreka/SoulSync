@@ -9809,6 +9809,71 @@ def get_album_art_options(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+def _derive_album_folder(db, album_id):
+    """The album's folder on disk, from the first resolvable track path (Docker-safe). None if no
+    track file can be located (e.g. paths aren't mapped in this container)."""
+    try:
+        tracks = db.get_tracks_by_album(int(album_id))
+    except Exception:
+        return None
+    for tr in (tracks or []):
+        raw = getattr(tr, 'file_path', None)
+        if not raw:
+            continue
+        resolved = _resolve_library_file_path(raw) or raw
+        if resolved and os.path.exists(resolved):
+            return os.path.dirname(resolved)
+    return None
+
+
+def _overwrite_cover_jpg(url, folder):
+    """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
+    existing-file guard in download_cover_art doesn't apply). Returns True on success."""
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
+    with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+        data = resp.read()
+    if not data:
+        return False
+    with open(os.path.join(folder, "cover.jpg"), "wb") as handle:
+        handle.write(data)
+    return True
+
+
+@app.route('/api/album/<album_id>/art', methods=['POST'])
+def set_album_art(album_id):
+    """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
+    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
+    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        if not db.set_album_thumb_url(album_id, url):
+            return jsonify({"error": "Album not found"}), 404
+
+        # Invalidate the cached options for this album's art so a re-open reflects the change.
+        cover_written = False
+        folder = _derive_album_folder(db, album_id)
+        if folder:
+            try:
+                cover_written = _overwrite_cover_jpg(url, folder)
+                logger.info("[set-art] album %s cover.jpg -> %s", album_id, folder)
+            except Exception as exc:
+                logger.warning("[set-art] cover.jpg write failed for album %s: %s", album_id, exc)
+        else:
+            logger.info("[set-art] no on-disk folder for album %s — DB art updated only", album_id)
+
+        return jsonify({"success": True, "album_id": album_id, "thumb_url": url,
+                        "cover_written": cover_written})
+    except Exception as e:
+        logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""
