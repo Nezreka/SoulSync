@@ -37,6 +37,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "audiodb": "audiodb_id",
         "genius": "genius_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
     "album": {
         "spotify": "spotify_album_id",
@@ -49,6 +50,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "qobuz": "qobuz_id",
         "audiodb": "audiodb_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
     "track": {
         "spotify": "spotify_track_id",
@@ -61,6 +63,7 @@ _CORE_ID_COLUMNS: Dict[str, Dict[str, str]] = {
         "audiodb": "audiodb_id",
         "genius": "genius_id",
         "hydrabase": "soul_id",
+        "jiosaavn": "jiosaavn_id",
     },
 }
 
@@ -75,11 +78,14 @@ _ALIASES: Dict[tuple, tuple] = {
     ("artist", "musicbrainz"): ("musicbrainz_artist_id", "similar_artist_musicbrainz_id"),
     ("artist", "discogs"): ("discogs_artist_id",),
     ("artist", "amazon"): ("amazon_artist_id",),
+    ("artist", "jiosaavn"): ("jiosaavn_artist_id",),
     ("album", "spotify"): ("album_spotify_id",),
     ("album", "itunes"): ("album_itunes_id",),
     ("album", "deezer"): ("deezer_album_id", "album_deezer_id"),
     ("album", "discogs"): ("discogs_release_id",),
+    ("album", "jiosaavn"): ("jiosaavn_album_id",),
     ("track", "deezer"): ("deezer_track_id",),
+    ("track", "jiosaavn"): ("jiosaavn_track_id",),
 }
 
 

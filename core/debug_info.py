@@ -232,7 +232,7 @@ def get_debug_info():
 
     # Enrichment workers
     workers = {}
-    worker_names = ['musicbrainz', 'audiodb', 'deezer', 'spotify', 'itunes', 'lastfm', 'genius', 'discogs', 'tidal', 'qobuz']
+    worker_names = ['musicbrainz', 'audiodb', 'deezer', 'jiosaavn', 'spotify', 'itunes', 'lastfm', 'genius', 'discogs', 'tidal', 'qobuz']
     for name in worker_names:
         paused_key = f'{name}_enrichment_paused'
         workers[name] = 'paused' if config_manager.get(paused_key, False) else 'active'

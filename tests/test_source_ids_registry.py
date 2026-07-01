@@ -18,6 +18,9 @@ def test_canonical_columns_match_real_schema():
     assert sid.id_column("spotify", "album") == "spotify_album_id"
     assert sid.id_column("musicbrainz", "album") == "musicbrainz_release_id"
     assert sid.id_column("deezer", "album") == "deezer_id"
+    assert sid.id_column("jiosaavn", "artist") == "jiosaavn_id"
+    assert sid.id_column("jiosaavn", "album") == "jiosaavn_id"
+    assert sid.id_column("jiosaavn", "track") == "jiosaavn_id"
     assert sid.id_column("spotify", "track") == "spotify_track_id"
     assert sid.id_column("musicbrainz", "track") == "musicbrainz_recording_id"
 

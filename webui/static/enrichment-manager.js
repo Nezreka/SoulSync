@@ -25,6 +25,7 @@ const ENRICHMENT_WORKERS = [
     { id: 'itunes',      name: 'iTunes',       color: '#fb5bc5', logoSel: '.itunes-enrich-logo' },
     { id: 'musicbrainz', name: 'MusicBrainz',  color: '#ba55d3', logoSel: '.mb-logo' },
     { id: 'deezer',      name: 'Deezer',       color: '#a238ff', logoSel: '.deezer-logo' },
+    { id: 'jiosaavn',    name: 'JioSaavn',     color: '#2bc5b4', logoSel: '.jiosaavn-logo' },
     { id: 'audiodb',     name: 'AudioDB',      color: '#1c8cf0', logoSel: '.audiodb-logo' },
     { id: 'discogs',     name: 'Discogs',      color: '#cfcfcf', logoSel: '.discogs-logo', imgFilter: 'brightness(0) invert(1)' },
     { id: 'lastfm',      name: 'Last.fm',      color: '#d51007', logoSel: '.lastfm-enrich-logo', imgRound: true },
@@ -41,6 +42,12 @@ const ENRICHMENT_WORKERS = [
 ];
 
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));
+
+function _emVisibleWorkers() {
+    const jiosaavnOn = document.getElementById('experimental-jiosaavn-enabled')?.checked === true
+        || window._settingsPayload?.experimental?.jiosaavn_enabled === true;
+    return ENRICHMENT_WORKERS.filter(w => w.id !== 'jiosaavn' || jiosaavnOn);
+}
 
 // '#1db954' -> '29,185,84' for rgba(var(--em-accent-rgb), a) usage.
 function _emHexToRgb(hex) {
@@ -194,10 +201,11 @@ async function openEnrichmentManager(workerId) {
     let remembered = null;
     try { remembered = localStorage.getItem('em-last-worker'); } catch (_e) { /* ignore */ }
     const valid = (wid) => wid && _emWorkerById[wid];
-    const running = ENRICHMENT_WORKERS.find(w => enrichmentManagerState.statuses[w.id]?.running);
+    const visible = _emVisibleWorkers();
+    const running = visible.find(w => enrichmentManagerState.statuses[w.id]?.running);
     const initial = (valid(workerId) && workerId)
         || (valid(remembered) && remembered)
-        || (running || ENRICHMENT_WORKERS[0]).id;
+        || (running || visible[0] || ENRICHMENT_WORKERS[0]).id;
     selectEnrichmentWorker(initial);
     if (modal) setTimeout(() => modal.focus(), 60);
 
@@ -247,7 +255,7 @@ async function refreshEnrichmentManager(btn) {
 // ── Status loading ──────────────────────────────────────────────────────────
 
 async function refreshAllEnrichmentStatuses() {
-    const results = await Promise.all(ENRICHMENT_WORKERS.map(async (w) => {
+    const results = await Promise.all(_emVisibleWorkers().map(async (w) => {
         try {
             const res = await fetch(`/api/enrichment/${w.id}/status`);
             return [w.id, res.ok ? await res.json() : null];
@@ -294,7 +302,7 @@ async function setGlobalPriority(entity, btn) {
         document.querySelectorAll('#em-global-tabs button').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
     }
-    const perWorker = await Promise.all(ENRICHMENT_WORKERS.map(async (w) => {
+    const perWorker = await Promise.all(_emVisibleWorkers().map(async (w) => {
         let okP = false, reset = 0;
         try {
             const r = await fetch(`/api/enrichment/${w.id}/priority`, {
@@ -352,7 +360,7 @@ function _emRailSubText(status) {
 function renderEnrichmentRail() {
     const rail = document.getElementById('em-rail');
     if (!rail) return;
-    rail.innerHTML = ENRICHMENT_WORKERS.map((w, i) => {
+    rail.innerHTML = _emVisibleWorkers().map((w, i) => {
         const status = enrichmentManagerState.statuses[w.id];
         const info = _emStatusInfo(status);
         const pct = _emOverallPct(status);
@@ -376,7 +384,7 @@ function renderEnrichmentRail() {
 }
 
 function _emHighlightRail() {
-    ENRICHMENT_WORKERS.forEach(w => {
+    _emVisibleWorkers().forEach(w => {
         const row = document.getElementById(`em-row-${w.id}`);
         if (row) row.classList.toggle('active', w.id === enrichmentManagerState.selected);
     });

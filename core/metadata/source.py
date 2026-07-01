@@ -130,6 +130,9 @@ SOURCE_TAG_CONFIG = {
     "ASIN": "musicbrainz.tags.asin",
     "DEEZER_TRACK_ID": "deezer.tags.track_id",
     "DEEZER_ARTIST_ID": "deezer.tags.artist_id",
+    "JIOSAAVN_TRACK_ID": "jiosaavn.tags.track_id",
+    "JIOSAAVN_ARTIST_ID": "jiosaavn.tags.artist_id",
+    "JIOSAAVN_ALBUM_ID": "jiosaavn.tags.album_id",
     "AUDIODB_TRACK_ID": "audiodb.tags.track_id",
     "TIDAL_TRACK_ID": "tidal.tags.track_id",
     "TIDAL_ARTIST_ID": "tidal.tags.artist_id",
@@ -140,7 +143,7 @@ SOURCE_TAG_CONFIG = {
     "GENIUS_TRACK_ID": "genius.tags.track_id",
 }
 
-DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "tidal", "hifi", "qobuz", "lastfm", "genius"]
+DEFAULT_SOURCE_ORDER = ["musicbrainz", "deezer", "audiodb", "jiosaavn", "tidal", "hifi", "qobuz", "lastfm", "genius"]
 
 ID3_TAG_MAP = {
     "MUSICBRAINZ_RECORDING_ID": ("UFID", "http://musicbrainz.org"),
@@ -462,6 +465,47 @@ def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
                 pp["release_year"] = dz_release[:4]
 
 
+def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
+    from core.metadata.registry import is_jiosaavn_enabled
+    if not is_jiosaavn_enabled():
+        return
+    if cfg.get("jiosaavn.embed_tags", True) is False:
+        return
+    if not track_title or not artist_name:
+        return
+
+    jiosaavn_worker = getattr(runtime, "jiosaavn_worker", None)
+    js_client = jiosaavn_worker.client if jiosaavn_worker else None
+    if not js_client:
+        return
+
+    query = f"{artist_name} {track_title}".strip()
+    results = _call_source_lookup("JioSaavn track", js_client.search_tracks, query, 5) or []
+    js_result = None
+    for candidate in results:
+        cand_name = getattr(candidate, 'name', '') or ''
+        cand_artists = getattr(candidate, 'artists', []) or []
+        if _names_match(cand_name, track_title) and any(
+            _names_match(artist_name, a) for a in cand_artists
+        ):
+            js_result = candidate
+            break
+
+    if js_result:
+        pp["id_tags"]["JIOSAAVN_TRACK_ID"] = str(js_result.id)
+        details = _call_source_lookup(
+            "JioSaavn track details", js_client.get_track_details, str(js_result.id),
+        )
+        if details:
+            album_id = details.get("album_id")
+            if album_id:
+                pp["id_tags"]["JIOSAAVN_ALBUM_ID"] = str(album_id)
+        if not pp["release_year"]:
+                release = (getattr(js_result, 'release_date', None) or '') or ''
+                if len(str(release)) >= 4 and str(release)[:4].isdigit():
+                    pp["release_year"] = str(release)[:4]
+
+
 def _process_audiodb_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
     if cfg.get("audiodb.embed_tags", True) is False:
         return
@@ -673,6 +717,8 @@ def _process_source_enrichment(source_name: str, pp: dict, metadata: dict, cfg, 
         _process_deezer_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "audiodb":
         _process_audiodb_source(pp, metadata, cfg, runtime, track_title, artist_name)
+    elif source_name == "jiosaavn":
+        _process_jiosaavn_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "tidal":
         _process_tidal_source(pp, metadata, cfg, runtime, track_title, artist_name)
     elif source_name == "hifi":
