@@ -3212,10 +3212,39 @@
                                 <div class="artmap-brand"><svg class="artmap-brand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg><span class="artmap-brand-text">Artist Web</span></div>
                                 <div class="artmap-stats" id="artist-web-stats"></div>
                             </div>
+
+                            <!-- Center: search (mirrors Artist Map) -->
+                            <div class="artmap-nav-center">
+                                <div class="artmap-search-wrap">
+                                    <svg class="artmap-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="artist-web-search" placeholder="Search artists... (S)" oninput="artWebSearch(this.value)" onkeydown="if(event.key==='Enter')artWebSearchEnter()">
+                                </div>
+                            </div>
+
+                            <!-- Right: tools -->
+                            <div class="artmap-nav-right">
+                                <button class="artmap-tool-btn" id="artweb-filter-btn" onclick="artWebToggleFilter()" title="Filter by genre">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    <span>Filter</span>
+                                </button>
+                                <div class="artmap-zoom-group">
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(0.7)" title="Zoom in (+)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(1.4)" title="Zoom out (-)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebFitToView()" title="Fit to view (F)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+                                </div>
+                            </div>
                         </div>
                         <div class="artmap-content-row">
+                            <div class="artmap-genre-sidebar" id="artweb-genre-sidebar" style="display:none;">
+                                <div class="artmap-genre-sidebar-header">
+                                    <span>Genres</span>
+                                    <input type="text" class="artmap-genre-sidebar-search" placeholder="Filter..." oninput="artWebFilterGenreList(this.value)">
+                                </div>
+                                <div class="artmap-genre-sidebar-list" id="artweb-genre-sidebar-list"></div>
+                            </div>
                             <div id="artist-web-canvas" style="flex:1; min-width:0; min-height:0;"></div>
                         </div>
+                        <div class="artist-map-search-results" id="artist-web-search-results"></div>
                     </div>
 
                     <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
