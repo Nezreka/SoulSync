@@ -6597,17 +6597,19 @@ function _artWebNodeReducer(node, data) {
         return res;
     }
     const active = st.focusSet || st.searchMatch;   // focus (hover/select) wins over search
-    if (active) {
-        if (active.has(node)) {
-            res.color = data.baseColor || data.color;
-            res.forceLabel = true;
-            res.zIndex = 2;
-            if (node === st.focusRoot) res.highlighted = true;   // sigma draws a halo on the root
-        } else {
-            res.color = _WEB_DIM_NODE;
-            res.label = '';
-            res.zIndex = 0;
-        }
+    if (!active) return res;
+    const searching = !st.focusSet && !!st.searchMatch;   // search labels all its hits (usually few)
+    if (active.has(node)) {
+        res.color = data.baseColor || data.color;
+        res.zIndex = 2;
+        // Only label the hovered/selected node itself (or search hits) — labeling every neighbor
+        // floods the view with white label pills on big genre clusters.
+        res.forceLabel = searching || node === st.focusRoot;
+        if (node === st.focusRoot) res.highlighted = true;   // sigma draws a halo on the root
+    } else {
+        res.color = _WEB_DIM_NODE;
+        res.label = '';
+        res.zIndex = 0;
     }
     return res;
 }
