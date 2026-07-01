@@ -361,6 +361,17 @@ def _caa_art_candidates(metadata: Optional[dict], *, fetch=None) -> List[dict]:
         return []
 
 
+def _mb_raw_client():
+    """The low-level MusicBrainzClient (has ``get_release`` / ``browse_release_group_releases``).
+
+    ``registry.get_musicbrainz_client()`` returns the higher-level ``MusicBrainzSearchClient``, which
+    wraps the raw client at ``._client`` — those browse/lookup methods aren't on the wrapper. Return
+    the raw client, tolerating either shape."""
+    from core.metadata.registry import get_musicbrainz_client
+    c = get_musicbrainz_client()
+    return getattr(c, "_client", c)
+
+
 def _resolve_release_group_mbid(release_mbid, *, get_release=None) -> Optional[str]:
     """The MusicBrainz release-GROUP id for a release, or None. ``get_release`` injectable. The group
     is the logical album; enumerating its releases is what surfaces every edition's cover art. Never
@@ -369,8 +380,7 @@ def _resolve_release_group_mbid(release_mbid, *, get_release=None) -> Optional[s
         return None
     if get_release is None:
         def get_release(mbid):
-            from core.metadata.registry import get_musicbrainz_client
-            client = get_musicbrainz_client()
+            client = _mb_raw_client()
             return client.get_release(mbid, includes=["release-groups"]) if client else None
     try:
         rel = get_release(release_mbid) or {}
@@ -389,8 +399,7 @@ def _caa_release_group_candidates(release_group_mbid, *, browse=None, limit=40) 
         return []
     if browse is None:
         def browse(rg):
-            from core.metadata.registry import get_musicbrainz_client
-            client = get_musicbrainz_client()
+            client = _mb_raw_client()
             return client.browse_release_group_releases(rg) if client else []
     try:
         releases = browse(release_group_mbid) or []
