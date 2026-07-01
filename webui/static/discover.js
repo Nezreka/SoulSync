@@ -6723,6 +6723,13 @@ function _artWebClearSelection() {
     _artWebClosePanel();
 }
 
+// Hand off to the Artist Map explorer. The Web is a fixed z-index:100 overlay that sits ON TOP of
+// the Map (later in the DOM), so we must close it first or the Map opens invisibly underneath.
+function artWebExploreInMap(name) {
+    closeArtistWeb();
+    if (typeof artMapExploreArtist === 'function') artMapExploreArtist(name);
+}
+
 // Focus the camera on an artist and open its card (used by the genre panel's member list).
 function _artWebGoToArtist(key) {
     const sig = _artistWeb.sigma;
@@ -6788,7 +6795,7 @@ function _artWebShowArtist(node) {
             <div style="height:100%;width:${pop}%;background:${color};"></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
-            <button onclick="artMapExploreArtist('${escapeForInlineJs(a.label)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
+            <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
             ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
         </div>`;
     p.style.display = 'flex';
