@@ -6705,8 +6705,9 @@ function closeArtistWeb() {
 }
 
 // ---- Artist Web reducers: the single place UI state turns into per-frame styling -------------
-const _WEB_DIM_NODE = 'rgba(120,120,130,0.12)';
-const _WEB_DIM_EDGE = 'rgba(255,255,255,0.02)';
+// Dimmed nodes fade to a DARK gray (not light — light + WebGL additive blending reads as white).
+// Dimmed edges are hidden outright: thousands of faint edges overlapping accumulate to a white haze.
+const _WEB_DIM_NODE = '#2b2b34';
 
 function _artWebNodeReducer(node, data) {
     const st = _artistWeb;
@@ -6745,7 +6746,7 @@ function _artWebEdgeReducer(edge, data) {
     if (st.genreFilter && g) {
         const sg = g.getNodeAttribute(g.source(edge), 'genre');
         const tg = g.getNodeAttribute(g.target(edge), 'genre');
-        if (!(st.genreFilter.has(sg) && st.genreFilter.has(tg))) { res.color = _WEB_DIM_EDGE; return res; }
+        if (!(st.genreFilter.has(sg) && st.genreFilter.has(tg))) { res.hidden = true; return res; }
     }
     const active = st.focusSet || st.searchMatch;
     if (active && g) {
@@ -6759,7 +6760,7 @@ function _artWebEdgeReducer(edge, data) {
             res.color = _webHexToRgba(data.baseColor || '#888888', 0.75);
             res.size = (data.size || 0.7) * 1.7;
         } else {
-            res.color = _WEB_DIM_EDGE;
+            res.hidden = true;   // hide non-focus edges (faint ones accumulate to a white haze)
         }
     }
     return res;
