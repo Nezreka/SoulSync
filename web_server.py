@@ -9881,7 +9881,7 @@ def export_library_m3u():
         db = get_database()
         entries = db.get_all_library_tracks_for_export()
         from core.library.m3u_export import build_m3u
-        content = build_m3u(entries)
+        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
         return Response(
             content,
             mimetype='audio/x-mpegurl',
@@ -16623,6 +16623,23 @@ def _db_update_artist_callback(artist_name, success, details, album_count, track
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
     global _db_update_automation_id
+    # Library extras: keep the whole-library M3U in sync with the DB. Every scan type (deep,
+    # incremental, full refresh) converges on this callback, so writing here keeps it current.
+    # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
+    # guarded — a playlist write must never disturb scan completion.
+    try:
+        if config_manager.get('m3u_export.library_enabled', False):
+            from core.library.m3u_export import write_library_m3u
+            _entries = get_database().get_all_library_tracks_for_export()
+            _dest = (config_manager.get('m3u_export.library_path', '') or '').strip() \
+                or config_manager.get('soulseek.transfer_path', './Transfer')
+            _dest = docker_resolve_path(_dest)
+            _base = config_manager.get('m3u_export.entry_base_path', '') or ''
+            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            if _written:
+                logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+    except Exception as _m3u_err:
+        logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
