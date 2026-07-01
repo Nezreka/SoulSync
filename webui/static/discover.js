@@ -6551,7 +6551,10 @@ async function openArtistWeb() {
 
 function closeArtistWeb() {
     const container = document.getElementById('artist-web-container');
-    if (container) container.style.display = 'none';
+    // Stamp _prevDisplay='none' so if another overlay (Artist Map) later runs its sibling-restore,
+    // it keeps this container hidden instead of falling back to '' and un-hiding a dead (sigma-killed)
+    // Web. Matters on the Explore-in-Map hand-off, where the Map's open skips recording _prevDisplay.
+    if (container) { container.style.display = 'none'; container._prevDisplay = 'none'; }
     document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
         if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
     });
