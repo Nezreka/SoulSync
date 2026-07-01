@@ -357,3 +357,53 @@ def test_gather_guards_a_failing_source(monkeypatch):
     out = art_lookup.gather_album_art_candidates("A", "B", {}, lookup=_lookup, caa_candidates=[])
     sources = {c["source"] for c in out}
     assert "itunes" not in sources and "deezer" in sources
+
+
+# ---------------------------------------------------------------------------
+# Release-group CAA — "loads of covers across editions" (MusicBrainz)
+# ---------------------------------------------------------------------------
+
+
+def test_release_group_candidates_one_front_per_edition_with_art():
+    releases = [
+        {"id": "rel-1", "cover-art-archive": {"front": True}},
+        {"id": "rel-2", "cover-art-archive": {"front": False}},   # no front -> skipped
+        {"id": "rel-3", "cover-art-archive": {"front": True}},
+        {"id": "rel-1", "cover-art-archive": {"front": True}},     # dup mbid -> once
+        {"cover-art-archive": {"front": True}},                    # no id -> skipped
+        "not-a-dict",
+    ]
+    out = art_lookup._caa_release_group_candidates("rg-1", browse=lambda rg: releases)
+    assert [c["url"] for c in out] == [
+        "https://coverartarchive.org/release/rel-1/front-1200",
+        "https://coverartarchive.org/release/rel-3/front-1200",
+    ]
+    assert all(c["source"] == "caa" and c["front"] for c in out)
+
+
+def test_release_group_candidates_empty_and_guarded():
+    assert art_lookup._caa_release_group_candidates("") == []
+
+    def _boom(rg):
+        raise RuntimeError("mb down")
+    assert art_lookup._caa_release_group_candidates("rg-1", browse=_boom) == []
+
+
+def test_release_group_candidates_respects_limit():
+    releases = [{"id": f"rel-{i}", "cover-art-archive": {"front": True}} for i in range(60)]
+    out = art_lookup._caa_release_group_candidates("rg-1", browse=lambda rg: releases, limit=5)
+    assert len(out) == 5
+
+
+def test_resolve_release_group_mbid():
+    assert art_lookup._resolve_release_group_mbid(
+        "rel-1", get_release=lambda m: {"release-group": {"id": "rg-9"}}) == "rg-9"
+
+
+def test_resolve_release_group_mbid_none_and_guarded():
+    assert art_lookup._resolve_release_group_mbid("") is None
+    assert art_lookup._resolve_release_group_mbid("rel-1", get_release=lambda m: {}) is None
+
+    def _boom(m):
+        raise RuntimeError("x")
+    assert art_lookup._resolve_release_group_mbid("rel-1", get_release=_boom) is None

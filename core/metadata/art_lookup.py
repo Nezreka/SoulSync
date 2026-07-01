@@ -361,6 +361,74 @@ def _caa_art_candidates(metadata: Optional[dict], *, fetch=None) -> List[dict]:
         return []
 
 
+def _resolve_release_group_mbid(release_mbid, *, get_release=None) -> Optional[str]:
+    """The MusicBrainz release-GROUP id for a release, or None. ``get_release`` injectable. The group
+    is the logical album; enumerating its releases is what surfaces every edition's cover art. Never
+    raises."""
+    if not release_mbid:
+        return None
+    if get_release is None:
+        def get_release(mbid):
+            from core.metadata.registry import get_musicbrainz_client
+            client = get_musicbrainz_client()
+            return client.get_release(mbid, includes=["release-groups"]) if client else None
+    try:
+        rel = get_release(release_mbid) or {}
+        return (rel.get("release-group") or {}).get("id")
+    except Exception as exc:
+        logger.debug("[art] release-group resolve failed: %s", exc)
+        return None
+
+
+def _caa_release_group_candidates(release_group_mbid, *, browse=None, limit=40) -> List[dict]:
+    """One Cover Art Archive front cover per RELEASE (edition) in the release-group that actually has
+    art — the "loads of covers across editions" source. A single MusicBrainz browse call; the front
+    URL is built from the deterministic CAA path (no per-release CAA fetch). ``browse`` injectable.
+    Never raises."""
+    if not release_group_mbid:
+        return []
+    if browse is None:
+        def browse(rg):
+            from core.metadata.registry import get_musicbrainz_client
+            client = get_musicbrainz_client()
+            return client.browse_release_group_releases(rg) if client else []
+    try:
+        releases = browse(release_group_mbid) or []
+    except Exception as exc:
+        logger.debug("[art] release-group browse failed: %s", exc)
+        return []
+    out: List[dict] = []
+    seen: set = set()
+    for rel in releases:
+        if not isinstance(rel, dict):
+            continue
+        mbid = rel.get("id")
+        caa = rel.get("cover-art-archive") or {}
+        if not mbid or mbid in seen or not caa.get("front"):
+            continue
+        seen.add(mbid)
+        out.append({
+            "url": f"{_COVER_ART_ARCHIVE}/release/{mbid}/front-1200",
+            "source": "caa", "type": "Front", "front": True,
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _caa_candidates_for(metadata: Optional[dict]) -> List[dict]:
+    """CAA candidates for an album — every edition's front across the release-group when it can be
+    resolved (the rich path), else just the one known release's images. Never raises."""
+    meta = metadata or {}
+    rg = meta.get("musicbrainz_release_group") or _resolve_release_group_mbid(
+        meta.get("musicbrainz_release_id"))
+    if rg:
+        group = _caa_release_group_candidates(rg)
+        if group:
+            return group
+    return _caa_art_candidates(meta)
+
+
 def gather_album_art_candidates(
     artist: Optional[str],
     album: Optional[str],
@@ -386,7 +454,7 @@ def gather_album_art_candidates(
         seen.add(url)
         candidates.append({"url": url, "source": source, "type": kind, "front": front})
 
-    caa = caa_candidates if caa_candidates is not None else _caa_art_candidates(meta)
+    caa = caa_candidates if caa_candidates is not None else _caa_candidates_for(meta)
     for c in caa:
         _add(c.get("url"), "caa", c.get("type", "Front"), c.get("front", False))
 
