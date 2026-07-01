@@ -6389,10 +6389,10 @@ let _artistWeb = {
     pathPairs: null,                  // Set<"a|b"> consecutive path edges (highlighted)
     pathResult: null,                 // the node-key array, once complete
     simGraph: null,                   // cached similarity-only graph for pathfinding (lens-independent)
-    // Cursor force-field: nodes near the pointer nudge away, then spring back to their layout home.
-    cursorFX: true,
-    cursor: null, cursorActive: false, cursorRAF: null,
-    cursorRadius: 0, cursorPush: 0, home: null, hoverNode: null,
+    // Node-spread effect: selecting a node fans its neighbors outward; they settle back on deselect.
+    cursorFX: true,                   // master flag (one switch to disable the effect)
+    fxRAF: null, home: null,          // rAF handle + captured resting positions
+    spreadRoot: null, spreadSet: null, spreadPush: 0,
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6555,9 +6555,8 @@ function _artWebRenderLens() {
     });
     const span = Math.max(maxX - minX, maxY - minY) || 1;
     _artistWeb.home = home;
-    _artistWeb.cursorRadius = span * 0.05;   // ~5% of the graph span
-    _artistWeb.cursorPush = span * 0.02;     // nudge up to ~2% — subtle, so hover/click still land
-    _artistWeb.cursor = null; _artistWeb.cursorActive = false;
+    _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
+    _artistWeb.spreadRoot = null; _artistWeb.spreadSet = null;
 
     _artWebMountSigma(host, built.graph);
 }
@@ -6700,7 +6699,7 @@ function _artWebRunLayout(graph) {
 function _artWebMountSigma(host, graph) {
     host.innerHTML = '';
     host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow
-    if (_artistWeb.cursorRAF) { cancelAnimationFrame(_artistWeb.cursorRAF); _artistWeb.cursorRAF = null; }
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     _artistWeb.graph = graph;
     _artistWeb.sigma = new window.Sigma(graph, host, {
@@ -6719,54 +6718,51 @@ function _artWebMountSigma(host, graph) {
         if (_artistWeb.pathMode) { _artWebClearPath(); _artWebPathHint('Click an artist, then a second one, to trace how they connect.'); }
         else _artWebClearSelection();
     });
-
-    // Cursor force-field: track the pointer in graph space; the rAF loop nudges nearby nodes.
-    if (_artistWeb.cursorFX) {
-        sig.getMouseCaptor().on('mousemovebody', (e) => {
-            try { _artistWeb.cursor = sig.viewportToGraph({ x: e.x, y: e.y }); } catch (_) { return; }
-            _artistWeb.cursorActive = true;
-            _artWebStartCursorFX();
-        });
-        host.addEventListener('mouseleave', () => { _artistWeb.cursorActive = false; _artWebStartCursorFX(); });
-    }
 }
 
-// Cursor force-field loop: nodes within radius get pushed away from the pointer (relative to their
-// home), and ease back home when the pointer moves off. Purely visual — never touches the data/layout.
-function _artWebStartCursorFX() {
-    if (!_artistWeb.cursorRAF) _artistWeb.cursorRAF = requestAnimationFrame(_artWebCursorTick);
-}
-
-function _artWebCursorTick() {
+// ---- Node-spread effect: selecting a node fans its neighbors outward, then they settle back -------
+// Set the spread to a node's neighbors (skips huge hubs so the whole screen doesn't heave).
+function _artWebSetSpread(root, focusSet) {
     const st = _artistWeb;
-    st.cursorRAF = null;
+    if (!st.cursorFX || !st.home) return;
+    const neighbors = new Set(focusSet);
+    neighbors.delete(root);
+    if (neighbors.size === 0 || neighbors.size > 60) { _artWebClearSpread(); return; }
+    st.spreadRoot = root;
+    st.spreadSet = neighbors;
+    _artWebStartFX();
+}
+
+function _artWebClearSpread() {
+    const st = _artistWeb;
+    st.spreadRoot = null; st.spreadSet = null;
+    _artWebStartFX();   // loop eases any pushed nodes back home, then stops
+}
+
+function _artWebStartFX() {
+    if (!_artistWeb.fxRAF) _artistWeb.fxRAF = requestAnimationFrame(_artWebSpreadTick);
+}
+
+// Each frame: nodes in the spread set ease toward (home pushed away from the selected node); every
+// other node eases toward home. The loop runs only WHILE things are moving, so it's not continuous.
+function _artWebSpreadTick() {
+    const st = _artistWeb;
+    st.fxRAF = null;
     if (!st.sigma || !st.cursorFX || !st.home || !st.graph) return;
     const g = st.graph, home = st.home;
-    const active = st.cursorActive && st.cursor;
-    const cx = active ? st.cursor.x : 0, cy = active ? st.cursor.y : 0;
-    const R = st.cursorRadius, PUSH = st.cursorPush, EASE = 0.2;
-
-    // The node nearest the pointer is exempt from the push (stays home) so it never flees your click;
-    // everything else parts around it.
-    let nearest = null;
-    if (active) {
-        let nd = Infinity;
-        g.forEachNode((k, a) => { const dx = a.x - cx, dy = a.y - cy, d = dx * dx + dy * dy; if (d < nd) { nd = d; nearest = k; } });
-    }
-
+    const set = st.spreadSet, root = st.spreadRoot;
+    const rootHome = root && home[root] ? home[root] : null;
+    const PUSH = st.spreadPush, EASE = 0.18;
     let moving = false;
     g.forEachNode((k, a) => {
         const h = home[k];
         if (!h) return;
         let tx = h.x, ty = h.y;
-        if (active && k !== nearest && k !== st.hoverNode) {
-            const dx = h.x - cx, dy = h.y - cy;          // measure from HOME → stable, no feedback jitter
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < R && dist > 0.0001) {
-                const force = (1 - dist / R) * PUSH;      // closer to pointer → stronger push
-                tx = h.x + (dx / dist) * force;
-                ty = h.y + (dy / dist) * force;
-            }
+        if (set && rootHome && set.has(k)) {
+            const dx = h.x - rootHome.x, dy = h.y - rootHome.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+            tx = h.x + (dx / dist) * PUSH;   // push each neighbor outward from the selected node
+            ty = h.y + (dy / dist) * PUSH;
         }
         const nx = a.x + (tx - a.x) * EASE;
         const ny = a.y + (ty - a.y) * EASE;
@@ -6776,8 +6772,7 @@ function _artWebCursorTick() {
             moving = true;
         }
     });
-    if (moving) st.sigma.refresh();
-    if (moving || active) st.cursorRAF = requestAnimationFrame(_artWebCursorTick);   // else settled → stop
+    if (moving) { st.sigma.refresh(); st.fxRAF = requestAnimationFrame(_artWebSpreadTick); }
 }
 
 function closeArtistWeb() {
@@ -6789,8 +6784,8 @@ function closeArtistWeb() {
     document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
         if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
     });
-    if (_artistWeb.cursorRAF) { cancelAnimationFrame(_artistWeb.cursorRAF); _artistWeb.cursorRAF = null; }
-    _artistWeb.cursorActive = false;
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = null;
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
@@ -6973,7 +6968,6 @@ function artWebFitToView() {
 // ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
 function _artWebHover(node) {
     const st = _artistWeb;
-    st.hoverNode = node || null;   // pin the hovered node so the force-field can't shove it out of reach
     if (!st.sigma || st.pathMode) return;   // no hover-dim while tracing a path
     if (node) {
         const set = new Set([node]);
@@ -6997,6 +6991,7 @@ function _artWebClickNode(node) {
     st.selectedKey = node; st.selectedFocus = set;
     st.focusSet = set; st.focusRoot = node;
     st.searchMatch = null;                      // a click supersedes a search dim
+    _artWebSetSpread(node, set);                // fan the neighbors outward
     st.sigma.refresh();
     if (st.graph.getNodeAttribute(node, 'kind') === 'genre') _artWebShowGenre(node);
     else _artWebShowArtist(node);
@@ -7005,6 +7000,7 @@ function _artWebClickNode(node) {
 function _artWebClearSelection() {
     const st = _artistWeb;
     st.selectedKey = st.selectedFocus = st.focusSet = st.focusRoot = null;
+    _artWebClearSpread();               // let the fanned-out neighbors settle back home
     if (st.sigma) st.sigma.refresh();
     _artWebClosePanel();
 }
