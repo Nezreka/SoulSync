@@ -9761,19 +9761,33 @@ def get_artist_discography(artist_id):
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
 
+_ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
+_ART_OPTIONS_CACHE_LOCK = threading.Lock()
+_ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+
+
 @app.route('/api/album/<album_id>/art-options', methods=['GET'])
 def get_album_art_options(album_id):
     """Candidate cover-art images for an album, for the art picker (read-only).
 
-    Gathers from Cover Art Archive (every image for the release) + Deezer/iTunes/Spotify/AudioDB
-    (their single validated best). ``artist`` and ``album`` come from the caller — the enhanced
-    library view already has them. CAA contributes only when the album's release MBID resolves.
+    Gathers from Cover Art Archive (a front cover per edition across the release-group) +
+    Deezer/iTunes/Spotify/AudioDB (their single validated best), fanned out concurrently. ``artist``
+    and ``album`` come from the caller — the enhanced library view already has them. Results are
+    cached briefly since the gather is several slow external calls.
     """
     try:
         artist = (request.args.get('artist') or '').strip()
         album = (request.args.get('album') or '').strip()
         if not artist or not album:
             return jsonify({"error": "artist and album query params are required"}), 400
+
+        cache_key = (artist.lower(), album.lower())
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                return jsonify({"album_id": album_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
 
         metadata = {}
         try:
@@ -9787,6 +9801,8 @@ def get_album_art_options(album_id):
 
         from core.metadata.art_lookup import gather_album_art_candidates
         candidates = gather_album_art_candidates(artist, album, metadata)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
         return jsonify({"album_id": album_id, "count": len(candidates), "candidates": candidates})
     except Exception as e:
         logger.error("[art-options] failed for album %s: %s", album_id, e, exc_info=True)
