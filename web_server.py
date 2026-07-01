@@ -9876,23 +9876,27 @@ def set_album_art(album_id):
 
 @app.route('/api/graph/library', methods=['GET'])
 def get_library_graph():
-    """Library "Taste Map": owned artists as nodes, wired by direct similarity — for the sigma.js graph.
+    """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.
 
-    Returns {"nodes": [{key,label,owned,popularity,thumb,genres}], "edges": [{source,target,weight}]}.
-    Built in-memory from similar_artists (a SQL self-join to resolve source IDs is too slow at 75k rows).
+    Returns {"nodes": [{key,label,kind,owned,primary_genre,popularity,thumb} | {key,label,kind,genre}],
+    "edges": [{source,target,weight,kind}]}. Every artist is included (attached to a per-genre hub node
+    so a force layout clusters them); similarity edges come from similar_artists (resolved in-memory —
+    a SQL self-join is too slow at 75k rows).
     """
     try:
-        from core.graph.artist_graph import build_taste_map
+        from core.graph.artist_graph import build_genre_grouped_map
         db = get_database()
         conn = db._get_connection()
         try:
             cur = conn.cursor()
             owned = set()
             meta = {}
+            artists = []
             for name, thumb, genres in cur.execute("SELECT name, thumb_url, genres FROM artists"):
                 key = (name or "").strip().lower()
                 owned.add(key)
                 meta[key] = {"thumb_url": thumb, "genres": genres}
+                artists.append((name, genres, thumb))
             rows = cur.execute(
                 "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
                 "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
@@ -9900,8 +9904,13 @@ def get_library_graph():
             ).fetchall()
         finally:
             conn.close()
-        graph = build_taste_map(rows, owned, artist_meta=meta)
-        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+        graph = build_genre_grouped_map(artists, rows, owned, artist_meta=meta)
+        n_artists = sum(1 for n in graph["nodes"] if n.get("kind") == "artist")
+        n_genres = sum(1 for n in graph["nodes"] if n.get("kind") == "genre")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "artists": n_artists, "genres": n_genres,
+        }})
     except Exception as e:
         logger.error("[library-graph] failed: %s", e, exc_info=True)
         return jsonify({"error": str(e)}), 500
