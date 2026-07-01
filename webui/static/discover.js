@@ -6630,11 +6630,14 @@ function _artWebRenderLens() {
     _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
     _artistWeb.spreadRoot = null; _artistWeb.spreadSet = null;
 
-    // Declutter threshold = median similarity-edge weight (hides the weaker half when toggled on).
+    // Declutter threshold: hide edges below the median weight — but most edges are weight-1
+    // (single-source), so if the median IS the minimum, bump above it to hide that weakest tier.
     const w = [];
     built.graph.forEachEdge((e, a) => { if (a.kind === 'similarity') w.push(a.weight || 1); });
     w.sort((x, y) => x - y);
-    _artistWeb.edgeThreshold = w.length ? w[Math.floor(w.length * 0.5)] : 2;
+    let thr = w.length ? w[Math.floor(w.length * 0.5)] : 2;
+    if (w.length && thr <= w[0]) thr = w[0] + 1;
+    _artistWeb.edgeThreshold = thr;
     _artWebSyncEdgeButton();
 
     _artWebMountSigma(host, built.graph);
