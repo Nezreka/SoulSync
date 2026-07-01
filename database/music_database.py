@@ -12058,6 +12058,26 @@ class MusicDatabase:
             logger.error(f"Error updating artist {artist_id}: {e}")
             return {'success': False, 'error': str(e)}
 
+    def set_album_thumb_url(self, album_id, thumb_url: str) -> bool:
+        """Set an album's cover-art URL (the user's art-picker choice). A non-empty value also PINS it:
+        every enrichment worker fills art only ``WHERE thumb_url IS NULL OR = ''``, so none will
+        overwrite a user pick. Returns True when a row was updated."""
+        conn = None
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE albums SET thumb_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (thumb_url, album_id))
+            conn.commit()
+            return cursor.rowcount > 0
+        except Exception as e:
+            logger.error(f"set_album_thumb_url failed for album {album_id}: {e}")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
     def update_album_fields(self, album_id, updates: Dict[str, Any]) -> Dict[str, Any]:
         """Update album metadata fields. Only whitelisted fields are accepted."""
         valid_updates = {k: v for k, v in updates.items() if k in self.ALBUM_EDITABLE_FIELDS}
