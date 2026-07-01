@@ -106,23 +106,57 @@ const SOURCE_ORDER = [
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
 const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'youtube_videos']);
 
+// Experimental metadata sources — each is opt-in via Settings → Advanced →
+// Experimental and individually toggleable. The backend reports their on/off
+// state in the `_experimental` payload ({'<name>_enabled': bool}); the picker
+// hides any experimental source that isn't currently enabled. To add a new
+// experimental provider, add its name here (plus a SOURCE_DEFINITIONS entry).
+const EXPERIMENTAL_SOURCES = new Set(['jiosaavn']);
+
+/** Parse an `_experimental` payload into a Set of enabled experimental names. */
+function parseEnabledExperimental(data) {
+    const enabled = new Set();
+    const flags = data && data._experimental;
+    if (flags && typeof flags === 'object') {
+        for (const [key, value] of Object.entries(flags)) {
+            if (value && key.endsWith('_enabled')) {
+                enabled.add(key.slice(0, -'_enabled'.length));
+            }
+        }
+    }
+    return enabled;
+}
+
+/** Set of currently-enabled experimental sources (read from /status). */
+async function fetchEnabledExperimentalSources() {
+    try {
+        const resp = await fetch('/status');
+        if (resp.ok) return parseEnabledExperimental(await resp.json());
+    } catch (_) { /* fall through */ }
+    return new Set();
+}
+
+/** Source picker order with disabled experimental sources removed. */
+function visibleSourceOrder(enabledExperimental = new Set()) {
+    return SOURCE_ORDER.filter(
+        src => !EXPERIMENTAL_SOURCES.has(src) || enabledExperimental.has(src)
+    );
+}
+
 // Fetch /api/settings/config-status and return a map { src -> bool }
-// covering every source in SOURCE_ORDER. Sources not present in the backend
+// covering every visible source. Sources not present in the backend
 // registry (musicbrainz / youtube_videos / soulseek) are reported as
 // configured so the picker doesn't dim always-available sources.
-async function fetchSourceConfiguredMap() {
+async function fetchSourceConfiguredMap(enabledExperimental = new Set()) {
     const map = {};
-    let jiosaavnEnabled = false;
     try {
         const resp = await fetch('/api/settings/config-status');
         if (resp.ok) {
             const data = await resp.json();
-            jiosaavnEnabled = !!(data._experimental && data._experimental.jiosaavn_enabled);
-            for (const src of SOURCE_ORDER) {
-                if (src === 'jiosaavn' && !jiosaavnEnabled) {
-                    map[src] = false;
-                    continue;
-                }
+            // /status and config-status share the _experimental shape; trust the
+            // freshest read so the picker and config agree.
+            enabledExperimental = parseEnabledExperimental(data);
+            for (const src of visibleSourceOrder(enabledExperimental)) {
                 if (_ALWAYS_CONFIGURED_SOURCES.has(src)) {
                     map[src] = true;
                 } else if (src === 'spotify') {
@@ -136,8 +170,11 @@ async function fetchSourceConfiguredMap() {
             return map;
         }
     } catch (_) { /* fall through to conservative default */ }
-    // Network / endpoint failure — be permissive rather than dim everything.
-    for (const src of SOURCE_ORDER) map[src] = true;
+    // Network / endpoint failure — be permissive for standard sources. Disabled
+    // experimental sources are already excluded from visibleSourceOrder.
+    for (const src of visibleSourceOrder(enabledExperimental)) {
+        map[src] = true;
+    }
     return map;
 }
 
@@ -192,6 +229,7 @@ function createSearchController({
         fallbacks: {},
         loadingSources: new Set(),
         configuredSources: {},
+        enabledExperimental: new Set(),
         _initialized: false,
     };
     // Optimistic default — replaced by the real config-status lookup on
@@ -218,7 +256,8 @@ function createSearchController({
 
     function renderSourceRow() {
         if (!sourceRowElement) return;
-        sourceRowElement.innerHTML = SOURCE_ORDER.map(src => {
+        const order = visibleSourceOrder(state.enabledExperimental);
+        sourceRowElement.innerHTML = order.map(src => {
             const info = SOURCE_LABELS[src];
             if (!info) return '';
             const active = src === state.activeSource;
@@ -302,16 +341,22 @@ function createSearchController({
         } catch (_) { /* best-effort */ }
         if (!SOURCE_LABELS[state.activeSource]) state.activeSource = 'spotify';
 
+        state.enabledExperimental = await fetchEnabledExperimentalSources();
+        if (EXPERIMENTAL_SOURCES.has(state.activeSource) && !state.enabledExperimental.has(state.activeSource)) {
+            state.activeSource = 'spotify';
+        }
+
         // Figure out which sources actually have credentials saved.
         try {
-            state.configuredSources = await fetchSourceConfiguredMap();
+            state.configuredSources = await fetchSourceConfiguredMap(state.enabledExperimental);
         } catch (_) { /* keep optimistic default */ }
 
         // If the configured primary is itself unconfigured (Spotify saved
         // as primary but no client_id yet), fall forward to the first
         // configured source so the default active icon is usable.
         if (state.configuredSources[state.activeSource] === false) {
-            const firstConfigured = SOURCE_ORDER.find(s => state.configuredSources[s] !== false);
+            const firstConfigured = visibleSourceOrder(state.enabledExperimental)
+                .find(s => state.configuredSources[s] !== false);
             if (firstConfigured) state.activeSource = firstConfigured;
         }
 
@@ -321,6 +366,7 @@ function createSearchController({
 
     function setActiveSource(src) {
         if (!SOURCE_LABELS[src]) return;
+        if (EXPERIMENTAL_SOURCES.has(src) && !state.enabledExperimental.has(src)) return;
 
         // Unconfigured — jump to the relevant card in Settings rather than
         // firing a search that can't succeed. Don't swap activeSource so the

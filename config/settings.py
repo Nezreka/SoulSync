@@ -729,7 +729,9 @@ class ConfigManager:
             },
             "m3u_export": {
                 "enabled": False,
-                "entry_base_path": ""
+                "entry_base_path": "",
+                "library_enabled": False,
+                "library_path": ""
             },
             "playlists": {
                 # Where "Organize by playlist" materializes playlist folders.

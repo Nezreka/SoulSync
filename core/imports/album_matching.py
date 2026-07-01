@@ -118,24 +118,48 @@ SimilarityFn = Callable[[str, str], float]
 QualityRankFn = Callable[[str], int]
 
 
+# Two files at one (disc, track) position are quality-duplicates of each other ONLY if their titles
+# also match this closely. Without it, a mixed-album staging pool (every album has a track 1) collapsed
+# DIFFERENT songs to one position and dropped the correct files (#963).
+_DEDUPE_SAME_SONG_THRESHOLD = 0.85
+
+
 def dedupe_files_by_position(
     audio_files: List[str],
     file_tags: Dict[str, Dict[str, Any]],
     *,
     quality_rank: QualityRankFn,
+    similarity: Optional[SimilarityFn] = None,
 ) -> List[str]:
-    """Drop quality-duplicate files at the same ``(disc, track)``
-    position, keeping the higher-quality one.
+    """Drop quality-duplicate files at the same ``(disc, track)`` position, keeping the
+    higher-quality one — but ONLY when the two files are the SAME SONG.
 
-    The position key is ``(disc_number, track_number)`` — NOT
-    ``track_number`` alone. Multi-disc albums where every disc has
-    tracks 1..N would otherwise collapse to one disc's worth of files
-    here, before the matcher even sees the rest.
+    The position key is ``(disc_number, track_number)`` — NOT ``track_number`` alone. Multi-disc
+    albums where every disc has tracks 1..N would otherwise collapse to one disc's worth of files.
 
-    Files with ``track_number == 0`` (no tag) all pass through —
-    can't dedupe positions we don't know.
+    But same position is necessary, NOT sufficient: a staging pool can hold several DIFFERENT albums,
+    each with its own track 1..N. Two files sharing a position can be different songs
+    (``01 - BLOOD`` vs ``01 - Deuces``); collapsing those dropped the correct file and made the
+    matcher assign songs to the wrong slots (manual album match — #963). So a file counts as a
+    quality-duplicate only when another file at the same position also matches it by title.
+
+    ``similarity`` is the ``(a, b) -> 0..1`` comparer; when omitted, the engine title cleaner is used.
+    Files with ``track_number == 0`` (no tag) all pass through — can't dedupe positions we don't know.
     """
-    seen_positions: Dict[Tuple[int, int], str] = {}
+    if similarity is None:
+        from core.imports.text_matching import title_similarity
+        title_sim = title_similarity
+    else:
+        title_sim = similarity
+
+    from core.imports.paths import strip_leading_track_number
+
+    def _song_title(fp: str, tags: Dict[str, Any]) -> str:
+        title = tags.get('title') or os.path.splitext(os.path.basename(fp))[0]
+        return strip_leading_track_number(title)
+
+    # Each position maps to the list of DISTINCT songs kept there (usually one).
+    seen_positions: Dict[Tuple[int, int], List[str]] = {}
     deduped: List[str] = []
 
     for f in audio_files:
@@ -146,16 +170,29 @@ def dedupe_files_by_position(
         position_key = (disc_num, track_num)
 
         if track_num > 0 and position_key in seen_positions:
-            prev_f = seen_positions[position_key]
-            prev_ext = os.path.splitext(prev_f)[1].lower()
-            if quality_rank(ext) > quality_rank(prev_ext):
-                deduped.remove(prev_f)
-                deduped.append(f)
-                seen_positions[position_key] = f
+            f_title = _song_title(f, tags)
+            dup_of = None
+            for prev_f in seen_positions[position_key]:
+                prev_title = _song_title(prev_f, file_tags.get(prev_f, {}))
+                if title_sim(f_title, prev_title) >= _DEDUPE_SAME_SONG_THRESHOLD:
+                    dup_of = prev_f
+                    break
+            if dup_of is not None:
+                # Genuine quality-duplicate of a kept file — keep the higher-quality copy.
+                prev_ext = os.path.splitext(dup_of)[1].lower()
+                if quality_rank(ext) > quality_rank(prev_ext):
+                    deduped.remove(dup_of)
+                    deduped.append(f)
+                    kept = seen_positions[position_key]
+                    kept[kept.index(dup_of)] = f
+                continue
+            # Same position but a DIFFERENT song (mixed-album pool) — keep both.
+            deduped.append(f)
+            seen_positions[position_key].append(f)
         else:
             deduped.append(f)
             if track_num > 0:
-                seen_positions[position_key] = f
+                seen_positions[position_key] = [f]
 
     return deduped
 
@@ -553,7 +590,8 @@ def match_files_to_tracks(
 
     # Phase 2 — quality dedup on remaining files.
     remaining_files = [f for f in audio_files if f not in used_files]
-    deduped = dedupe_files_by_position(remaining_files, file_tags, quality_rank=quality_rank)
+    deduped = dedupe_files_by_position(
+        remaining_files, file_tags, quality_rank=quality_rank, similarity=similarity)
 
     # Phase 3 — fuzzy scoring on remaining tracks.
     duration_rejected = 0     # diagnostics for the "no matches" case
