@@ -6561,7 +6561,7 @@ function _artWebApplySize(mode) {
     max = max || 1;
     g.forEachNode((k, a) => {
         if (a.kind !== 'artist') return;   // genre hubs stay sized by member count
-        const size = 2 + Math.sqrt(metric(k, a) / max) * 11;   // 2..13
+        const size = 2 + Math.sqrt(metric(k, a) / max) * 3.5;   // 2..5.5 — matches the original build scale
         g.setNodeAttribute(k, 'size', size);
     });
     if (st.sigma) st.sigma.refresh();
