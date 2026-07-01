@@ -3317,14 +3317,30 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
+            # Experimental toggles must land before metadata.fallback_source so a
+            # single save that enables JioSaavn and sets it primary is not silently
+            # reset to the default (same validation as the sidebar quick-switch).
+            _experimental_in = new_settings.get('experimental')
+            if isinstance(_experimental_in, dict):
+                for key, value in _experimental_in.items():
+                    config_manager.set(f'experimental.{key}', value)
+
             for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
+                    if service == 'experimental' and isinstance(_experimental_in, dict):
+                        continue
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import experimental_source_rejected, METADATA_SOURCE_PRIORITY
-            if experimental_source_rejected(config_manager.get('metadata.fallback_source')):
+            from core.metadata.registry import (
+                METADATA_SOURCE_PRIORITY,
+                get_configured_primary_source,
+                primary_metadata_source_rejection_error,
+            )
+            _primary_err = primary_metadata_source_rejection_error(get_configured_primary_source())
+            if _primary_err:
                 config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
+                return jsonify({"success": False, "error": _primary_err}), 400
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -27894,20 +27910,13 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            from core.metadata.registry import experimental_source_rejected
-            if experimental_source_rejected(src):
-                return jsonify({
-                    'success': False,
-                    'error': f'{src} is not enabled — turn it on under Settings → Advanced → Experimental.',
-                }), 400
-            # Same composite the Settings save uses: 'spotify_free' is stored as
-            # fallback_source='spotify' + metadata.spotify_free=true.
-            if src == 'spotify_free':
-                config_manager.set('metadata.fallback_source', 'spotify')
-                config_manager.set('metadata.spotify_free', True)
-            else:
-                config_manager.set('metadata.fallback_source', src)
-                config_manager.set('metadata.spotify_free', False)
+            from core.metadata.registry import apply_primary_metadata_source
+            _primary_err = apply_primary_metadata_source(
+                src,
+                config_manager.set,
+            )
+            if _primary_err:
+                return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
 
