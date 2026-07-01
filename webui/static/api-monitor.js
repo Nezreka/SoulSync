@@ -3,17 +3,17 @@
 
 const _rateMonitorState = {};
 const _RATE_GAUGE_SERVICES = [
-    'spotify', 'itunes', 'deezer', 'lastfm', 'genius',
+    'spotify', 'itunes', 'deezer', 'jiosaavn', 'lastfm', 'genius',
     'musicbrainz', 'audiodb', 'tidal', 'qobuz', 'discogs', 'amazon',
 ];
 const _RATE_GAUGE_LABELS = {
-    spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer',
+    spotify: 'Spotify', itunes: 'Apple Music', deezer: 'Deezer', jiosaavn: 'JioSaavn',
     lastfm: 'Last.fm', genius: 'Genius', musicbrainz: 'MusicBrainz',
     audiodb: 'AudioDB', tidal: 'Tidal', qobuz: 'Qobuz', discogs: 'Discogs',
     amazon: 'Amazon Music',
 };
 const _RATE_GAUGE_COLORS = {
-    spotify: '#1DB954', itunes: '#FC3C44', deezer: '#A238FF',
+    spotify: '#1DB954', itunes: '#FC3C44', deezer: '#A238FF', jiosaavn: '#2BC5B4',
     lastfm: '#D51007', genius: '#FFFF64', musicbrainz: '#BA478F',
     audiodb: '#00BCD4', tidal: '#00FFFF', qobuz: '#FF6B35', discogs: '#D4A574',
     amazon: '#FF9900',
@@ -28,6 +28,7 @@ const _RATE_GAUGE_LOGOS = {
     spotify:    'https://storage.googleapis.com/pr-newsroom-wp/1/2023/05/Spotify_Primary_Logo_RGB_Green.png',
     itunes:     'https://upload.wikimedia.org/wikipedia/commons/thumb/d/df/ITunes_logo.svg/960px-ITunes_logo.svg.png',
     deezer:     'https://cdn.brandfetch.io/idEUKgCNtu/theme/dark/symbol.svg?c=1bxid64Mup7aczewSAYMX&t=1758260798610',
+    jiosaavn:   'https://cdn-1.webcatalog.io/catalog/jiosaavn/jiosaavn-icon-filled-256.webp?v=1782693273643',
     lastfm:     'https://www.last.fm/static/images/lastfm_avatar_twitter.52a5d69a85ac.png',
     genius:     'https://images.genius.com/8ed669cadd956443e29c70361ec4f372.1000x1000x1.png',
     musicbrainz:'https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/MusicBrainz_Logo_%282016%29.svg/500px-MusicBrainz_Logo_%282016%29.svg.png',
@@ -43,6 +44,27 @@ const _RATE_GAUGE_LOGOS = {
 // last fill height so the spike-detect peak flash only fires on a
 // real upward step (not on repaint / equal-value socket updates).
 const _eqDisplay = {};
+
+function _isJiosaavnExperimentalEnabled() {
+    return document.getElementById('experimental-jiosaavn-enabled')?.checked === true
+        || window._settingsPayload?.experimental?.jiosaavn_enabled === true;
+}
+
+function _visibleRateGaugeServices() {
+    if (_isJiosaavnExperimentalEnabled()) return _RATE_GAUGE_SERVICES;
+    return _RATE_GAUGE_SERVICES.filter(svc => svc !== 'jiosaavn');
+}
+
+function _removeJiosaavnRateGauge() {
+    document.getElementById('rate-eq-jiosaavn')?.remove();
+    document.getElementById('rate-gauge-jiosaavn')?.remove();
+    delete _rateMonitorState.jiosaavn;
+    delete _eqDisplay.jiosaavn;
+}
+
+function refreshRateMonitorExperimentalVisibility() {
+    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+}
 
 // SVG constants — 240° arc, gap at bottom
 const _G = { size: 160, cx: 80, cy: 84, r: 56, stroke: 8, startAngle: 240, totalArc: 240 };
@@ -64,6 +86,10 @@ function _gArc(startDeg, endDeg, radius) {
 function _handleRateMonitorUpdate(data) {
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
+
+    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+
+    const visibleServices = _visibleRateGaugeServices();
 
     // Skip DOM writes while the equalizer is off-screen (you're on another page).
     // All pages stay mounted, so updating a hidden grid still fires every
@@ -87,7 +113,16 @@ function _handleRateMonitorUpdate(data) {
     }
 
     if (!grid.children.length) {
-        for (const svc of _RATE_GAUGE_SERVICES) {
+        for (const svc of visibleServices) {
+            const div = document.createElement('div');
+            div.className = 'rate-gauge-card';
+            div.id = `rate-gauge-${svc}`;
+            div.onclick = () => _openRateModal(svc);
+            grid.appendChild(div);
+        }
+    } else {
+        for (const svc of visibleServices) {
+            if (document.getElementById(`rate-gauge-${svc}`)) continue;
             const div = document.createElement('div');
             div.className = 'rate-gauge-card';
             div.id = `rate-gauge-${svc}`;
@@ -96,7 +131,7 @@ function _handleRateMonitorUpdate(data) {
         }
     }
 
-    for (const svc of _RATE_GAUGE_SERVICES) {
+    for (const svc of visibleServices) {
         const d = data[svc];
         if (!d) continue;
         _rateMonitorState[svc] = d;
@@ -199,8 +234,12 @@ function _handleRateMonitorUpdate(data) {
 // flex row regardless of viewport.
 
 function _renderEqualizerBars(grid, data) {
-    if (!grid.children.length) {
-        for (const svc of _RATE_GAUGE_SERVICES) {
+    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+
+    const visibleServices = _visibleRateGaugeServices();
+
+    for (const svc of visibleServices) {
+        if (document.getElementById(`rate-eq-${svc}`)) continue;
             const accent = _RATE_GAUGE_COLORS[svc] || '#888';
             const label = _RATE_GAUGE_LABELS[svc] || svc;
             const logoSrc = _RATE_GAUGE_LOGOS[svc] || '';
@@ -253,10 +292,9 @@ function _renderEqualizerBars(grid, data) {
             `;
             grid.appendChild(bar);
             _eqDisplay[svc] = { value: 0, pct: 0.04 };
-        }
     }
 
-    for (const svc of _RATE_GAUGE_SERVICES) {
+    for (const svc of visibleServices) {
         const d = data[svc];
         if (!d) continue;
         _rateMonitorState[svc] = d;

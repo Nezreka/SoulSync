@@ -60,6 +60,7 @@ export const STATS_ENRICHMENT_SERVICES = [
   { key: 'spotify', label: 'Spotify', color: '#1db954' },
   { key: 'musicbrainz', label: 'MusicBrainz', color: '#ba55d3' },
   { key: 'deezer', label: 'Deezer', color: '#a238ff' },
+  { key: 'jiosaavn', label: 'JioSaavn', color: '#2bc5b4' },
   { key: 'lastfm', label: 'Last.fm', color: '#d51007' },
   { key: 'itunes', label: 'iTunes', color: '#fc3c44' },
   { key: 'audiodb', label: 'AudioDB', color: '#1a9fff' },

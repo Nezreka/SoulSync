@@ -47,12 +47,14 @@ def build_metadata_enrichment_runtime(
     genius_worker: Any | None = None,
     spotify_enrichment_worker: Any | None = None,
     itunes_enrichment_worker: Any | None = None,
+    jiosaavn_worker: Any | None = None,
 ) -> SimpleNamespace:
     """Build the runtime object consumed by core.metadata.enrichment/source."""
     return SimpleNamespace(
         mb_worker=mb_worker,
         deezer_worker=deezer_worker,
         audiodb_worker=audiodb_worker,
+        jiosaavn_worker=jiosaavn_worker,
         tidal_client=tidal_client,
         hifi_client=hifi_client,
         qobuz_enrichment_worker=qobuz_enrichment_worker,

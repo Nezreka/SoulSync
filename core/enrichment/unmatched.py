@@ -32,6 +32,7 @@ SERVICE_ENTITY_SUPPORT = {
     'tidal': ('artist', 'album', 'track'),
     'qobuz': ('artist', 'album', 'track'),
     'amazon': ('artist', 'album', 'track'),
+    'jiosaavn': ('artist', 'album', 'track'),
     # Relationship enrichment (not a metadata source): the Similar Artists worker
     # only operates at the artist level, and its <service>_match_status tracks
     # whether MusicMap similars were fetched (not a source-id match). So the

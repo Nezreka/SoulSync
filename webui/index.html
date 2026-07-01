@@ -439,6 +439,23 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- JioSaavn Enrichment Status Icon (hidden until experimental flag on) -->
+                            <div class="jiosaavn-button-container" style="display:none">
+                                <button class="jiosaavn-button" id="jiosaavn-button" title="JioSaavn Library Enrichment">
+                                    <span class="jiosaavn-logo" aria-hidden="true">🎵</span>
+                                    <div class="jiosaavn-spinner"></div>
+                                </button>
+                                <div class="jiosaavn-tooltip" id="jiosaavn-tooltip">
+                                    <div class="jiosaavn-tooltip-content">
+                                        <div class="jiosaavn-tooltip-header">JioSaavn Enrichment</div>
+                                        <div class="jiosaavn-tooltip-body" id="jiosaavn-tooltip-body">
+                                            <div class="tooltip-status">Status: <span id="jiosaavn-tooltip-status">Idle</span></div>
+                                            <div class="tooltip-current" id="jiosaavn-tooltip-current">No active matches</div>
+                                            <div class="tooltip-progress" id="jiosaavn-tooltip-progress">Progress: 0 / 0</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                             <!-- Spotify Enrichment Status Icon -->
                             <div class="spotify-enrich-button-container">
                                 <button class="spotify-enrich-button" id="spotify-enrich-button" title="Spotify Library Enrichment">

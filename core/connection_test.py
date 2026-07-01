@@ -423,6 +423,18 @@ def run_service_test(service, test_config):
                 return False, f"Deezer returned HTTP {resp.status_code}"
             except Exception as e:
                 return False, f"Deezer connection error: {str(e)}"
+        elif service == "jiosaavn":
+            from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
+            if not is_jiosaavn_enabled():
+                return False, "JioSaavn is disabled (experimental feature off)"
+            try:
+                client = get_jiosaavn_client()
+                results = client.search_artists("beatles", limit=1)
+                if results:
+                    return True, "JioSaavn API reachable"
+                return False, "JioSaavn API returned no results"
+            except Exception as e:
+                return False, f"JioSaavn connection error: {str(e)}"
         elif service == "discogs":
             token = test_config.get('token', '') or config_manager.get('discogs.token', '')
             if not token:

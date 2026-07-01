@@ -20,6 +20,7 @@ ARTIST_NAME_MATCH_THRESHOLD = 0.85
 _ARTIST_ID_COLUMNS = frozenset({
     'deezer_id', 'spotify_artist_id', 'itunes_artist_id', 'musicbrainz_id',
     'discogs_id', 'audiodb_id', 'qobuz_id', 'tidal_id', 'amazon_id', 'soul_id',
+    'jiosaavn_id',
 })
 
 

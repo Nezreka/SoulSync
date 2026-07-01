@@ -653,7 +653,7 @@ class ConfigManager:
             "metadata_enhancement": {
                 "enabled": True,
                 "embed_album_art": True,
-                "post_process_order": ["musicbrainz", "deezer", "audiodb", "tidal", "qobuz", "lastfm", "genius"],
+                "post_process_order": ["musicbrainz", "deezer", "audiodb", "jiosaavn", "tidal", "qobuz", "lastfm", "genius"],
                 # Ordered preferred cover-art sources (empty = use the
                 # download's own art, i.e. today's behavior). Resolved + walked
                 # with fallback by core/metadata/art_sources.py.
@@ -671,6 +671,14 @@ class ConfigManager:
             },
             "musicbrainz": {
                 "embed_tags": True
+            },
+            "jiosaavn": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "album_id": True,
+                },
             },
             "playlist_sync": {
                 "create_backup": True,
