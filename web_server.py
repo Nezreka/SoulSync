@@ -9892,11 +9892,13 @@ def get_library_graph():
             owned = set()
             meta = {}
             artists = []
-            for name, thumb, genres in cur.execute("SELECT name, thumb_url, genres FROM artists"):
+            for name, thumb, genres, aid, source in cur.execute(
+                "SELECT name, thumb_url, genres, id, server_source FROM artists"
+            ):
                 key = (name or "").strip().lower()
                 owned.add(key)
                 meta[key] = {"thumb_url": thumb, "genres": genres}
-                artists.append((name, genres, thumb))
+                artists.append((name, genres, thumb, aid, source))
             rows = cur.execute(
                 "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
                 "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "

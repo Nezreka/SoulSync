@@ -74,6 +74,15 @@ def test_grouped_artist_without_genre_has_no_hub_edge():
     assert [e for e in g["edges"] if e["kind"] == "membership"] == []
 
 
+def test_grouped_carries_id_and_source_when_provided():
+    artists = [("A", '["Rock"]', "http://t", 42, "spotify"), ("B", '["Rock"]', None)]  # 5-tuple + 3-tuple
+    g = build_genre_grouped_map(artists, [], {"a", "b"})
+    a = next(n for n in g["nodes"] if n["key"] == "a")
+    b = next(n for n in g["nodes"] if n["key"] == "b")
+    assert a["id"] == 42 and a["source"] == "spotify" and a["thumb"] == "http://t"
+    assert b["id"] is None and b["source"] is None       # 3-tuple still works (back-compat)
+
+
 def test_grouped_shares_genre_hub_and_dedups_artists():
     artists = [("A", '["Rock"]', None), ("B", '["Rock"]', None), ("A", '["Rock"]', None)]  # dup A
     g = build_genre_grouped_map(artists, [], {"a", "b"})
