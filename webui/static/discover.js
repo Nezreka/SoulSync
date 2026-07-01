@@ -6371,6 +6371,21 @@ function _artMapPanelArtistById(id) {
 // styling, hover/expand interactions — gets built on top of this.
 let _artistWeb = { sigma: null, graph: null, onKey: null };
 
+// Distinct colors for the most-common genres; everything in the long tail falls back to gray.
+const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
+    '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
+const WEB_GENRE_FALLBACK = '#5a5a66';
+
+// Map the top-N genres (by artist count) to palette colors; return a lookup + the per-genre counts.
+function _webGenreColorMap(nodes) {
+    const counts = {};
+    nodes.forEach(n => { if (n.kind === 'artist' && n.primary_genre) counts[n.primary_genre] = (counts[n.primary_genre] || 0) + 1; });
+    const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a]).slice(0, WEB_PALETTE.length);
+    const map = {};
+    top.forEach((g, i) => { map[g] = WEB_PALETTE[i]; });
+    return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
+}
+
 async function openArtistWeb() {
     const container = document.getElementById('artist-web-container');
     if (!container) return;
@@ -6400,27 +6415,59 @@ async function openArtistWeb() {
     try {
         const data = await (await fetch('/api/graph/library')).json();
         const nodes = data.nodes || [], edges = data.edges || [];
-        if (statsEl) statsEl.textContent = `${nodes.length} artists · ${edges.length} connections`;
+        const c = data.counts || {};
+        const simCount = edges.filter(e => e.kind === 'similarity').length;
+        if (statsEl) statsEl.textContent = `${c.artists ?? nodes.length} artists · ${c.genres ?? 0} genres · ${simCount} similarity links`;
+
+        const { color: genreColor, counts: genreCounts } = _webGenreColorMap(nodes);
 
         const graph = new Graph();
         nodes.forEach(n => {
-            graph.addNode(n.key, {
-                label: n.label,
-                x: Math.random(), y: Math.random(),          // scaffold — real layout (forceAtlas2) next
-                size: 3 + Math.sqrt(n.popularity || 0) / 2,
-                color: '#1db954',
-            });
+            if (n.kind === 'genre') {
+                const members = genreCounts[n.genre] || 1;
+                graph.addNode(n.key, {
+                    label: n.label,
+                    x: Math.random(), y: Math.random(),
+                    size: 6 + Math.sqrt(members) * 1.5,      // hub size scales with how many artists it holds
+                    color: genreColor(n.genre),
+                    forceLabel: true,                         // genre hubs are always labeled
+                    isGenre: true,
+                });
+            } else {
+                graph.addNode(n.key, {
+                    label: n.label,
+                    x: Math.random(), y: Math.random(),      // random seed; forceAtlas2 places them below
+                    size: 2 + Math.sqrt(n.popularity || 0) / 3,
+                    color: genreColor(n.primary_genre),
+                });
+            }
         });
         edges.forEach(e => {
             if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
-                graph.addEdge(e.source, e.target, { weight: e.weight, size: 0.6, color: 'rgba(255,255,255,0.08)' });
+                const membership = e.kind === 'membership';
+                graph.addEdge(e.source, e.target, {
+                    weight: e.weight,
+                    size: membership ? 0.4 : 0.8,
+                    color: membership ? 'rgba(255,255,255,0.03)' : 'rgba(29,185,84,0.15)',
+                });
             }
         });
+
+        // Settle the random blob into genre clusters. Barnes-Hut keeps the ~5k-node layout tractable.
+        const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
+        if (fa2) {
+            fa2.assign(graph, { iterations: 250, settings: { ...fa2.inferSettings(graph), barnesHutOptimize: true } });
+        } else {
+            console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions');
+        }
 
         host.innerHTML = '';
         if (_artistWeb.sigma) _artistWeb.sigma.kill();
         _artistWeb.graph = graph;
-        _artistWeb.sigma = new window.Sigma(graph, host, { renderLabels: true });
+        _artistWeb.sigma = new window.Sigma(graph, host, {
+            renderLabels: true,
+            labelRenderedSizeThreshold: 20,   // only large nodes (genre hubs) label by default; artists on zoom
+        });
     } catch (err) {
         console.error('[Artist Web] load failed', err);
         host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
