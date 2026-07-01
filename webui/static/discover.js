@@ -6371,7 +6371,9 @@ function _artMapPanelArtistById(id) {
 // recolor/dim per frame — the graph data is never mutated for visual state.
 let _artistWeb = {
     sigma: null, graph: null, onKey: null,
-    genreColor: null,                 // (genre) -> color, set at render
+    lens: 'genre',                    // 'genre' (all artists by genre) | 'community' (Louvain on similarity)
+    data: null,                       // cached /api/graph/library payload (reused when switching lens)
+    genreColor: null,                 // (group) -> color, set at render
     index: [],                        // [{key,label}] artist nodes, for client-side search
     searchMatch: null,                // Set<key> of search hits, or null when search is empty
     focusSet: null,                   // Set<key> currently emphasized (hover node+neighbors, or selection)
@@ -6461,109 +6463,210 @@ async function openArtistWeb() {
     }
 
     try {
-        const data = await (await fetch('/api/graph/library')).json();
-        const nodes = data.nodes || [], edges = data.edges || [];
-        const c = data.counts || {};
-        const simCount = edges.filter(e => e.kind === 'similarity').length;
-        if (statsEl) statsEl.textContent = `${c.artists ?? nodes.length} artists · ${c.genres ?? 0} genres · ${simCount} similarity links`;
-
-        const { color: genreColor, counts: genreCounts } = _webGenreColorMap(nodes);
-        _artistWeb.genreColor = genreColor;
-        _artistWeb.genreCounts = genreCounts;
-        _artistWeb.genreFilter = null;
-        _artistWeb.index = [];
-        _artistWeb.searchMatch = null;
-
-        const graph = new Graph();
-        nodes.forEach(n => {
-            if (n.kind === 'genre') {
-                const members = genreCounts[n.genre] || 1;
-                graph.addNode(n.key, {
-                    label: n.label,
-                    x: Math.random(), y: Math.random(),
-                    size: 6 + Math.sqrt(members) * 1.5,      // hub size scales with how many artists it holds
-                    color: genreColor(n.genre),
-                    baseColor: genreColor(n.genre),           // reducers restore from this
-                    forceLabel: true,                         // genre hubs are always labeled
-                    kind: 'genre', genre: n.genre,
-                });
-            } else {
-                const color = genreColor(n.cluster);            // color by the cluster it grouped under
-                graph.addNode(n.key, {
-                    label: n.label,
-                    x: Math.random(), y: Math.random(),      // random seed; forceAtlas2 places them below
-                    size: 2 + Math.sqrt(n.popularity || 0) / 3,
-                    color: color, baseColor: color,
-                    kind: 'artist', genre: n.cluster,          // `genre` = cluster (drives filter + edge color)
-                    primaryGenre: n.primary_genre,             // true genre, shown in the panel
-                    popularity: n.popularity || 0, thumb: n.thumb || null,
-                    artistId: n.id != null ? n.id : null, source: n.source || null,
-                });
-                _artistWeb.index.push({ key: n.key, label: n.label });
-            }
-        });
-        edges.forEach(e => {
-            if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
-                const membership = e.kind === 'membership';
-                // Edge inherits its artist endpoint's cluster color (low alpha) -> the glowing web look.
-                const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
-                graph.addEdge(e.source, e.target, {
-                    weight: e.weight,
-                    size: membership ? 0.35 : 0.7,
-                    color: _webHexToRgba(base, 0.22),
-                    kind: e.kind,   // 'membership' (layout-only, never drawn) | 'similarity' (drawn)
-                });
-            }
-        });
-
-        // Settle the random blob into SEPARATED genre islands. LinLog + outbound-attraction pushes
-        // clusters apart (vs one round hairball); Barnes-Hut keeps the ~5k-node layout tractable.
-        // Tuning knobs if it drifts: gravity (higher = tighter to center), scalingRatio (higher =
-        // more space between islands), iterations (more = more settled).
-        const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
-        if (fa2) {
-            fa2.assign(graph, {
-                iterations: 400,
-                settings: {
-                    ...fa2.inferSettings(graph),
-                    barnesHutOptimize: true,
-                    linLogMode: true,                      // clusters separate into islands
-                    outboundAttractionDistribution: true,  // spread the hubs out
-                    adjustSizes: true,                     // don't overlap node circles
-                    gravity: 1.2,
-                    scalingRatio: 3,
-                    slowDown: 4,                           // stability with linLog
-                },
-            });
-        } else {
-            console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions');
-        }
-
-        host.innerHTML = '';
-        host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow (reference look)
-        if (_artistWeb.sigma) _artistWeb.sigma.kill();
-        _artistWeb.graph = graph;
-        _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
-        _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
-        _artistWeb.sigma = new window.Sigma(graph, host, {
-            renderLabels: true,
-            labelRenderedSizeThreshold: 20,   // only large nodes (genre hubs) label by default; artists on zoom
-            labelRenderer: _webDrawLabel,     // white pill labels
-            // Reducers: recolor/dim per frame from UI state (search / hover / selection). Data is untouched.
-            nodeReducer: (node, data) => _artWebNodeReducer(node, data),
-            edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
-        });
-
-        // Interaction: hover highlights a node + its neighbors; click opens the side panel.
-        const sig = _artistWeb.sigma;
-        sig.on('enterNode', ({ node }) => _artWebHover(node));
-        sig.on('leaveNode', () => _artWebHover(null));
-        sig.on('clickNode', ({ node }) => _artWebClickNode(node));
-        sig.on('clickStage', () => _artWebClearSelection());
+        _artistWeb.data = await (await fetch('/api/graph/library')).json();
+        _artistWeb.lens = _artistWeb.lens || 'genre';
+        _artWebSyncLensButtons();
+        _artWebRenderLens();
     } catch (err) {
         console.error('[Artist Web] load failed', err);
         host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
     }
+}
+
+// Switch the organizing lens (genre clusters vs similarity communities) and rebuild.
+function artWebSetLens(lens) {
+    if (!_artistWeb.data || _artistWeb.lens === lens) return;
+    _artistWeb.lens = lens;
+    _artWebSyncLensButtons();
+    const host = document.getElementById('artist-web-canvas');
+    if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
+    setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
+}
+
+function _artWebSyncLensButtons() {
+    document.querySelectorAll('.artweb-lens-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.lens === _artistWeb.lens));
+}
+
+// (Re)build the graph for the current lens, run the layout, and mount sigma.
+function _artWebRenderLens() {
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    const data = _artistWeb.data;
+    if (!host || !data) return;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph) return;
+
+    // Reset per-render UI state + chrome.
+    _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
+    _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
+    _artistWeb.genreFilter = null;
+    _artistWeb.index = [];
+    _artWebClosePanel();
+    const sidebar = document.getElementById('artweb-genre-sidebar');
+    if (sidebar) sidebar.style.display = 'none';
+    const searchInput = document.getElementById('artist-web-search');
+    if (searchInput) searchInput.value = '';
+
+    const built = _artistWeb.lens === 'community'
+        ? _artWebBuildCommunity(data, Graph)
+        : _artWebBuildGenre(data, Graph);
+
+    _artistWeb.genreColor = built.colorOf;
+    _artistWeb.genreCounts = built.counts;
+    if (statsEl) statsEl.textContent = built.stats;
+    const sbHeader = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-header span');
+    if (sbHeader) sbHeader.textContent = _artistWeb.lens === 'community' ? 'Communities' : 'Genres';
+
+    _artWebRunLayout(built.graph);
+    _artWebMountSigma(host, built.graph);
+}
+
+// ---- Lens A: GENRE — every artist, grouped by genre-anchor hubs (membership edges = layout only) --
+function _artWebBuildGenre(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const { color: colorOf, counts } = _webGenreColorMap(nodes);
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'genre') {
+            const members = counts[n.genre] || 1;
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 6 + Math.sqrt(members) * 1.5,
+                color: colorOf(n.genre), baseColor: colorOf(n.genre),
+                forceLabel: true, kind: 'genre', genre: n.genre,
+            });
+        } else {
+            const color = colorOf(n.cluster);
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 2 + Math.sqrt(n.popularity || 0) / 3,
+                color: color, baseColor: color,
+                kind: 'artist', genre: n.cluster, primaryGenre: n.primary_genre,
+                popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+            });
+            _artistWeb.index.push({ key: n.key, label: n.label });
+        }
+    });
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            const membership = e.kind === 'membership';
+            const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight, size: membership ? 0.35 : 0.7,
+                color: _webHexToRgba(base, 0.22), kind: e.kind,
+            });
+        }
+    });
+    const c = data.counts || {};
+    const simCount = edges.filter(e => e.kind === 'similarity').length;
+    const stats = `${c.artists ?? nodes.length} artists · ${c.genres ?? '?'} genres · ${simCount} similarity links`;
+    return { graph, colorOf, counts, stats };
+}
+
+// ---- Lens B: COMMUNITIES — the similarity-connected core, clustered by Louvain, named by hub artist -
+function _artWebBuildCommunity(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const simEdges = edges.filter(e => e.kind === 'similarity');
+    const artistByKey = {};
+    nodes.forEach(n => { if (n.kind === 'artist') artistByKey[n.key] = n; });
+
+    const graph = new Graph();
+    // Only artists with at least one similarity link — the discoverable "taste" core.
+    simEdges.forEach(e => [e.source, e.target].forEach(k => {
+        if (!graph.hasNode(k) && artistByKey[k]) {
+            const n = artistByKey[k];
+            graph.addNode(k, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 2 + Math.sqrt(n.popularity || 0) / 3, kind: 'artist',
+                primaryGenre: n.primary_genre, popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+            });
+        }
+    }));
+    simEdges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            graph.addEdge(e.source, e.target, { weight: e.weight, kind: 'similarity', size: 0.7 });
+        }
+    });
+
+    // Louvain community detection on the similarity graph.
+    const louvain = window.graphologyLibrary && window.graphologyLibrary.communitiesLouvain;
+    let comm = {};
+    if (louvain) { try { comm = louvain(graph, { getEdgeWeight: 'weight' }); } catch (e) { comm = {}; } }
+
+    // Group members; name each community by its highest-degree (most central) artist.
+    const members = {};
+    graph.forEachNode(k => { const cid = (comm[k] != null ? comm[k] : 'x'); (members[cid] = members[cid] || []).push(k); });
+    const commIds = Object.keys(members).sort((a, b) => members[b].length - members[a].length);
+    const repOf = {}, colorByRep = {}, countsByRep = {};
+    commIds.forEach((cid, i) => {
+        let best = null, bestDeg = -1;
+        members[cid].forEach(k => { const d = graph.degree(k); if (d > bestDeg) { bestDeg = d; best = k; } });
+        let rep = best ? graph.getNodeAttribute(best, 'label') : ('Group ' + cid);
+        if (countsByRep[rep] != null) rep = rep + ' · ' + cid;   // guard rare rep-name collision
+        repOf[cid] = rep;
+        colorByRep[rep] = i < WEB_PALETTE.length ? WEB_PALETTE[i] : WEB_GENRE_FALLBACK;
+        countsByRep[rep] = members[cid].length;
+        if (best) graph.setNodeAttribute(best, '_rep', true);
+    });
+    graph.forEachNode(k => {
+        const cid = (comm[k] != null ? comm[k] : 'x');
+        const rep = repOf[cid];
+        const color = colorByRep[rep] || WEB_GENRE_FALLBACK;
+        const isRep = graph.getNodeAttribute(k, '_rep') === true;
+        graph.mergeNodeAttributes(k, {
+            color, baseColor: color, genre: rep, forceLabel: isRep,
+            size: isRep ? Math.max(8, graph.getNodeAttribute(k, 'size')) : graph.getNodeAttribute(k, 'size'),
+        });
+        _artistWeb.index.push({ key: k, label: graph.getNodeAttribute(k, 'label') });
+    });
+    graph.forEachEdge((edge, attrs, s) => {
+        const base = graph.getNodeAttribute(s, 'baseColor') || WEB_GENRE_FALLBACK;
+        graph.setEdgeAttribute(edge, 'color', _webHexToRgba(base, 0.22));
+    });
+
+    const stats = `${graph.order} connected artists · ${commIds.length} communities · ${graph.size} links`;
+    return { graph, colorOf: (rep) => colorByRep[rep] || WEB_GENRE_FALLBACK, counts: countsByRep, stats };
+}
+
+// Shared force layout — LinLog + outbound-attraction settles clusters into separated islands.
+function _artWebRunLayout(graph) {
+    const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
+    if (!fa2) { console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions'); return; }
+    fa2.assign(graph, {
+        iterations: 400,
+        settings: {
+            ...fa2.inferSettings(graph),
+            barnesHutOptimize: true,
+            linLogMode: true,                      // clusters separate into islands
+            outboundAttractionDistribution: true,  // spread the hubs out
+            adjustSizes: true,                     // don't overlap node circles
+            gravity: 1.2, scalingRatio: 3, slowDown: 4,
+        },
+    });
+}
+
+// Shared sigma mount + interaction wiring (used by both lenses).
+function _artWebMountSigma(host, graph) {
+    host.innerHTML = '';
+    host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = graph;
+    _artistWeb.sigma = new window.Sigma(graph, host, {
+        renderLabels: true,
+        labelRenderedSizeThreshold: 20,
+        labelRenderer: _webDrawLabel,
+        hideEdgesOnMove: true,   // edge cleanup: drop edges while panning/zooming for clarity + perf
+        nodeReducer: (node, data) => _artWebNodeReducer(node, data),
+        edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
+    });
+    const sig = _artistWeb.sigma;
+    sig.on('enterNode', ({ node }) => _artWebHover(node));
+    sig.on('leaveNode', () => _artWebHover(null));
+    sig.on('clickNode', ({ node }) => _artWebClickNode(node));
+    sig.on('clickStage', () => _artWebClearSelection());
 }
 
 function closeArtistWeb() {
