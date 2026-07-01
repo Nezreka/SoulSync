@@ -78,11 +78,14 @@ _ALIASES: Dict[tuple, tuple] = {
     ("artist", "musicbrainz"): ("musicbrainz_artist_id", "similar_artist_musicbrainz_id"),
     ("artist", "discogs"): ("discogs_artist_id",),
     ("artist", "amazon"): ("amazon_artist_id",),
+    ("artist", "jiosaavn"): ("jiosaavn_artist_id",),
     ("album", "spotify"): ("album_spotify_id",),
     ("album", "itunes"): ("album_itunes_id",),
     ("album", "deezer"): ("deezer_album_id", "album_deezer_id"),
     ("album", "discogs"): ("discogs_release_id",),
+    ("album", "jiosaavn"): ("jiosaavn_album_id",),
     ("track", "deezer"): ("deezer_track_id",),
+    ("track", "jiosaavn"): ("jiosaavn_track_id",),
 }
 
 

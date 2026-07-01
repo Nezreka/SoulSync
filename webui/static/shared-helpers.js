@@ -3885,7 +3885,7 @@ function renderEnrichmentCards(enrichment) {
 
     // Service display order
     const serviceOrder = [
-        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment',
+        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
         'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
         'acoustid', 'listenbrainz'
     ];

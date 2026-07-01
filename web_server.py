@@ -227,6 +227,7 @@ from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.discogs_worker import DiscogsWorker
 from core.deezer_worker import DeezerWorker
+from core.jiosaavn_worker import JioSaavnWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
@@ -1929,6 +1930,7 @@ def _shutdown_runtime_components():
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
+        (jiosaavn_worker, "jiosaavn worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2391,6 +2393,7 @@ def _get_enrichment_status():
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
+        ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2400,6 +2403,7 @@ def _get_enrichment_status():
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
+        'jiosaavn_enrichment': lambda: __import__('core.metadata.registry', fromlist=['is_jiosaavn_enabled']).is_jiosaavn_enabled(),
     }
 
     for key, name, get_worker in workers_info:
@@ -3313,14 +3317,30 @@ def handle_settings():
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
+            # Experimental toggles must land before metadata.fallback_source so a
+            # single save that enables JioSaavn and sets it primary is not silently
+            # reset to the default (same validation as the sidebar quick-switch).
+            _experimental_in = new_settings.get('experimental')
+            if isinstance(_experimental_in, dict):
+                for key, value in _experimental_in.items():
+                    config_manager.set(f'experimental.{key}', value)
+
             for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
+                    if service == 'experimental' and isinstance(_experimental_in, dict):
+                        continue
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import experimental_source_rejected, METADATA_SOURCE_PRIORITY
-            if experimental_source_rejected(config_manager.get('metadata.fallback_source')):
+            from core.metadata.registry import (
+                METADATA_SOURCE_PRIORITY,
+                get_configured_primary_source,
+                primary_metadata_source_rejection_error,
+            )
+            _primary_err = primary_metadata_source_rejection_error(get_configured_primary_source())
+            if _primary_err:
                 config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
+                return jsonify({"success": False, "error": _primary_err}), 400
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -12702,7 +12722,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -12728,7 +12748,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -12818,6 +12838,21 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         elif entity_type == 'track':
             deezer_worker._process_track(entity_id, name, artist_name, item)
         return {"success": True, "message": f"Deezer lookup complete for {entity_type}"}
+
+    elif service == 'jiosaavn':
+        if not jiosaavn_worker:
+            return {"success": False, "error": "JioSaavn worker not initialized"}
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            return {"success": False, "error": "JioSaavn is disabled (experimental feature off)"}
+        item = {'type': entity_type, 'id': entity_id, 'name': name, 'artist': artist_name}
+        if entity_type == 'artist':
+            jiosaavn_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            jiosaavn_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            jiosaavn_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"JioSaavn lookup complete for {entity_type}"}
 
     elif service == 'musicbrainz':
         if not mb_worker:
@@ -12956,6 +12991,7 @@ _SERVICE_ID_COLUMNS = {
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
+    'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -16099,6 +16135,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         runtime=metadata_runtime or _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16204,6 +16241,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16328,6 +16366,7 @@ def _post_process_matched_download(context_key, context, file_path):
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16792,7 +16831,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -16808,7 +16847,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -27871,20 +27910,13 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            from core.metadata.registry import experimental_source_rejected
-            if experimental_source_rejected(src):
-                return jsonify({
-                    'success': False,
-                    'error': f'{src} is not enabled — turn it on under Settings → Advanced → Experimental.',
-                }), 400
-            # Same composite the Settings save uses: 'spotify_free' is stored as
-            # fallback_source='spotify' + metadata.spotify_free=true.
-            if src == 'spotify_free':
-                config_manager.set('metadata.fallback_source', 'spotify')
-                config_manager.set('metadata.spotify_free', True)
-            else:
-                config_manager.set('metadata.fallback_source', src)
-                config_manager.set('metadata.spotify_free', False)
+            from core.metadata.registry import apply_primary_metadata_source
+            _primary_err = apply_primary_metadata_source(
+                src,
+                config_manager.set,
+            )
+            if _primary_err:
+                return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
 
@@ -36972,6 +37004,32 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+# ================================================================================================
+# JIOSAAVN ENRICHMENT INTEGRATION
+# ================================================================================================
+
+jiosaavn_worker = None
+try:
+    from database.music_database import MusicDatabase
+    jiosaavn_db = MusicDatabase()
+    jiosaavn_worker = JioSaavnWorker(database=jiosaavn_db)
+    jiosaavn_worker.start()
+    if config_manager.get('jiosaavn_enrichment_paused', False):
+        jiosaavn_worker.pause()
+        logger.info("JioSaavn enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("JioSaavn enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"JioSaavn worker initialization failed: {e}")
+    jiosaavn_worker = None
+
+# JioSaavn status / pause / resume routes are served by the
+# generic enrichment blueprint at /api/enrichment/jiosaavn/{status,pause,resume}.
+
+# ================================================================================================
+# END JIOSAAVN INTEGRATION
+# ================================================================================================
+
 amazon_worker = None
 try:
     amazon_db = MusicDatabase()
@@ -37284,6 +37342,7 @@ _init_service_search(
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
+    jiosaavn_worker_obj=jiosaavn_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
@@ -38865,6 +38924,11 @@ _register_enrichment_services([
         config_paused_key='amazon_enrichment_paused',
     ),
     _EnrichmentService(
+        id='jiosaavn', display_name='JioSaavn',
+        worker_getter=lambda: jiosaavn_worker,
+        config_paused_key='jiosaavn_enrichment_paused',
+    ),
+    _EnrichmentService(
         id='similar_artists', display_name='Similar Artists',
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
@@ -38891,6 +38955,7 @@ def _emit_rate_monitor_loop():
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
+        'jiosaavn': 'jiosaavn_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -38947,6 +39012,7 @@ def _emit_enrichment_status_loop():
         'audiodb': lambda: audiodb_worker,
         'discogs': lambda: discogs_worker,
         'deezer': lambda: deezer_worker,
+        'jiosaavn': lambda: jiosaavn_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,
         'lastfm-enrichment': lambda: lastfm_worker,

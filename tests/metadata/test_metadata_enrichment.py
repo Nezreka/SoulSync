@@ -768,3 +768,54 @@ def test_mb_genre_all_empty_returns_empty(monkeypatch):
     ms._process_musicbrainz_source(pp, {"album": "Alb"}, _Config({"musicbrainz.embed_tags": True}),
                                     runtime, "T", "A")
     assert pp["mb_genres"] == []
+
+
+class _JsTrack:
+    def __init__(self, id, name, artists, release_date=None):
+        self.id = id
+        self.name = name
+        self.artists = artists
+        self.release_date = release_date
+
+
+class _JsClient:
+    def search_tracks(self, query, limit=5):
+        return [_JsTrack("js-trk-1", "Song One", ["Artist One"], release_date="2021")]
+
+    def get_track_details(self, track_id):
+        return {"id": track_id, "album_id": "js-alb-1"}
+
+
+def test_jiosaavn_source_embeds_when_enabled(monkeypatch):
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: True)
+    runtime = types.SimpleNamespace(jiosaavn_worker=types.SimpleNamespace(client=_JsClient()))
+    pp = {"id_tags": {}, "release_year": None}
+    ms._process_jiosaavn_source(
+        pp, {"album": "Album One"}, _Config({"jiosaavn.embed_tags": True}),
+        runtime, "Song One", "Artist One",
+    )
+    assert pp["id_tags"]["JIOSAAVN_TRACK_ID"] == "js-trk-1"
+    assert pp["id_tags"]["JIOSAAVN_ALBUM_ID"] == "js-alb-1"
+    assert pp["release_year"] == "2021"
+
+
+def test_jiosaavn_source_skips_when_disabled(monkeypatch):
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: False)
+    runtime = types.SimpleNamespace(jiosaavn_worker=types.SimpleNamespace(client=_JsClient()))
+    pp = {"id_tags": {}, "release_year": None}
+    ms._process_jiosaavn_source(
+        pp, {}, _Config({"jiosaavn.embed_tags": True}),
+        runtime, "Song One", "Artist One",
+    )
+    assert pp["id_tags"] == {}
+
+
+def test_jiosaavn_source_skips_when_embed_tags_false(monkeypatch):
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: True)
+    runtime = types.SimpleNamespace(jiosaavn_worker=types.SimpleNamespace(client=_JsClient()))
+    pp = {"id_tags": {}, "release_year": None}
+    ms._process_jiosaavn_source(
+        pp, {}, _Config({"jiosaavn.embed_tags": False}),
+        runtime, "Song One", "Artist One",
+    )
+    assert pp["id_tags"] == {}

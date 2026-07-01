@@ -112,6 +112,7 @@ _DEFAULT_ENRICHMENT_STATUS = {
     'musicbrainz': copy.deepcopy(_ENRICHMENT_COMMON),
     'audiodb': copy.deepcopy(_ENRICHMENT_COMMON),
     'deezer': copy.deepcopy(_ENRICHMENT_COMMON),
+    'jiosaavn': copy.deepcopy(_ENRICHMENT_COMMON),
     'spotify-enrichment': {**copy.deepcopy(_ENRICHMENT_COMMON), 'authenticated': True},
     'itunes-enrichment': copy.deepcopy(_ENRICHMENT_COMMON),
     'hydrabase': {
@@ -347,7 +348,7 @@ def _build_enrichment_status(worker_name):
     return copy.deepcopy(enrichment_status.get(worker_name, {}))
 
 ENRICHMENT_WORKERS = [
-    'musicbrainz', 'audiodb', 'deezer',
+    'musicbrainz', 'audiodb', 'deezer', 'jiosaavn',
     'spotify-enrichment', 'itunes-enrichment',
     'hydrabase', 'repair',
 ]
@@ -356,6 +357,7 @@ ENRICHMENT_ENDPOINTS = {
     'musicbrainz': '/api/enrichment/musicbrainz/status',
     'audiodb': '/api/enrichment/audiodb/status',
     'deezer': '/api/enrichment/deezer/status',
+    'jiosaavn': '/api/enrichment/jiosaavn/status',
     'spotify-enrichment': '/api/enrichment/spotify/status',
     'itunes-enrichment': '/api/enrichment/itunes/status',
     'hydrabase': '/api/hydrabase-worker/status',

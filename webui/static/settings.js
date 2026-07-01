@@ -195,11 +195,23 @@ function resolveExperimentalEnableDialog(confirmed) {
     }
 }
 
+function syncJiosaavnEnrichmentBubble(enabled) {
+    const container = document.querySelector('.jiosaavn-button-container');
+    if (container) container.style.display = enabled ? '' : 'none';
+    if (typeof refreshRateMonitorExperimentalVisibility === 'function') {
+        refreshRateMonitorExperimentalVisibility();
+    }
+    if (enabled && typeof renderEnrichmentRail === 'function') {
+        renderEnrichmentRail();
+    }
+}
+
 async function onExperimentalJiosaavnToggle(checkbox) {
     if (!checkbox) return;
 
     if (!checkbox.checked) {
         syncJiosaavnMetadataSourceOption(false);
+        syncJiosaavnEnrichmentBubble(false);
         debouncedAutoSaveSettings();
         return;
     }
@@ -215,6 +227,7 @@ async function onExperimentalJiosaavnToggle(checkbox) {
 
     checkbox.checked = true;
     syncJiosaavnMetadataSourceOption(true);
+    syncJiosaavnEnrichmentBubble(true);
     debouncedAutoSaveSettings();
 }
 
@@ -1393,6 +1406,7 @@ async function loadSettingsData() {
         const jiosaavnEnabled = settings.experimental?.jiosaavn_enabled === true;
         if (_jiosaavnExp) _jiosaavnExp.checked = jiosaavnEnabled;
         syncJiosaavnMetadataSourceOption(jiosaavnEnabled);
+        syncJiosaavnEnrichmentBubble(jiosaavnEnabled);
         if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
             document.getElementById('metadata-fallback-source').value = 'jiosaavn';
         }
