@@ -6378,6 +6378,8 @@ let _artistWeb = {
     focusRoot: null,                  // the node at the center of the focus (gets a halo)
     selectedKey: null,                // click-selected node (survives hover-out)
     selectedFocus: null,              // the focus set to restore when hover clears
+    genreFilter: null,                // Set<genre> persistent filter (dims everything outside it)
+    genreCounts: null,                // {genre: artistCount} for the filter sidebar
 };
 
 // White pill label (black text, 10px padding) — custom sigma labelRenderer, per Boulder's spec.
@@ -6465,6 +6467,8 @@ async function openArtistWeb() {
 
         const { color: genreColor, counts: genreCounts } = _webGenreColorMap(nodes);
         _artistWeb.genreColor = genreColor;
+        _artistWeb.genreCounts = genreCounts;
+        _artistWeb.genreFilter = null;
         _artistWeb.index = [];
         _artistWeb.searchMatch = null;
 
@@ -6554,6 +6558,8 @@ function closeArtistWeb() {
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
     if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const sb = document.getElementById('artweb-genre-sidebar');
+    if (sb) sb.style.display = 'none';
     _artWebClosePanel();
 }
 
@@ -6564,6 +6570,11 @@ const _WEB_DIM_EDGE = 'rgba(255,255,255,0.02)';
 function _artWebNodeReducer(node, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
+    // Persistent genre filter dims anything outside the chosen genres, regardless of focus/search.
+    if (st.genreFilter && !st.genreFilter.has(data.genre)) {
+        res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        return res;
+    }
     const active = st.focusSet || st.searchMatch;   // focus (hover/select) wins over search
     if (active) {
         if (active.has(node)) {
@@ -6583,9 +6594,14 @@ function _artWebNodeReducer(node, data) {
 function _artWebEdgeReducer(edge, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
+    const g = _artistWeb.graph;
+    if (st.genreFilter && g) {
+        const sg = g.getNodeAttribute(g.source(edge), 'genre');
+        const tg = g.getNodeAttribute(g.target(edge), 'genre');
+        if (!(st.genreFilter.has(sg) && st.genreFilter.has(tg))) { res.color = _WEB_DIM_EDGE; return res; }
+    }
     const active = st.focusSet || st.searchMatch;
-    if (active && _artistWeb.graph) {
-        const g = _artistWeb.graph;
+    if (active && g) {
         const s = g.source(edge), t = g.target(edge);
         // Focus (hover/select): show only edges fully inside the set → clean neighborhood.
         // Search: show any edge touching a match.
@@ -6797,9 +6813,64 @@ function _artWebShowGenre(node) {
     p.style.display = 'flex';
 }
 
-// Filter-by-genre lives in a later phase; stubs keep the toolbar buttons inert-but-safe for now.
-function artWebToggleFilter() { /* Phase C */ }
-function artWebFilterGenreList() { /* Phase C */ }
+// ---- Artist Web filter by genre: multi-select sidebar; dims everything outside the chosen genres --
+function artWebToggleFilter() {
+    const sb = document.getElementById('artweb-genre-sidebar');
+    const btn = document.getElementById('artweb-filter-btn');
+    if (!sb) return;
+    const open = sb.style.display !== 'none';
+    if (open) {
+        sb.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    } else {
+        _artWebPopulateGenreList('');
+        sb.style.display = 'flex';
+        if (btn) btn.classList.add('active');
+    }
+}
+
+function _artWebPopulateGenreList(query) {
+    const list = document.getElementById('artweb-genre-sidebar-list');
+    if (!list) return;
+    const counts = _artistWeb.genreCounts || {};
+    const color = _artistWeb.genreColor || (() => WEB_GENRE_FALLBACK);
+    const active = _artistWeb.genreFilter;
+    const q = (query || '').trim().toLowerCase();
+    const genres = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
+        .filter(g => !q || g.toLowerCase().includes(q));
+
+    const clearRow = active ? `<div onclick="artWebClearGenreFilter()" style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;border-radius:8px;cursor:pointer;color:#fff;font-size:12px;font-weight:700;background:rgba(255,255,255,0.06);">&#10005; Clear filter (${active.size})</div>` : '';
+    list.innerHTML = clearRow + (genres.map(g => {
+        const on = active && active.has(g);
+        return `<div onclick="artWebToggleGenre('${escapeForInlineJs(g)}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;${on ? 'background:rgba(255,255,255,0.09);' : ''}"
+             onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='${on ? 'rgba(255,255,255,0.09)' : 'transparent'}'">
+            <span style="width:10px;height:10px;border-radius:50%;flex:none;background:${color(g)};"></span>
+            <span style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${on ? 'font-weight:700;' : ''}">${escapeHtml(g)}</span>
+            <span style="font-size:10.5px;color:rgba(255,255,255,0.4);">${counts[g]}</span>
+        </div>`;
+    }).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;font-size:12px;">No genres</div>');
+}
+
+function artWebToggleGenre(genre) {
+    const st = _artistWeb;
+    if (!st.genreFilter) st.genreFilter = new Set();
+    if (st.genreFilter.has(genre)) st.genreFilter.delete(genre);
+    else st.genreFilter.add(genre);
+    if (st.genreFilter.size === 0) st.genreFilter = null;
+    if (st.sigma) st.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+function artWebClearGenreFilter() {
+    _artistWeb.genreFilter = null;
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+// Sidebar search box just filters which genres are listed.
+function artWebFilterGenreList(query) { _artWebPopulateGenreList(query); }
 
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
