@@ -35532,6 +35532,10 @@ div.artist-hero-badge {
 }
 .artweb-lens-btn:hover { color: #fff; }
 .artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
+/* Toolbar toggle buttons (Path, Filter) when engaged */
+#artist-web-container .artmap-tool-btn.active {
+    background: rgba(29,185,84,0.28); border-color: rgba(29,185,84,0.5); color: #fff;
+}
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);

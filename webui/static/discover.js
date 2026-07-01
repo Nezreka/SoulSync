@@ -6382,6 +6382,13 @@ let _artistWeb = {
     selectedFocus: null,              // the focus set to restore when hover clears
     genreFilter: null,                // Set<genre> persistent filter (dims everything outside it)
     genreCounts: null,                // {genre: artistCount} for the filter sidebar
+    // Shortest-path mode: click two artists to trace how they connect (via the similarity graph).
+    pathMode: false,
+    pathSource: null, pathTarget: null,
+    pathNodes: null,                  // Set<key> on the path (highlighted)
+    pathPairs: null,                  // Set<"a|b"> consecutive path edges (highlighted)
+    pathResult: null,                 // the node-key array, once complete
+    simGraph: null,                   // cached similarity-only graph for pathfinding (lens-independent)
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6455,9 +6462,10 @@ async function openArtistWeb() {
     const statsEl = document.getElementById('artist-web-stats');
     host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
 
-    // Esc: dismiss an open detail panel first, otherwise leave the web (mirrors the artist map).
+    // Esc: exit path mode, else dismiss an open detail panel, else leave the web.
     _artistWeb.onKey = (e) => {
         if (e.key !== 'Escape') return;
+        if (_artistWeb.pathMode) { _artWebExitPath(); return; }
         const p = document.getElementById('artweb-panel');
         if (p && p.style.display !== 'none') _artWebClearSelection();
         else closeArtistWeb();
@@ -6473,6 +6481,7 @@ async function openArtistWeb() {
 
     try {
         _artistWeb.data = await (await fetch('/api/graph/library')).json();
+        _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
         _artistWeb.lens = _artistWeb.lens || 'genre';
         _artWebSyncLensButtons();
         _artWebRenderLens();
@@ -6509,6 +6518,8 @@ function _artWebRenderLens() {
     // Reset per-render UI state + chrome.
     _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
     _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
+    _artistWeb.pathSource = _artistWeb.pathTarget = _artistWeb.pathResult = null;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = null;
     _artistWeb.genreFilter = null;
     _artistWeb.index = [];
     _artWebClosePanel();
@@ -6683,7 +6694,10 @@ function _artWebMountSigma(host, graph) {
     sig.on('enterNode', ({ node }) => _artWebHover(node));
     sig.on('leaveNode', () => _artWebHover(null));
     sig.on('clickNode', ({ node }) => _artWebClickNode(node));
-    sig.on('clickStage', () => _artWebClearSelection());
+    sig.on('clickStage', () => {
+        if (_artistWeb.pathMode) { _artWebClearPath(); _artWebPathHint('Click an artist, then a second one, to trace how they connect.'); }
+        else _artWebClearSelection();
+    });
 }
 
 function closeArtistWeb() {
@@ -6701,6 +6715,12 @@ function closeArtistWeb() {
     if (results) { results.style.display = 'none'; results.innerHTML = ''; }
     const sb = document.getElementById('artweb-genre-sidebar');
     if (sb) sb.style.display = 'none';
+    _artistWeb.pathMode = false;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = _artistWeb.pathResult = _artistWeb.pathSource = _artistWeb.pathTarget = null;
+    const pathBtn = document.getElementById('artweb-path-btn');
+    if (pathBtn) pathBtn.classList.remove('active');
+    const hint = document.getElementById('artweb-path-hint');
+    if (hint) hint.style.display = 'none';
     _artWebClosePanel();
 }
 
@@ -6712,6 +6732,19 @@ const _WEB_DIM_NODE = '#2b2b34';
 function _artWebNodeReducer(node, data) {
     const st = _artistWeb;
     const res = Object.assign({}, data);
+    // Shortest-path mode takes priority: the chain lights up, everything else goes dark.
+    if (st.pathNodes) {
+        if (st.pathNodes.has(node)) {
+            res.color = data.baseColor || data.color;
+            res.zIndex = 3;
+            const isEnd = (node === st.pathSource || node === st.pathTarget);
+            res.forceLabel = isEnd || !!st.pathResult;   // label the whole chain once complete
+            if (isEnd) res.highlighted = true;
+        } else {
+            res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        }
+        return res;
+    }
     // Persistent genre filter dims anything outside the chosen genres, regardless of focus/search.
     if (st.genreFilter && !st.genreFilter.has(data.genre)) {
         res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
@@ -6743,6 +6776,21 @@ function _artWebEdgeReducer(edge, data) {
     // conveyed by node position + color. Only similarity edges are drawn.
     if (data.kind === 'membership') { res.hidden = true; return res; }
     const g = _artistWeb.graph;
+    // Shortest-path mode: only the consecutive edges along the chain show (bright + thick), rest hidden.
+    if (st.pathNodes) {
+        if (g && st.pathPairs && st.pathPairs.size) {
+            const s = g.source(edge), t = g.target(edge);
+            const key = s < t ? s + '|' + t : t + '|' + s;
+            if (st.pathPairs.has(key)) {
+                res.zIndex = 3;
+                res.color = _webHexToRgba(data.baseColor || '#ffffff', 0.95);
+                res.size = (data.size || 0.7) * 2.4;
+                return res;
+            }
+        }
+        res.hidden = true;
+        return res;
+    }
     if (st.genreFilter && g) {
         const sg = g.getNodeAttribute(g.source(edge), 'genre');
         const tg = g.getNodeAttribute(g.target(edge), 'genre');
@@ -6843,7 +6891,7 @@ function artWebFitToView() {
 // ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
 function _artWebHover(node) {
     const st = _artistWeb;
-    if (!st.sigma) return;
+    if (!st.sigma || st.pathMode) return;   // no hover-dim while tracing a path
     if (node) {
         const set = new Set([node]);
         st.graph.forEachNeighbor(node, nb => set.add(nb));
@@ -6860,6 +6908,7 @@ function _artWebHover(node) {
 function _artWebClickNode(node) {
     const st = _artistWeb;
     if (!st.graph || !st.graph.hasNode(node)) return;
+    if (st.pathMode) { _artWebPathClick(node); return; }
     const set = new Set([node]);
     st.graph.forEachNeighbor(node, nb => set.add(nb));
     st.selectedKey = node; st.selectedFocus = set;
@@ -6891,6 +6940,149 @@ function _artWebGoToArtist(key) {
     _artWebClickNode(key);
     const disp = sig.getNodeDisplayData(key);
     if (disp) sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+}
+
+// ---- Artist Web shortest path: click two artists, trace how they connect via similarity ---------
+// Pathfinding runs on a SIMILARITY-only graph (not the displayed one) so a path means "sounds like ->
+// sounds like", never "both are tagged Rock" (which membership-to-hub edges would allow).
+function _artWebSimGraph() {
+    if (_artistWeb.simGraph) return _artistWeb.simGraph;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    const data = _artistWeb.data;
+    if (!Graph || !data) return null;
+    // UNDIRECTED: similarity pairs are stored once (sorted), so a directed graph would miss reverse
+    // traversals and report "no connection" for most pairs.
+    const g = new Graph({ type: 'undirected' });
+    (data.edges || []).forEach(e => {
+        if (e.kind !== 'similarity') return;
+        if (!g.hasNode(e.source)) g.addNode(e.source);
+        if (!g.hasNode(e.target)) g.addNode(e.target);
+        if (!g.hasEdge(e.source, e.target)) g.addEdge(e.source, e.target, { weight: e.weight || 1 });
+    });
+    _artistWeb.simGraph = g;
+    return g;
+}
+
+function artWebTogglePathMode() {
+    const st = _artistWeb;
+    if (st.pathMode) { _artWebExitPath(); return; }
+    st.pathMode = true;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.add('active');
+    _artWebClearSelection();
+    _artWebClearPath();
+    _artWebPathHint('Click an artist, then a second one, to trace how they connect.');
+}
+
+function _artWebPathClick(node) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(node)) return;
+    if (g.getNodeAttribute(node, 'kind') === 'genre') { _artWebPathHint('Pick artists, not genre hubs.'); return; }
+    const label = g.getNodeAttribute(node, 'label') || node;
+
+    if (!st.pathSource || st.pathResult) {
+        // (Re)start from this node.
+        st.pathSource = node; st.pathTarget = null; st.pathResult = null;
+        st.pathNodes = new Set([node]); st.pathPairs = new Set();
+        st.searchMatch = st.focusSet = st.focusRoot = null;
+        _artWebClosePanel();
+        st.sigma.refresh();
+        _artWebPathHint(`Start: <b>${escapeHtml(label)}</b> — now click a second artist.`);
+        return;
+    }
+    if (node === st.pathSource) return;
+    const path = _artWebComputePath(st.pathSource, node);
+    if (!path || path.length < 2) {
+        _artWebPathHint(`No similarity path between <b>${escapeHtml(g.getNodeAttribute(st.pathSource, 'label'))}</b> and <b>${escapeHtml(label)}</b>.`);
+        return;
+    }
+    st.pathTarget = node;
+    st.pathResult = path;
+    st.pathNodes = new Set(path);
+    st.pathPairs = new Set();
+    for (let i = 0; i + 1 < path.length; i++) {
+        const a = path[i], b = path[i + 1];
+        st.pathPairs.add(a < b ? a + '|' + b : b + '|' + a);
+    }
+    st.sigma.refresh();
+    _artWebShowPathPanel(path);
+    _artWebHidePathHint();
+}
+
+function _artWebComputePath(a, b) {
+    const sp = window.graphologyLibrary && window.graphologyLibrary.shortestPath;
+    const g = _artWebSimGraph();
+    if (!sp || !sp.bidirectional || !g || !g.hasNode(a) || !g.hasNode(b)) return null;
+    try { return sp.bidirectional(g, a, b); } catch (e) { return null; }
+}
+
+function _artWebClearPath() {
+    const st = _artistWeb;
+    st.pathSource = st.pathTarget = st.pathResult = st.pathNodes = st.pathPairs = null;
+    if (st.sigma) st.sigma.refresh();
+}
+
+function _artWebExitPath() {
+    _artistWeb.pathMode = false;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.remove('active');
+    _artWebHidePathHint();
+    _artWebClosePanel();
+    _artWebClearPath();
+}
+
+function _artWebShowPathPanel(path) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const hops = path.length - 1;
+    const between = path.length - 2;
+    const rows = path.map((k, i) => {
+        const label = g.getNodeAttribute(k, 'label') || k;
+        const color = g.getNodeAttribute(k, 'baseColor') || '#1db954';
+        const tag = i === 0 ? 'start' : (i === path.length - 1 ? 'end' : '');
+        return `<div onclick="_artWebCameraTo('${escapeForInlineJs(k)}')" style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+            <span style="width:11px;height:11px;border-radius:50%;flex:none;background:${color};box-shadow:0 0 0 ${tag ? '2px rgba(255,255,255,0.5)' : '0'};"></span>
+            <span style="flex:1;min-width:0;font-size:13px;font-weight:${tag ? '800' : '600'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</span>
+            ${tag ? `<span style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.4);">${tag}</span>` : ''}
+        </div>${i < path.length - 1 ? '<div style="margin-left:13px;height:10px;border-left:2px solid rgba(255,255,255,0.12);"></div>' : ''}`;
+    }).join('');
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebExitPath()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Done</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Connection path</div>
+        <div style="font-size:20px;font-weight:800;margin:3px 0 2px;">${hops} hop${hops === 1 ? '' : 's'} apart</div>
+        <div style="font-size:11.5px;color:rgba(255,255,255,0.5);margin-bottom:14px;">${between === 0 ? 'directly similar' : `via ${between} artist${between === 1 ? '' : 's'} in between`}</div>
+        ${rows}`;
+    p.style.display = 'flex';
+}
+
+// Pan/zoom the camera to a node WITHOUT triggering a selection (used by path + genre member lists).
+function _artWebCameraTo(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph || !_artistWeb.graph.hasNode(key)) return;
+    const d = sig.getNodeDisplayData(key);
+    if (d) sig.getCamera().animate({ x: d.x, y: d.y, ratio: 0.12 }, { duration: 500 });
+}
+
+function _artWebPathHint(html) {
+    let el = document.getElementById('artweb-path-hint');
+    if (!el) {
+        const container = document.getElementById('artist-web-container');
+        if (!container) return;
+        el = document.createElement('div');
+        el.id = 'artweb-path-hint';
+        el.style.cssText = 'position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:8px 16px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:none;';
+        container.appendChild(el);
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+}
+
+function _artWebHidePathHint() {
+    const el = document.getElementById('artweb-path-hint');
+    if (el) el.style.display = 'none';
 }
 
 // ---- Artist Web side panel (mirrors the Artist Map card design/interactions) -------------------
