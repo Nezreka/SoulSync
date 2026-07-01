@@ -2922,8 +2922,8 @@ function restoreNavSections() {
     try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { saved = {}; }
     const path = window.location.pathname;
     document.querySelectorAll('.nav-section-label').forEach(label => {
-        // Collapsed by default to save space; expanded only when the user explicitly expanded it.
-        let collapsed = saved[label.dataset.section] !== false;
+        // Expanded by default; collapsed only when the user explicitly collapsed it.
+        let collapsed = saved[label.dataset.section] === true;
         // Never collapse the section holding the current page — the active item must stay visible.
         if (_navSectionItems(label).some(it => it.getAttribute('href') === path)) collapsed = false;
         _setNavSectionCollapsed(label, collapsed);
