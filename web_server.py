@@ -9874,6 +9874,24 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/library/export/m3u', methods=['GET'])
+def export_library_m3u():
+    """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
+    try:
+        db = get_database()
+        entries = db.get_all_library_tracks_for_export()
+        from core.library.m3u_export import build_m3u
+        content = build_m3u(entries)
+        return Response(
+            content,
+            mimetype='audio/x-mpegurl',
+            headers={'Content-Disposition': 'attachment; filename="soulsync_library.m3u"'},
+        )
+    except Exception as e:
+        logger.error("[library-m3u] export failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
     """Get tracks for specific album formatted for download missing tracks modal"""

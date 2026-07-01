@@ -69742,3 +69742,13 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
 .art-picker-cancel:hover { border-color: #fff; }
 .art-picker-apply { background: rgb(var(--accent-rgb)); color: #0b1d12; }
 .art-picker-apply:disabled { opacity: .4; cursor: default; transform: none; }
+
+/* Library M3U export button (standalone action in the Export modal) */
+.arec-btn-m3u {
+    border-color: rgba(var(--accent-rgb), .55) !important;
+    color: rgb(var(--accent-light-rgb)) !important;
+}
+.arec-btn-m3u:hover {
+    background: rgba(var(--accent-rgb), .14) !important;
+    border-color: rgb(var(--accent-rgb)) !important;
+}
