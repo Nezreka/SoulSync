@@ -2890,6 +2890,43 @@ function initializeMobileNavigation() {
             }
         });
     });
+
+    restoreNavSections();
+}
+
+// --- Collapsible sidebar sections (persisted per section in localStorage) ---
+function _navSectionItems(label) {
+    const items = [];
+    let el = label.nextElementSibling;
+    while (el && !el.classList.contains('nav-section-label')) {
+        if (el.classList.contains('nav-button')) items.push(el);
+        el = el.nextElementSibling;
+    }
+    return items;
+}
+function _setNavSectionCollapsed(label, collapsed) {
+    label.classList.toggle('collapsed', collapsed);
+    _navSectionItems(label).forEach(it => it.classList.toggle('nav-item-hidden', collapsed));
+}
+function toggleNavSection(label) {
+    const collapsed = !label.classList.contains('collapsed');
+    _setNavSectionCollapsed(label, collapsed);
+    try {
+        const saved = JSON.parse(localStorage.getItem('navSections') || '{}');
+        saved[label.dataset.section] = collapsed;
+        localStorage.setItem('navSections', JSON.stringify(saved));
+    } catch (e) { /* localStorage unavailable — collapse still works for the session */ }
+}
+function restoreNavSections() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) { return; }
+    const path = window.location.pathname;
+    document.querySelectorAll('.nav-section-label').forEach(label => {
+        if (!saved[label.dataset.section]) return;
+        // Keep the section that contains the current page expanded, so the active item is never hidden.
+        const hasCurrent = _navSectionItems(label).some(it => it.getAttribute('href') === path);
+        if (!hasCurrent) _setNavSectionCollapsed(label, true);
+    });
 }
 
 function initializeWatchlist() {
