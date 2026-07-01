@@ -218,14 +218,20 @@ class DuplicateDetectorJob(RepairJob):
                 if t2['id'] in found_groups:
                     continue
 
+                # Applies to both passes — a shared filename (e.g. a
+                # single edit vs. the album version of the same track)
+                # is not itself proof the user wants cross-album copies
+                # flagged, so this gate must not be limited to the
+                # title-bucket pass.
+                if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
+                    continue
+
                 if require_metadata_match:
                     title_sim = SequenceMatcher(None, t1['norm_title'], t2['norm_title']).ratio()
                     if title_sim < title_threshold:
                         continue
                     artist_sim = SequenceMatcher(None, t1['norm_artist'], t2['norm_artist']).ratio()
                     if artist_sim < artist_threshold:
-                        continue
-                    if ignore_cross_album and t1['album'] and t2['album'] and t1['album'] != t2['album']:
                         continue
                 else:
                     # Filename-bucket pass: filename agreement is strong but
@@ -345,9 +351,30 @@ def _normalize(text: str) -> str:
 
     Keeps parenthetical content (remixes, live, etc.) so that similarity
     thresholds can distinguish 'title' from 'title xxx remix'.
+
+    CJK text is preserved rather than stripped — the plain
+    ``[^a-z0-9() ]`` strip collapsed every Japanese/Chinese/Korean title
+    to an empty string, and two empty strings score a perfect 1.0
+    SequenceMatcher ratio, so any two CJK-titled tracks by the same
+    artist were flagged as duplicates regardless of their actual titles.
     """
+    if not text:
+        return ""
     t = text.lower()
-    t = re.sub(r'[^a-z0-9() ]', '', t)
+    has_cjk = any(
+        '⺀' <= c <= '鿿'  # CJK Unified Ideographs + radicals
+        or '぀' <= c <= 'ヿ'  # Hiragana + Katakana
+        or '＀' <= c <= '￯'  # Halfwidth / Fullwidth forms
+        or '가' <= c <= '힯'  # Hangul syllables
+        for c in t
+    )
+    if has_cjk:
+        t = re.sub(
+            r'[^a-z0-9() ⺀-鿿぀-ヿ＀-￯가-힯]',
+            '', t,
+        )
+    else:
+        t = re.sub(r'[^a-z0-9() ]', '', t)
     return t.strip()
 
 
