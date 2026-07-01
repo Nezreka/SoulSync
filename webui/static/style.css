@@ -69752,3 +69752,17 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     background: rgba(var(--accent-rgb), .14) !important;
     border-color: rgb(var(--accent-rgb)) !important;
 }
+
+/* Sidebar nav section labels (grouping: Find / Acquire / Library / Extras / System) */
+.nav-section-label {
+    padding: 16px 18px 5px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.30);
+    user-select: none;
+    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+}
