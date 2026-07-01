@@ -69758,27 +69758,36 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     display: flex;
     align-items: center;
     justify-content: space-between;
-    width: 100%;
-    padding: 15px 18px 5px;
-    background: none;
+    gap: 8px;
+    width: calc(100% - 20px);
+    margin: 7px 10px 3px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.035);
     border: none;
+    border-radius: 8px;
     font-family: inherit;
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 0.09em;
+    letter-spacing: 0.07em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.30);
+    color: rgba(255, 255, 255, 0.52);
     cursor: pointer;
     user-select: none;
     text-align: left;
-    transition: color .15s ease;
+    transition: background .15s ease, color .15s ease;
 }
-.nav-section-label:hover { color: rgba(255, 255, 255, 0.6); }
+.nav-section-label:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: rgba(255, 255, 255, 0.92);
+}
 .nav-section-chevron {
     flex: 0 0 auto;
-    opacity: 0.45;
+    width: 13px;
+    height: 13px;
+    opacity: 0.7;
     transition: transform .2s ease, opacity .15s ease;
 }
-.nav-section-label:hover .nav-section-chevron { opacity: 0.8; }
+.nav-section-label:hover .nav-section-chevron { opacity: 1; }
+/* Collapsed: chevron points right (closed). Expanded: points down (default, open). */
 .nav-section-label.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 .nav-item-hidden { display: none !important; }

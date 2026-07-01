@@ -342,6 +342,31 @@
                     <span class="nav-text">Hydrabase</span>
                 </a>
             </nav>
+            <script>
+            /* Apply collapsed sidebar sections synchronously (before paint) to avoid a load flash —
+               the async nav init runs after awaits, so JS-collapsing there would flicker. Mirrors
+               restoreNavSections(): collapsed by default, but the current page's section stays open. */
+            (function () {
+                var saved = {};
+                try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) {}
+                var path = window.location.pathname;
+                document.querySelectorAll('.nav-section-label').forEach(function (label) {
+                    var collapsed = saved[label.dataset.section] !== false;
+                    var el = label.nextElementSibling;
+                    while (collapsed && el && !el.classList.contains('nav-section-label')) {
+                        if (el.classList.contains('nav-button') && el.getAttribute('href') === path) collapsed = false;
+                        el = el.nextElementSibling;
+                    }
+                    if (!collapsed) return;
+                    label.classList.add('collapsed');
+                    var e2 = label.nextElementSibling;
+                    while (e2 && !e2.classList.contains('nav-section-label')) {
+                        if (e2.classList.contains('nav-button')) e2.classList.add('nav-item-hidden');
+                        e2 = e2.nextElementSibling;
+                    }
+                });
+            })();
+            </script>
 
             <!-- Spacer -->
             <div class="sidebar-spacer"></div>
