@@ -6420,7 +6420,7 @@ function _webDrawLabel(context, data, settings) {
 // Distinct colors for the most-common genres; everything in the long tail falls back to gray.
 const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
     '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
-const WEB_GENRE_FALLBACK = '#5a5a66';
+const WEB_GENRE_FALLBACK = '#6b7aa8';   // slate-periwinkle for "Other" — a real color, not dead gray
 const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
 
 // Edge opacity scales with weight (consensus): weak links stay faint so they don't clutter; strong,
@@ -6447,7 +6447,7 @@ function _webGenreColorMap(nodes) {
     nodes.forEach(n => { if (n.kind === 'artist' && n.cluster) counts[n.cluster] = (counts[n.cluster] || 0) + 1; });
     const ranked = Object.keys(counts).filter(g => g !== 'Other').sort((a, b) => counts[b] - counts[a]);
     const map = { 'Other': WEB_GENRE_FALLBACK };
-    ranked.forEach((g, i) => { if (i < WEB_PALETTE.length) map[g] = WEB_PALETTE[i]; });
+    ranked.forEach((g, i) => { map[g] = WEB_PALETTE[i % WEB_PALETTE.length]; });   // cycle, never gray
     return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
 }
 
@@ -6650,7 +6650,7 @@ function _artWebBuildCommunity(data, Graph) {
         let rep = best ? graph.getNodeAttribute(best, 'label') : ('Group ' + cid);
         if (countsByRep[rep] != null) rep = rep + ' · ' + cid;   // guard rare rep-name collision
         repOf[cid] = rep;
-        colorByRep[rep] = i < WEB_PALETTE.length ? WEB_PALETTE[i] : WEB_GENRE_FALLBACK;
+        colorByRep[rep] = WEB_PALETTE[i % WEB_PALETTE.length];   // cycle palette; no community goes gray
         countsByRep[rep] = members[cid].length;
         if (best) graph.setNodeAttribute(best, '_rep', true);
     });
