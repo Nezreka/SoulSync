@@ -6401,6 +6401,15 @@ function _webDrawLabel(context, data, settings) {
 const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
     '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
 const WEB_GENRE_FALLBACK = '#5a5a66';
+const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
+
+// '#rrggbb' -> 'rgba(r,g,b,a)' so edges can inherit a cluster color at low alpha (the glowing web).
+function _webHexToRgba(hex, alpha) {
+    const h = (hex || '').replace('#', '');
+    if (h.length !== 6) return `rgba(140,140,150,${alpha})`;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
 
 // Map the top-N genres (by artist count) to palette colors; return a lookup + the per-genre counts.
 function _webGenreColorMap(nodes) {
@@ -6480,10 +6489,13 @@ async function openArtistWeb() {
         edges.forEach(e => {
             if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
                 const membership = e.kind === 'membership';
+                // Edge inherits its artist endpoint's cluster color (low alpha) -> the glowing web look.
+                const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
+                const alpha = membership ? 0.07 : 0.22;   // membership faintly tints clusters; similarity brighter
                 graph.addEdge(e.source, e.target, {
                     weight: e.weight,
-                    size: membership ? 0.4 : 0.8,
-                    color: membership ? 'rgba(255,255,255,0.03)' : 'rgba(29,185,84,0.15)',
+                    size: membership ? 0.35 : 0.7,
+                    color: _webHexToRgba(base, alpha),
                 });
             }
         });
@@ -6497,6 +6509,7 @@ async function openArtistWeb() {
         }
 
         host.innerHTML = '';
+        host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow (reference look)
         if (_artistWeb.sigma) _artistWeb.sigma.kill();
         _artistWeb.graph = graph;
         _artistWeb.sigma = new window.Sigma(graph, host, {
