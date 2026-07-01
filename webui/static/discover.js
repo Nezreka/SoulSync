@@ -6727,7 +6727,9 @@ function _artWebSetSpread(root, focusSet) {
     if (!st.cursorFX || !st.home) return;
     const neighbors = new Set(focusSet);
     neighbors.delete(root);
-    if (neighbors.size === 0 || neighbors.size > 60) { _artWebClearSpread(); return; }
+    if (neighbors.size === 0) { _artWebClearSpread(); return; }
+    // Genre hubs have hundreds of members — that's fine, the whole cluster just blooms outward from
+    // its label. (Per-frame cost is the full render either way, so member count doesn't hurt perf.)
     st.spreadRoot = root;
     st.spreadSet = neighbors;
     _artWebStartFX();
