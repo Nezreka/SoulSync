@@ -69753,49 +69753,40 @@ body.app-locked > *:not(#launch-pin-overlay):not(#login-overlay):not(script):not
     border-color: rgb(var(--accent-rgb)) !important;
 }
 
-/* Sidebar nav section headers — styled exactly like .nav-button (transparent, same hover: gradient +
-   slide + shadow) so they're one family with Dashboard; distinguished only by the uppercase label +
-   collapse chevron. */
+/* Sidebar nav section headers — clean collapsible dividers. Deliberately distinct from nav items
+   (they toggle a group, not navigate): compact, uppercase, readable, with a disclosure chevron. */
 .nav-section-label {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
     box-sizing: border-box;
     width: 216px;
-    height: 44px;
-    margin: 8px 0 1px;
-    padding: 0 14px 0 16px;
+    height: 30px;
+    margin: 12px 0 2px;
+    padding: 0 12px 0 16px;
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: 12px;
+    border: none;
+    border-radius: 8px;
     font-family: inherit;
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 700;
-    letter-spacing: 0.07em;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.64);
     cursor: pointer;
     user-select: none;
     text-align: left;
-    transition: background 0.1s ease, border-color 0.1s ease, transform 0.1s ease, box-shadow 0.1s ease, color 0.1s ease;
+    transition: background .12s ease, color .12s ease;
 }
-.nav-section-label:hover { color: rgba(255, 255, 255, 0.92); }
-body:not(.reduce-effects) .nav-section-label:hover {
-    background: linear-gradient(135deg,
-            rgba(255, 255, 255, 0.06) 0%,
-            rgba(255, 255, 255, 0.03) 100%);
-    border-color: rgba(255, 255, 255, 0.08);
-    transform: translateX(4px);
-    box-shadow:
-        0 4px 12px rgba(0, 0, 0, 0.2),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+.nav-section-label:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.95);
 }
 .nav-section-chevron {
     flex: 0 0 auto;
-    width: 13px;
-    height: 13px;
-    opacity: 0.7;
+    width: 14px;
+    height: 14px;
+    opacity: 0.55;
     transition: transform .2s ease, opacity .15s ease;
 }
 .nav-section-label:hover .nav-section-chevron { opacity: 1; }
