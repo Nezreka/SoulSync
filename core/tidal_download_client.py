@@ -37,6 +37,11 @@ from core.quality.source_map import quality_from_tidal_tier, quality_tier_for_so
 
 logger = get_logger("tidal_download_client")
 
+# How long a live check_login() result is trusted before re-verifying. Keeps the download-source
+# status poll from hitting Tidal on every call and prevents a single transient failure from flipping
+# a working source to "unconfigured" (which the UI auto-deselects).
+_STATUS_LOGIN_CHECK_TTL_S = 60
+
 
 # Quality tiers definitions (used for display in search results)
 QUALITY_MAP = {
@@ -135,6 +140,10 @@ class TidalDownloadClient(DownloadSourcePlugin):
         self._device_auth_future = None
         self._device_auth_link = None
         self._boot_session_tokens: Optional[dict] = None
+        # Cache for the live check_login() so is_authenticated() (polled for the download-source
+        # status) doesn't hit Tidal on every call.
+        self._last_login_check_at: float = 0.0
+        self._last_login_check_ok: bool = False
 
         # Engine reference is populated by set_engine() at registration
         # time. Until then dispatch returns None — orchestrator wires
@@ -233,6 +242,15 @@ class TidalDownloadClient(DownloadSourcePlugin):
             'expiry_time': self.session.expiry_time.timestamp() if self.session.expiry_time else 0,
         })
 
+    def _has_unexpired_token(self) -> bool:
+        """True when the session holds an access token that hasn't expired — a local, network-free
+        check using the same fields ``_save_session`` persists. Missing expiry -> treat as unknown."""
+        try:
+            exp = self.session.expiry_time
+            return bool(self.session.access_token and exp and exp.timestamp() > time.time())
+        except Exception:
+            return False
+
     def is_authenticated(self) -> bool:
         from core.boot_phase import is_boot_phase
         if is_boot_phase():
@@ -244,10 +262,30 @@ class TidalDownloadClient(DownloadSourcePlugin):
 
         if not self.session:
             return False
+
+        # A loaded session whose token hasn't expired is authenticated — a cheap LOCAL check. This
+        # avoids a live Tidal API call (check_login) on every download-source status poll: a transient
+        # failure there (rate-limit from frequent polling, a network blip, a refresh hiccup) was
+        # flipping a perfectly-good Tidal source to "unconfigured", which the UI then auto-deselected
+        # (same class of bug as the Deezer drop). tidalapi refreshes the token itself on real use.
+        if self._has_unexpired_token():
+            return True
+
+        # Token missing/expired -> verify live. A recent POSITIVE result is trusted for the TTL so a
+        # burst of status polls doesn't hammer Tidal. Only positives are cached: a transient failure
+        # must not linger and keep a working source deselected — the next poll simply re-checks.
+        now = time.time()
+        if getattr(self, '_last_login_check_ok', False) and \
+                (now - getattr(self, '_last_login_check_at', 0.0)) < _STATUS_LOGIN_CHECK_TTL_S:
+            return True
         try:
-            return self.session.check_login()
+            ok = bool(self.session.check_login())
         except Exception:
-            return False
+            ok = False
+        if ok:
+            self._last_login_check_at = now
+            self._last_login_check_ok = True
+        return ok
 
     def start_device_auth(self) -> Optional[Dict[str, str]]:
         if tidalapi is None:
