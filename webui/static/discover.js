@@ -6384,6 +6384,8 @@ let _artistWeb = {
     genreCounts: null,                // {genre: artistCount} for the filter sidebar
     sizeBy: 'popularity',             // node-size metric: popularity | connections | influence(betweenness)
     betweenCache: null,               // cached betweenness scores (computed once on the similarity graph)
+    edgeDeclutter: false,             // when on, hide the weaker half of similarity edges at rest
+    edgeThreshold: 2,                 // weight cutoff for declutter (computed per render)
     // Shortest-path mode: click two artists to trace how they connect (via the similarity graph).
     pathMode: false,
     pathSource: null, pathTarget: null,
@@ -6627,6 +6629,13 @@ function _artWebRenderLens() {
     _artistWeb.home = home;
     _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
     _artistWeb.spreadRoot = null; _artistWeb.spreadSet = null;
+
+    // Declutter threshold = median similarity-edge weight (hides the weaker half when toggled on).
+    const w = [];
+    built.graph.forEachEdge((e, a) => { if (a.kind === 'similarity') w.push(a.weight || 1); });
+    w.sort((x, y) => x - y);
+    _artistWeb.edgeThreshold = w.length ? w[Math.floor(w.length * 0.5)] : 2;
+    _artWebSyncEdgeButton();
 
     _artWebMountSigma(host, built.graph);
 }
@@ -6932,6 +6941,11 @@ function _artWebEdgeReducer(edge, data) {
     // spokes overlapping accumulate to solid white), so never render them — clustering is already
     // conveyed by node position + color. Only similarity edges are drawn.
     if (data.kind === 'membership') { res.hidden = true; return res; }
+    // Declutter (resting view only): hide the weaker half of similarity edges. Hover/select/path/search
+    // below still reveal the full detail for whatever you're inspecting.
+    if (st.edgeDeclutter && !st.pathNodes && !st.focusSet && !st.searchMatch && (data.weight || 1) < st.edgeThreshold) {
+        res.hidden = true; return res;
+    }
     const g = _artistWeb.graph;
     // Shortest-path mode: only the consecutive edges along the chain show (bright + thick), rest hidden.
     if (st.pathNodes) {
@@ -7404,6 +7418,21 @@ function artWebClearGenreFilter() {
 
 // Sidebar search box just filters which genres are listed.
 function artWebFilterGenreList(query) { _artWebPopulateGenreList(query); }
+
+// ---- Edge declutter toggle: show all connections vs only the stronger (high-consensus) ones -------
+function artWebToggleEdges() {
+    _artistWeb.edgeDeclutter = !_artistWeb.edgeDeclutter;
+    _artWebSyncEdgeButton();
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+}
+
+function _artWebSyncEdgeButton() {
+    const btn = document.getElementById('artweb-edges-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', _artistWeb.edgeDeclutter);
+    const label = btn.querySelector('span');
+    if (label) label.textContent = _artistWeb.edgeDeclutter ? 'Strong' : 'Edges';
+}
 
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
