@@ -9874,6 +9874,39 @@ def set_album_art(album_id):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/graph/library', methods=['GET'])
+def get_library_graph():
+    """Library "Taste Map": owned artists as nodes, wired by direct similarity — for the sigma.js graph.
+
+    Returns {"nodes": [{key,label,owned,popularity,thumb,genres}], "edges": [{source,target,weight}]}.
+    Built in-memory from similar_artists (a SQL self-join to resolve source IDs is too slow at 75k rows).
+    """
+    try:
+        from core.graph.artist_graph import build_taste_map
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            meta = {}
+            for name, thumb, genres in cur.execute("SELECT name, thumb_url, genres FROM artists"):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                meta[key] = {"thumb_url": thumb, "genres": genres}
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists"
+            ).fetchall()
+        finally:
+            conn.close()
+        graph = build_taste_map(rows, owned, artist_meta=meta)
+        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+    except Exception as e:
+        logger.error("[library-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/library/export/m3u', methods=['GET'])
 def export_library_m3u():
     """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
