@@ -9918,6 +9918,74 @@ def get_library_graph():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/graph/discovery', methods=['GET'])
+def get_discovery_graph():
+    """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
+
+    Candidates are enriched from the metadata cache (image/genres/popularity) so they render as real
+    artists you could add, not bare dots. Hybrid seed view: the top ``seed`` owned anchors (by neighbor
+    count), each with its top ``per`` unowned candidates. The frontend expands from here on click.
+    """
+    try:
+        from core.graph.artist_graph import build_discovery_map
+        seed = max(1, min(int(request.args.get('seed', 30)), 120))
+        per = max(1, min(int(request.args.get('per', 6)), 20))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            owned_meta = {}
+            for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists"
+            ).fetchall()
+
+            # Pass 1: shape the graph (no enrichment) to learn which candidate ids we actually need.
+            base = build_discovery_map(rows, owned, owned_meta, seed_count=seed, per_anchor=per)
+            need_ids = {eid for n in base["nodes"] if n.get("kind") == "discovery" for eid in n.get("ids", [])}
+            cache_lookup = _discovery_cache_lookup(cur, need_ids)
+        finally:
+            conn.close()
+
+        # Pass 2: rebuild with enrichment (cheap, in-memory).
+        graph = build_discovery_map(rows, owned, owned_meta, cache_lookup=cache_lookup, seed_count=seed, per_anchor=per)
+        n_owned = sum(1 for n in graph["nodes"] if n.get("kind") == "owned")
+        n_disc = sum(1 for n in graph["nodes"] if n.get("kind") == "discovery")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "owned": n_owned, "discovery": n_disc,
+        }})
+    except Exception as e:
+        logger.error("[discovery-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _discovery_cache_lookup(cur, ids):
+    """Look up cached artist metadata (image/genres/popularity) for a set of external ids.
+
+    Returns {external_id: {"image_url", "genres", "popularity"}} from metadata_cache_entities.
+    Queried in batches so we never blow the SQL variable limit.
+    """
+    lookup = {}
+    ids = [i for i in ids if i]
+    for i in range(0, len(ids), 400):
+        batch = ids[i:i + 400]
+        placeholders = ",".join("?" * len(batch))
+        for eid, image_url, genres, popularity in cur.execute(
+            f"SELECT entity_id, image_url, genres, popularity FROM metadata_cache_entities "
+            f"WHERE entity_type='artist' AND entity_id IN ({placeholders})", batch
+        ):
+            if eid not in lookup:
+                lookup[eid] = {"image_url": image_url, "genres": genres, "popularity": popularity}
+    return lookup
+
+
 @app.route('/api/library/export/m3u', methods=['GET'])
 def export_library_m3u():
     """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
