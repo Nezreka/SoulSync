@@ -82,6 +82,7 @@ const SOURCE_LABELS = {
     },
     bandcamp: {
         text: 'Bandcamp', icon: '🎵',
+        logo: 'https://upload.wikimedia.org/wikipedia/commons/9/90/Bandcamp-polygon-aqua.svg',
         tabClass: 'enh-tab-bandcamp', badgeClass: 'enh-badge-bandcamp',
     },
     youtube_videos: {
