@@ -6711,6 +6711,11 @@ function _artWebStartLiveLayout(graph) {
         if (statsEl) statsEl.textContent = statsEl.textContent.replace(' · settling…', '');
         if (_artistWeb.sigma && _artistWeb.graph === graph) {
             _artistWeb.sigma.getCamera().animatedReset({ duration: 500 });   // fit the settled web
+            // hideEdgesOnMove leaves the LAST frame of the animation edge-less (nothing re-renders
+            // after the camera stops) — force one refresh once the animation has landed.
+            setTimeout(() => {
+                if (_artistWeb.sigma && _artistWeb.graph === graph) _artistWeb.sigma.refresh();
+            }, 650);
         }
     }, ms);
 }
@@ -7196,19 +7201,29 @@ function artWebFocusNode(key) {
     const disp = sig.getNodeDisplayData(key);
     if (disp) {
         sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+        _artWebRefreshAfter(600);
     }
 }
 
 // ---- Artist Web camera controls ---------------------------------------------------------------
+// hideEdgesOnMove leaves the final frame of any camera ANIMATION edge-less (the last render happens
+// while "moving", and nothing re-renders after the animation stops). Every animated camera move
+// schedules one trailing refresh via this helper.
+function _artWebRefreshAfter(ms) {
+    setTimeout(() => { if (_artistWeb.sigma) _artistWeb.sigma.refresh(); }, ms);
+}
+
 function artWebZoom(factor) {
     if (!_artistWeb.sigma) return;
     const cam = _artistWeb.sigma.getCamera();
     cam.animate({ ratio: cam.ratio * factor }, { duration: 250 });
+    _artWebRefreshAfter(350);
 }
 
 function artWebFitToView() {
     if (!_artistWeb.sigma) return;
     _artistWeb.sigma.getCamera().animatedReset({ duration: 400 });
+    _artWebRefreshAfter(500);
     // Clear any search focus so the whole web is visible again.
     const input = document.getElementById('artist-web-search');
     if (input) input.value = '';
@@ -7271,7 +7286,7 @@ function _artWebGoToArtist(key) {
     if (!sig || !_artistWeb.graph.hasNode(key)) return;
     _artWebClickNode(key);
     const disp = sig.getNodeDisplayData(key);
-    if (disp) sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+    if (disp) { sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 }); _artWebRefreshAfter(600); }
 }
 
 // ---- Artist Web shortest path: click two artists, trace how they connect via similarity ---------
@@ -7393,7 +7408,7 @@ function _artWebCameraTo(key) {
     const sig = _artistWeb.sigma;
     if (!sig || !_artistWeb.graph || !_artistWeb.graph.hasNode(key)) return;
     const d = sig.getNodeDisplayData(key);
-    if (d) sig.getCamera().animate({ x: d.x, y: d.y, ratio: 0.12 }, { duration: 500 });
+    if (d) { sig.getCamera().animate({ x: d.x, y: d.y, ratio: 0.12 }, { duration: 500 }); _artWebRefreshAfter(600); }
 }
 
 function _artWebPathHint(html) {
