@@ -40,7 +40,7 @@ const ENRICHMENT_WORKERS = [
       logoUrl: 'https://www.music-map.com/elements/objects/og_logo.png', imgRound: true },
     // Experimental (core.metadata.registry.EXPERIMENTAL_SOURCES), no dashboard
     // bubble/logo element — falls back to the colored-initial chip.
-    { id: 'bandcamp',    name: 'Bandcamp',     color: '#1da0c3' },
+    { id: 'bandcamp',    name: 'Bandcamp',     color: '#629aa9' },
 ];
 
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));
