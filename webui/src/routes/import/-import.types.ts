@@ -247,6 +247,10 @@ export interface ImportQueueEntry {
   processed: number;
   total: number;
   errors: string[];
+  /** Set when the backend refused to process because the active media server
+   * isn't connected (see `is_active_media_server_ready` in core/imports/side_effects.py).
+   * The queue item renders a Settings link instead of the plain error list. */
+  blockedByMediaServer?: boolean;
 }
 
 export interface ImportAlbumQueueJob {

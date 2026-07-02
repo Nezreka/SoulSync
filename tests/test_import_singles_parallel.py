@@ -229,7 +229,8 @@ def test_route_processes_multiple_files_in_parallel(tmp_path) -> None:
     flask_app.config['TESTING'] = True
     client = flask_app.test_client()
 
-    with patch("web_server._process_single_import_file", side_effect=fake_worker):
+    with patch("web_server._process_single_import_file", side_effect=fake_worker), \
+            patch("core.imports.side_effects.is_active_media_server_ready", return_value=(True, "")):
         start = _time.monotonic()
         response = client.post(
             "/api/import/singles/process",
@@ -283,7 +284,8 @@ def test_route_aggregates_mixed_success_and_error_outcomes(tmp_path) -> None:
     flask_app.config['TESTING'] = True
     client = flask_app.test_client()
 
-    with patch("web_server._process_single_import_file", side_effect=mixed_worker):
+    with patch("web_server._process_single_import_file", side_effect=mixed_worker), \
+            patch("core.imports.side_effects.is_active_media_server_ready", return_value=(True, "")):
         response = client.post(
             "/api/import/singles/process",
             json={'files': files_payload},
@@ -322,7 +324,8 @@ def test_route_recovers_from_worker_crash(tmp_path) -> None:
     flask_app.config['TESTING'] = True
     client = flask_app.test_client()
 
-    with patch("web_server._process_single_import_file", side_effect=crashing_worker):
+    with patch("web_server._process_single_import_file", side_effect=crashing_worker), \
+            patch("core.imports.side_effects.is_active_media_server_ready", return_value=(True, "")):
         response = client.post(
             "/api/import/singles/process",
             json={'files': files_payload},

@@ -392,6 +392,35 @@ def record_download_provenance(context: Dict[str, Any]) -> None:
         logger.debug("record_download_provenance failed: %s", e)
 
 
+def is_active_media_server_ready() -> tuple[bool, str]:
+    """Standalone ('soulsync') is always ready — no external connection needed.
+
+    Otherwise the active media server must actually be connected, or an
+    import copies files into place fully tagged but never registers them:
+    record_soulsync_library_entry() below only writes the local DB when
+    active_media_server == 'soulsync', and the alternative path (a
+    Plex/Jellyfin/Navidrome library scan syncing into the DB) silently
+    no-ops without a live connection too. Files land on disk; the Library
+    view never learns about them. Shared by the HTTP import routes
+    (core.imports.routes) and the auto-import background worker
+    (core.auto_import_worker) so neither path can leave files stranded."""
+    active = _get_config_manager().get_active_media_server()
+    if active == "soulsync":
+        return True, ""
+
+    from core.media_server.engine import get_media_server_engine
+
+    if get_media_server_engine().is_connected():
+        return True, ""
+
+    label = active.replace("_", " ").title() if active else "Your media server"
+    return False, (
+        f"{label} isn't connected, so importing now would copy files into "
+        f"place without adding them to your Library. Connect {label} in "
+        f"Settings, or switch to Standalone mode, then try again."
+    )
+
+
 def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[str, Any], album_info: Dict[str, Any]) -> None:
     """Write imported media to the SoulSync library tables when the active server is SoulSync."""
     try:

@@ -44,6 +44,12 @@ def _get_single_track_import_context(*args, **kwargs):
     return get_single_track_import_context(*args, **kwargs)
 
 
+def _is_active_media_server_ready() -> tuple[bool, str]:
+    from core.imports.side_effects import is_active_media_server_ready
+
+    return is_active_media_server_ready()
+
+
 @dataclass
 class ImportRouteRuntime:
     """Dependencies needed to service import/staging HTTP endpoints."""
@@ -65,6 +71,7 @@ class ImportRouteRuntime:
     get_import_track_info: Callable[[Dict[str, Any]], Dict[str, Any]] = get_import_track_info
     process_single_import_file: Callable[["ImportRouteRuntime", Dict[str, Any]], tuple[str, str]] | None = None
     post_process_matched_download: Callable[[str, Dict[str, Any], str], Any] | None = None
+    is_active_media_server_ready: Callable[[], tuple[bool, str]] = _is_active_media_server_ready
     add_activity_item: Callable[[Any, Any, Any, Any], Any] | None = None
     refresh_import_suggestions_cache: Callable[[], Any] = _refresh_import_suggestions_cache
     automation_engine: Any = None
@@ -486,6 +493,10 @@ def album_process(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Di
         if runtime.post_process_matched_download is None:
             return {"success": False, "error": "Import post-processing not available"}, 500
 
+        ready, reason = runtime.is_active_media_server_ready()
+        if not ready:
+            return {"success": False, "error": reason, "error_code": "media_server_not_connected"}, 503
+
         processed = 0
         errors = []
         album_name = album.get("name", album.get("album_name", "Unknown Album"))
@@ -664,6 +675,10 @@ def singles_process(runtime: ImportRouteRuntime, files: list[Dict[str, Any]]) ->
             return {"success": False, "error": "No files provided"}, 400
         if runtime.import_singles_executor is None:
             return {"success": False, "error": "Import executor not available"}, 500
+
+        ready, reason = runtime.is_active_media_server_ready()
+        if not ready:
+            return {"success": False, "error": reason, "error_code": "media_server_not_connected"}, 503
 
         processed = 0
         errors = []
