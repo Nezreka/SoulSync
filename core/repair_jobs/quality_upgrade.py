@@ -45,7 +45,7 @@ from core.library.path_resolver import resolve_library_file_path
 # monkeypatchable in tests.
 from core.imports.file_ops import probe_audio_quality
 from core.quality.model import rank_candidate
-from core.quality.selection import targets_from_profile, quality_meets_profile
+from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_jobs.quality_upgrade")
@@ -58,6 +58,39 @@ def _to_bool(val) -> bool:
     if isinstance(val, str):
         return val.lower() == 'true'
     return bool(val) if val is not None else False
+
+
+def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict) -> Optional[int]:
+    """Return the ranked-target index that stops upgrade findings.
+
+    ``None`` means any configured target is acceptable. ``until_top`` is kept
+    as a compatibility alias for rows created by the first profile branch.
+    """
+    policy = profile.get("upgrade_policy")
+    if policy == "until_top":
+        policy = "until_cutoff"
+    if policy is None and settings.get("require_top_target"):
+        policy = "until_cutoff"
+    if policy != "until_cutoff" or not targets:
+        return None
+    try:
+        idx = int(profile.get("upgrade_cutoff_index") or 0)
+    except (TypeError, ValueError):
+        idx = 0
+    return max(0, min(idx, len(targets) - 1))
+
+
+def _profile_bundle(profile: dict, settings: dict) -> Dict[str, Any]:
+    """Precompute the per-profile values the scan loop needs (targets, cutoff
+    index, id/name for the finding) once per distinct profile, so a per-track
+    override only costs a DB lookup the first time that profile is seen."""
+    targets, _fallback = targets_from_profile(profile)
+    return {
+        'targets': targets,
+        'cutoff_index': _upgrade_cutoff_index(profile, targets, settings),
+        'id': profile.get('id'),
+        'name': profile.get('name') or profile.get('preset') or 'default',
+    }
 
 
 # Per-source file-tag key holding that source's own track ID (written by enrichment).
@@ -186,7 +219,7 @@ def _match_via_isrc(isrc: str, source_priority: List[str]) -> Tuple[Optional[Any
 _TRACK_COLS = (
     'id', 'title', 'file_path', 'bitrate', 'duration', 'artist_name', 'album_title',
     'album_id', 'track_number', 'spotify_album_id', 'itunes_album_id', 'deezer_id',
-    'musicbrainz_release_id', 'audiodb_id',
+    'musicbrainz_release_id', 'audiodb_id', 'quality_profile_id',
 )
 
 # Human-readable note per match tier (search uses a confidence % instead).
@@ -380,8 +413,8 @@ class QualityUpgradeJob(RepairJob):
     icon = 'repair-icon-lossy'
     default_enabled = False
     default_interval_hours = 168
-    default_settings = {'scope': 'all', 'min_confidence': 0.7, 'deep_audio_verify': False, 'require_top_target': False}
-    setting_options = {'scope': ['all', 'watchlist'], 'deep_audio_verify': [True, False], 'require_top_target': [True, False]}
+    default_settings = {'scope': 'all', 'min_confidence': 0.7, 'deep_audio_verify': False}
+    setting_options = {'scope': ['all', 'watchlist'], 'deep_audio_verify': [True, False]}
     auto_fix = False
 
     def _get_settings(self, context: JobContext) -> Dict[str, Any]:
@@ -408,7 +441,7 @@ class QualityUpgradeJob(RepairJob):
                 "SELECT t.id, t.title, t.file_path, t.bitrate, t.duration, "
                 "a.name AS artist_name, al.title AS album_title, t.album_id, t.track_number, "
                 "al.spotify_album_id, al.itunes_album_id, al.deezer_id, "
-                "al.musicbrainz_release_id, al.audiodb_id "
+                "al.musicbrainz_release_id, al.audiodb_id, t.quality_profile_id "
                 "FROM tracks t "
                 "JOIN artists a ON t.artist_id = a.id "
                 "JOIN albums al ON t.album_id = al.id "
@@ -456,7 +489,6 @@ class QualityUpgradeJob(RepairJob):
         scope = settings['scope']
         min_conf = settings['min_confidence']
         deep_verify = settings['deep_audio_verify']
-        require_top = settings['require_top_target']
 
         # v3 quality: judge the REAL file (mutagen-measured bit depth / sample rate
         # / bitrate) against the profile's ranked targets — the SAME definition the
@@ -465,16 +497,34 @@ class QualityUpgradeJob(RepairJob):
         # quality_meets_profile / probe_audio_quality are imported at module level.
         db = context.db
         quality_profile = db.get_quality_profile()
-        targets, _fallback = targets_from_profile(quality_profile)
+        default_bundle = _profile_bundle(quality_profile, settings)
+        targets = default_bundle['targets']
+        cutoff_index = default_bundle['cutoff_index']
         if not targets:
             logger.info("[Quality Upgrade] No quality targets in profile — nothing to flag")
             return result
 
         logger.info(
-            "[Quality Upgrade] scope=%s require_top=%s · all targets: %s",
-            scope, require_top,
+            "[Quality Upgrade] scope=%s cutoff=%s · all targets: %s",
+            scope,
+            targets[cutoff_index].label if cutoff_index is not None else "any accepted target",
             [t.label for t in targets] if targets else '(none — all pass)',
         )
+
+        # Per-track profile override (`tracks.quality_profile_id`, still NULL
+        # for almost every install — there's no assignment UI yet, only the
+        # migration backfill): resolved lazily and cached per distinct id so a
+        # library with one profile everywhere costs exactly one DB read, same
+        # as before this existed.
+        profile_bundle_cache: Dict[Any, Dict[str, Any]] = {default_bundle['id']: default_bundle}
+
+        def _bundle_for_track(row_profile_id) -> Dict[str, Any]:
+            if not row_profile_id or row_profile_id == default_bundle['id']:
+                return default_bundle
+            if row_profile_id not in profile_bundle_cache:
+                profile_bundle_cache[row_profile_id] = _profile_bundle(
+                    load_profile_by_id(row_profile_id), settings)
+            return profile_bundle_cache[row_profile_id]
 
         try:
             tracks = self._load_tracks(db, scope)
@@ -522,6 +572,12 @@ class QualityUpgradeJob(RepairJob):
                 result.findings_skipped_dedup += 1
                 continue
 
+            bundle = _bundle_for_track(row.get('quality_profile_id'))
+            targets = bundle['targets']
+            cutoff_index = bundle['cutoff_index']
+            quality_profile_id = bundle['id']
+            quality_profile_name = bundle['name']
+
             # v3 quality decision — probe the REAL file. Resolve the library path
             # first (the DB stores a possibly-relative path). Pass config_manager so
             # the resolver can find the transfer/music folders and expand relative paths.
@@ -553,11 +609,12 @@ class QualityUpgradeJob(RepairJob):
                 continue
 
             if not broken_reason and measured_aq is not None:
-                if require_top:
-                    # ranking-based: skip only if the file already sits at rank 0
-                    # (the top configured target). Any lower rank → flag for upgrade.
+                if cutoff_index is not None:
+                    # ranking-based: skip only if the file already sits at the
+                    # configured cutoff rank or better. Any lower rank triggers
+                    # a proposed upgrade.
                     idx, _ = rank_candidate(measured_aq, targets)
-                    already_best = (idx == 0)
+                    already_best = idx <= cutoff_index
                 else:
                     # default: skip if the file meets ANY configured target (i.e.
                     # it's not below the acceptable floor).
@@ -668,7 +725,8 @@ class QualityUpgradeJob(RepairJob):
                         title=f'Upgrade: {artist_name} - {title} ({current_label})',
                         description=(
                             f'"{title}" by {artist_name} is {current_label}'
-                            + (f', below your preferred quality ({targets[0].label})' if require_top and targets else ', below your preferred quality')
+                            + (f', below your upgrade cutoff ({targets[cutoff_index].label})'
+                               if cutoff_index is not None else ', below your preferred quality')
                             + f'. Best match: "{_track_name(best)}" via {source} '
                             f'({_MATCH_NOTE.get(matched_via, "matched") if matched_via != "search" else f"confidence {conf:.0%}"}). '
                             'Apply to add it to the wishlist.'),
@@ -680,6 +738,8 @@ class QualityUpgradeJob(RepairJob):
                             'album_title': album_title,
                             'current_format': current_label,
                             'current_bitrate': bitrate,
+                            'quality_profile_id': quality_profile_id,
+                            'quality_profile_name': quality_profile_name,
                             'match_confidence': conf,
                             'matched_via': matched_via,
                             'provider': source,

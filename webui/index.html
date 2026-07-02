@@ -5049,12 +5049,11 @@
                             </div><!-- end Download Settings body -->
 
                             <!-- ═══ QUALITY TAB: two-column layout ═══ -->
-                            <!-- Left (.qp-main): the 4 quality tiles, unchanged. Right
-                                 (.qp-side-panel): a DETACHED, sticky profile-management panel —
-                                 same pattern as the Downloads page's .adl-layout/.adl-main/
-                                 .adl-batch-panel. Everything on this whole tab is saved under
-                                 whichever profile is active in that panel; the 3 tiles besides
-                                 "Quality" carry a small badge saying so. -->
+                            <!-- Left (.qp-main): the 4 quality tiles on the standard Settings
+                                 column. Right (.qp-side-panel): a detached, sticky
+                                 profile-management panel. Everything on this whole tab is saved
+                                 under whichever profile is active in that panel; each tile carries
+                                 a small badge saying so. -->
                             <div class="qp-layout" data-stg="quality">
                             <div class="qp-main" data-stg="quality">
 
@@ -5065,7 +5064,8 @@
                             <div id="quality-profile-tile" data-stg="quality">
                             <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>🎚 Quality</h3>
+                                <h3>Quality</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5178,6 +5178,28 @@
                                     </div>
                                 </div>
 
+                                <!-- Upgrade cutoff -->
+                                <div class="form-group">
+                                    <div class="setting-row" style="margin-bottom:4px;">
+                                        <label for="quality-upgrade-policy" style="font-weight:600;">Upgrade until</label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <select id="quality-upgrade-policy" style="width:100%;max-width:420px;" onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                        <option value="acceptable">Any accepted target</option>
+                                        <option value="until_cutoff">Selected target or better</option>
+                                    </select>
+                                    <div id="quality-upgrade-cutoff-group" class="quality-upgrade-cutoff-group">
+                                        <label for="quality-upgrade-cutoff">Cutoff target</label>
+                                        <select id="quality-upgrade-cutoff" onchange="debouncedSaveQualityProfile()"></select>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        <strong>Any accepted target</strong> stops upgrade findings as soon as a file matches any target in the list.
+                                        <br><br>
+                                        <strong>Selected target or better</strong> keeps the Quality Upgrade job proposing replacements until the file reaches the selected rank.
+                                    </div>
+                                </div>
+
                                 <!-- Search strategy -->
                                 <div class="form-group">
                                     <div class="setting-row" style="margin-bottom:4px;">
@@ -5254,7 +5276,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality on Import</h3>
-                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Apply the profile to manually imported files</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5302,7 +5324,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Download Conversion</h3>
-                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Downsample hi-res, make lossy copies</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5366,7 +5388,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Audio Verification</h3>
-                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">AcoustID identity match + truncated/silent detection</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5423,9 +5445,9 @@
                                  width away from the tiles. -->
                             <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
                                 <div class="qp-side-panel-header">
-                                    <h3 class="qp-side-panel-title">🎚 Quality Profiles</h3>
+                                    <h3 class="qp-side-panel-title">Quality Profiles</h3>
                                 </div>
-                                <p class="qp-side-panel-hint">Click a profile to make it active. Everything on the left is saved under it — ranked targets, AcoustID strictness, downsample, real-audio verification, and lossy-copy.</p>
+                                <p class="qp-side-panel-hint">Click a profile to make it the app-wide default — everything on the left is saved under it. Per row: ✏ rename, ✎ update with the current page settings, ⇩ use for Auto-Import instead of the default, × delete.</p>
                                 <div class="qp-profile-list" id="qp-profile-list">
                                     <!-- rows injected by renderCustomQualityProfiles() -->
                                 </div>

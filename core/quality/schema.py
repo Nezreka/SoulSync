@@ -29,9 +29,11 @@ logger = get_logger("database.quality_schema")
 
 
 # --- Quality profiles --------------------------------------------------------
-# ``upgrade_policy='until_top'`` is the Lidarr-like "keep searching/upgrading
-# until the first ranked target is reached" mode; it maps to the
-# quality_upgrade repair worker's require_top_target=True.
+# ``upgrade_policy='until_cutoff'`` is the Lidarr-like "keep searching/
+# upgrading until the selected ranked target is reached" mode. The selected
+# target is stored as ``upgrade_cutoff_index``; index 0 means "top quality".
+# ``until_top`` is kept as a compatibility alias for rows created by the first
+# quality-profile branch.
 # ``acoustid_required`` is the STRICTNESS dial (same meaning as the
 # ``acoustid.require_verified`` setting it was migrated from): when on, a
 # track AcoustID runs on but cannot confirm is quarantined instead of
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS quality_profiles (
     fallback_enabled INTEGER NOT NULL DEFAULT 1,
     search_mode TEXT NOT NULL DEFAULT 'priority',
     rank_candidates_by_quality INTEGER NOT NULL DEFAULT 0,
-    upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'acceptable'|'until_top'
+    upgrade_policy TEXT NOT NULL DEFAULT 'acceptable', -- 'acceptable'|'until_cutoff'|'until_top'
+    upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0,
     acoustid_required INTEGER NOT NULL DEFAULT 0,
     downsample_enabled INTEGER NOT NULL DEFAULT 0,
     deep_audio_verify INTEGER NOT NULL DEFAULT 0,
@@ -85,6 +88,10 @@ _INDEXES = (
 # Columns added after the initial schema shipped -- applied to existing installs via
 # a PRAGMA-probe ALTER (SQLite has no ADD COLUMN IF NOT EXISTS). (table, column, ddl).
 _ADDED_COLUMNS = (
+    ("quality_profiles", "upgrade_policy",
+     "ALTER TABLE quality_profiles ADD COLUMN upgrade_policy TEXT NOT NULL DEFAULT 'acceptable'"),
+    ("quality_profiles", "upgrade_cutoff_index",
+     "ALTER TABLE quality_profiles ADD COLUMN upgrade_cutoff_index INTEGER NOT NULL DEFAULT 0"),
     ("quality_profiles", "acoustid_required",
      "ALTER TABLE quality_profiles ADD COLUMN acoustid_required INTEGER NOT NULL DEFAULT 0"),
     ("quality_profiles", "downsample_enabled",
@@ -103,6 +110,10 @@ _ADDED_COLUMNS = (
      "ALTER TABLE quality_profiles ADD COLUMN lossy_copy_delete_original INTEGER NOT NULL DEFAULT 0"),
     ("quality_profiles", "folder_artist_override",
      "ALTER TABLE quality_profiles ADD COLUMN folder_artist_override INTEGER NOT NULL DEFAULT 1"),
+    ("quality_profiles", "repair_job_id",
+     "ALTER TABLE quality_profiles ADD COLUMN repair_job_id TEXT NOT NULL DEFAULT 'quality_upgrade'"),
+    ("quality_profiles", "repair_settings",
+     "ALTER TABLE quality_profiles ADD COLUMN repair_settings TEXT NOT NULL DEFAULT '{}'"),
 )
 
 # Columns removed after shipping -- dropped via a PRAGMA-probe ALTER, mirroring
@@ -145,12 +156,13 @@ def _seed_quality_profiles(cursor: Any) -> None:
         """
         INSERT INTO quality_profiles
             (id, name, description, ranked_targets, fallback_enabled, search_mode,
-             rank_candidates_by_quality, upgrade_policy, repair_job_id, repair_settings, is_default)
+             rank_candidates_by_quality, upgrade_policy, upgrade_cutoff_index,
+             repair_job_id, repair_settings, is_default)
         VALUES
             (1, 'Balanced', 'Lossless preferred, high-quality lossy accepted.',
-             ?, 1, 'priority', 0, 'acceptable', 'quality_upgrade', '{}', 1),
+             ?, 1, 'priority', 0, 'acceptable', 0, 'quality_upgrade', '{}', 1),
             (2, 'Upgrade until top quality', 'Keep proposing upgrades until the first ranked target is reached.',
-             ?, 1, 'best_quality', 1, 'until_top', 'quality_upgrade',
+             ?, 1, 'best_quality', 1, 'until_cutoff', 0, 'quality_upgrade',
              '{"require_top_target": true}', 0)
         """,
         (_DEFAULT_RANKED_TARGETS, _TOP_RANKED_TARGETS),
@@ -169,7 +181,6 @@ def ensure_quality_profiles_schema(connection: Any) -> None:
     cursor.execute(QUALITY_PROFILES_DDL)
     for index_sql in _INDEXES:
         cursor.execute(index_sql)
-    _seed_quality_profiles(cursor)
     # Additive column migrations for installs created before a column existed.
     for table, column, alter_sql in _ADDED_COLUMNS:
         cursor.execute(f"PRAGMA table_info({table})")
@@ -178,6 +189,7 @@ def ensure_quality_profiles_schema(connection: Any) -> None:
                 cursor.execute(alter_sql)
             except Exception as e:  # noqa: BLE001
                 logger.debug("column migration %s.%s: %s", table, column, e)
+    _seed_quality_profiles(cursor)
     # Removed-column cleanup for installs that ran an intermediate version.
     for table, column in _DROPPED_COLUMNS:
         cursor.execute(f"PRAGMA table_info({table})")

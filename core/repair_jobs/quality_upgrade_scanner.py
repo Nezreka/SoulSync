@@ -23,11 +23,42 @@ import os
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+# Same v3 quality primitives the download import guard and Quality Upgrade
+# Finder use. Module-level (not a local import inside scan()) so tests can
+# monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
+from core.quality.model import rank_candidate
+from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.quality_upgrade")
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
+
+
+def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict):
+    policy = profile.get("upgrade_policy")
+    if policy == "until_top":
+        policy = "until_cutoff"
+    if policy is None and settings.get("require_top_target"):
+        policy = "until_cutoff"
+    if policy != "until_cutoff" or not targets:
+        return None
+    try:
+        idx = int(profile.get("upgrade_cutoff_index") or 0)
+    except (TypeError, ValueError):
+        idx = 0
+    return max(0, min(idx, len(targets) - 1))
+
+
+def _profile_bundle(profile: dict, settings: dict) -> dict:
+    """Precompute the per-profile values the scan loop needs (targets, cutoff
+    index) once per distinct profile, so a per-track override only costs a DB
+    lookup the first time that profile is seen."""
+    targets, _fallback = targets_from_profile(profile)
+    return {
+        'targets': targets,
+        'cutoff_index': _upgrade_cutoff_index(profile, targets, settings),
+    }
 
 
 @register_job
@@ -68,10 +99,9 @@ class QualityUpgradeScannerJob(RepairJob):
     # deep_audio_verify default OFF: the ffmpeg decode is the CPU-heavy step. Most
     # users want the fast header-only quality pass; turn it on for a deep scan that
     # also catches broken/silent audio. (Matches the download pipeline's default.)
-    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False, 'require_top_target': False}
+    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False}
     setting_options = {'library_tracks_only': [True, False],
-                       'deep_audio_verify': [True, False],
-                       'require_top_target': [True, False]}
+                       'deep_audio_verify': [True, False]}
     auto_fix = False  # User chooses fix action per finding
 
     def scan(self, context: JobContext) -> JobResult:
@@ -80,19 +110,38 @@ class QualityUpgradeScannerJob(RepairJob):
         # Load the user's v3 ranked targets — the SAME definition the download
         # import guard uses. Strict: a track is below-profile when its measured
         # quality satisfies NONE of the targets (fallback is not consulted).
-        from core.quality.selection import targets_from_profile, quality_meets_profile
         try:
             profile = context.db.get_quality_profile()
         except Exception as e:
             logger.warning("Could not load quality profile: %s", e)
             return result
-        targets, _fallback = targets_from_profile(profile)
+        settings = self._get_settings(context)
+        default_bundle = _profile_bundle(profile, settings)
+        targets = default_bundle['targets']
+        cutoff_index = default_bundle['cutoff_index']
         if not targets:
             logger.info("Quality profile has no targets — nothing to check against")
             return result
 
         logger.info("Quality upgrade scan — profile targets (strict): %s",
                     [t.label for t in targets])
+
+        # Per-track profile override (`tracks.quality_profile_id`, still NULL
+        # for almost every install — there's no assignment UI yet, only the
+        # migration backfill): resolved lazily and cached per distinct id so a
+        # library with one profile everywhere costs exactly one DB read, same
+        # as before this existed. Loose files with no DB match (meta has no
+        # 'quality_profile_id' key) always fall back to the default.
+        profile_id = profile.get('id')
+        profile_bundle_cache = {profile_id: default_bundle}
+
+        def _bundle_for(row_profile_id):
+            if not row_profile_id or row_profile_id == profile_id:
+                return default_bundle
+            if row_profile_id not in profile_bundle_cache:
+                profile_bundle_cache[row_profile_id] = _profile_bundle(
+                    load_profile_by_id(row_profile_id), settings)
+            return profile_bundle_cache[row_profile_id]
 
         from core.imports.file_ops import probe_audio_quality
         # Same real-file AudioGuard the download/import pipeline runs: ffmpeg
@@ -141,18 +190,12 @@ class QualityUpgradeScannerJob(RepairJob):
         # residue after a DB reset) — those are orphans, not library tracks, and
         # belong to the Orphan File Detector, not a quality upgrade scan. Default
         # ON so the scan reflects the user's actual library, not download junk.
-        _settings = self._get_settings(context)
-        library_only = _settings.get('library_tracks_only', False)
+        library_only = settings.get('library_tracks_only', False)
         # Deep verify = run the ffmpeg AudioGuard (real decode) per file, exactly
         # like the download pipeline. Slower than a header read (seconds vs ms) but
         # it verifies the REAL audio, not just the metadata. OFF by default (the
         # decode is the CPU-heavy step); turn on for a deep scan.
-        deep_verify = _settings.get('deep_audio_verify', False)
-        # require_top_target: flag files that meet a lower target but not the
-        # highest-priority one (e.g. 16-bit FLAC when 24-bit is preferred).
-        require_top = _settings.get('require_top_target', False)
-        check_targets = targets[:1] if require_top and len(targets) > 1 else targets
-
+        deep_verify = settings.get('deep_audio_verify', False)
         probe_failed = 0
         not_in_library = 0
         for i, fpath in enumerate(audio_files):
@@ -173,6 +216,10 @@ class QualityUpgradeScannerJob(RepairJob):
                 continue
             if meta is None:
                 meta = self._read_file_tags(fpath)
+
+            bundle = _bundle_for(meta.get('quality_profile_id'))
+            targets = bundle['targets']
+            cutoff_index = bundle['cutoff_index']
 
             result.scanned += 1
             if context.report_progress and i % 25 == 0:
@@ -208,7 +255,10 @@ class QualityUpgradeScannerJob(RepairJob):
                 probe_failed += 1
                 result.skipped += 1
                 continue
-            elif not quality_meets_profile(aq, check_targets):
+            elif cutoff_index is not None and rank_candidate(aq, targets)[0] > cutoff_index:
+                issue = 'below_profile'
+                current_label = aq.label()
+            elif cutoff_index is None and not quality_meets_profile(aq, targets):
                 issue = 'below_profile'
                 current_label = aq.label()
             else:
@@ -227,7 +277,7 @@ class QualityUpgradeScannerJob(RepairJob):
                          f'verification (ffmpeg): {broken_reason}')
                 _severity = 'warning'
             else:
-                _pref = targets[0].label if require_top and len(targets) > 1 else None
+                _pref = targets[cutoff_index].label if cutoff_index is not None else None
                 _title = f'{"Upgradeable" if _pref else "Below quality"}: {disp_title} ({current_label})'
                 _desc = (f'"{disp_title}" by {disp_artist} is {current_label}'
                          + (f', below your preferred quality ({_pref}).' if _pref else
@@ -350,7 +400,8 @@ class QualityUpgradeScannerJob(RepairJob):
                 SELECT t.id, t.title,
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
-                       al.title AS album_title, al.thumb_url, ar.thumb_url
+                       al.title AS album_title, al.thumb_url, ar.thumb_url,
+                       t.quality_profile_id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -369,6 +420,7 @@ class QualityUpgradeScannerJob(RepairJob):
                     'album': row[5] or '',
                     'album_thumb_url': row[6] or None,
                     'artist_thumb_url': row[7] or None,
+                    'quality_profile_id': row[8],
                 }
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()

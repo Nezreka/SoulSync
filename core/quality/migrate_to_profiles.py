@@ -38,11 +38,20 @@ def _profile_row_fields(profile: dict) -> dict:
     """Convert a legacy v3 quality-profile dict into `quality_profiles` row fields."""
     ranked = profile.get("ranked_targets") or []
     search_mode = profile.get("search_mode", "priority")
+    upgrade_policy = profile.get("upgrade_policy", "acceptable")
+    if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
+        upgrade_policy = "acceptable"
+    try:
+        upgrade_cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
+    except (TypeError, ValueError):
+        upgrade_cutoff_index = 0
     return {
         "ranked_targets": json.dumps(ranked),
         "fallback_enabled": 1 if profile.get("fallback_enabled", True) else 0,
         "search_mode": search_mode if search_mode in ("priority", "best_quality") else "priority",
         "rank_candidates_by_quality": 1 if profile.get("rank_candidates_by_quality") else 0,
+        "upgrade_policy": upgrade_policy,
+        "upgrade_cutoff_index": upgrade_cutoff_index,
     }
 
 
@@ -151,14 +160,23 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         # Overwrite (not INSERT OR IGNORE) — `_seed_quality_profiles` already
         # inserted factory content if the table was empty; the user's real
         # settings must win over that seed or any intermediate default row.
+        # Rename to 'Default' too: the seeded name ("Balanced") describes a
+        # factory preset the user never actually chose, which is misleading
+        # once the row holds their real carried-over settings. Only rename
+        # when the row still has ITS OWN seeded name — an intermediate build
+        # may have let the user rename it already, and that choice must win.
         cursor.execute(
             """
             UPDATE quality_profiles
-               SET description = 'Migrated from your previous global Quality settings',
+               SET name = CASE WHEN name IN ('Balanced', 'Upgrade until top quality')
+                                THEN 'Default' ELSE name END,
+                   description = 'Migrated from your previous global Quality settings',
                    ranked_targets = :ranked_targets,
                    fallback_enabled = :fallback_enabled,
                    search_mode = :search_mode,
                    rank_candidates_by_quality = :rank_candidates_by_quality,
+                   upgrade_policy = :upgrade_policy,
+                   upgrade_cutoff_index = :upgrade_cutoff_index,
                    acoustid_required = :acoustid_required,
                    downsample_enabled = :downsample_enabled,
                    deep_audio_verify = :deep_audio_verify,
@@ -182,14 +200,33 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         )
         backfilled = cursor.rowcount
 
+        # Existing library tracks predate per-item profile assignment entirely
+        # (there was nothing to point at before this migration created a
+        # profile row) — pin them to the same migrated profile, same as
+        # wishlist rows above, so a Quality Check/Upgrade Finder run right
+        # after upgrading judges them against the settings the user actually
+        # had, not a silent reset to factory defaults. New tracks added after
+        # this point are inserted with quality_profile_id=NULL and simply
+        # follow whichever profile is default at read time.
+        try:
+            cursor.execute(
+                "UPDATE tracks SET quality_profile_id = ? WHERE quality_profile_id IS NULL",
+                (default_profile_id,),
+            )
+            library_backfilled = cursor.rowcount
+        except Exception as e:  # noqa: BLE001 — column may not exist yet on a very old schema
+            logger.debug("library track backfill skipped: %s", e)
+            library_backfilled = 0
+
         cursor.execute(
             "INSERT OR IGNORE INTO metadata (key, value, updated_at) "
             "VALUES (?, 'true', CURRENT_TIMESTAMP)",
             (_MIGRATION_FLAG_KEY,),
         )
         logger.info(
-            "Quality-profile migration: materialized default profile, backfilled %d wishlist row(s)",
-            backfilled,
+            "Quality-profile migration: materialized default profile, backfilled "
+            "%d wishlist row(s), %d library track(s)",
+            backfilled, library_backfilled,
         )
         return True
     except Exception as e:  # noqa: BLE001

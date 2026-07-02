@@ -28,7 +28,10 @@ def db(tmp_path, monkeypatch):
 
 def test_none_id_resolves_default_profile(db):
     profile = load_profile_by_id(None)
-    assert profile["preset"] == "balanced"
+    # The migrated default row is renamed to "Default" (see
+    # core/quality/migrate_to_profiles.py), so it no longer matches a
+    # built-in preset name and resolves to "custom".
+    assert profile["preset"] == "custom"
     assert profile["ranked_targets"]
 
 
@@ -44,4 +47,7 @@ def test_explicit_id_resolves_that_profile(db):
 
 def test_unknown_id_falls_back_to_default(db):
     profile = load_profile_by_id(999999)
-    assert profile["preset"] == "balanced"
+    # The migrated default row is renamed to "Default" (see
+    # core/quality/migrate_to_profiles.py), so it no longer matches a
+    # built-in preset name and resolves to "custom".
+    assert profile["preset"] == "custom"

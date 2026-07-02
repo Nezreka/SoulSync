@@ -2329,7 +2329,16 @@ function populateQualityProfileUI(profile) {
     const rankCandidatesCheckbox = document.getElementById('quality-rank-candidates');
     if (rankCandidatesCheckbox) rankCandidatesCheckbox.checked = profile.rank_candidates_by_quality === true;
 
+    const upgradePolicySelect = document.getElementById('quality-upgrade-policy');
+    if (upgradePolicySelect) {
+        upgradePolicySelect.value = ['until_cutoff', 'until_top'].includes(profile.upgrade_policy)
+            ? 'until_cutoff'
+            : 'acceptable';
+    }
+    renderUpgradeCutoffOptions(profile.upgrade_cutoff_index);
+
     onSearchModeChange();
+    onUpgradePolicyChange();
 }
 
 // Hide the "rank-based download order" toggle when Best quality is active —
@@ -2338,6 +2347,30 @@ function onSearchModeChange() {
     const mode = document.getElementById('quality-search-mode')?.value;
     const group = document.getElementById('quality-rank-candidates-group');
     if (group) group.style.display = mode === 'best_quality' ? 'none' : '';
+}
+
+function renderUpgradeCutoffOptions(selectedIndex = null) {
+    const select = document.getElementById('quality-upgrade-cutoff');
+    if (!select) return;
+    const current = selectedIndex ?? parseInt(select.value || '0', 10);
+    const maxIdx = Math.max(0, currentRankedTargets.length - 1);
+    const clamped = Number.isFinite(current) ? Math.min(Math.max(current, 0), maxIdx) : 0;
+    if (!currentRankedTargets.length) {
+        select.innerHTML = '<option value="0">Top ranked target</option>';
+        select.value = '0';
+        return;
+    }
+    select.innerHTML = currentRankedTargets.map((target, index) => (
+        `<option value="${index}">${index + 1}. ${escapeHtml(rtLabel(target))}</option>`
+    )).join('');
+    select.value = String(clamped);
+}
+
+function onUpgradePolicyChange() {
+    const policy = document.getElementById('quality-upgrade-policy')?.value || 'acceptable';
+    const cutoffGroup = document.getElementById('quality-upgrade-cutoff-group');
+    if (cutoffGroup) cutoffGroup.style.display = policy === 'until_cutoff' ? '' : 'none';
+    renderUpgradeCutoffOptions();
 }
 
 // Toggle the collapsible help text below a setting's ⓘ icon. Walks forward from
@@ -2379,6 +2412,7 @@ function renderRankedTargets() {
     if (currentRankedTargets.length === 0) {
         list.innerHTML = '<div class="ranked-targets-empty">No targets yet — add one below. '
             + 'With fallback off this would reject every download.</div>';
+        renderUpgradeCutoffOptions();
         return;
     }
 
@@ -2411,6 +2445,7 @@ function renderRankedTargets() {
         });
         list.appendChild(row);
     });
+    renderUpgradeCutoffOptions();
 }
 
 function reorderRankedTarget(from, to) {
@@ -2580,6 +2615,8 @@ function collectQualityProfileFromUI() {
         fallback_enabled: document.getElementById('quality-fallback-enabled')?.checked ?? true,
         search_mode: document.getElementById('quality-search-mode')?.value === 'best_quality' ? 'best_quality' : 'priority',
         rank_candidates_by_quality: document.getElementById('quality-rank-candidates')?.checked ?? false,
+        upgrade_policy: document.getElementById('quality-upgrade-policy')?.value === 'until_cutoff' ? 'until_cutoff' : 'acceptable',
+        upgrade_cutoff_index: parseInt(document.getElementById('quality-upgrade-cutoff')?.value || '0', 10) || 0,
         ranked_targets,
     };
 }
@@ -2622,6 +2659,15 @@ async function saveQualityProfile() {
 // showConfirmDialog() — never a native prompt()/confirm() popup.
 
 let _qpAutoImportProfileId = null; // cached so re-renders don't re-fetch
+let _qpProfileRows = [];
+
+function normalizeQualityProfileId(profileId) {
+    if (profileId === null || profileId === undefined || profileId === '' || profileId === 0 || profileId === '0') {
+        return null;
+    }
+    const numericId = parseInt(profileId, 10);
+    return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
+}
 
 async function loadCustomQualityProfiles() {
     try {
@@ -2632,9 +2678,12 @@ async function loadCustomQualityProfiles() {
         const data = await profilesRes.json();
         if (autoImportRes && autoImportRes.ok) {
             const aiData = await autoImportRes.json();
-            _qpAutoImportProfileId = aiData.quality_profile_id || null;
+            _qpAutoImportProfileId = normalizeQualityProfileId(aiData.quality_profile_id);
         }
-        if (data.success) renderCustomQualityProfiles(data.profiles || []);
+        if (data.success) {
+            _qpProfileRows = data.profiles || [];
+            renderCustomQualityProfiles(_qpProfileRows);
+        }
     } catch (error) {
         console.error('Error loading custom quality profiles:', error);
     }
@@ -2657,6 +2706,11 @@ function qpProfileSummary(profile) {
     if (profile.deep_audio_verify) parts.push('deep verify');
     if (profile.downsample_enabled) parts.push('downsample');
     if (profile.lossy_copy_enabled) parts.push(`lossy copy ${(profile.lossy_copy_codec || 'mp3').toUpperCase()}`);
+    if (['until_cutoff', 'until_top'].includes(profile.upgrade_policy)) {
+        const cutoffIndex = Math.min(Math.max(parseInt(profile.upgrade_cutoff_index || '0', 10) || 0, 0), Math.max(targets.length - 1, 0));
+        const cutoff = targets[cutoffIndex]?.label || 'top target';
+        parts.push(`upgrade until ${cutoff}`);
+    }
     return parts.join(' · ');
 }
 
@@ -2670,11 +2724,9 @@ function renderCustomQualityProfiles(profiles) {
         return;
     }
 
-    // Auto-Import falls back to the app-wide default when it has nothing of
-    // its own assigned (same resolution core/quality/selection.py::
-    // load_profile_by_id does) — so tag the default row when unset.
-    const autoImportTarget = _qpAutoImportProfileId
-        || (profiles.find(p => p.is_default) || {}).id;
+    // Only tag Auto-Import when the Import page has an explicit override.
+    // Falling back to the default profile is not a real assignment.
+    const autoImportTarget = _qpAutoImportProfileId;
 
     profiles.forEach(profile => {
         const row = document.createElement('div');
@@ -2716,6 +2768,24 @@ function renderCustomQualityProfiles(profiles) {
 
         const actions = document.createElement('span');
         actions.className = 'qp-profile-actions';
+
+        // Assign this profile to Auto-Import (Settings → Import), independent
+        // of the app-wide default used by normal downloads/Wishlist items.
+        // Toggle: click again on the currently-assigned profile to clear it
+        // back to "use the default".
+        const isAutoImport = profile.id === autoImportTarget;
+        const ai = document.createElement('button');
+        ai.type = 'button';
+        ai.className = 'qp-profile-action qp-action-autoimport' + (isAutoImport ? ' active' : '');
+        ai.textContent = '⇩';
+        ai.title = isAutoImport
+            ? `Stop using '${profile.name}' for Auto-Import (revert to the default profile)`
+            : `Use '${profile.name}' for Auto-Import`;
+        ai.onclick = (e) => {
+            e.stopPropagation();
+            toggleAutoImportQualityProfile(profile.id);
+        };
+        actions.appendChild(ai);
 
         const ren = document.createElement('button');
         ren.type = 'button';
@@ -3010,6 +3080,33 @@ async function deleteCustomQualityProfile(profileId, name) {
     } catch (error) {
         console.error('Error deleting custom quality profile:', error);
         showToast('Failed to delete profile', 'error');
+    }
+}
+
+// Auto-Import assignment lives inline in the profile list (see the
+// qp-action-autoimport button in renderCustomQualityProfiles) instead of a
+// separate "Manage" modal — that modal only ever duplicated "set default"
+// (already one click on a row's dot) and buried the one thing it uniquely
+// did (Auto-Import assignment) behind an extra surface the rename/update/
+// delete actions weren't on. One list, every action, is more discoverable.
+async function toggleAutoImportQualityProfile(profileId) {
+    const nowAssigned = _qpAutoImportProfileId === profileId;
+    try {
+        const response = await fetch('/api/auto-import/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quality_profile_id: nowAssigned ? null : profileId }),
+        });
+        const data = await response.json();
+        if (!data.success) throw new Error(data.error || 'Failed to update Auto-Import');
+        _qpAutoImportProfileId = nowAssigned ? null : profileId;
+        renderCustomQualityProfiles(_qpProfileRows);
+        showToast(nowAssigned
+            ? 'Auto-Import now uses the default profile'
+            : 'Auto-Import profile updated', 'success');
+    } catch (error) {
+        console.error('Error updating Auto-Import quality profile:', error);
+        showToast('Failed to update Auto-Import profile', 'error');
     }
 }
 
