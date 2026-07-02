@@ -6399,6 +6399,8 @@ let _artistWeb = {
     cursorFX: true,                   // master flag (one switch to disable the effect)
     fxRAF: null, home: null,          // rAF handle + captured resting positions
     spreadRoot: null, spreadSet: null, spreadPush: 0,
+    spreadActive: null,               // Set of nodes currently displaced/pushed — the FX tick animates
+                                      // only these, never a full ~5k-node sweep per frame.
     fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
     previewAudio: null, previewKey: null,   // 30s Deezer preview playback (discovery candidates)
 };
@@ -6683,7 +6685,7 @@ function _artWebRenderLens() {
     // Home positions are captured AFTER the layout settles (_artWebFinishLayout); until then the
     // selection-spread effect stays dormant (its guards check st.home).
     _artistWeb.home = null;
-    _artistWeb.spreadRoot = _artistWeb.spreadSet = null;
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
 
     // Declutter threshold: hide edges below the median weight — but most edges are weight-1
     // (single-source), so if the median IS the minimum, bump above it to hide that weakest tier.
@@ -7084,23 +7086,36 @@ function _artWebSpreadTick() {
     const set = st.spreadSet, root = st.spreadRoot;
     const rootHome = root && home[root] ? home[root] : null;
     const PUSH = st.spreadPush, EASE = 0.18;
+
+    // Animate only the pushed/displaced nodes, not all ~5k every frame. `spreadActive` accumulates
+    // any pushed node and drops it once it eases back home (and isn't currently pushed).
+    if (!st.spreadActive) st.spreadActive = new Set();
+    if (set) set.forEach(k => st.spreadActive.add(k));
+
     let moving = false;
-    g.forEachNode((k, a) => {
+    st.spreadActive.forEach(k => {
         const h = home[k];
-        if (!h) return;
+        if (!h) { st.spreadActive.delete(k); return; }
+        const ax = g.getNodeAttribute(k, 'x'), ay = g.getNodeAttribute(k, 'y');
         let tx = h.x, ty = h.y;
-        if (set && rootHome && set.has(k)) {
+        const pushed = set && rootHome && set.has(k);
+        if (pushed) {
             const dx = h.x - rootHome.x, dy = h.y - rootHome.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
             tx = h.x + (dx / dist) * PUSH;   // push each neighbor outward from the selected node
             ty = h.y + (dy / dist) * PUSH;
         }
-        const nx = a.x + (tx - a.x) * EASE;
-        const ny = a.y + (ty - a.y) * EASE;
-        if (Math.abs(nx - a.x) > 0.0005 || Math.abs(ny - a.y) > 0.0005) {
+        const nx = ax + (tx - ax) * EASE;
+        const ny = ay + (ty - ay) * EASE;
+        if (Math.abs(nx - ax) > 0.0005 || Math.abs(ny - ay) > 0.0005) {
             g.setNodeAttribute(k, 'x', nx);
             g.setNodeAttribute(k, 'y', ny);
             moving = true;
+        } else if (!pushed) {
+            // Reached home and not being pushed → snap exact + stop tracking it.
+            g.setNodeAttribute(k, 'x', tx);
+            g.setNodeAttribute(k, 'y', ty);
+            st.spreadActive.delete(k);
         }
     });
     if (moving) { st.sigma.refresh(); st.fxRAF = requestAnimationFrame(_artWebSpreadTick); }
@@ -7118,7 +7133,7 @@ function closeArtistWeb() {
     });
     _artWebKillLiveLayout();
     if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
-    _artistWeb.spreadRoot = _artistWeb.spreadSet = null;
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
@@ -7143,6 +7158,9 @@ const _WEB_DIM_NODE = '#2b2b34';
 
 function _artWebNodeReducer(node, data) {
     const st = _artistWeb;
+    // Resting fast-path: nothing highlighting/filtering → render base attrs as-is, no per-node
+    // clone. This is the common case and runs once per node (~5k) on EVERY refresh (hover, pan, etc).
+    if (!st.pathNodes && !st.genreFilter && !st.focusSet && !st.searchMatch) return data;
     const res = Object.assign({}, data);
     // Shortest-path mode takes priority: the chain lights up, everything else goes dark.
     if (st.pathNodes) {
@@ -7182,11 +7200,17 @@ function _artWebNodeReducer(node, data) {
 
 function _artWebEdgeReducer(edge, data) {
     const st = _artistWeb;
-    const res = Object.assign({}, data);
     // Membership edges are a layout scaffold only. Drawing them starbursts big hubs (1000+ faint
     // spokes overlapping accumulate to solid white), so never render them — clustering is already
     // conveyed by node position + color. Only similarity edges are drawn.
-    if (data.kind === 'membership') { res.hidden = true; return res; }
+    if (data.kind === 'membership') { const r = Object.assign({}, data); r.hidden = true; return r; }
+    // Resting fast-path: no path/focus/search/genre-filter/declutter active → the ~35k similarity
+    // edges render as-is with NO clone and NO source/target lookups. This is the biggest per-refresh
+    // allocation sink; refresh fires on every hover, click, search keystroke, and spread frame.
+    if (!st.pathNodes && !st.focusSet && !st.searchMatch && !st.genreFilter && !st.edgeDeclutter) {
+        return data;
+    }
+    const res = Object.assign({}, data);
     // Declutter (resting view only): hide the weaker half of SIMILARITY edges. Scoped to that kind —
     // the threshold is computed from similarity weights, and applying it to the Discovery lens's
     // (mostly weight-1) edges hid essentially all of them, leaving candidates as floating dots.
