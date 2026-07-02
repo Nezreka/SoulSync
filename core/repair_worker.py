@@ -1916,35 +1916,92 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-        # Delete duplicate files from disk (resolve paths for cross-environment compat)
+        # Move duplicate files to the <transfer>/deleted quarantine instead of hard
+        # deleting them — recoverable, and consistent with the older duplicate
+        # cleaner (the reorganizer already skips <transfer>/deleted, #746). Resolve
+        # paths first for cross-environment (Docker) compat.
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
+        deleted_root = os.path.join(self.transfer_folder, 'deleted')
         files_deleted = 0
+        files_failed = 0
         for fpath in remove_paths:
+            resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                # #971/Docker: the stored path didn't map to a file the container
+                # can see. Previously this was skipped silently — the DB row was
+                # removed, the file left on disk, and NO log explained why. Surface
+                # it so the user can fix their volume mapping / Music Paths.
+                files_failed += 1
+                logger.warning(
+                    "Duplicate cleanup: could not locate file to remove (DB path %r "
+                    "did not resolve to an existing file). DB entry removed, file left "
+                    "on disk — check your Docker volume mapping and Settings > Library "
+                    "> Music Paths.", fpath)
+                continue
             try:
-                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    os.remove(resolved)
-                    files_deleted += 1
-                    # Clean up empty parent directories (never remove transfer folder itself)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
-                                and not os.listdir(parent)):
-                            os.rmdir(parent)
-                            parent = os.path.dirname(parent)
-                        else:
-                            break
+                dest = self._quarantine_dest(resolved, deleted_root)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.move(resolved, dest)
+                files_deleted += 1
+            except OSError as e:
+                # Was `except OSError: pass` — a Docker PUID/PGID permission mismatch
+                # on the media volume silently no-op'd the removal with no log.
+                files_failed += 1
+                logger.warning(
+                    "Duplicate cleanup: failed to move %s to the deleted folder (%s). "
+                    "DB entry removed, file left on disk — in Docker this is usually a "
+                    "PUID/PGID permission mismatch on the media volume.", resolved, e)
+                continue
+            # Clean up empty parent directories (best effort, cosmetic; never remove
+            # the transfer folder itself). A failure here must not count as a failed
+            # removal — the file WAS moved out.
+            try:
+                parent = os.path.dirname(resolved)
+                for _ in range(3):
+                    if (parent and os.path.isdir(parent)
+                            and os.path.normpath(parent) != transfer_norm
+                            and not os.listdir(parent)):
+                        os.rmdir(parent)
+                        parent = os.path.dirname(parent)
+                    else:
+                        break
             except OSError:
-                pass  # Best effort — DB entry already removed
+                pass
 
         msg = f'Kept best quality copy, removed {removed} duplicate(s)'
         if files_deleted:
-            msg += f' and {files_deleted} file(s) from disk'
-        return {'success': True, 'action': 'removed_duplicates', 'message': msg}
+            msg += f' and moved {files_deleted} file(s) to the deleted folder'
+        if files_failed:
+            msg += f' — {files_failed} file(s) could NOT be removed (see logs)'
+        return {'success': True, 'action': 'removed_duplicates', 'message': msg,
+                'files_deleted': files_deleted, 'files_failed': files_failed}
+
+    def _quarantine_dest(self, resolved: str, deleted_root: str) -> str:
+        """Destination under <transfer>/deleted for a removed duplicate.
+
+        Mirrors the duplicate-cleaner convention (#746): preserve the path relative
+        to the transfer folder when the file lives there, else fall back to the
+        basename (files resolved from the media library live outside transfer).
+        Never escapes ``deleted_root``; de-collides with a numeric suffix so two
+        same-named duplicates don't clobber each other in quarantine."""
+        try:
+            rel = os.path.relpath(resolved, self.transfer_folder)
+        except ValueError:
+            # Windows: file and transfer folder on different drives — relpath
+            # raises (and ValueError isn't caught by the caller's except OSError).
+            rel = os.path.basename(resolved)
+        if rel.startswith('..') or os.path.isabs(rel):
+            rel = os.path.basename(resolved)
+        dest = os.path.join(deleted_root, rel)
+        base, ext = os.path.splitext(dest)
+        n = 1
+        while os.path.exists(dest):
+            dest = f"{base}_{n}{ext}"
+            n += 1
+        return dest
 
     def _fix_single_album_redundant(self, entity_type, entity_id, file_path, details):
         """Remove the single/EP version, keeping the album version."""
