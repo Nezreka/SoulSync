@@ -1,7 +1,6 @@
 """Duplicate Track Detector Job — finds potential duplicate tracks in the library."""
 
 import os
-import re
 from collections import defaultdict
 from difflib import SequenceMatcher
 
@@ -187,10 +186,12 @@ class DuplicateDetectorJob(RepairJob):
         """Compare every pair within a bucket; emit duplicate groups.
 
         ``require_metadata_match`` gates the title / artist similarity
-        thresholds and the cross-album guard. Pass ``False`` for buckets
-        whose grouping is already strong evidence (e.g. shared canonical
-        filename) so that dedup orphans with broken / missing tags still
-        get caught.
+        thresholds. Pass ``False`` for buckets whose grouping is already
+        strong evidence (e.g. shared canonical filename) so that dedup
+        orphans with broken / missing tags still get caught. The
+        cross-album guard (``ignore_cross_album``) applies to BOTH passes —
+        a shared filename is not itself proof the user wants cross-album
+        copies flagged.
         """
         for i, t1 in enumerate(bucket_tracks):
             if context.check_stop():
@@ -352,30 +353,20 @@ def _normalize(text: str) -> str:
     Keeps parenthetical content (remixes, live, etc.) so that similarity
     thresholds can distinguish 'title' from 'title xxx remix'.
 
-    CJK text is preserved rather than stripped — the plain
-    ``[^a-z0-9() ]`` strip collapsed every Japanese/Chinese/Korean title
-    to an empty string, and two empty strings score a perfect 1.0
-    SequenceMatcher ratio, so any two CJK-titled tracks by the same
-    artist were flagged as duplicates regardless of their actual titles.
+    Letters/digits of ANY script are kept (``str.isalnum`` is Unicode-aware).
+    The original allowlist ``[^a-z0-9() ]`` deleted every non-Latin character,
+    so an all-CJK / Cyrillic / Arabic / Thai / Greek / etc. title collapsed to
+    ``''`` — and two empty strings score a perfect 1.0 SequenceMatcher ratio,
+    so unrelated same-artist tracks in those scripts were all flagged as
+    duplicates. (#966 fixed this for CJK via an allowlist of CJK ranges;
+    keeping any-script alphanumerics fixes every non-Latin script at once and
+    needs no per-range maintenance. Dedup compares two library rows, so unlike
+    matching_engine we don't transliterate — the native script is kept as-is.)
     """
     if not text:
         return ""
     t = text.lower()
-    has_cjk = any(
-        '⺀' <= c <= '鿿'  # CJK Unified Ideographs + radicals
-        or '぀' <= c <= 'ヿ'  # Hiragana + Katakana
-        or '＀' <= c <= '￯'  # Halfwidth / Fullwidth forms
-        or '가' <= c <= '힯'  # Hangul syllables
-        for c in t
-    )
-    if has_cjk:
-        t = re.sub(
-            r'[^a-z0-9() ⺀-鿿぀-ヿ＀-￯가-힯]',
-            '', t,
-        )
-    else:
-        t = re.sub(r'[^a-z0-9() ]', '', t)
-    return t.strip()
+    return ''.join(c for c in t if c.isalnum() or c in '() ').strip()
 
 
 def _is_same_physical_file(p1, p2, dur1, dur2) -> bool:

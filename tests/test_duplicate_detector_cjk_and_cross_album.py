@@ -48,6 +48,32 @@ class TestNormalizePreservesCJK:
     def test_ascii_titles_unaffected(self):
         assert _normalize("Hello World (Remix)") == "hello world (remix)"
 
+    def test_non_cjk_non_latin_scripts_preserved(self):
+        """The CJK fix (#966) was an allowlist of CJK ranges, so every OTHER
+        non-Latin script (Cyrillic, Arabic, Greek, Thai…) still collapsed to
+        ''. Keeping any-script alphanumerics fixes them all — distinct titles
+        must stay distinct, identical titles must still match."""
+        from difflib import SequenceMatcher
+
+        for title_a, title_b in (
+            ("Привет", "Мир"),          # Cyrillic
+            ("Γειά σου", "Κόσμε"),      # Greek
+            ("สวัสดี", "โลก"),          # Thai
+        ):
+            a, b = _normalize(title_a), _normalize(title_b)
+            assert a and b, f"{title_a!r}/{title_b!r} collapsed to empty"
+            assert a != b
+            assert SequenceMatcher(None, a, b).ratio() < 0.85
+
+        same = "Привет"
+        assert SequenceMatcher(None, _normalize(same), _normalize(same)).ratio() == 1.0
+
+    def test_cjk_punctuation_stripped_like_ascii(self):
+        """Punctuation is dropped regardless of script — 「」 / 。 are not
+        alphanumeric, so two copies differing only in CJK punctuation still
+        normalize equal (the old CJK allowlist kept them, an asymmetry)."""
+        assert _normalize("いつもの道") == _normalize("「いつもの道」")
+
 
 class TestCrossAlbumHonoredInFilenamePass:
     def setup_method(self):
