@@ -10,11 +10,12 @@ import type {
   ImportAutoImportResultsPayload,
   ImportAutoImportSettingsPayload,
   ImportAutoImportStatusPayload,
-  ImportOptionsPayload,
   ImportProcessPayload,
   ImportStagingFilesPayload,
   ImportStagingGroupsPayload,
   ImportTrackSearchPayload,
+  AutoImportQualityProfile,
+  QualityProfilesPayload,
 } from './-import.types';
 
 export const IMPORT_QUERY_KEY = ['import'] as const;
@@ -123,15 +124,23 @@ export async function fetchAutoImportSettings(): Promise<ImportAutoImportSetting
 export async function saveAutoImportSettings(input: {
   confidenceThreshold: number;
   scanInterval: number;
+  qualityProfileId?: number | null;
 }): Promise<void> {
   await readJson<{ success: boolean; error?: string }>(
     apiClient.post('auto-import/settings', {
       json: {
         confidence_threshold: input.confidenceThreshold,
         scan_interval: input.scanInterval,
+        quality_profile_id: input.qualityProfileId ?? null,
       },
     }),
   );
+}
+
+// Every quality profile (the app-wide default + any named custom ones).
+export async function fetchQualityProfiles(): Promise<AutoImportQualityProfile[]> {
+  const payload = await readJson<QualityProfilesPayload>(apiClient.get('quality-profile/custom'));
+  return payload.profiles ?? [];
 }
 
 export async function fetchAutoImportResults(): Promise<ImportAutoImportResultsPayload> {
@@ -242,42 +251,10 @@ export function autoImportResultsQueryOptions() {
   });
 }
 
-// --- Import behaviour toggles (mirrors Settings → Import) ---
-// Both live under the `import.*` config namespace. GET reads the whole settings
-// blob; POST /api/settings partial-merges, so we only send the import keys.
-type SettingsBlob = {
-  import?: { quality_filter_enabled?: boolean; folder_artist_override?: boolean };
-};
-
-export async function fetchImportOptions(): Promise<ImportOptionsPayload> {
-  const data = await readJson<SettingsBlob>(apiClient.get('settings'));
-  const imp = data.import ?? {};
-  return {
-    // Both default ON when the key is absent (matches the backend defaults).
-    qualityFilterEnabled: imp.quality_filter_enabled !== false,
-    folderArtistOverride: imp.folder_artist_override !== false,
-  };
-}
-
-export async function saveImportOptions(
-  options: ImportOptionsPayload,
-): Promise<{ success: boolean; error?: string }> {
-  return readJson<{ success: boolean; error?: string }>(
-    apiClient.post('settings', {
-      json: {
-        import: {
-          quality_filter_enabled: options.qualityFilterEnabled,
-          folder_artist_override: options.folderArtistOverride,
-        },
-      },
-    }),
-  );
-}
-
-export function importOptionsQueryOptions() {
+export function qualityProfilesQueryOptions() {
   return queryOptions({
-    queryKey: [...IMPORT_QUERY_KEY, 'import-options'],
-    queryFn: fetchImportOptions,
+    queryKey: [...IMPORT_QUERY_KEY, 'quality-profiles'],
+    queryFn: fetchQualityProfiles,
   });
 }
 

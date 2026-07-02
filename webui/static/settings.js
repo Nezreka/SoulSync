@@ -1624,11 +1624,10 @@ async function loadSettingsData() {
         }
 
         // Populate Import settings
-        const _qualFilterEl = document.getElementById('import-quality-filter-enabled');
-        if (_qualFilterEl) _qualFilterEl.checked = settings.import?.quality_filter_enabled !== false;  // default ON
         document.getElementById('import-replace-lower-quality').checked = settings.import?.replace_lower_quality === true;
+        // Default ON (legacy Artist/Album staging behavior) when the key is absent.
         const _folderArtistEl = document.getElementById('import-folder-artist-override');
-        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override === true;
+        if (_folderArtistEl) _folderArtistEl.checked = settings.import?.folder_artist_override !== false;
         const _transferPermEl = document.getElementById('import-transfer-permanent');
         if (_transferPermEl) _transferPermEl.checked = settings.import?.transfer_is_permanent === true;
 
@@ -2291,6 +2290,7 @@ async function loadQualityProfile() {
     } catch (error) {
         console.error('Error loading quality profile:', error);
     }
+    await loadCustomQualityProfiles();
 }
 
 // v3: the working copy of the ordered target list. Mirrors the DOM rows
@@ -2609,6 +2609,407 @@ async function saveQualityProfile() {
     } catch (error) {
         console.error('Error saving quality profile:', error);
         return false;
+    }
+}
+
+// ── Named global profiles (assignable to Wishlist items / per-context
+// overrides like Auto-Import, not just the single active default) ───────
+//
+// Rendered as a detached, sticky side panel (.qp-side-panel — see the
+// Downloads page's .adl-batch-panel for the same pattern), not a control
+// strip above the tiles it governs. Every action here is inline (a row
+// switching into an edit-in-place `<input>`) or the app's own themed
+// showConfirmDialog() — never a native prompt()/confirm() popup.
+
+let _qpAutoImportProfileId = null; // cached so re-renders don't re-fetch
+
+async function loadCustomQualityProfiles() {
+    try {
+        const [profilesRes, autoImportRes] = await Promise.all([
+            fetch('/api/quality-profile/custom'),
+            fetch('/api/auto-import/settings').catch(() => null),
+        ]);
+        const data = await profilesRes.json();
+        if (autoImportRes && autoImportRes.ok) {
+            const aiData = await autoImportRes.json();
+            _qpAutoImportProfileId = aiData.quality_profile_id || null;
+        }
+        if (data.success) renderCustomQualityProfiles(data.profiles || []);
+    } catch (error) {
+        console.error('Error loading custom quality profiles:', error);
+    }
+}
+
+// One-line what's-in-it summary under each profile row (Lidarr shows the
+// allowed qualities on its profile cards for the same reason: a name alone
+// says nothing about what the profile actually does).
+function qpProfileSummary(profile) {
+    let targets = [];
+    try { targets = JSON.parse(profile.ranked_targets || '[]'); } catch (e) { /* unreadable → treat as empty */ }
+    const parts = [];
+    if (targets.length) {
+        const first = targets[0]?.label || 'Top target';
+        parts.push(targets.length === 1 ? first : `${first} +${targets.length - 1} more`);
+    } else {
+        parts.push('Accepts anything');
+    }
+    if (profile.acoustid_required) parts.push('strict AcoustID');
+    if (profile.deep_audio_verify) parts.push('deep verify');
+    if (profile.downsample_enabled) parts.push('downsample');
+    if (profile.lossy_copy_enabled) parts.push(`lossy copy ${(profile.lossy_copy_codec || 'mp3').toUpperCase()}`);
+    return parts.join(' · ');
+}
+
+function renderCustomQualityProfiles(profiles) {
+    const wrap = document.getElementById('qp-profile-list');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    if (!profiles.length) {
+        wrap.innerHTML = '<span class="qp-profile-list-empty">No profiles yet.</span>';
+        return;
+    }
+
+    // Auto-Import falls back to the app-wide default when it has nothing of
+    // its own assigned (same resolution core/quality/selection.py::
+    // load_profile_by_id does) — so tag the default row when unset.
+    const autoImportTarget = _qpAutoImportProfileId
+        || (profiles.find(p => p.is_default) || {}).id;
+
+    profiles.forEach(profile => {
+        const row = document.createElement('div');
+        row.className = 'qp-profile-row' + (profile.is_default ? ' active' : '');
+
+        const dot = document.createElement('span');
+        dot.className = 'qp-profile-dot';
+        dot.title = profile.is_default ? 'Currently active' : 'Click to make this the active profile';
+        dot.onclick = () => applyCustomQualityProfile(profile.id, profile.name);
+        row.appendChild(dot);
+
+        const text = document.createElement('span');
+        text.className = 'qp-profile-text';
+        text.title = profile.is_default ? 'Currently active' : 'Click to make this the active profile';
+        text.onclick = () => applyCustomQualityProfile(profile.id, profile.name);
+
+        const name = document.createElement('span');
+        name.className = 'qp-profile-name';
+        name.textContent = profile.name;
+        text.appendChild(name);
+
+        const sub = document.createElement('span');
+        sub.className = 'qp-profile-sub';
+        sub.textContent = qpProfileSummary(profile);
+        text.appendChild(sub);
+
+        row.appendChild(text);
+
+        if (profile.id === autoImportTarget) {
+            const tags = document.createElement('span');
+            tags.className = 'qp-profile-tags';
+            const tag = document.createElement('span');
+            tag.className = 'qp-profile-tag qp-tag-autoimport';
+            tag.textContent = 'Auto-Import';
+            tag.title = 'Also used by Auto-Import (Settings → Import)';
+            tags.appendChild(tag);
+            row.appendChild(tags);
+        }
+
+        const actions = document.createElement('span');
+        actions.className = 'qp-profile-actions';
+
+        const ren = document.createElement('button');
+        ren.type = 'button';
+        ren.className = 'qp-profile-action qp-action-rename';
+        ren.textContent = '✏';
+        ren.title = `Rename '${profile.name}'`;
+        ren.onclick = (e) => {
+            e.stopPropagation();
+            qpStartRename(row, profile);
+        };
+        actions.appendChild(ren);
+
+        // Update: overwrite this profile's stored settings with whatever is
+        // currently on the page (edit-in-place, keeps the name). Allowed on
+        // every profile, including the starter ones — it's an overwrite,
+        // not a delete.
+        const upd = document.createElement('button');
+        upd.type = 'button';
+        upd.className = 'qp-profile-action qp-action-update';
+        upd.textContent = '✎';
+        upd.title = `Update '${profile.name}' with the current page settings`;
+        upd.onclick = (e) => {
+            e.stopPropagation();
+            updateCustomQualityProfile(profile.id, profile.name);
+        };
+        actions.appendChild(upd);
+
+        // Any profile can be deleted (including the starter ones) as long as
+        // it isn't the very last one left — mirrors the backend guard in
+        // MusicDatabase.delete_quality_profile.
+        if (profiles.length > 1) {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'qp-profile-action qp-action-delete';
+            del.textContent = '×';
+            del.title = `Delete '${profile.name}'`;
+            del.onclick = (e) => {
+                e.stopPropagation();
+                deleteCustomQualityProfile(profile.id, profile.name);
+            };
+            actions.appendChild(del);
+        }
+
+        row.appendChild(actions);
+        wrap.appendChild(row);
+    });
+}
+
+// Turns a profile row's name into an inline, in-place text input — no
+// native prompt(). Enter/blur commits via the PUT rename endpoint, Escape
+// cancels back to the plain label.
+function qpStartRename(row, profile) {
+    if (row.querySelector('.qp-profile-name-input')) return; // already editing
+
+    const nameEl = row.querySelector('.qp-profile-name');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'qp-profile-name-input';
+    input.value = profile.name;
+    // The name sits inside the clickable row text — typing/clicking in the
+    // input must not bubble up and apply the profile.
+    input.onclick = (e) => e.stopPropagation();
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        settled = true;
+        const newName = input.value.trim();
+        if (!newName || newName === profile.name) {
+            await loadCustomQualityProfiles();
+            return;
+        }
+        try {
+            const response = await fetch(`/api/quality-profile/custom/${profile.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName }),
+            });
+            const data = await response.json();
+            if (data.success) {
+                renderCustomQualityProfiles(data.profiles || []);
+                showToast(`Renamed to '${newName}'`, 'success');
+            } else {
+                showToast(`Failed to rename: ${data.error}`, 'error');
+                await loadCustomQualityProfiles();
+            }
+        } catch (error) {
+            console.error('Error renaming quality profile:', error);
+            showToast('Failed to rename profile', 'error');
+            await loadCustomQualityProfiles();
+        }
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        loadCustomQualityProfiles();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', commit);
+}
+
+// Inline "+ New profile" control — swaps the button for a text input, no
+// native prompt().
+function qpShowNewProfileInput() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap || wrap.querySelector('.qp-profile-new-input')) return;
+    wrap.innerHTML = `
+        <div class="qp-profile-new-row">
+            <input type="text" class="qp-profile-new-input" id="qp-profile-new-input" placeholder="Profile name" autocomplete="off" spellcheck="false">
+        </div>
+    `;
+    const input = document.getElementById('qp-profile-new-input');
+    input.focus();
+
+    let settled = false;
+    const commit = async () => {
+        if (settled) return;
+        const name = input.value.trim();
+        if (!name) { qpResetNewProfileControl(); return; }
+        settled = true;
+        await saveCurrentAsQualityProfile(name);
+    };
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        qpResetNewProfileControl();
+    };
+
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commit(); }
+        else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+    input.addEventListener('blur', () => { if (!settled) cancel(); });
+}
+
+function qpResetNewProfileControl() {
+    const wrap = document.getElementById('qp-profile-new');
+    if (!wrap) return;
+    wrap.innerHTML = '<button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn" onclick="qpShowNewProfileInput()">+ New profile</button>';
+}
+
+// Everything a "Global Quality Profile" now captures: the ranked-target
+// ladder (collectQualityProfileFromUI) PLUS every other toggle scattered
+// across Quality on Import / Post-Download Conversion / Audio Verification
+// that conceptually belongs to "what quality means to me" — see
+// core/quality/schema.py's QUALITY_PROFILES_DDL docstring for the same list.
+function collectFullQualityBundleFromUI() {
+    const base = collectQualityProfileFromUI();
+    return {
+        ...base,
+        acoustid_required: document.getElementById('acoustid-require-verified')?.checked === true,
+        downsample_enabled: document.getElementById('downsample-hires')?.checked === true,
+        deep_audio_verify: document.getElementById('audio-completeness-check')?.checked === true,
+        replace_lower_quality: document.getElementById('import-replace-lower-quality')?.checked === true,
+        lossy_copy_enabled: document.getElementById('lossy-copy-enabled')?.checked === true,
+        lossy_copy_codec: document.getElementById('lossy-copy-codec')?.value || 'mp3',
+        lossy_copy_bitrate: document.getElementById('lossy-copy-bitrate')?.value || '320',
+        lossy_copy_delete_original: document.getElementById('lossy-copy-delete-original')?.checked === true,
+        folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
+    };
+}
+
+// The inverse of collectFullQualityBundleFromUI: reflect an applied profile's
+// full bundle back onto every toggle it captures, so the page never shows
+// stale state after switching profiles (which would otherwise get written
+// back over the just-applied config on the next autosave tick).
+function applyFullQualityBundleToDom(profile) {
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (el.type === 'checkbox') el.checked = value === true;
+        else el.value = value;
+    };
+    set('acoustid-require-verified', profile.acoustid_required);
+    set('downsample-hires', profile.downsample_enabled);
+    set('audio-completeness-check', profile.deep_audio_verify);
+    set('import-replace-lower-quality', profile.replace_lower_quality);
+    set('import-folder-artist-override', profile.folder_artist_override !== false);
+    set('lossy-copy-enabled', profile.lossy_copy_enabled);
+    set('lossy-copy-codec', profile.lossy_copy_codec);
+    set('lossy-copy-bitrate', profile.lossy_copy_bitrate);
+    set('lossy-copy-delete-original', profile.lossy_copy_delete_original);
+    const lossyOptions = document.getElementById('lossy-copy-options');
+    if (lossyOptions) lossyOptions.style.display = profile.lossy_copy_enabled ? 'block' : 'none';
+}
+
+async function saveCurrentAsQualityProfile(name) {
+    name = (name || '').trim();
+    if (!name) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch('/api/quality-profile/custom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...profile, name }),
+        });
+        const data = await response.json();
+        if (data.success) {
+            renderCustomQualityProfiles(data.profiles || []);
+            qpResetNewProfileControl();
+            showToast(`Saved profile '${name}'`, 'success');
+        } else {
+            showToast(`Failed to save profile: ${data.error}`, 'error');
+            qpResetNewProfileControl();
+        }
+    } catch (error) {
+        console.error('Error saving custom quality profile:', error);
+        showToast('Failed to save profile', 'error');
+        qpResetNewProfileControl();
+    }
+}
+
+async function updateCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Update Profile',
+        message: `Update '${name}' with the current page settings? This overwrites what was saved before.`,
+        confirmText: 'Update',
+    })) return;
+
+    try {
+        const profile = collectFullQualityBundleFromUI();
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(profile),
+        });
+        const data = await response.json();
+        if (data.success) {
+            renderCustomQualityProfiles(data.profiles || []);
+            showToast(`Updated '${name}'`, 'success');
+        } else {
+            showToast(`Failed to update profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error updating custom quality profile:', error);
+        showToast('Failed to update profile', 'error');
+    }
+}
+
+async function applyCustomQualityProfile(profileId, name) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}/apply`, { method: 'POST' });
+        const data = await response.json();
+        if (data.success) {
+            currentQualityProfile = data.profile;
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(currentQualityProfile);
+                applyFullQualityBundleToDom(data.profile);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            await loadCustomQualityProfiles();
+            showToast(`Now using '${name}' (all Quality-page settings updated)`, 'success');
+        } else {
+            showToast(`Failed to apply profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error applying custom quality profile:', error);
+        showToast('Failed to apply profile', 'error');
+    }
+}
+
+async function deleteCustomQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Delete Profile',
+        message: `Delete '${name}'? This cannot be undone. Anything still assigned to it (Wishlist items, Auto-Import) automatically falls back to your active profile.`,
+        confirmText: 'Delete',
+        destructive: true,
+    })) return;
+
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`, { method: 'DELETE' });
+        const data = await response.json();
+        if (data.success) {
+            // Full reload (not just re-render): deleting may have cleared the
+            // Auto-Import override and/or promoted a new default — both feed
+            // the row tags, so refresh them from the server.
+            await loadCustomQualityProfiles();
+            showToast(`Deleted '${name}'`, 'success');
+        } else {
+            showToast(`Failed to delete profile: ${data.error}`, 'error');
+        }
+    } catch (error) {
+        console.error('Error deleting custom quality profile:', error);
+        showToast('Failed to delete profile', 'error');
     }
 }
 
@@ -3611,9 +4012,8 @@ async function saveSettings(quiet = false) {
             music_videos_path: document.getElementById('music-videos-path').value || './MusicVideos'
         },
         import: {
-            quality_filter_enabled: document.getElementById('import-quality-filter-enabled')?.checked !== false,
             replace_lower_quality: document.getElementById('import-replace-lower-quality').checked,
-            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked === true,
+            folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
             transfer_is_permanent: document.getElementById('import-transfer-permanent')?.checked === true,
             staging_path: document.getElementById('staging-path').value || './Staging'
         },
