@@ -30024,6 +30024,20 @@ def _discover_genre_taste(database, profile_id):
     return profile
 
 
+def _discover_primary_genre(item):
+    """First genre of a discover candidate for diversity grouping — its ``genres`` may be a JSON
+    string, an already-parsed list, or missing. Returns a normalized genre string or None."""
+    g = item.get('genres')
+    if isinstance(g, str):
+        try:
+            g = json.loads(g)
+        except (ValueError, TypeError):
+            g = None
+    if isinstance(g, list) and g and isinstance(g[0], str) and g[0].strip():
+        return g[0].strip().lower()
+    return None
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -30133,12 +30147,25 @@ def get_discover_similar_artists():
             from core.discovery.listening_recommendations import why_chips
             for a in result_artists:
                 _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
-                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
                 if _w:
                     a['why'] = _w
                 a.pop('_why_genre', None)
         except Exception as _why_err:
             logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
+        # Diversity: spread the shown picks across genres so one genre can't hog the row (broader
+        # discovery). No-ops on small lists. Then mark the shown set featured so the next load
+        # rotates in different deep cuts (freshness).
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+            _shown = [a.get('artist_name') for a in result_artists[:18] if a.get('artist_name')]
+            if _shown:
+                database.mark_artists_featured(_shown)
+        except Exception as _div_err:
+            logger.debug(f"similar-artists diversify/rotate skipped: {_div_err}")
 
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
@@ -30346,7 +30373,8 @@ def get_discover_listening_recommendations():
             try:
                 from core.discovery.listening_recommendations import why_chips
                 _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
-                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'),
+                                 level=level)   # adaptive: "Off your usual path" on the adventurous end
                 if _why:
                     entry["why"] = _why
             except Exception as _why_err:
@@ -30360,6 +30388,13 @@ def get_discover_listening_recommendations():
             if a.get('seeds'):
                 entry["because"] = a['seeds']
             result_artists.append(entry)
+
+        # Spread the shown picks across genres (broader discovery). No-ops on small lists.
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+        except Exception as _div_err:
+            logger.debug(f"listening-recs diversify skipped: {_div_err}")
 
         return jsonify({
             "success": True,

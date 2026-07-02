@@ -23,6 +23,7 @@ as the adventurousness dial's lever (``min_seed_count``).
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set
 
@@ -364,6 +365,35 @@ def apply_adventurous_blend(
     return [t[3] for t in scored]
 
 
+def diversify_by_genre(items: Sequence[dict], primary_genre_of, *, cap: int = 3) -> List[dict]:
+    """Spread a ranked list so one genre can't monopolise the visible top — broadens the discovery
+    surface (you get deep cuts across your taste, not 18 obscure artists from one genre).
+
+    Round-robin over genre groups (each kept in rank order): take up to ``cap`` from a group, then
+    move to the next, cycling until all placed. Groups are visited in order of their best-ranked
+    member, so the strongest genres still lead — they just don't hog the top. Items with no genre
+    become singleton groups (never held behind a real genre). Returns a NEW list, same length. Pure.
+    """
+    lst = list(items)
+    if len(lst) <= cap:
+        return lst
+    groups = OrderedDict()   # genre-key -> list of items in rank order
+    for idx, it in enumerate(lst):
+        g = primary_genre_of(it)
+        key = g if g else ("\x00", idx)   # genreless -> unique singleton key
+        groups.setdefault(key, []).append(it)
+    queues = [list(v) for v in groups.values()]   # rank order within, best-genre-first across
+    out: List[dict] = []
+    while queues:
+        nxt = []
+        for q in queues:
+            out.extend(q[:cap])
+            if q[cap:]:
+                nxt.append(q[cap:])
+        queues = nxt
+    return out
+
+
 # ── Genre / tag affinity (aurral's missing signal) ──────────────────────────────────────────
 # Rank candidates whose genres match the genres you actually PLAY higher. Always-on, data we already
 # store (no popularity-style backfill needed). Built additively: affinity is 0 when there's no genre
@@ -428,14 +458,22 @@ def novelty_score(play_count: object, *, half_at: float = 8.0) -> float:
 # Turn the scoring signals into short human tags shown on each rec card. Pure. Only emits a tag when
 # the signal is actually meaningful, so a card shows 0-3 informative chips, never noise.
 
-def why_chips(*, genre_affinity: float = 0.0, popularity: object = None, seed_count: object = 0) -> List[dict]:
+def why_chips(*, genre_affinity: float = 0.0, popularity: object = None, seed_count: object = 0,
+              level: object = 0.3) -> List[dict]:
     """Return ``[{'type', 'label'}]`` explaining why a candidate is recommended. ``type`` lets the UI
     pick an icon. Thresholds keep it honest: genre tag only on a real taste match, 'deep cut' only on
     a known-but-low popularity (not on unfilled 0 / -1), consensus only when 2+ of your artists agree.
+
+    ``level`` (the adventurousness dial) makes the chips adapt: on the adventurous end, an off-taste
+    pick the dial deliberately surfaced is flagged 'Off your usual path' (a discovery signal) instead
+    of getting no genre chip. Additive — at the default dial the output is unchanged.
     """
     chips: List[dict] = []
-    if _coerce_float(genre_affinity, 0.0) >= 0.45:
+    aff = _coerce_float(genre_affinity, 0.0)
+    if aff >= 0.45:
         chips.append({"type": "genre", "label": "Your genres"})
+    elif _coerce_float(level, 0.3) >= 0.6 and aff < 0.2:
+        chips.append({"type": "explore", "label": "Off your usual path"})
     if popularity is not None:
         pf = _coerce_float(popularity, -1.0)
         if 0 < pf < 30:

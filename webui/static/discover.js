@@ -930,7 +930,8 @@ function _listeningRecommendationReasonTitle(artist) {
 }
 
 function _whyIcon(type) {
-    return type === 'genre' ? '🎯' : type === 'obscure' ? '💎' : type === 'consensus' ? '👥' : '✨';
+    return type === 'genre' ? '🎯' : type === 'obscure' ? '💎' : type === 'consensus' ? '👥'
+        : type === 'explore' ? '🧭' : '✨';
 }
 
 function _renderRecommendedMini(artist, source, opts) {
