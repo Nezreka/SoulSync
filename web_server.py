@@ -9986,6 +9986,57 @@ def _discovery_cache_lookup(cur, ids):
     return lookup
 
 
+@app.route('/api/graph/discovery/expand', methods=['POST'])
+def expand_discovery_graph():
+    """Expand-on-click for the Discovery Web: one node's similar artists, minus what's on screen.
+
+    POST JSON: ``key`` (normalized artist name), ``ids`` (external ids — for unowned candidates whose
+    similars are keyed by id), ``exclude`` (node keys already in the graph — JSON body because artist
+    names can contain commas), ``per`` (max new nodes). Same node/edge shape as /api/graph/discovery.
+    """
+    try:
+        from core.graph.artist_graph import expand_discovery_node
+        payload = request.get_json(silent=True) or {}
+        node_key = str(payload.get('key') or '').strip().lower()
+        if not node_key:
+            return jsonify({"error": "missing key"}), 400
+        node_ids = [i for i in (payload.get('ids') or []) if i]
+        exclude = {k for k in (payload.get('exclude') or []) if k}
+        try:
+            per = int(payload.get('per') or 10)
+        except (TypeError, ValueError):
+            per = 10
+        per = max(1, min(per, 30))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            owned_meta = {}
+            for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists"
+            ).fetchall()
+
+            base = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta, per=per, exclude=exclude)
+            need_ids = {eid for n in base["nodes"] if n.get("kind") == "discovery" for eid in n.get("ids", [])}
+            cache_lookup = _discovery_cache_lookup(cur, need_ids)
+        finally:
+            conn.close()
+
+        graph = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta,
+                                      cache_lookup=cache_lookup, per=per, exclude=exclude)
+        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+    except Exception as e:
+        logger.error("[discovery-expand] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/library/export/m3u', methods=['GET'])
 def export_library_m3u():
     """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
