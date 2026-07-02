@@ -3371,10 +3371,12 @@ function qpManagerOverlay() {
                     items always follow the <strong>Default</strong> below,
                     and Auto-Import can optionally use a different one instead
                     (falls back to Default when unset). A profile's
-                    "Upgrade until" setting controls exactly how far the
-                    Quality Upgrade Finder and Quality Check search for a
-                    replacement for anything judged against it — both jobs
-                    read it live, same as the download pipeline. Per-artist/
+                    "Upgrade until" setting controls exactly how far below
+                    it counts as needing an upgrade — the Quality Upgrade
+                    Finder then actively searches for and proposes a
+                    replacement, while Quality Check only flags (you choose
+                    re-download/delete/ignore per finding); both read the
+                    cutoff live, same as the download pipeline. Per-artist/
                     album/track assignment is planned for the Library
                     Manager; it will plug into this exact mechanism.
                 </div>
@@ -4538,6 +4540,30 @@ async function saveSettings(quiet = false) {
                 `Allowed Origins: ${invalid.length} entr${invalid.length === 1 ? 'y looks' : 'ies look'} malformed (need full URL like https://soulsync.example.com, no trailing slash). Saving anyway — they\'ll be ignored.`,
                 'warning'
             );
+        }
+    }
+
+    // Previewing a non-default profile shows ITS acoustid/lossy-copy/deep-verify/
+    // replace-lower-quality values in the same DOM fields this whole-page save
+    // reads (collectFullQualityBundleFromUI's fields, above). The server mirrors
+    // whatever comes through in these sections straight into the ACTIVE default
+    // profile (see web_server.py's settings handler calling
+    // sync_default_quality_profile_from_config) — so without this, just clicking
+    // Save Settings while previewing another profile would silently overwrite the
+    // live default with the previewed profile's values. Substitute the real
+    // default's stored values back in before sending, so this save is a no-op for
+    // those keys regardless of what's currently on screen.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        const def = _qpProfileRows.find(p => p.is_default);
+        if (def) {
+            settings.acoustid.require_verified = !!def.acoustid_required;
+            settings.lossy_copy.downsample_hires = !!def.downsample_enabled;
+            settings.lossy_copy.enabled = !!def.lossy_copy_enabled;
+            settings.lossy_copy.codec = def.lossy_copy_codec || 'mp3';
+            settings.lossy_copy.bitrate = def.lossy_copy_bitrate || '320';
+            settings.lossy_copy.delete_original = !!def.lossy_copy_delete_original;
+            settings.post_processing.audio_completeness_check = !!def.deep_audio_verify;
+            settings.import.replace_lower_quality = !!def.replace_lower_quality;
         }
     }
 
