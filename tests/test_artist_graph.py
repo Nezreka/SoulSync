@@ -1,5 +1,5 @@
 """Unit tests for the pure artist-similarity graph builder (Taste Map)."""
-from core.graph.artist_graph import build_taste_map, build_genre_grouped_map
+from core.graph.artist_graph import build_taste_map, build_genre_grouped_map, build_discovery_map
 # Row: (source_id, similar_name, spotify_id, deezer_id, itunes_id, occurrence_count, popularity)
 
 
@@ -110,3 +110,49 @@ def test_grouped_shares_genre_hub_and_dedups_artists():
     assert len(art) == 2                                            # dup A collapsed
     assert len(gen) == 1 and gen[0]["genre"] == "Rock"             # one shared hub
     assert len([e for e in g["edges"] if e["kind"] == "membership"]) == 2
+
+
+# ---- discovery map: owned anchors -> UNOWNED similar candidates -------------------------------
+
+def test_discovery_keeps_owned_to_unowned_only():
+    rows = [
+        ("aid", "X", "xid", None, None, 5, 70),   # A -> X (unowned)
+        ("aid", "Y", "yid", None, None, 3, 60),   # A -> Y (unowned)
+        ("aid", "B", "bid", None, None, 2, 50),   # A -> B (OWNED → excluded from discovery)
+        ("bid", "A", "aid", None, None, 1, 40),   # gives 'aid' the name A
+    ]
+    g = build_discovery_map(rows, {"a", "b"})
+    kinds = {n["key"]: n["kind"] for n in g["nodes"]}
+    assert kinds["a"] == "owned"
+    assert kinds["x"] == "discovery" and kinds["y"] == "discovery"
+    assert "b" not in kinds                       # owned target is not a discovery node
+    e = {(x["source"], x["target"]) for x in g["edges"]}
+    assert ("a", "x") in e and ("a", "y") in e and ("a", "b") not in e
+
+
+def test_discovery_enriches_from_cache():
+    rows = [("aid", "X", "xid", None, None, 5, 70), ("bid", "A", "aid", None, None, 1, 40)]
+    cache = {"xid": {"image_url": "http://img", "genres": ["Pop"], "popularity": 88}}
+    g = build_discovery_map(rows, {"a"}, cache_lookup=cache)
+    x = next(n for n in g["nodes"] if n["key"] == "x")
+    assert x["image_url"] == "http://img" and x["genres"] == ["Pop"] and x["popularity"] == 88
+
+
+def test_discovery_per_anchor_limit_keeps_strongest():
+    rows = [("aid", f"T{i}", f"t{i}", None, None, i + 1, 0) for i in range(10)]  # occ 1..10
+    rows.append(("t0", "A", "aid", None, None, 1, 0))                            # 'aid' → A
+    g = build_discovery_map(rows, {"a"}, per_anchor=3)
+    disc = sorted(n["label"] for n in g["nodes"] if n["kind"] == "discovery")
+    assert disc == ["T7", "T8", "T9"]             # top 3 by occurrence_count
+
+
+def test_discovery_seed_count_ranks_by_neighbor_count():
+    rows = [
+        ("aid", "X", "xid", None, None, 1, 0), ("aid", "Y", "yid", None, None, 1, 0),
+        ("aid", "Z", "zid", None, None, 1, 0), ("bid", "W", "wid", None, None, 1, 0),
+        ("xid", "A", "aid", None, None, 1, 0),    # 'aid' → A
+        ("wid", "B", "bid", None, None, 1, 0),    # 'bid' → B
+    ]
+    g = build_discovery_map(rows, {"a", "b"}, seed_count=1)
+    anchors = [n["key"] for n in g["nodes"] if n["kind"] == "owned"]
+    assert anchors == ["a"]                       # A (3 neighbors) outranks B (1); only 1 seeded
