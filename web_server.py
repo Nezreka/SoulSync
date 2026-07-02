@@ -12737,7 +12737,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -12763,7 +12763,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -12939,6 +12939,17 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
             return {"success": False, "error": "Discogs does not support track-level enrichment"}
         discogs_worker._process_item(item)
         return {"success": True, "message": f"Discogs lookup complete for {entity_type}"}
+
+    elif service == 'bandcamp':
+        if not bandcamp_worker:
+            return {"success": False, "error": "Bandcamp worker not initialized"}
+        if entity_type == 'artist':
+            return {"success": False, "error": "Bandcamp does not support artist-level enrichment"}
+        if entity_type == 'album':
+            bandcamp_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            bandcamp_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"Bandcamp lookup complete for {entity_type}"}
 
     else:
         return {"success": False, "error": f"Unknown service: {service}"}
@@ -37429,6 +37440,7 @@ _init_service_search(
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
+    bandcamp_worker_obj=bandcamp_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
