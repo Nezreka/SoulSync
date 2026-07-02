@@ -69,6 +69,12 @@ export const STATS_ENRICHMENT_SERVICES = [
   { key: 'qobuz', label: 'Qobuz', color: '#4285f4' },
 ] as const;
 
+export function visibleStatsEnrichmentServices(jiosaavnEnabled: boolean) {
+  return STATS_ENRICHMENT_SERVICES.filter(
+    (service) => service.key !== 'jiosaavn' || jiosaavnEnabled,
+  );
+}
+
 export function getStatsRangeLabel(range: StatsRange): string {
   switch (range) {
     case '7d':

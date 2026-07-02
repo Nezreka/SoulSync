@@ -2378,6 +2378,8 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
+    from core.metadata.registry import is_jiosaavn_enabled
+
     services = {}
 
     # Worker-based enrichment services: (key, display_name, worker_var)
@@ -2403,10 +2405,12 @@ def _get_enrichment_status():
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
-        'jiosaavn_enrichment': lambda: __import__('core.metadata.registry', fromlist=['is_jiosaavn_enabled']).is_jiosaavn_enabled(),
+        'jiosaavn_enrichment': is_jiosaavn_enabled,
     }
 
     for key, name, get_worker in workers_info:
+        if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
         worker = get_worker()
         if worker is not None:
             is_alive = worker.thread is not None and worker.thread.is_alive()
@@ -3314,13 +3318,21 @@ def handle_settings():
                 if write_pasted_cookiefile(_yt_paste, _cookie_path):
                     config_manager.set('youtube.cookies_file', _cookie_path)
 
+            _experimental_in = new_settings.get('experimental')
+            _metadata_in = new_settings.get('metadata')
+
+            from core.metadata.registry import resolve_settings_metadata_primary
+            _primary_err, _primary_override = resolve_settings_metadata_primary(
+                _experimental_in,
+                _metadata_in,
+                config_manager.get,
+            )
+            if _primary_err:
+                return jsonify({"success": False, "error": _primary_err}), 400
+
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
-            # Experimental toggles must land before metadata.fallback_source so a
-            # single save that enables JioSaavn and sets it primary is not silently
-            # reset to the default (same validation as the sidebar quick-switch).
-            _experimental_in = new_settings.get('experimental')
             if isinstance(_experimental_in, dict):
                 for key, value in _experimental_in.items():
                     config_manager.set(f'experimental.{key}', value)
@@ -3332,15 +3344,8 @@ def handle_settings():
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import (
-                METADATA_SOURCE_PRIORITY,
-                get_configured_primary_source,
-                primary_metadata_source_rejection_error,
-            )
-            _primary_err = primary_metadata_source_rejection_error(get_configured_primary_source())
-            if _primary_err:
-                config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
-                return jsonify({"success": False, "error": _primary_err}), 400
+            if _primary_override:
+                config_manager.set('metadata.fallback_source', _primary_override)
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -3348,9 +3353,7 @@ def handle_settings():
             changed_services = list(new_settings.keys())
             services_text = ", ".join(changed_services)
             add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
-            add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
+
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
@@ -12845,7 +12848,6 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         from core.metadata.registry import is_jiosaavn_enabled
         if not is_jiosaavn_enabled():
             return {"success": False, "error": "JioSaavn is disabled (experimental feature off)"}
-        item = {'type': entity_type, 'id': entity_id, 'name': name, 'artist': artist_name}
         if entity_type == 'artist':
             jiosaavn_worker._process_artist(entity_id, name)
         elif entity_type == 'album':

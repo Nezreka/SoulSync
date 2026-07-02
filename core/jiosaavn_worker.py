@@ -220,7 +220,7 @@ class JioSaavnWorker:
             cursor.execute("""
                 SELECT id, name
                 FROM artists
-                WHERE jiosaavn_match_status = 'not_found' AND jiosaavn_last_attempted < ?
+                WHERE jiosaavn_match_status IN ('not_found', 'error') AND jiosaavn_last_attempted < ?
                 ORDER BY jiosaavn_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -233,7 +233,7 @@ class JioSaavnWorker:
                 SELECT a.id, a.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
                 FROM albums a
                 JOIN artists ar ON a.artist_id = ar.id
-                WHERE a.jiosaavn_match_status = 'not_found' AND a.jiosaavn_last_attempted < ?
+                WHERE a.jiosaavn_match_status IN ('not_found', 'error') AND a.jiosaavn_last_attempted < ?
                 ORDER BY a.jiosaavn_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -251,7 +251,7 @@ class JioSaavnWorker:
                 SELECT t.id, t.title, ar.name AS artist_name, ar.jiosaavn_id AS artist_jiosaavn_id
                 FROM tracks t
                 JOIN artists ar ON t.artist_id = ar.id
-                WHERE t.jiosaavn_match_status = 'not_found' AND t.jiosaavn_last_attempted < ?
+                WHERE t.jiosaavn_match_status IN ('not_found', 'error') AND t.jiosaavn_last_attempted < ?
                 ORDER BY t.jiosaavn_last_attempted ASC
                 LIMIT 1
             """, (not_found_cutoff,))
@@ -393,9 +393,11 @@ class JioSaavnWorker:
         if chosen:
             full_album = self.client.get_album(chosen.id)
             if full_album is None:
-                self._mark_status('album', album_id, 'error')
                 self.stats['errors'] += 1
-                logger.warning("Album '%s' matched but full details unavailable, will retry", album_name)
+                logger.warning(
+                    "Album '%s' matched but full details unavailable, leaving unmarked for retry",
+                    album_name,
+                )
                 return
 
             self._update_album(album_id, full_album)
@@ -430,9 +432,11 @@ class JioSaavnWorker:
         if chosen:
             full_track = self.client.get_track_details(chosen.id)
             if full_track is None:
-                self._mark_status('track', track_id, 'error')
                 self.stats['errors'] += 1
-                logger.warning("Track '%s' matched but full details unavailable, will retry", track_name)
+                logger.warning(
+                    "Track '%s' matched but full details unavailable, leaving unmarked for retry",
+                    track_name,
+                )
                 return
 
             self._update_track(track_id, full_track)

@@ -45,13 +45,10 @@ const _RATE_GAUGE_LOGOS = {
 // real upward step (not on repaint / equal-value socket updates).
 const _eqDisplay = {};
 
-function _isJiosaavnExperimentalEnabled() {
-    return document.getElementById('experimental-jiosaavn-enabled')?.checked === true
-        || window._settingsPayload?.experimental?.jiosaavn_enabled === true;
-}
-
 function _visibleRateGaugeServices() {
-    if (_isJiosaavnExperimentalEnabled()) return _RATE_GAUGE_SERVICES;
+    if (typeof isJiosaavnExperimentalEnabled === 'function' && isJiosaavnExperimentalEnabled()) {
+        return _RATE_GAUGE_SERVICES;
+    }
     return _RATE_GAUGE_SERVICES.filter(svc => svc !== 'jiosaavn');
 }
 
@@ -63,7 +60,9 @@ function _removeJiosaavnRateGauge() {
 }
 
 function refreshRateMonitorExperimentalVisibility() {
-    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+    if (typeof isJiosaavnExperimentalEnabled === 'function' && !isJiosaavnExperimentalEnabled()) {
+        _removeJiosaavnRateGauge();
+    }
 }
 
 // SVG constants — 240° arc, gap at bottom
@@ -87,7 +86,9 @@ function _handleRateMonitorUpdate(data) {
     const grid = document.getElementById('rate-monitor-grid');
     if (!grid) return;
 
-    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+    if (typeof isJiosaavnExperimentalEnabled === 'function' && !isJiosaavnExperimentalEnabled()) {
+        _removeJiosaavnRateGauge();
+    }
 
     const visibleServices = _visibleRateGaugeServices();
 
@@ -234,7 +235,9 @@ function _handleRateMonitorUpdate(data) {
 // flex row regardless of viewport.
 
 function _renderEqualizerBars(grid, data) {
-    if (!_isJiosaavnExperimentalEnabled()) _removeJiosaavnRateGauge();
+    if (typeof isJiosaavnExperimentalEnabled === 'function' && !isJiosaavnExperimentalEnabled()) {
+        _removeJiosaavnRateGauge();
+    }
 
     const visibleServices = _visibleRateGaugeServices();
 

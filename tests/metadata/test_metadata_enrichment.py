@@ -783,7 +783,7 @@ class _JsClient:
         return [_JsTrack("js-trk-1", "Song One", ["Artist One"], release_date="2021")]
 
     def get_track_details(self, track_id):
-        return {"id": track_id, "album_id": "js-alb-1"}
+        return {"id": track_id, "album_id": "js-alb-1", "artist_id": "js-art-1"}
 
 
 def test_jiosaavn_source_embeds_when_enabled(monkeypatch):
@@ -796,7 +796,20 @@ def test_jiosaavn_source_embeds_when_enabled(monkeypatch):
     )
     assert pp["id_tags"]["JIOSAAVN_TRACK_ID"] == "js-trk-1"
     assert pp["id_tags"]["JIOSAAVN_ALBUM_ID"] == "js-alb-1"
+    assert pp["id_tags"]["JIOSAAVN_ARTIST_ID"] == "js-art-1"
     assert pp["release_year"] == "2021"
+
+
+def test_jiosaavn_source_falls_back_to_registry_client(monkeypatch):
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: True)
+    runtime = types.SimpleNamespace(jiosaavn_worker=None)
+    monkeypatch.setattr("core.metadata.registry.get_jiosaavn_client", lambda: _JsClient())
+    pp = {"id_tags": {}, "release_year": None}
+    ms._process_jiosaavn_source(
+        pp, {"album": "Album One"}, _Config({"jiosaavn.embed_tags": True}),
+        runtime, "Song One", "Artist One",
+    )
+    assert pp["id_tags"]["JIOSAAVN_TRACK_ID"] == "js-trk-1"
 
 
 def test_jiosaavn_source_skips_when_disabled(monkeypatch):
@@ -819,3 +832,41 @@ def test_jiosaavn_source_skips_when_embed_tags_false(monkeypatch):
         runtime, "Song One", "Artist One",
     )
     assert pp["id_tags"] == {}
+
+
+def test_embed_source_ids_skips_jiosaavn_in_order_when_disabled(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ms,
+        "_process_jiosaavn_source",
+        lambda *args, **kwargs: calls.append(True),
+    )
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: False)
+
+    audio = _FakeAudio()
+    symbols = _fake_symbols(audio)
+    monkeypatch.setattr(
+        ms,
+        "get_config_manager",
+        lambda: _Config({
+            "metadata_enhancement.post_process_order": [
+                "musicbrainz", "deezer", "jiosaavn", "lastfm",
+            ],
+            "musicbrainz.embed_tags": False,
+            "deezer.embed_tags": False,
+        }),
+    )
+    monkeypatch.setattr(ms, "get_mutagen_symbols", lambda: symbols)
+    monkeypatch.setattr(ms, "get_database", lambda: None)
+    monkeypatch.setattr(ms, "_process_musicbrainz_source", lambda *a, **k: None)
+    monkeypatch.setattr(ms, "_process_deezer_source", lambda *a, **k: None)
+    monkeypatch.setattr(ms, "_process_lastfm_source", lambda *a, **k: None)
+
+    metadata = {
+        "title": "Song One",
+        "artist": "Artist One",
+        "album_artist": "Artist One",
+        "album": "Album One",
+    }
+    me.embed_source_ids(audio, metadata, context={"track_info": {}, "original_search_result": {}})
+    assert calls == []

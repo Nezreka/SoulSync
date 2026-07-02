@@ -44,8 +44,7 @@ const ENRICHMENT_WORKERS = [
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));
 
 function _emVisibleWorkers() {
-    const jiosaavnOn = document.getElementById('experimental-jiosaavn-enabled')?.checked === true
-        || window._settingsPayload?.experimental?.jiosaavn_enabled === true;
+    const jiosaavnOn = typeof isJiosaavnExperimentalEnabled === 'function' && isJiosaavnExperimentalEnabled();
     return ENRICHMENT_WORKERS.filter(w => w.id !== 'jiosaavn' || jiosaavnOn);
 }
 
