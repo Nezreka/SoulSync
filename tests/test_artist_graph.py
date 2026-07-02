@@ -156,3 +156,42 @@ def test_discovery_seed_count_ranks_by_neighbor_count():
     g = build_discovery_map(rows, {"a", "b"}, seed_count=1)
     anchors = [n["key"] for n in g["nodes"] if n["kind"] == "owned"]
     assert anchors == ["a"]                       # A (3 neighbors) outranks B (1); only 1 seeded
+
+
+# ---- expand-on-click: one node's similar artists, minus what's already on screen ---------------
+
+def test_expand_matches_by_name_and_by_id():
+    from core.graph.artist_graph import expand_discovery_node
+    rows = [
+        ("aid", "X", "xid", None, None, 5, 0),    # source resolves to A (by name)
+        ("cid", "Y", "yid", None, None, 3, 0),    # source is cid — matches via node_ids
+        ("bid", "A", "aid", None, None, 1, 0),    # teaches id2name: aid -> A
+        ("bid", "Z", "zid", None, None, 9, 0),    # unrelated source -> excluded
+    ]
+    g = expand_discovery_node(rows, {"a"}, "A", node_ids=["cid"])
+    keys = {n["key"] for n in g["nodes"]}
+    assert keys == {"x", "y"}                     # Z's source matches neither name nor ids
+    assert all(e["source"] == "a" for e in g["edges"])
+
+
+def test_expand_skips_excluded_and_limits_by_strength():
+    from core.graph.artist_graph import expand_discovery_node
+    rows = [("aid", f"T{i}", f"t{i}", None, None, i, 0) for i in range(1, 6)]  # occ 1..5
+    rows.append(("bid", "A", "aid", None, None, 1, 0))
+    g = expand_discovery_node(rows, {"a"}, "A", per=2, exclude={"t5"})
+    labels = sorted(n["label"] for n in g["nodes"])
+    assert labels == ["T3", "T4"]                 # T5 excluded (on screen), then top-2 by occ
+
+
+def test_expand_owned_target_comes_back_as_owned_node():
+    from core.graph.artist_graph import expand_discovery_node
+    rows = [
+        ("aid", "B", "bid", None, None, 4, 0),    # B is OWNED -> comes back kind=owned
+        ("aid", "X", "xid", None, None, 2, 0),    # X unowned -> discovery
+        ("bid", "A", "aid", None, None, 1, 0),
+    ]
+    g = expand_discovery_node(rows, {"a", "b"}, "A", owned_meta={"b": {"id": 7, "thumb_url": "t"}})
+    kinds = {n["key"]: n["kind"] for n in g["nodes"]}
+    assert kinds == {"b": "owned", "x": "discovery"}
+    b = next(n for n in g["nodes"] if n["key"] == "b")
+    assert b["id"] == 7 and b["thumb"] == "t"

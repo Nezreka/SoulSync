@@ -283,3 +283,75 @@ def build_discovery_map(
                 edges.append({"source": anchor_norm, "target": tkey, "weight": _as_int(occ, 1)})
 
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+def expand_discovery_node(
+    rows: Iterable[Row],
+    owned_names: set,
+    node_key: str,
+    node_ids: Optional[Iterable[Any]] = None,
+    owned_meta: Optional[Dict[str, Dict[str, Any]]] = None,
+    cache_lookup: Optional[Dict[Any, Dict[str, Any]]] = None,
+    per: int = 10,
+    exclude: Optional[set] = None,
+) -> Dict[str, List[dict]]:
+    """One expand-on-click step for the Discovery map: the clicked node's similar artists.
+
+    The clicked node is identified by ``node_key`` (normalized name) and/or ``node_ids`` (its external
+    ids) — a row matches when its source id resolves to that name or is one of those ids. Targets in
+    ``exclude`` (keys already on screen) are skipped, then the strongest ``per`` (by consensus, then
+    popularity) are returned. Unowned targets become ``discovery`` nodes (cache-enriched, like
+    :func:`build_discovery_map`); owned targets become ``owned`` nodes, so a trail can also reveal how
+    a candidate connects back into your library. Edges run ``node_key -> target``.
+    """
+    owned_meta = owned_meta or {}
+    cache_lookup = cache_lookup or {}
+    exclude = exclude or set()
+    ids_set = {i for i in (node_ids or []) if i}
+    node_key = _norm(node_key)
+    rows = list(rows)
+
+    id2name: Dict[str, str] = {}
+    for _src, name, sp, dz, it, _occ, _pop in rows:
+        for eid in (sp, dz, it):
+            if eid and eid not in id2name:
+                id2name[eid] = name
+
+    targets: List[Tuple[str, Any, Any, Any, int, int]] = []
+    seen_targets: set = set()
+    for src, name, sp, dz, it, occ, pop in rows:
+        if src not in ids_set and _norm(id2name.get(src, "")) != node_key:
+            continue                              # row isn't about the clicked node
+        tkey = _norm(name)
+        if not tkey or tkey == node_key or tkey in exclude or tkey in seen_targets:
+            continue
+        seen_targets.add(tkey)
+        targets.append((name, sp, dz, it, _as_int(occ, 1), _as_int(pop)))
+
+    targets.sort(key=lambda t: (t[4], t[5]), reverse=True)
+
+    nodes: List[dict] = []
+    edges: List[dict] = []
+    for (tname, sp, dz, it, occ, pop) in targets[:per]:
+        tkey = _norm(tname)
+        if tkey in owned_names:
+            meta = owned_meta.get(tkey, {})
+            nodes.append({
+                "key": tkey, "label": tname, "owned": True, "kind": "owned",
+                "id": meta.get("id"), "thumb": meta.get("thumb_url"), "genres": meta.get("genres"),
+            })
+        else:
+            enrich: Dict[str, Any] = {}
+            for eid in (sp, dz, it):
+                if eid and eid in cache_lookup:
+                    enrich = cache_lookup[eid]
+                    break
+            nodes.append({
+                "key": tkey, "label": tname, "owned": False, "kind": "discovery",
+                "popularity": enrich.get("popularity", pop),
+                "image_url": enrich.get("image_url"), "genres": enrich.get("genres"),
+                "ids": [e for e in (sp, dz, it) if e],
+            })
+        edges.append({"source": node_key, "target": tkey, "weight": _as_int(occ, 1)})
+
+    return {"nodes": nodes, "edges": edges}
