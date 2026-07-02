@@ -366,9 +366,17 @@ class BandcampWorker:
             tags_json = json.dumps(tags) if tags else None
             label = result.get('label')
 
+            # bandcamp_id is COALESCEd rather than overwritten outright: the
+            # "already matched, re-fetch from existing bandcamp_url" path above
+            # (_process_album/_process_track) has no numeric id to report and
+            # passes result['id']=None, which would otherwise null out a
+            # previously-recorded id on every re-enrichment pass — silently
+            # breaking anything that keys off bandcamp_id (e.g. the enhanced
+            # library view's per-track match chip, the artist enrichment
+            # coverage percentage) even though the item is still matched.
             cursor.execute(f"""
                 UPDATE {table} SET
-                    bandcamp_id = ?,
+                    bandcamp_id = COALESCE(?, bandcamp_id),
                     bandcamp_match_status = 'matched',
                     bandcamp_last_attempted = CURRENT_TIMESTAMP,
                     bandcamp_url = ?,
