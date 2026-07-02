@@ -9829,7 +9829,6 @@ def _derive_album_folder(db, album_id):
 def _overwrite_cover_jpg(url, folder):
     """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
     existing-file guard in download_cover_art doesn't apply). Returns True on success."""
-    import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
     with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
         data = resp.read()
