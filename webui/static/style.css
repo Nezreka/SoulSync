@@ -4180,50 +4180,32 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1;
 }
 
-/* Quality tab: two-column layout — the 4 tiles on the left (.qp-main), a
-   DETACHED, sticky profile-management panel on the right (.qp-side-panel).
-   Mirrors the Downloads page's .adl-layout/.adl-main/.adl-batch-panel look,
-   with one deliberate difference: the panel is ALWAYS visible (no collapse)
-   and, on wide screens, PROTRUDES to the right of the centered 920px
-   settings column instead of taking width away from the 4 tiles it governs
-   (.qp-main keeps the full column width via flex-basis 100%; the panel
-   occupies the page's empty right margin — the tab reads slightly
-   off-center, which is intended). On narrower viewports there is no free
-   margin to protrude into, so the panel falls back to sharing the column,
-   and below 900px it stacks underneath. This replaces an earlier attempt
-   that put a control strip ABOVE the tiles — that made it look like only
-   the first tile was "governed", which is wrong: everything on this whole
-   tab belongs to the active profile. */
+/* Quality tab: the settings tiles stay exactly on the normal centered 920px
+   settings column. On wide screens only the profile panel protrudes into the
+   empty right margin, so the Quality tab lines up with the other tabs. */
 .qp-layout {
+    --qp-side-width: 320px;
+    --qp-side-gap: 8px;
     display: flex;
     align-items: flex-start;
-    gap: 0;
+    gap: var(--qp-side-gap);
+    width: calc(100% + var(--qp-side-width) + var(--qp-side-gap));
+    overflow: visible;
 }
 
 .qp-main {
-    flex: 1;
+    flex: 0 0 calc(100% - var(--qp-side-width) - var(--qp-side-gap));
+    width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
     min-width: 0;
-    /* The tiles never grow past the standard settings column width — the
-       widened tab (below) gives all extra room to the side panel. */
-    max-width: 920px;
-}
-
-/* While the Quality tab is visible, widen the centered settings column by
-   exactly the panel's width (920px tiles + 8px margin + 350px panel), same
-   :has() pattern the Logs tab uses for its full-width terminal. The tiles
-   keep their full 920px (max-width above); the panel takes the extra —
-   the tab as a whole sits a bit left of the other tabs' center, which is
-   the intended "detached, sticking out" look. */
-#settings-page .settings-columns:has(.qp-layout[data-stg="quality"]:not([style*="none"])) {
-    max-width: 1278px;
+    max-width: calc(100% - var(--qp-side-width) - var(--qp-side-gap));
 }
 
 .qp-side-panel {
-    width: 320px;
+    width: var(--qp-side-width);
     flex-shrink: 0;
     border-left: 1px solid rgba(255, 255, 255, 0.06);
     padding: 0 4px 0 22px;
-    margin-left: 8px;
+    margin-left: 0;
     position: sticky;
     top: 80px;
     max-height: calc(100vh - 120px);
@@ -4241,6 +4223,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     margin-bottom: 6px;
 }
 
@@ -4338,9 +4321,11 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .qp-profile-name-input {
     flex: 1;
     min-width: 0;
+    height: 28px;
     font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    line-height: 16px;
+    padding: 5px 7px;
     border-radius: 6px;
     border: 1px solid rgba(var(--accent-rgb), 0.4);
     background: rgba(0, 0, 0, 0.25);
@@ -4398,6 +4383,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     background: rgba(248, 113, 113, 0.2);
     color: #f87171;
 }
+.qp-profile-action.qp-action-autoimport.active {
+    color: rgb(var(--accent-light-rgb));
+    background: rgba(var(--accent-rgb), 0.18);
+}
 
 .qp-profile-new {
     margin-top: 10px;
@@ -4424,13 +4413,16 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     display: flex;
     align-items: center;
     gap: 6px;
+    min-height: 34px;
 }
 
 .qp-profile-new-input {
     flex: 1;
     min-width: 0;
+    height: 32px;
     font-size: 12px;
-    padding: 6px 8px;
+    line-height: 16px;
+    padding: 7px 9px;
     border-radius: 8px;
     border: 1px solid rgba(var(--accent-rgb), 0.4);
     background: rgba(0, 0, 0, 0.25);
@@ -4443,11 +4435,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     font-style: italic;
 }
 
-/* Small badge on the 3 tiles governed by the active profile (Quality on
-   Import, Post-Download Conversion, Audio Verification) — signals "this
-   section's settings are part of the active Quality Profile" without
-   repeating the full explanation on every tile. Sits between the title and
-   the existing right-aligned .settings-section-hint. */
+/* Small badge on tiles governed by the active profile. */
 .qp-governed-badge {
     flex-shrink: 0;
     padding: 2px 8px;
@@ -4459,9 +4447,34 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     white-space: nowrap;
 }
 
-@media (max-width: 900px) {
+.quality-upgrade-cutoff-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+}
+
+.quality-upgrade-cutoff-group label {
+    flex-shrink: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.quality-upgrade-cutoff-group select {
+    width: 100%;
+    max-width: 420px;
+}
+
+@media (max-width: 1800px) {
     .qp-layout {
         flex-direction: column;
+        width: 100%;
+    }
+
+    .qp-main {
+        flex-basis: 100%;
+        width: 100%;
+        max-width: 100%;
     }
 
     .qp-side-panel {
@@ -4473,6 +4486,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         margin-top: 16px;
         max-height: none;
         position: static;
+    }
+}
+
+@media (max-width: 640px) {
+    .quality-upgrade-cutoff-group {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 6px;
     }
 }
 

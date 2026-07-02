@@ -375,6 +375,57 @@ def test_scan_skips_tracks_meeting_quality(monkeypatch):
     assert findings == []
 
 
+def test_scan_flags_accepted_track_below_profile_cutoff(monkeypatch):
+    profile = {
+        'id': 11,
+        'name': 'Strict FLAC',
+        'upgrade_policy': 'until_cutoff',
+        'upgrade_cutoff_index': 0,
+        'ranked_targets': [
+            {'label': 'FLAC 24-bit', 'format': 'flac', 'bit_depth': 24},
+            {'label': 'FLAC 16-bit', 'format': 'flac', 'bit_depth': 16},
+        ],
+    }
+    db = _FakeDB([_row(track_id=3, title='Cutoff Song', path='/music/c.flac')], profile)
+    from core.quality.model import AudioQuality, QualityTarget
+    targets = [
+        QualityTarget(label='FLAC 24-bit', format='flac', bit_depth=24),
+        QualityTarget(label='FLAC 16-bit', format='flac', bit_depth=16),
+    ]
+
+    monkeypatch.setattr(qu, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality', lambda p: AudioQuality(format='flac', bit_depth=16))
+    monkeypatch.setattr(qu, 'quality_meets_profile', lambda aq, ts: True)
+    monkeypatch.setattr(qu, 'rank_candidate', lambda aq, ts: (1, 0))
+    monkeypatch.setattr(qu, 'get_primary_source', lambda: 'spotify')
+    monkeypatch.setattr(qu, 'get_source_priority', lambda src: ['spotify'])
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
+    fake_match = {'id': 'sp-cutoff', 'name': 'Cutoff Song', 'artists': ['Artist A'], 'album': {'name': 'Album X'}}
+    monkeypatch.setattr(qu, '_find_best_match', lambda *a, **k: (fake_match, 0.9, 'spotify', True))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda t, s: dict(fake_match))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Cutoff Song')
+    monkeypatch.setattr(
+        'core.matching_engine.MusicMatchingEngine',
+        lambda: types.SimpleNamespace(
+            generate_download_queries=lambda t: ['q'],
+            similarity_score=lambda a, b: 1.0,
+            normalize_string=lambda s: s,
+        ),
+    )
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['matched_track_data']['id'] == 'sp-cutoff'
+    assert findings[0]['details']['quality_profile_id'] == 11
+    assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
+    assert 'FLAC 24-bit' in findings[0]['description']
+
+
 # --- fix handler adds to wishlist ------------------------------------------
 
 def test_fix_handler_adds_matched_track_to_wishlist():
@@ -395,11 +446,98 @@ def test_fix_handler_adds_matched_track_to_wishlist():
                                'album': {'name': 'Album X'}},
         'current_format': 'MP3 192', 'current_bitrate': 192,
         'album_title': 'Album X', 'provider': 'spotify', 'match_confidence': 0.9,
+        'quality_profile_id': 7, 'quality_profile_name': 'Strict FLAC',
     }
     res = worker._fix_quality_upgrade('track', '1', '/music/a.mp3', details)
 
     assert res['success'] is True
     assert captured['spotify_track_data']['id'] == 'sp1'
     assert captured['source_type'] == 'repair'
+    assert captured['quality_profile_id'] == 7
     assert captured['source_info']['job'] == 'quality_upgrade'
     assert captured['source_info']['album_title'] == 'Album X'
+    assert captured['source_info']['quality_profile_id'] == 7
+    assert captured['source_info']['quality_profile_name'] == 'Strict FLAC'
+
+
+def test_fix_handler_resolves_own_track_identity_when_no_prematched_data():
+    """The flag-only Quality Check scanner never pre-searches a replacement
+    (unlike the active Quality Upgrade Finder) — its findings carry no
+    `matched_track_data`. The redownload action it documents must still work
+    by resolving the track's own identity from the DB instead of failing with
+    "No matched track in finding"."""
+    import sqlite3
+    from core.repair_worker import RepairWorker
+
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
+                     spotify_album_id TEXT, record_type TEXT, track_count INTEGER,
+                     year INTEGER, thumb_url TEXT)""")
+    conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT,
+                     track_number INTEGER, duration INTEGER, artist_id INTEGER,
+                     album_id INTEGER, spotify_track_id TEXT, itunes_track_id TEXT,
+                     deezer_id TEXT)""")
+    conn.execute("INSERT INTO artists (id, name) VALUES (1, 'Artist A')")
+    conn.execute("INSERT INTO albums (id, title, record_type, track_count, year) "
+                 "VALUES (1, 'Album X', 'album', 10, 2020)")
+    conn.execute("INSERT INTO tracks (id, title, track_number, duration, artist_id, album_id) "
+                 "VALUES (3, 'Cutoff Song', 4, 210000, 1, 1)")
+    conn.commit()
+
+    captured = {}
+
+    class _DB:
+        def _get_connection(self):
+            return conn
+
+        def add_to_wishlist(self, **kw):
+            captured.update(kw)
+            return True
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    details = {
+        'quality_issue': 'below_profile',
+        'current_format': 'FLAC 16-bit',
+        'expected_title': 'Cutoff Song',
+        'expected_artist': 'Artist A',
+        'album_title': 'Album X',
+    }
+    res = worker._fix_quality_upgrade('track', 3, '/music/c.flac', details)
+
+    assert res['success'] is True
+    assert captured['spotify_track_data']['name'] == 'Cutoff Song'
+    assert captured['spotify_track_data']['artists'] == [{'name': 'Artist A'}]
+    assert captured['spotify_track_data']['album']['name'] == 'Album X'
+    assert captured['source_info']['job'] == 'quality_upgrade'
+
+
+def test_fix_handler_fails_cleanly_when_track_gone_and_no_prematched_data():
+    import sqlite3
+    from core.repair_worker import RepairWorker
+
+    conn = sqlite3.connect(':memory:')
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE artists (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("""CREATE TABLE albums (id INTEGER PRIMARY KEY, title TEXT,
+                     spotify_album_id TEXT, record_type TEXT, track_count INTEGER,
+                     year INTEGER, thumb_url TEXT)""")
+    conn.execute("""CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT,
+                     track_number INTEGER, duration INTEGER, artist_id INTEGER,
+                     album_id INTEGER, spotify_track_id TEXT, itunes_track_id TEXT,
+                     deezer_id TEXT)""")
+    conn.commit()
+
+    class _DB:
+        def _get_connection(self):
+            return conn
+
+    worker = object.__new__(RepairWorker)
+    worker.db = _DB()
+
+    res = worker._fix_quality_upgrade('track', 999, '/music/gone.flac', {})
+    assert res['success'] is False
+    assert 'No matched track' in res['error']

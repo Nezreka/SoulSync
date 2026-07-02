@@ -75,6 +75,8 @@ def test_migration_overwrites_factory_seed_with_real_prior_settings(db):
         "fallback_enabled": False,
         "search_mode": "best_quality",
         "rank_candidates_by_quality": True,
+        "upgrade_policy": "until_cutoff",
+        "upgrade_cutoff_index": 1,
         "ranked_targets": [{"label": "Only WAV", "format": "wav"}],
     }
     conn = db._get_connection()
@@ -90,12 +92,74 @@ def test_migration_overwrites_factory_seed_with_real_prior_settings(db):
 
         row = conn.execute(
             "SELECT ranked_targets, fallback_enabled, search_mode, "
-            "rank_candidates_by_quality FROM quality_profiles WHERE id=1"
+            "rank_candidates_by_quality, upgrade_policy, upgrade_cutoff_index "
+            "FROM quality_profiles WHERE id=1"
         ).fetchone()
         assert json.loads(row["ranked_targets"]) == custom_profile["ranked_targets"]
         assert row["fallback_enabled"] == 0
         assert row["search_mode"] == "best_quality"
         assert row["rank_candidates_by_quality"] == 1
+        assert row["upgrade_policy"] == "until_cutoff"
+        assert row["upgrade_cutoff_index"] == 1
+    finally:
+        conn.close()
+
+
+def test_migration_renames_seeded_default_row_to_default(db):
+    """The seeded name ("Balanced") describes a factory preset the user never
+    actually chose; once the row holds their real carried-over settings it
+    should read 'Default', not a preset name that no longer means anything."""
+    conn = db._get_connection()
+    try:
+        row = conn.execute("SELECT name FROM quality_profiles WHERE id=1").fetchone()
+        assert row["name"] == "Default"
+    finally:
+        conn.close()
+
+
+def test_migration_preserves_a_name_the_user_already_chose(db):
+    """An intermediate build may have let the user rename the default row
+    before this migration flag existed — that choice must survive, not get
+    silently overwritten to 'Default'."""
+    conn = db._get_connection()
+    try:
+        conn.execute("UPDATE quality_profiles SET name='My Custom Profile' WHERE id=1")
+        conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
+        conn.commit()
+
+        ran = materialize_default_profile_and_backfill(db, conn)
+        assert ran is True
+
+        row = conn.execute("SELECT name FROM quality_profiles WHERE id=1").fetchone()
+        assert row["name"] == "My Custom Profile"
+    finally:
+        conn.close()
+
+
+def test_migration_backfills_existing_library_tracks(db):
+    conn = db._get_connection()
+    try:
+        conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
+        conn.execute(
+            "INSERT INTO artists (id, name) VALUES (1, 'Artist')"
+        )
+        conn.execute(
+            "INSERT INTO albums (id, artist_id, title) VALUES (1, 1, 'Album')"
+        )
+        conn.execute(
+            "INSERT INTO tracks (id, album_id, artist_id, title, quality_profile_id) "
+            "VALUES (1, 1, 1, 'Track', NULL)"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = db._get_connection()
+    try:
+        ran = materialize_default_profile_and_backfill(db, conn)
+        assert ran is True
+        row = conn.execute("SELECT quality_profile_id FROM tracks WHERE id=1").fetchone()
+        assert row["quality_profile_id"] == 1
     finally:
         conn.close()
 

@@ -57,9 +57,10 @@ row (see `core/quality/schema.py::QUALITY_PROFILES_DDL`):
   decides what happens when nothing on it matches).
 - `search_mode` / `rank_candidates_by_quality` — how download candidates are
   ordered.
-- `upgrade_policy` (`acceptable` | `until_top`) — whether the Quality Upgrade
-  repair job treats "meets any ranked target" as done, or keeps proposing
-  upgrades until the very first target is reached.
+- `upgrade_policy` (`acceptable` | `until_cutoff`) plus
+  `upgrade_cutoff_index` — whether the Quality Upgrade jobs treat "meets any
+  ranked target" as done, or keep proposing upgrades until the selected ranked
+  target is reached.
 - `acoustid_required` — AcoustID verification STRICTNESS for this profile:
   when on, a track AcoustID runs on but cannot confirm is quarantined instead
   of imported with the "unverified" badge. It is not an on/off switch for
@@ -149,11 +150,12 @@ just its own config key and the same injection.
 
 ## Managing profiles
 
-Every profile, including the two starter ones ("Balanced" / "Upgrade until
-top quality"), is fully user-manageable — renamed, edited-in-place, or
-deleted. Nothing is permanently protected; a user may simply not want
-"Balanced" at all. Two guards keep the app always in a valid state instead of
-relying on hard-coded protected ids:
+Every profile, including the two starter ones (seeded as "Balanced" /
+"Upgrade until top quality" — the one-time migration renames the default row
+to "Default" so it reads as "your carried-over settings", not a factory
+preset nobody chose), is fully user-manageable — renamed, edited-in-place, or
+deleted. Nothing is permanently protected. Two guards keep the app always in
+a valid state instead of relying on hard-coded protected ids:
 
 - Deleting the current app-wide default auto-promotes another remaining
   profile to default first, so the app is never left without one.
@@ -170,30 +172,27 @@ Settings UI: a detached, sticky, always-visible side panel next to the 4
 Quality tiles (mirrors the Downloads page's filter-pills-left /
 batches-panel-right layout), not a strip sitting above them — every tile on
 that tab visibly belongs to whichever profile is active in the panel. On
-wide screens the Quality tab's column widens by exactly the panel's width,
-so the panel protrudes to the right WITHOUT taking any width away from the
-tiles (the tab sits slightly left of the other tabs' center — intended).
+wide screens the panel protrudes to the right WITHOUT taking any width away
+from the tiles; the tiles stay on the same centered Settings column as every
+other tab.
 All actions are inline (rename/create swap a label for a text input in
 place) or the app's own themed confirm dialog; no native
 `prompt()`/`confirm()` popups.
 
 ## Known gaps / deliberately deferred here
 
-- **No configurable upgrade cutoff (Lidarr parity).** Lidarr's profiles have
-  an explicit *cutoff* quality ("upgrade until you reach X, then stop") that
-  can sit anywhere in the allowed list. Our `upgrade_policy` covers the two
-  ends of that spectrum (`acceptable` = any ranked target is enough,
-  `until_top` = only rank 0 is enough); a cutoff pointing at a middle rank
-  would slot into the same field/ranking machinery later without schema
-  changes beyond one column.
-- **`quality_upgrade.py` has no per-track profile override on this branch.**
-  A fuller version of this repair job resolved a per-track profile via a
-  Library-v2 link table (`lib2_tracks.legacy_track_id`); that dependency was
-  removed when this work was split out of the Library-v2 branch (see below),
-  so the job currently judges every track against the app-wide default
-  profile only. Re-adding a per-track override (via whatever future
-  entity-assignment mechanism replaces the Library-v2 link) is a natural
-  next step once this branch lands.
+- **No per-artist/album/track profile assignment UI yet.** The `tracks` table
+  now carries its own `quality_profile_id` pointer (same nullable, NULL =
+  "use the app-wide default" design as `wishlist_tracks`; existing library
+  tracks are backfilled to the migrated default profile so nothing is
+  silently reset to factory targets on upgrade), and both the Quality Check
+  scanner and the Quality Upgrade Finder resolve it per track (cached per
+  distinct profile id, falling back to the default). What's still missing is
+  purely the UI to actually set a *different* profile on a specific artist/
+  album/track — until that exists every track's pointer stays whatever the
+  migration backfilled or NULL for anything added since, so in practice every
+  track is judged against the same default profile today. A full Library
+  Manager assignment surface is the natural next step once this branch lands.
 - **This branch was extracted from a larger internal effort** (an
   experimental, not-yet-proposed Library Manager v2) specifically so it could
   be reviewed and merged on its own merits without that larger, riskier

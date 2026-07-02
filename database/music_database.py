@@ -1016,6 +1016,7 @@ class MusicDatabase:
                 logger.error(f"Quality-profiles schema init failed: {qp_err}")
 
             self._ensure_wishlist_quality_columns(cursor)
+            self._ensure_library_quality_column(cursor)
 
             # One-time: materialize the current global quality/AcoustID/downsample
             # settings into the `quality_profiles` default row and backfill
@@ -1302,6 +1303,27 @@ class MusicDatabase:
                         logger.debug("wishlist column removal %s: %s", dead_col, e)
         except Exception as e:
             logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _ensure_library_quality_column(self, cursor):
+        """Give every library track a pointer to its own quality profile.
+
+        Same pointer-only design as `_ensure_wishlist_quality_columns` above:
+        NULL means "use the app-wide default profile" (resolved live), a
+        concrete id pins the track to a specific profile. Existing rows are
+        backfilled to the migrated default profile by
+        `core/quality/migrate_to_profiles.py` so upgrading installs don't lose
+        the assignment their old global settings implied; new library tracks
+        are inserted with NULL and simply follow whichever profile is default
+        at read time — no insert call site needs to change.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(tracks)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'quality_profile_id' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
+                logger.info("Added quality_profile_id column to tracks table (quality-profile pipeline)")
+        except Exception as e:
+            logger.error("Error adding library quality-profile column: %s", e)
 
     def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
                             score: float, locked: bool = False) -> bool:
@@ -8960,6 +8982,9 @@ class MusicDatabase:
         except (TypeError, ValueError):
             ranked_targets = []
         return {
+            "id": row["id"],
+            "name": row["name"],
+            "is_default": bool(row["is_default"]),
             "version": 3,
             "preset": preset,
             "fallback_enabled": bool(row["fallback_enabled"]),
@@ -8976,6 +9001,7 @@ class MusicDatabase:
             "lossy_copy_delete_original": bool(row["lossy_copy_delete_original"]),
             "folder_artist_override": bool(row["folder_artist_override"]),
             "upgrade_policy": row["upgrade_policy"] or "acceptable",
+            "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0),
         }
 
     @staticmethod
@@ -8984,11 +9010,22 @@ class MusicDatabase:
         profile dict into ``quality_profiles`` column values. Shared by
         ``create_quality_profile`` and ``update_quality_profile``."""
         import json
+        policy = profile.get("upgrade_policy") or "acceptable"
+        if policy not in ("acceptable", "until_cutoff", "until_top"):
+            policy = "acceptable"
+        try:
+            cutoff_index = int(profile.get("upgrade_cutoff_index") or 0)
+        except (TypeError, ValueError):
+            cutoff_index = 0
+        if cutoff_index < 0:
+            cutoff_index = 0
         return {
             "ranked_targets": json.dumps(profile.get("ranked_targets") or []),
             "fallback_enabled": 1 if profile.get("fallback_enabled", True) else 0,
             "search_mode": profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
             "rank_candidates_by_quality": 1 if profile.get("rank_candidates_by_quality") else 0,
+            "upgrade_policy": policy,
+            "upgrade_cutoff_index": cutoff_index,
             "acoustid_required": 1 if profile.get("acoustid_required") else 0,
             "downsample_enabled": 1 if profile.get("downsample_enabled") else 0,
             "deep_audio_verify": 1 if profile.get("deep_audio_verify") else 0,
@@ -9026,14 +9063,14 @@ class MusicDatabase:
             cur.execute(
                 """INSERT INTO quality_profiles
                        (name, description, ranked_targets, fallback_enabled,
-                        search_mode, rank_candidates_by_quality, acoustid_required,
-                        downsample_enabled, deep_audio_verify,
+                        search_mode, rank_candidates_by_quality, upgrade_policy,
+                        upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
                         replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
                         lossy_copy_bitrate, lossy_copy_delete_original,
                         folder_artist_override, is_default)
                    VALUES (:name, :description, :ranked_targets, :fallback_enabled,
-                           :search_mode, :rank_candidates_by_quality, :acoustid_required,
-                           :downsample_enabled, :deep_audio_verify,
+                           :search_mode, :rank_candidates_by_quality, :upgrade_policy,
+                           :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
                            :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
                            :lossy_copy_bitrate, :lossy_copy_delete_original,
                            :folder_artist_override, 0)""",
@@ -9058,6 +9095,7 @@ class MusicDatabase:
                 """UPDATE quality_profiles
                       SET ranked_targets=:ranked_targets, fallback_enabled=:fallback_enabled,
                           search_mode=:search_mode, rank_candidates_by_quality=:rank_candidates_by_quality,
+                          upgrade_policy=:upgrade_policy, upgrade_cutoff_index=:upgrade_cutoff_index,
                           acoustid_required=:acoustid_required, downsample_enabled=:downsample_enabled,
                           deep_audio_verify=:deep_audio_verify,
                           replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
@@ -9451,18 +9489,28 @@ class MusicDatabase:
         """Write-through helper for `set_quality_profile`: updates the
         ``is_default=1`` row in `quality_profiles` to match."""
         import json
+        try:
+            cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
+        except (TypeError, ValueError):
+            cutoff_index = 0
+        upgrade_policy = profile.get("upgrade_policy")
+        if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
+            upgrade_policy = "acceptable"
         conn = self._get_connection()
         try:
             conn.execute(
                 """UPDATE quality_profiles
                       SET ranked_targets=?, fallback_enabled=?, search_mode=?,
-                          rank_candidates_by_quality=?, updated_at=CURRENT_TIMESTAMP
+                          rank_candidates_by_quality=?, upgrade_policy=?,
+                          upgrade_cutoff_index=?, updated_at=CURRENT_TIMESTAMP
                     WHERE is_default=1""",
                 (
                     json.dumps(profile.get("ranked_targets") or []),
                     1 if profile.get("fallback_enabled", True) else 0,
                     profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
                     1 if profile.get("rank_candidates_by_quality") else 0,
+                    upgrade_policy,
+                    cutoff_index,
                 ),
             )
             conn.commit()

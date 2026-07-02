@@ -22,12 +22,22 @@ def db(tmp_path):
 
 def test_get_quality_profile_dict_shape_unchanged(db):
     profile = db.get_quality_profile()
+    assert isinstance(profile["id"], int)
+    assert profile["name"] == "Default"
+    assert profile["is_default"] is True
     assert profile["version"] == 3
-    assert profile["preset"] == "balanced"
+    # `preset` is name-derived (see `_quality_profile_row_to_dict`) and the
+    # migration renamed the default row away from the seeded "Balanced" name
+    # (see test_migrate_to_profiles.py) — it no longer matches a built-in
+    # preset name, so it's "custom" even though its targets are the factory
+    # balanced defaults.
+    assert profile["preset"] == "custom"
     assert isinstance(profile["ranked_targets"], list) and profile["ranked_targets"]
     assert isinstance(profile["fallback_enabled"], bool)
     assert profile["search_mode"] in ("priority", "best_quality")
     assert isinstance(profile["rank_candidates_by_quality"], bool)
+    assert profile["upgrade_policy"] in ("acceptable", "until_cutoff", "until_top")
+    assert isinstance(profile["upgrade_cutoff_index"], int)
 
 
 def test_set_quality_profile_writes_through_to_default_row(db):
@@ -37,6 +47,8 @@ def test_set_quality_profile_writes_through_to_default_row(db):
         "fallback_enabled": False,
         "search_mode": "best_quality",
         "rank_candidates_by_quality": True,
+        "upgrade_policy": "until_cutoff",
+        "upgrade_cutoff_index": 1,
         "ranked_targets": [{"label": "Only FLAC", "format": "flac"}],
     }
     assert db.set_quality_profile(custom) is True
@@ -46,16 +58,18 @@ def test_set_quality_profile_writes_through_to_default_row(db):
     assert reloaded["fallback_enabled"] is False
     assert reloaded["search_mode"] == "best_quality"
     assert reloaded["rank_candidates_by_quality"] is True
+    assert reloaded["upgrade_policy"] == "until_cutoff"
+    assert reloaded["upgrade_cutoff_index"] == 1
     # `preset` is derived from the default row's `name` column (still
-    # "Balanced" — set_quality_profile only updates targets/flags, not the
+    # "Default" — set_quality_profile only updates targets/flags, not the
     # row's name), not from whatever the caller's dict happened to carry.
-    assert reloaded["preset"] == "balanced"
+    assert reloaded["preset"] == "custom"
 
 
 def test_list_quality_profiles_includes_builtins(db):
     profiles = db.list_quality_profiles()
     names = [p["name"] for p in profiles]
-    assert names[0] == "Balanced"  # is_default DESC, id — default sorts first
+    assert names[0] == "Default"  # is_default DESC, id — default sorts first
     assert "Upgrade until top quality" in names
 
 
@@ -74,7 +88,7 @@ def test_create_rename_delete_custom_profile(db):
     assert "Renamed Profile" in names and "My Profile" not in names
 
     # Renaming onto an existing name is refused with a useful reason.
-    ok, reason = db.rename_quality_profile(pid, "Balanced")
+    ok, reason = db.rename_quality_profile(pid, "Default")
     assert ok is False and "already exists" in reason
 
     ok, reason = db.delete_quality_profile(pid)
@@ -84,8 +98,9 @@ def test_create_rename_delete_custom_profile(db):
 
 
 def test_delete_allows_builtins_when_not_default(db):
-    # id=1 ("Balanced") is the default; id=2 ("Upgrade until top quality")
-    # isn't — nothing about being a built-in blocks deleting it.
+    # id=1 ("Default", migrated from the seeded "Balanced") is the default;
+    # id=2 ("Upgrade until top quality") isn't — nothing about being a
+    # built-in blocks deleting it.
     ok, reason = db.delete_quality_profile(2)
     assert ok is True and reason == ""
     names = [p["name"] for p in db.list_quality_profiles()]
@@ -236,6 +251,8 @@ _FULL_BUNDLE = {
     "fallback_enabled": False,
     "search_mode": "best_quality",
     "rank_candidates_by_quality": True,
+    "upgrade_policy": "until_cutoff",
+    "upgrade_cutoff_index": 0,
     "acoustid_required": True,
     "downsample_enabled": True,
     "deep_audio_verify": True,

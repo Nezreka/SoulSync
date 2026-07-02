@@ -38437,6 +38437,15 @@ def auto_import_toggle():
 
 @app.route('/api/auto-import/settings', methods=['GET', 'POST'])
 def auto_import_settings():
+    def normalize_quality_profile_id(raw_profile_id):
+        if raw_profile_id in (None, '', 0, '0'):
+            return None
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None
+        return profile_id if profile_id > 0 else None
+
     if request.method == 'GET':
         return jsonify({
             "success": True,
@@ -38447,9 +38456,30 @@ def auto_import_settings():
             # Per-context quality profile override (see core/auto_import_worker.py
             # _process_matches) — None/0 means "use the app-wide default profile",
             # same as every other context that doesn't specify its own.
-            "quality_profile_id": config_manager.get('auto_import.quality_profile_id') or None,
+            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
         })
     data = request.get_json() or {}
+    if 'quality_profile_id' in data:
+        raw_profile_id = data.get('quality_profile_id')
+        if raw_profile_id in (None, '', 0, '0'):
+            data['quality_profile_id'] = None
+        else:
+            profile_id = normalize_quality_profile_id(raw_profile_id)
+            if profile_id is None:
+                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
+
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
+            except Exception as e:
+                logger.error(f"Error validating Auto-Import quality profile: {e}")
+                return jsonify({"success": False, "error": str(e)}), 500
+
+            if profile_id not in profile_ids:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            data['quality_profile_id'] = profile_id
+
     for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
