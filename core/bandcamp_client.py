@@ -528,3 +528,37 @@ class BandcampClient:
                 'artists': [artist.name],
             })
         return result
+
+
+def release_to_spotify_shape(
+    release: Dict[str, Any], album_id: str = '',
+    fallback_name: str = '', fallback_artist: str = '',
+) -> Dict[str, Any]:
+    """Reshape a get_release_metadata()/search_album() result into the
+    'Spotify-shaped' dict (name/artists/images/tracks with
+    name/duration_ms/track_number) the rest of SoulSync's album/track
+    pipeline expects via its duck-typed field extraction
+    (core.metadata.album_tracks._extract_lookup_value chains like
+    'name', 'track_name', 'trackName' — Bandcamp's own field names
+    ('title', 'position') don't match any of those aliases, so results
+    must be relabeled here rather than passed through raw)."""
+    tracks = []
+    for i, t in enumerate(release.get('tracks') or []):
+        tracks.append({
+            'id': t.get('url', ''),
+            'name': t.get('title', ''),
+            'track_number': t.get('position') or (i + 1),
+            'disc_number': 1,
+            'duration_ms': t.get('duration_ms', 0),
+            'artists': [{'name': release.get('artist') or fallback_artist}],
+        })
+    return {
+        'id': release.get('id') or album_id,
+        'name': release.get('title') or fallback_name,
+        'artists': [{'name': release.get('artist') or fallback_artist}],
+        'release_date': release.get('release_date', ''),
+        'total_tracks': release.get('total_tracks', len(tracks)),
+        'album_type': 'album',
+        'images': [{'url': release['image_url']}] if release.get('image_url') else [],
+        'tracks': tracks,
+    }
