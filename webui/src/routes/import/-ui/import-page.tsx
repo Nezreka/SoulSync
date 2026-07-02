@@ -239,14 +239,22 @@ function ImportQueueItem({ entry }: { entry: ImportQueueEntry }) {
       <div className={styles.importPageQueueInfo}>
         <div className={styles.importPageQueueName}>{entry.label}</div>
         <div className={styles.importPageQueueDetail}>{entry.sublabel}</div>
-        {entry.errors.length > 0 && (
+        {entry.blockedByMediaServer ? (
           <ul className={styles.importPageQueueErrors}>
-            {entry.errors.map((err, i) => (
-              <li key={i} title={err}>
-                {err}
-              </li>
-            ))}
+            <li title={entry.errors[0]}>
+              {entry.errors[0]} <a href="/settings">Go to Settings</a>
+            </li>
           </ul>
+        ) : (
+          entry.errors.length > 0 && (
+            <ul className={styles.importPageQueueErrors}>
+              {entry.errors.map((err, i) => (
+                <li key={i} title={err}>
+                  {err}
+                </li>
+              ))}
+            </ul>
+          )
         )}
       </div>
       <div className={styles.importPageQueueProgress}>

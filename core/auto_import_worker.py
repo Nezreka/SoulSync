@@ -515,6 +515,12 @@ class AutoImportWorker:
             logger.warning(f"[Auto-Import] Staging path not found or invalid: {self.staging_path}")
             return
 
+        from core.imports.side_effects import is_active_media_server_ready
+        ready, reason = is_active_media_server_ready()
+        if not ready:
+            logger.warning(f"[Auto-Import] Skipping scan cycle — {reason}")
+            return
+
         candidates = self._enumerate_folders(staging)
         logger.info(f"[Auto-Import] Scan cycle: {len(candidates)} candidates in {staging}")
         if not candidates:

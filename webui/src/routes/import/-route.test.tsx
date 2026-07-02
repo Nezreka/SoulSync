@@ -361,6 +361,38 @@ describe('import route', () => {
     expect(screen.getByText('via MusicBrainz')).toBeInTheDocument();
   });
 
+  it('shows a Settings link and stops the batch when the media server is not connected', async () => {
+    let processCalls = 0;
+    server.use(
+      http.post('/api/import/singles/process', () => {
+        processCalls += 1;
+        return HttpResponse.json(
+          {
+            success: false,
+            error: "Plex isn't connected, so importing now would copy files into place without adding them to your Library. Connect Plex in Settings, or switch to Standalone mode, then try again.",
+            error_code: 'media_server_not_connected',
+          },
+          { status: 503 },
+        );
+      }),
+    );
+
+    renderImportRoute(['/import/singles']);
+
+    fireEvent.click(await screen.findByLabelText('Select 01-track.flac'));
+    fireEvent.click(screen.getByLabelText('Select 02-track.flac'));
+    fireEvent.click(screen.getByRole('button', { name: /Process Selected/ }));
+
+    expect(await screen.findByRole('link', { name: 'Go to Settings' })).toHaveAttribute(
+      'href',
+      '/settings',
+    );
+    expect(screen.getByText(/Plex isn't connected/)).toBeInTheDocument();
+    // The gate rejects the whole batch identically — stop after the first file
+    // instead of repeating the same request (and error) once per selected file.
+    expect(processCalls).toBe(1);
+  });
+
   it('renders auto-import results from route search state', async () => {
     renderImportRoute(['/import/auto?autoFilter=pending']);
 

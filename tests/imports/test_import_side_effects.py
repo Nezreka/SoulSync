@@ -690,3 +690,62 @@ def test_provenance_labels_auto_import(monkeypatch):
     }
     side_effects.record_download_provenance(context)
     assert captured.get("source_service") == "auto_import"
+
+
+def test_is_active_media_server_ready_standalone_always_ready(monkeypatch):
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "soulsync"),
+    )
+
+    ready, reason = side_effects.is_active_media_server_ready()
+
+    assert ready is True
+    assert reason == ""
+
+
+def test_is_active_media_server_ready_true_when_server_connected(monkeypatch):
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "plex"),
+    )
+
+    import core.media_server.engine as media_server_engine
+
+    monkeypatch.setattr(
+        media_server_engine,
+        "get_media_server_engine",
+        lambda: SimpleNamespace(is_connected=lambda: True),
+    )
+
+    ready, reason = side_effects.is_active_media_server_ready()
+
+    assert ready is True
+    assert reason == ""
+
+
+def test_is_active_media_server_ready_false_when_server_not_connected(monkeypatch):
+    monkeypatch.setattr(
+        side_effects,
+        "_get_config_manager",
+        lambda: SimpleNamespace(get_active_media_server=lambda: "jellyfin"),
+    )
+
+    import core.media_server.engine as media_server_engine
+
+    monkeypatch.setattr(
+        media_server_engine,
+        "get_media_server_engine",
+        lambda: SimpleNamespace(is_connected=lambda: False),
+    )
+
+    ready, reason = side_effects.is_active_media_server_ready()
+
+    assert ready is False
+    assert reason == (
+        "Jellyfin isn't connected, so importing now would copy files into "
+        "place without adding them to your Library. Connect Jellyfin in "
+        "Settings, or switch to Standalone mode, then try again."
+    )
