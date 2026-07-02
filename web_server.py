@@ -20408,23 +20408,21 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
+        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
-        # a re-resolved durable match actually exists before pairing it.
+        # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
         def _override_lookup(src_id):
-            # 1) Fast override cache (cleared on every rescan).
-            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
-            if cached.get('server_track_id'):
-                return cached['server_track_id']
-            # 2) Durable manual library match — survives a rescan (#787), so a
-            #    Find & Add / manual match keeps pairing after a DB scan. Re-
-            #    resolves a stale id via the stored file path when needed.
-            return resolve_durable_match_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            # Validated fast-cache hit, else durable manual match (#787) which
+            # self-heals a stale library id via the stored file path. A cache hit
+            # that no longer points into THIS playlist must not short-circuit the
+            # durable path, or the manual match silently never applies (wolf39us).
+            return resolve_override_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
+                _db_for_overrides.read_sync_match_cache,
             )
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
