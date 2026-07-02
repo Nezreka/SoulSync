@@ -6398,6 +6398,7 @@ let _artistWeb = {
     cursorFX: true,                   // master flag (one switch to disable the effect)
     fxRAF: null, home: null,          // rAF handle + captured resting positions
     spreadRoot: null, spreadSet: null, spreadPush: 0,
+    fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6644,21 +6645,10 @@ function _artWebRenderLens() {
     const sbHeader = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-header span');
     if (sbHeader) sbHeader.textContent = _artistWeb.lens === 'community' ? 'Communities' : 'Genres';
 
-    _artWebRunLayout(built.graph);
-
-    // Capture resting ("home") positions + size the cursor force-field to the layout's coordinate
-    // range (FA2 output scale is unknown up front), so radius/push are proportional, not guessed.
-    const home = {};
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    built.graph.forEachNode((k, a) => {
-        home[k] = { x: a.x, y: a.y };
-        if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
-        if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
-    });
-    const span = Math.max(maxX - minX, maxY - minY) || 1;
-    _artistWeb.home = home;
-    _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
-    _artistWeb.spreadRoot = null; _artistWeb.spreadSet = null;
+    // Home positions are captured AFTER the layout settles (_artWebFinishLayout); until then the
+    // selection-spread effect stays dormant (its guards check st.home).
+    _artistWeb.home = null;
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = null;
 
     // Declutter threshold: hide edges below the median weight — but most edges are weight-1
     // (single-source), so if the median IS the minimum, bump above it to hide that weakest tier.
@@ -6670,7 +6660,80 @@ function _artWebRenderLens() {
     _artistWeb.edgeThreshold = thr;
     _artWebSyncEdgeButton();
 
+    // Mount FIRST (random scatter is visible immediately), then settle live in a Web Worker — the
+    // graph visibly organizes into islands without ever blocking the UI.
     _artWebMountSigma(host, built.graph);
+    _artWebStartLiveLayout(built.graph);
+}
+
+// ---- Live-settle layout: forceAtlas2 in a Web Worker (FA2Layout supervisor) ---------------------
+// The worker streams positions into the graph; sigma re-renders each frame, so the user watches the
+// blob organize. Falls back to the synchronous pass when the worker build is unavailable or throws.
+function _artWebStartLiveLayout(graph) {
+    _artWebKillLiveLayout();
+    const lib = window.graphologyLibrary;
+    const FA2Layout = lib && lib.FA2Layout;
+    const fa2 = lib && lib.layoutForceAtlas2;
+    if (!FA2Layout || !fa2 || graph.order === 0) {
+        _artWebRunLayout(graph);          // sync fallback (blocks briefly, but always works)
+        _artWebFinishLayout(graph);
+        return;
+    }
+    let layout = null;
+    try {
+        layout = new FA2Layout(graph, {
+            settings: {
+                ...fa2.inferSettings(graph),
+                barnesHutOptimize: true,
+                linLogMode: true,                      // clusters separate into islands
+                outboundAttractionDistribution: true,  // spread the hubs out
+                adjustSizes: true,                     // don't overlap node circles
+                gravity: 1.2, scalingRatio: 3, slowDown: 4,
+            },
+        });
+        layout.start();
+    } catch (e) {
+        console.warn('[Artist Web] worker layout unavailable — falling back to sync', e);
+        try { if (layout) layout.kill(); } catch (_) { /* ignore */ }
+        _artWebRunLayout(graph);
+        _artWebFinishLayout(graph);
+        return;
+    }
+    _artistWeb.fa2 = layout;
+    const statsEl = document.getElementById('artist-web-stats');
+    if (statsEl && statsEl.textContent.indexOf('· settling') === -1) statsEl.textContent += ' · settling…';
+    // Run time scales with graph size (a worker iterates as fast as it can; this is wall-clock).
+    const ms = Math.min(6000, 1200 + graph.order * 0.8);
+    _artistWeb.fa2Timer = setTimeout(() => {
+        _artWebKillLiveLayout();
+        _artWebFinishLayout(graph);
+        if (statsEl) statsEl.textContent = statsEl.textContent.replace(' · settling…', '');
+        if (_artistWeb.sigma && _artistWeb.graph === graph) {
+            _artistWeb.sigma.getCamera().animatedReset({ duration: 500 });   // fit the settled web
+        }
+    }, ms);
+}
+
+function _artWebKillLiveLayout() {
+    if (_artistWeb.fa2Timer) { clearTimeout(_artistWeb.fa2Timer); _artistWeb.fa2Timer = null; }
+    if (_artistWeb.fa2) { try { _artistWeb.fa2.kill(); } catch (e) { /* ignore */ } _artistWeb.fa2 = null; }
+}
+
+// Post-layout bookkeeping: capture resting ("home") positions + scale interaction distances to the
+// settled coordinate range (FA2 output scale is unknown up front).
+function _artWebFinishLayout(graph) {
+    const home = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    graph.forEachNode((k, a) => {
+        home[k] = { x: a.x, y: a.y };
+        if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+        if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+    });
+    const span = Math.max(maxX - minX, maxY - minY) || 1;
+    _artistWeb.home = home;
+    _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
+    _artistWeb.spreadRoot = null;
+    _artistWeb.spreadSet = null;
 }
 
 // ---- Lens A: GENRE — every artist, grouped by genre-anchor hubs (membership edges = layout only) --
@@ -6963,6 +7026,7 @@ function closeArtistWeb() {
     document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
         if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
     });
+    _artWebKillLiveLayout();
     if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
     _artistWeb.spreadRoot = _artistWeb.spreadSet = null;
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
