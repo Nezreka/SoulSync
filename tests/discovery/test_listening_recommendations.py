@@ -6,6 +6,7 @@ from core.discovery.listening_recommendations import (
     adventurousness_weights,
     aggregate_candidate_tracks,
     apply_adventurousness,
+    damp_consensus_base,
     build_genre_taste_profile,
     build_recency_weighted_seeds,
     genre_affinity,
@@ -457,3 +458,45 @@ def test_why_chips_thresholds():
 def test_why_chips_empty_when_nothing_notable():
     assert why_chips() == []
     assert why_chips(genre_affinity=0.1, popularity=80, seed_count=0) == []
+
+
+# ── damp_consensus_base (the fourth axis — dial-blend how much occurrence dominates) ──────────
+
+def test_damp_consensus_base_is_noop_at_default():
+    # exp == 1 at the default dial -> the base is untouched, so default recs are unchanged.
+    for v in (1, 3, 10, 21, 0.5, 100):
+        assert round(damp_consensus_base(v, 0.3), 9) == round(float(v), 9)
+
+
+def test_damp_consensus_base_flattens_at_adventurous_end():
+    # dial 1 compresses the ratio between a high-consensus pick and a low one, so the exploration
+    # signals can actually reorder them (an occ-1 obscure pick is no longer 21x behind an occ-21).
+    hi, lo = damp_consensus_base(21, 1.0), damp_consensus_base(1, 1.0)
+    assert (hi / lo) < 3.0                      # was 21x at raw
+    assert hi > lo                              # still ordered, just compressed
+
+
+def test_damp_consensus_base_amplifies_at_safe_end():
+    # dial 0 spreads the ratio further -> trusted, heavily-recommended picks dominate even more.
+    ratio_safe = damp_consensus_base(21, 0.0) / damp_consensus_base(1, 0.0)
+    assert ratio_safe > 21.0
+
+
+def test_damp_consensus_base_monotonic_ordering_preserved():
+    # Whatever the dial, more consensus never scores LOWER than less consensus.
+    for lvl in (0.0, 0.3, 0.6, 1.0):
+        assert damp_consensus_base(20, lvl) >= damp_consensus_base(5, lvl) >= damp_consensus_base(1, lvl)
+
+
+def test_damp_consensus_base_compresses_a_0_to_1_score_scale_too():
+    # Works for the listening-recs 'score' base (0..1), not just occurrence counts.
+    hi, lo = damp_consensus_base(0.8, 1.0), damp_consensus_base(0.2, 1.0)
+    raw_ratio = 0.8 / 0.2
+    assert (hi / lo) < raw_ratio                # ratio compressed at the adventurous end
+    assert hi > lo
+
+
+def test_damp_consensus_base_nonpositive_unchanged():
+    assert damp_consensus_base(0, 1.0) == 0.0
+    assert damp_consensus_base(-3, 0.0) == -3.0
+    assert damp_consensus_base(None, 0.5) == 0.0
