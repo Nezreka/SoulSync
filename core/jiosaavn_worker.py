@@ -338,6 +338,10 @@ class JioSaavnWorker:
     def _process_artist(self, artist_id: int, artist_name: str):
         existing_id = self._get_existing_id('artist', artist_id)
         if existing_id:
+            # Has an id but status may still be NULL (e.g. an id-only manual match),
+            # and _get_next_item selects NULL rows every loop — stamp 'matched' so it
+            # stops re-selecting this artist and blocking the queue (#964).
+            self._mark_status('artist', artist_id, 'matched')
             logger.debug("Preserving existing JioSaavn ID for artist '%s': %s", artist_name, existing_id)
             return
 
@@ -393,9 +397,15 @@ class JioSaavnWorker:
         if chosen:
             full_album = self.client.get_album(chosen.id)
             if full_album is None:
+                # Detail fetch failed after a search match. Mark 'error' (NOT left
+                # NULL): _get_next_item selects NULL rows by id ASC every loop, so a
+                # NULL row here would be re-picked forever, wedging the whole album
+                # pass on one bad id and hammering the API. 'error' moves it to the
+                # deferred (retry_days) queue instead (#964).
+                self._mark_status('album', album_id, 'error')
                 self.stats['errors'] += 1
                 logger.warning(
-                    "Album '%s' matched but full details unavailable, leaving unmarked for retry",
+                    "Album '%s' matched but full details unavailable, deferring retry",
                     album_name,
                 )
                 return
@@ -432,9 +442,12 @@ class JioSaavnWorker:
         if chosen:
             full_track = self.client.get_track_details(chosen.id)
             if full_track is None:
+                # See _process_album: a NULL row is re-picked every loop, so mark
+                # 'error' to defer it to the retry_days queue instead (#964).
+                self._mark_status('track', track_id, 'error')
                 self.stats['errors'] += 1
                 logger.warning(
-                    "Track '%s' matched but full details unavailable, leaving unmarked for retry",
+                    "Track '%s' matched but full details unavailable, deferring retry",
                     track_name,
                 )
                 return
@@ -537,7 +550,8 @@ class JioSaavnWorker:
                 UPDATE tracks SET
                     jiosaavn_id = ?,
                     jiosaavn_match_status = 'matched',
-                    jiosaavn_last_attempted = CURRENT_TIMESTAMP
+                    jiosaavn_last_attempted = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             """, (str(data.get('id')), track_id))
 

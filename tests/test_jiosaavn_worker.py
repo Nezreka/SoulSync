@@ -174,6 +174,9 @@ class TestJioSaavnWorkerMatching:
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_preserves_existing_id(self, _enabled, worker, db):
+        # An id-only write (e.g. manual match) leaves status NULL. Processing it
+        # must PRESERVE the id AND stamp 'matched' — otherwise _get_next_item, which
+        # selects NULL rows every loop, re-picks it forever and wedges the queue (#964).
         _insert_artist(db)
         with db._get_connection() as conn:
             conn.execute(
@@ -184,7 +187,9 @@ class TestJioSaavnWorkerMatching:
         worker._process_artist("a1", "Test Artist")
         status, js_id = _status(db, "artists", "a1")
         assert js_id == "existing"
-        assert status is None
+        assert status == "matched"
+        # And it must not be handed out again by the queue.
+        assert worker._get_next_item() is None
 
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
@@ -209,9 +214,15 @@ class TestJioSaavnWorkerMatching:
 
 
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
-    def test_album_details_unavailable_leaves_status_unmarked(self, _enabled, worker, db):
+    def test_album_details_unavailable_marks_error_and_does_not_stall(self, _enabled, worker, db):
+        # A search match whose detail fetch returns None must be marked 'error' (NOT
+        # left NULL): a NULL row is re-selected by _get_next_item every loop, spinning
+        # the API on one bad id and blocking every later album. 'error' + fresh
+        # last_attempted defers it to the retry_days queue instead (#964).
         _insert_artist(db)
         _insert_album(db)
+        # Match the artist first so only the album is left pending.
+        worker._process_artist("a1", "Test Artist")
 
         class _ClientNoAlbumDetails(_FakeJioSaavnClient):
             def get_album(self, album_id):
@@ -220,8 +231,32 @@ class TestJioSaavnWorkerMatching:
         worker._client = _ClientNoAlbumDetails()
         worker._process_album("al1", "Test Album", "Test Artist")
         status, js_id = _status(db, "albums", "al1")
-        assert status is None
+        assert status == "error"
         assert js_id is None
+        # Regression: the row must leave the immediate queue — no other pending work
+        # exists, so the queue is now empty rather than re-handing out al1.
+        assert worker._get_next_item() is None
+
+    @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
+    def test_track_details_unavailable_marks_error_and_does_not_stall(self, _enabled, worker, db):
+        # Same stall guard for tracks (#964).
+        _insert_artist(db)
+        _insert_album(db)
+        _insert_track(db)
+        # Match the artist + album first so only the track is left pending.
+        worker._process_artist("a1", "Test Artist")
+        worker._process_album("al1", "Test Album", "Test Artist")
+
+        class _ClientNoTrackDetails(_FakeJioSaavnClient):
+            def get_track_details(self, track_id):
+                return None
+
+        worker._client = _ClientNoTrackDetails()
+        worker._process_track("t1", "Test Track", "Test Artist")
+        status, js_id = _status(db, "tracks", "t1")
+        assert status == "error"
+        assert js_id is None
+        assert worker._get_next_item() is None
 
 
 class TestJioSaavnWorkerQueue:
@@ -242,6 +277,36 @@ class TestJioSaavnDbMigration:
                 assert "jiosaavn_id" in cols
                 assert "jiosaavn_match_status" in cols
                 assert "jiosaavn_last_attempted" in cols
+
+    def test_repair_columns_survive_deezer_migration_failure(self, db):
+        """#964 regression: the repair-worker columns live in their OWN try block, so
+        a failure in the Deezer-column migration must NOT skip them — the repair
+        worker queries repair_status on every run and errors out if it's missing."""
+        with db._get_connection() as conn:
+            real = conn.cursor()
+            # Simulate a pre-migration tracks table lacking the repair columns.
+            real.execute("DROP TABLE IF EXISTS tracks")
+            real.execute("CREATE TABLE tracks (id INTEGER PRIMARY KEY, title TEXT)")
+            conn.commit()
+
+            class _FailDeezerCursor:
+                """Aborts the Deezer half at its first statement; delegates the rest
+                (the repair block never touches an 'artists' PRAGMA/ALTER)."""
+                def execute(self, sql, *args):
+                    if "artists" in sql.lower():
+                        raise RuntimeError("simulated Deezer migration failure")
+                    return real.execute(sql, *args)
+                def fetchall(self):
+                    return real.fetchall()
+                def fetchone(self):
+                    return real.fetchone()
+
+            db._add_deezer_columns(_FailDeezerCursor())
+            conn.commit()
+
+            cols = {row[1] for row in real.execute("PRAGMA table_info(tracks)")}
+            assert "repair_status" in cols
+            assert "repair_last_checked" in cols
 
 
 def test_jiosaavn_in_service_entity_support():
