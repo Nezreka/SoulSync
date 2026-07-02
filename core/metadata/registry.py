@@ -77,6 +77,75 @@ def experimental_source_rejected(source: Optional[str]) -> bool:
     return is_experimental_source(source) and not is_source_enabled(source)
 
 
+def primary_metadata_source_rejection_error(source: Optional[str]) -> Optional[str]:
+    """Return a user-facing error when ``source`` cannot be primary, else None."""
+    if not source or not experimental_source_rejected(source):
+        return None
+    label = METADATA_SOURCE_LABELS.get(source, source)
+    return (
+        f"{label} is not enabled — turn it on under Settings → Advanced → Experimental."
+    )
+
+
+def resolve_settings_metadata_primary(
+    experimental_in: Optional[dict],
+    metadata_in: Optional[dict],
+    get_config: Callable[[str], Any],
+) -> tuple[Optional[str], Optional[str]]:
+    """Validate prospective primary metadata source for a settings save.
+
+    Returns ``(error_message, fallback_source_override)``. When the user disables
+    an experimental source that remains the stored primary (without explicitly
+    re-selecting it in the same payload), returns ``(None, default)`` so the
+    save can reset primary without persisting other changes first.
+    """
+    jiosaavn_enabled = bool(get_config("experimental.jiosaavn_enabled"))
+    if isinstance(experimental_in, dict) and "jiosaavn_enabled" in experimental_in:
+        jiosaavn_enabled = bool(experimental_in["jiosaavn_enabled"])
+
+    prospective_primary = get_config("metadata.fallback_source")
+    if isinstance(metadata_in, dict) and "fallback_source" in metadata_in:
+        prospective_primary = metadata_in["fallback_source"]
+
+    if prospective_primary != "jiosaavn":
+        return None, None
+
+    if jiosaavn_enabled:
+        return None, None
+
+    explicitly_setting_primary = (
+        isinstance(metadata_in, dict)
+        and metadata_in.get("fallback_source") == "jiosaavn"
+    )
+    if explicitly_setting_primary:
+        return primary_metadata_source_rejection_error("jiosaavn"), None
+
+    return None, METADATA_SOURCE_PRIORITY[0]
+
+
+def apply_primary_metadata_source(
+    source: str,
+    set_config: Callable[[str, Any], None],
+) -> Optional[str]:
+    """Persist primary metadata source from a UI id (e.g. ``spotify_free``, ``jiosaavn``).
+
+    ``set_config`` receives dotted config keys such as ``metadata.fallback_source``.
+    Returns an error message when the source is rejected, else None.
+    """
+    if source == "spotify_free":
+        set_config("metadata.fallback_source", "spotify")
+        set_config("metadata.spotify_free", True)
+        return None
+
+    err = primary_metadata_source_rejection_error(source)
+    if err:
+        return err
+
+    set_config("metadata.fallback_source", source)
+    set_config("metadata.spotify_free", False)
+    return None
+
+
 def experimental_status() -> Dict[str, bool]:
     """``{'<source>_enabled': bool}`` map for the UI ``_experimental`` payload."""
     return {f"{name}_enabled": is_source_enabled(name) for name in EXPERIMENTAL_SOURCES}
@@ -444,12 +513,24 @@ def get_primary_source(spotify_client_factory: Optional[MetadataClientFactory] =
     if is_boot_phase():
         source = get_configured_primary_source()
         if experimental_source_rejected(source):
+            if source != _default:
+                logger.warning(
+                    "Primary metadata source %r is not enabled; using %r instead",
+                    source,
+                    _default,
+                )
             return _default
         return source
 
     source = get_configured_primary_source()
 
     if experimental_source_rejected(source):
+        if source != _default:
+            logger.warning(
+                "Primary metadata source %r is not enabled; using %r instead",
+                source,
+                _default,
+            )
         return _default
 
     if source == "spotify":

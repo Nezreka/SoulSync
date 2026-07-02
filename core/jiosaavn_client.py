@@ -531,10 +531,19 @@ class JioSaavnClient:
     def _track_to_enhanced_dict(track: Track, raw: Dict[str, Any]) -> Dict[str, Any]:
         album_block = raw.get("album") if isinstance(raw.get("album"), dict) else {}
         album_id = track.album_id or album_block.get("id")
+        artist_id = None
+        artists_block = raw.get("artists")
+        if isinstance(artists_block, dict):
+            primary = artists_block.get("primary")
+            if isinstance(primary, list) and primary:
+                first = primary[0]
+                if isinstance(first, dict):
+                    artist_id = first.get("id")
         return {
             "id": track.id,
             "name": track.name,
             "artists": JioSaavnClient._names_to_artist_dicts(track.artists),
+            "artist_id": artist_id,
             "album": {
                 "id": album_id,
                 "name": track.album,

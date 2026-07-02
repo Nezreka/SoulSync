@@ -440,6 +440,9 @@ class MusicDatabase:
             # Add Deezer columns to library tables (migration)
             self._add_deezer_columns(cursor)
 
+            # Add JioSaavn columns to library tables (migration)
+            self._add_jiosaavn_columns(cursor)
+
             # Add Spotify/iTunes enrichment tracking columns (migration)
             self._add_spotify_itunes_enrichment_columns(cursor)
 
@@ -454,9 +457,6 @@ class MusicDatabase:
 
             # Add Amazon artist ID column (migration)
             self._add_amazon_columns(cursor)
-
-            # Add JioSaavn source ID columns (migration)
-            self._add_jiosaavn_columns(cursor)
 
             # Add Similar-Artists worker tracking columns (migration)
             self._add_similar_artists_worker_columns(cursor)
@@ -2881,22 +2881,6 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding Amazon columns: {e}")
 
-    def _add_jiosaavn_columns(self, cursor):
-        """Add JioSaavn external ID columns to artists, albums, and tracks."""
-        try:
-            for table in ("artists", "albums", "tracks"):
-                cursor.execute(f"PRAGMA table_info({table})")
-                columns = [column[1] for column in cursor.fetchall()]
-                if "jiosaavn_id" not in columns:
-                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN jiosaavn_id TEXT")
-                cursor.execute(
-                    f"CREATE INDEX IF NOT EXISTS idx_{table}_jiosaavn_id ON {table} (jiosaavn_id)"
-                )
-
-            logger.info("JioSaavn columns added/verified successfully")
-        except Exception as e:
-            logger.error(f"Error adding JioSaavn columns: {e}")
-
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
         populated external ID but NULL match_status.
@@ -2922,6 +2906,9 @@ class MusicDatabase:
             ('artists', 'qobuz_id', 'qobuz_match_status'),
             ('albums', 'qobuz_id', 'qobuz_match_status'),
             ('tracks', 'qobuz_id', 'qobuz_match_status'),
+            ('artists', 'jiosaavn_id', 'jiosaavn_match_status'),
+            ('albums', 'jiosaavn_id', 'jiosaavn_match_status'),
+            ('tracks', 'jiosaavn_id', 'jiosaavn_match_status'),
         ]
 
         total_backfilled = 0
@@ -3004,12 +2991,6 @@ class MusicDatabase:
             if 'explicit' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN explicit INTEGER")
 
-        except Exception as e:
-            logger.error(f"Error adding Deezer columns: {e}")
-            # Don't raise - this is a migration, database can still function
-
-        # --- Repair worker columns ---
-        try:
             if 'repair_status' not in tracks_columns:
                 cursor.execute("ALTER TABLE tracks ADD COLUMN repair_status TEXT")
             if 'repair_last_checked' not in tracks_columns:
@@ -3018,7 +2999,54 @@ class MusicDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_repair_status ON tracks (repair_status)")
 
         except Exception as e:
-            logger.error(f"Error adding repair columns: {e}")
+            logger.error(f"Error adding Deezer columns: {e}")
+            # Don't raise - this is a migration, database can still function
+
+    def _add_jiosaavn_columns(self, cursor):
+        """Add JioSaavn tracking columns for enrichment (artists, albums, tracks)"""
+        try:
+            cursor.execute("PRAGMA table_info(artists)")
+            artists_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'jiosaavn_id' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_id TEXT")
+            if 'jiosaavn_match_status' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_match_status TEXT")
+            if 'jiosaavn_last_attempted' not in artists_columns:
+                cursor.execute("ALTER TABLE artists ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_id ON artists (jiosaavn_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_artists_jiosaavn_status ON artists (jiosaavn_match_status)")
+
+            cursor.execute("PRAGMA table_info(albums)")
+            albums_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'jiosaavn_id' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_id TEXT")
+            if 'jiosaavn_match_status' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_match_status TEXT")
+            if 'jiosaavn_last_attempted' not in albums_columns:
+                cursor.execute("ALTER TABLE albums ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_id ON albums (jiosaavn_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_albums_jiosaavn_status ON albums (jiosaavn_match_status)")
+
+            cursor.execute("PRAGMA table_info(tracks)")
+            tracks_columns = [column[1] for column in cursor.fetchall()]
+
+            if 'jiosaavn_id' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_id TEXT")
+            if 'jiosaavn_match_status' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_match_status TEXT")
+            if 'jiosaavn_last_attempted' not in tracks_columns:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN jiosaavn_last_attempted TIMESTAMP")
+
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_id ON tracks (jiosaavn_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_tracks_jiosaavn_status ON tracks (jiosaavn_match_status)")
+
+            logger.info("JioSaavn columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding JioSaavn columns: {e}")
 
     def _add_spotify_itunes_enrichment_columns(self, cursor):
         """Add Spotify/iTunes enrichment tracking columns (match_status + last_attempted) to artists, albums, tracks"""
@@ -6001,6 +6029,7 @@ class MusicDatabase:
                     'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                     'style', 'mood', 'label', 'banner_url',
                     'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                    'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                 ]
 
                 for group in duplicate_groups:
@@ -6317,6 +6346,7 @@ class MusicDatabase:
                             'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                             'style', 'mood', 'label', 'banner_url',
                             'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                            'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                         ]
 
                         # Read enrichment data from old artist
@@ -6487,6 +6517,7 @@ class MusicDatabase:
                         'audiodb_id', 'audiodb_match_status', 'audiodb_last_attempted',
                         'style', 'mood', 'label', 'explicit', 'record_type',
                         'deezer_id', 'deezer_match_status', 'deezer_last_attempted',
+                        'jiosaavn_id', 'jiosaavn_match_status', 'jiosaavn_last_attempted',
                         # api_track_count is metadata-source-derived enrichment cache;
                         # losing it on a ratingKey rekey would force the next
                         # completeness scan back to live API lookups (kettui PR #374).
