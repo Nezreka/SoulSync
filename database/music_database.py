@@ -9234,10 +9234,10 @@ class MusicDatabase:
           app without one.
 
         References to the deleted id are cleaned up in the same transaction
-        (wishlist rows are re-pointed to NULL = "use the default", and a
-        matching Auto-Import override is cleared) — and even a reference
-        missed by that (or written concurrently) safely falls back to the
-        default via `core/quality/selection.py::load_profile_by_id`.
+        (wishlist rows AND library tracks are re-pointed to NULL = "use the
+        default", and a matching Auto-Import override is cleared) — and even
+        a reference missed by that (or written concurrently) safely falls
+        back to the default via `core/quality/selection.py::load_profile_by_id`.
 
         Returns ``(success, reason)`` — ``reason`` is empty on success.
         """
@@ -9260,6 +9260,10 @@ class MusicDatabase:
                 )
             conn.execute(
                 "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
+                (profile_id,),
+            )
+            conn.execute(
+                "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
                 (profile_id,),
             )
             cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))

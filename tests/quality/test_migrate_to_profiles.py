@@ -105,20 +105,27 @@ def test_migration_overwrites_factory_seed_with_real_prior_settings(db):
         conn.close()
 
 
-def test_migration_preserves_legacy_import_quality_filter_off_as_fallback(db, monkeypatch):
-    """If an old install had the import-only quality gate disabled, upgrading
-    must not suddenly start quarantining files. In the profile model that maps
-    to fallback acceptance on the migrated default profile."""
+def test_migration_gives_auto_import_its_own_relaxed_profile_when_filter_was_off(db, monkeypatch):
+    """If an old install had the import-only quality gate disabled entirely,
+    that most plausibly reflects Auto-Import specifically (it scans an
+    already-acquired Staging folder with nothing to search for as an
+    alternative) — not "I want every download/Wishlist item to accept
+    anything too". The migration must NOT loosen the default profile itself;
+    it creates a second, relaxed profile and assigns it to Auto-Import."""
     custom_profile = {
         "version": 3,
         "preset": "custom",
         "fallback_enabled": False,
         "ranked_targets": [{"label": "Only FLAC", "format": "flac"}],
     }
+    set_calls = {}
 
     class _FakeCfg:
         def get(self, key, default=None):
             return {"import.quality_filter_enabled": False}.get(key, default)
+
+        def set(self, key, value):
+            set_calls[key] = value
 
     monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
 
@@ -129,10 +136,49 @@ def test_migration_preserves_legacy_import_quality_filter_off_as_fallback(db, mo
         conn.commit()
 
         assert materialize_default_profile_and_backfill(db, conn) is True
-        row = conn.execute(
+
+        # Default profile keeps the user's real fallback setting — untouched.
+        default_row = conn.execute(
             "SELECT fallback_enabled FROM quality_profiles WHERE id=1"
         ).fetchone()
-        assert row["fallback_enabled"] == 1
+        assert default_row["fallback_enabled"] == 0
+
+        # A second, relaxed profile exists and is assigned to Auto-Import.
+        relaxed = conn.execute(
+            "SELECT id, fallback_enabled, is_default FROM quality_profiles WHERE name=?",
+            ("Auto-Import (accept anything)",),
+        ).fetchone()
+        assert relaxed is not None
+        assert relaxed["fallback_enabled"] == 1
+        assert relaxed["is_default"] == 0
+        assert set_calls["auto_import.quality_profile_id"] == relaxed["id"]
+    finally:
+        conn.close()
+
+
+def test_migration_does_not_overwrite_existing_auto_import_override(db, monkeypatch):
+    """The relaxed profile must never clobber an Auto-Import assignment the
+    user already made some other way."""
+    set_calls = {}
+
+    class _FakeCfg:
+        def get(self, key, default=None):
+            return {
+                "import.quality_filter_enabled": False,
+                "auto_import.quality_profile_id": 2,
+            }.get(key, default)
+
+        def set(self, key, value):
+            set_calls[key] = value
+
+    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+
+    conn = db._get_connection()
+    try:
+        conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
+        conn.commit()
+        assert materialize_default_profile_and_backfill(db, conn) is True
+        assert "auto_import.quality_profile_id" not in set_calls
     finally:
         conn.close()
 
