@@ -463,6 +463,7 @@ function initializeWebSocket() {
     socket.on('enrichment:tidal-enrichment', (data) => updateTidalEnrichmentStatusFromData(data));
     socket.on('enrichment:qobuz-enrichment', (data) => updateQobuzEnrichmentStatusFromData(data));
     socket.on('enrichment:amazon-enrichment', (data) => updateAmazonEnrichmentStatusFromData(data));
+    socket.on('enrichment:bandcamp-enrichment', (data) => updateBandcampEnrichmentStatusFromData(data));
     socket.on('enrichment:similar_artists', (data) => updateSimilarArtistsEnrichmentStatusFromData(data));
     socket.on('enrichment:hydrabase', (data) => updateHydrabaseStatusFromData(data));
     socket.on('enrichment:repair', (data) => updateRepairStatusFromData(data));
@@ -475,7 +476,7 @@ function initializeWebSocket() {
     // disturb the UI handlers above).
     ['musicbrainz', 'audiodb', 'discogs', 'deezer', 'spotify-enrichment',
      'itunes-enrichment', 'lastfm-enrichment', 'genius-enrichment', 'tidal-enrichment',
-     'qobuz-enrichment', 'amazon-enrichment', 'similar_artists', 'hydrabase',
+     'qobuz-enrichment', 'amazon-enrichment', 'bandcamp-enrichment', 'similar_artists', 'hydrabase',
      'soulid', 'repair'].forEach((ch) => {
         socket.on('enrichment:' + ch, (data) => {
             if (window.workerOrbs && window.workerOrbs.onStatus) window.workerOrbs.onStatus(ch, data);

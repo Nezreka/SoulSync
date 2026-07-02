@@ -968,6 +968,133 @@ if (document.readyState === 'loading') {
 }
 
 // ===================================================================
+// BANDCAMP ENRICHMENT WORKER
+// ===================================================================
+// Bandcamp is keyless (no access token) but opt-in experimental — the
+// worker always reports authenticated:true; data.enabled instead reflects
+// whether the user has turned it on in Settings > Advanced > Experimental
+// (see core.metadata.registry.is_source_enabled). Progress is keyed by
+// 'albums'/'tracks' (core/bandcamp_worker.py has no artist-level pass).
+
+async function updateBandcampEnrichmentStatus() {
+    if (socketConnected) return;
+    if (document.hidden) return;
+    try {
+        const response = await fetch('/api/enrichment/bandcamp/status');
+        if (!response.ok) { console.warn('Bandcamp status endpoint unavailable'); return; }
+        const data = await response.json();
+        updateBandcampEnrichmentStatusFromData(data);
+    } catch (error) {
+        console.error('Error updating Bandcamp status:', error);
+    }
+}
+
+function updateBandcampEnrichmentStatusFromData(data) {
+    const button = document.getElementById('bandcamp-enrich-button');
+    if (!button) return;
+
+    const disabled = data.enabled === false;
+
+    button.classList.remove('active', 'paused', 'complete', 'no-auth');
+    if (disabled) {
+        button.classList.add('no-auth');
+    } else if (data.paused) {
+        button.classList.add('paused');
+    } else if (data.idle) {
+        button.classList.add('complete');
+    } else if (data.running && !data.paused) {
+        button.classList.add('active');
+    }
+
+    const tooltipStatus = document.getElementById('bandcamp-enrich-tooltip-status');
+    const tooltipCurrent = document.getElementById('bandcamp-enrich-tooltip-current');
+    const tooltipProgress = document.getElementById('bandcamp-enrich-tooltip-progress');
+
+    if (tooltipStatus) {
+        if (disabled) { tooltipStatus.textContent = 'Disabled'; }
+        else if (data.paused) { tooltipStatus.textContent = 'Paused'; }
+        else if (data.idle) { tooltipStatus.textContent = 'Complete'; }
+        else if (data.running) { tooltipStatus.textContent = 'Running'; }
+        else { tooltipStatus.textContent = 'Idle'; }
+    }
+
+    if (tooltipCurrent) {
+        if (disabled) {
+            tooltipCurrent.textContent = 'Enable in Settings → Advanced → Experimental';
+        } else if (data.paused) {
+            tooltipCurrent.textContent = 'Click to resume';
+        } else if (data.idle) {
+            tooltipCurrent.textContent = 'All items processed';
+        } else if (data.current_item && data.current_item.name) {
+            tooltipCurrent.textContent = `Now: ${data.current_item.name}`;
+        }
+    }
+
+    if (data.progress && tooltipProgress) {
+        if (disabled) {
+            tooltipProgress.textContent = `Pending: ${data.stats?.pending || 0} items`;
+        } else {
+            const albums = data.progress.albums || {};
+            const tracks = data.progress.tracks || {};
+
+            const currentType = data.current_item?.type;
+            let progressText = '';
+
+            const albumsComplete = albums.matched >= albums.total;
+
+            if (currentType === 'album' || (!albumsComplete && !currentType)) {
+                progressText = `Albums: ${albums.matched || 0} / ${albums.total || 0} (${albums.percent || 0}%)`;
+            } else {
+                progressText = `Tracks: ${tracks.matched || 0} / ${tracks.total || 0} (${tracks.percent || 0}%)`;
+            }
+
+            tooltipProgress.textContent = progressText;
+        }
+    }
+}
+
+async function toggleBandcampEnrichment() {
+    try {
+        const button = document.getElementById('bandcamp-enrich-button');
+        if (!button) return;
+        if (button.classList.contains('no-auth')) return; // disabled — toggle via Settings instead
+
+        const isRunning = button.classList.contains('active');
+        const endpoint = isRunning ? '/api/enrichment/bandcamp/pause' : '/api/enrichment/bandcamp/resume';
+
+        const response = await fetch(endpoint, { method: 'POST' });
+        if (!response.ok) {
+            throw new Error(`Failed to ${isRunning ? 'pause' : 'resume'} Bandcamp enrichment`);
+        }
+
+        await updateBandcampEnrichmentStatus();
+        console.log(`Bandcamp enrichment ${isRunning ? 'paused' : 'resumed'}`);
+
+    } catch (error) {
+        console.error('Error toggling Bandcamp enrichment:', error);
+        showToast(`Error: ${error.message}`, 'error');
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('bandcamp-enrich-button');
+        if (button) {
+            button.addEventListener('click', toggleBandcampEnrichment);
+            updateBandcampEnrichmentStatus();
+            setInterval(updateBandcampEnrichmentStatus, 2000);
+        }
+    });
+} else {
+    const button = document.getElementById('bandcamp-enrich-button');
+    if (button) {
+        button.addEventListener('click', toggleBandcampEnrichment);
+        updateBandcampEnrichmentStatus();
+        setInterval(updateBandcampEnrichmentStatus, 2000);
+    }
+}
+
+// ===================================================================
 // TIDAL ENRICHMENT WORKER
 // ===================================================================
 

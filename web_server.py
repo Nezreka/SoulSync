@@ -12966,6 +12966,7 @@ _SERVICE_ID_COLUMNS = {
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
+    'bandcamp': {'album': 'bandcamp_url', 'track': 'bandcamp_url'},  # no artist-level id column
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -39078,6 +39079,7 @@ def _emit_enrichment_status_loop():
         'tidal-enrichment': lambda: tidal_enrichment_worker,
         'qobuz-enrichment': lambda: qobuz_enrichment_worker,
         'amazon-enrichment': lambda: amazon_worker,
+        'bandcamp-enrichment': lambda: bandcamp_worker,
         'similar_artists': lambda: similar_artists_worker,
         'hydrabase': lambda: hydrabase_worker,
         'soulid': lambda: soulid_worker,

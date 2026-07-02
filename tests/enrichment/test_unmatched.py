@@ -279,3 +279,38 @@ def test_route_retry_item_missing_id_400(client):
     r = client.post('/api/enrichment/spotify/retry',
                     json={'entity_type': 'artist', 'scope': 'item'})
     assert r.status_code == 400
+
+
+# --------------------------------------------------------------------------
+# Bandcamp — album+track only (no artist-level id column, see
+# core/bandcamp_worker.py). Regression coverage: the Manage Enrichment
+# Workers modal's "Coverage & processing order" section 404'd because
+# 'bandcamp' was missing from SERVICE_ENTITY_SUPPORT entirely.
+# --------------------------------------------------------------------------
+
+
+def test_bandcamp_supports_album_and_track_only():
+    assert supported_entity_types('bandcamp') == ('album', 'track')
+
+
+def test_bandcamp_breakdown_and_unmatched(db):
+    conn = db._get_connection()
+    cur = conn.cursor()
+    cur.execute("UPDATE albums SET bandcamp_match_status = 'matched' WHERE id = 'al1'")
+    cur.execute("UPDATE tracks SET bandcamp_match_status = 'not_found' WHERE id = 't1'")
+    conn.commit()
+    conn.close()
+
+    bd = db.get_enrichment_breakdown('bandcamp', 'album')
+    assert bd == {'matched': 1, 'not_found': 0, 'pending': 0, 'total': 1}
+
+    res = db.get_enrichment_unmatched('bandcamp', 'track', status='not_found')
+    assert res['total'] == 1
+    assert res['items'][0]['name'] == 'Believer'
+
+
+def test_bandcamp_breakdown_route(client):
+    r = client.get('/api/enrichment/bandcamp/breakdown')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert set(body['breakdown'].keys()) == {'album', 'track'}
