@@ -41442,6 +41442,44 @@ div.artist-hero-badge {
     border-bottom: 8px solid rgba(30, 30, 30, 0.98);
 }
 
+/* JioSaavn enrichment bubble (teal #2bc5b4) */
+.jiosaavn-button-container { position: relative; display: inline-block; margin-right: 12px; }
+.jiosaavn-button {
+    position: relative; width: 44px; height: 44px;
+    background: linear-gradient(135deg, rgba(43, 197, 180, 0.12) 0%, rgba(30, 160, 145, 0.18) 100%);
+    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1.5px solid rgba(43, 197, 180, 0.25); border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 16px rgba(43, 197, 180, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.jiosaavn-button:hover { border-color: rgba(43, 197, 180, 0.4); transform: scale(1.05); }
+.jiosaavn-logo { font-size: 20px; line-height: 1; opacity: 0.9; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3)); }
+.jiosaavn-spinner {
+    position: absolute; width: 44px; height: 44px; border: 3px solid transparent;
+    border-top-color: rgba(43, 197, 180, 0.8); border-right-color: rgba(43, 197, 180, 0.5);
+    border-radius: 50%; opacity: 0; transition: opacity 0.3s ease; pointer-events: none;
+}
+.jiosaavn-button.active .jiosaavn-spinner { opacity: 1; animation: jiosaavn-spin 1.2s linear infinite; }
+.jiosaavn-button.active { border-color: rgba(43, 197, 180, 0.5); }
+.jiosaavn-button.complete { border-color: rgba(76, 175, 80, 0.35); }
+.jiosaavn-button.complete .jiosaavn-spinner { opacity: 0; }
+.jiosaavn-button.paused { border-color: rgba(255, 193, 7, 0.35); }
+@keyframes jiosaavn-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.jiosaavn-tooltip {
+    position: absolute; left: 50%; top: calc(100% + 12px); transform: translateX(-50%) translateY(-5px);
+    z-index: 5000; opacity: 0; visibility: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); pointer-events: none;
+}
+.jiosaavn-button:hover + .jiosaavn-tooltip { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.jiosaavn-tooltip-content {
+    min-width: 260px; background: linear-gradient(135deg, rgba(30, 30, 30, 0.98) 0%, rgba(20, 20, 20, 0.99) 100%);
+    border: 1px solid rgba(43, 197, 180, 0.3); border-radius: 16px; padding: 16px 18px;
+}
+.jiosaavn-tooltip-header { font-size: 13px; font-weight: 600; color: rgba(43, 197, 180, 0.95); margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.jiosaavn-tooltip-body { display: flex; flex-direction: column; gap: 8px; }
+#jiosaavn-tooltip-status { color: rgb(var(--accent-light-rgb)); font-weight: 600; }
+.jiosaavn-button.paused + .jiosaavn-tooltip #jiosaavn-tooltip-status { color: #ffc107; }
+
 /* ============================================================================
    SPOTIFY ENRICHMENT STATUS BUTTON
    ============================================================================ */

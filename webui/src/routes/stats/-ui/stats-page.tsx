@@ -53,6 +53,7 @@ import {
   STATS_DB_STORAGE_COLORS,
   STATS_ENRICHMENT_SERVICES,
   STATS_GENRE_COLORS,
+  visibleStatsEnrichmentServices,
 } from '../-stats.helpers';
 import { Route } from '../route';
 import styles from './stats-page.module.css';
@@ -626,6 +627,9 @@ function StatsRecentPlays({
 }
 
 function StatsLibraryHealth({ health }: { health: StatsHealth }) {
+  const shellStatus = useShellStatus();
+  const jiosaavnEnabled = shellStatus?._experimental?.jiosaavn_enabled === true;
+  const enrichmentServices = visibleStatsEnrichmentServices(jiosaavnEnabled);
   const totalTracks = health.total_tracks ?? 0;
   const formatEntries = Object.entries(health.format_breakdown ?? {});
   const formatTotal = formatEntries.reduce((sum, [, count]) => sum + count, 0) || 1;
@@ -681,7 +685,7 @@ function StatsLibraryHealth({ health }: { health: StatsHealth }) {
         </div>
       </div>
       <div id="stats-enrichment-coverage" className={styles.statsEnrichment}>
-        {STATS_ENRICHMENT_SERVICES.map((service) => {
+        {enrichmentServices.map((service) => {
           const percent = health.enrichment_coverage?.[service.key] || 0;
           return (
             <div key={service.key} className={styles.statsEnrichItem}>

@@ -252,6 +252,7 @@ class TestJioSaavnClientSearch:
 
         assert details["id"] == "abc123"
         assert details["name"] == "Kesariya"
+        assert details["artist_id"] == "1"
         assert details["artists"] == [{"name": "Arijit Singh"}, {"name": "Pritam"}]
         assert details["album"]["name"] == "Brahmastra"
         self.client.session.get.assert_not_called()
