@@ -203,6 +203,31 @@ place) or the app's own themed confirm dialog; no native
   migration backfilled or NULL for anything added since, so in practice every
   track is judged against the same default profile today. A full Library
   Manager assignment surface is the natural next step once this branch lands.
+- **No separate profile for manual Staging imports.** Wishlist downloads use
+  the row's own `quality_profile_id`, Auto-Import can be assigned its own
+  (`auto_import.quality_profile_id`), but a manual "Import" click on the
+  Import page carries no `quality_profile_id` in its context at all — it
+  always resolves to the app-wide default via `load_profile_by_id(None)`.
+  Not a regression: `nezreka/dev` had exactly one global profile for
+  literally everything (manual, auto, and downloads alike), so this already
+  matches historical behavior — it's simply not yet extended with its own
+  per-context assignment the way Auto-Import was, as a first, minimal proof
+  the mechanism generalizes (see "Per-context precedent" above).
+- **The old standalone `import.quality_filter_enabled` master toggle is
+  gone**, not just hidden — its backend gate (`core/imports/guards.py`) and
+  its React Import-page toggle were both removed in favor of "empty
+  `ranked_targets` (or `fallback_enabled=True`) already means accept
+  anything," so a second on/off switch saying the same thing doesn't exist.
+  Functionally equivalent, but it removes a one-click, easily-reversible way
+  to pause quality filtering — flagged and confirmed with the user rather
+  than restored, since composing "accept anything" through the profile is
+  the design this whole branch is built around. The one-time migration keeps
+  its intent working exactly the way it did, though: if the toggle was OFF,
+  a lenient profile named "Auto-Import (accept anything)" is created and
+  assigned to Auto-Import specifically (that's the case this toggle almost
+  always meant in practice — an already-acquired Staging folder has no
+  alternative version to search for) rather than loosening the one profile
+  every normal download/Wishlist item also uses.
 - **This branch was extracted from a larger internal effort** (an
   experimental, not-yet-proposed Library Manager v2) specifically so it could
   be reviewed and merged on its own merits without that larger, riskier

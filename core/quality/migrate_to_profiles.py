@@ -70,11 +70,15 @@ def _str(config_manager, key: str, default: str) -> str:
 
 
 def _legacy_import_quality_filter_disabled(config_manager) -> bool:
-    """Whether the old import-only quality gate was explicitly disabled.
+    """Whether the old global "quality filter on import" switch was
+    explicitly disabled.
 
-    That switch no longer exists as a separate setting: "accept anything" is
-    represented by the profile's fallback behaviour. Preserve upgrades from
-    installs where the user had deliberately turned the old gate off.
+    That switch no longer exists as a standalone setting — "accept anything"
+    is represented by a profile's fallback behaviour instead. Used by
+    ``_materialize_relaxed_auto_import_profile`` to preserve upgrades from
+    installs where the user had deliberately turned the old gate off (see
+    that function for why this becomes an Auto-Import-only profile rather
+    than loosening the default profile everything else also uses).
     """
     try:
         value = config_manager.get("import.quality_filter_enabled", True)
@@ -138,6 +142,54 @@ def _default_profile_id(cursor) -> int:
     return profile_id
 
 
+def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dict, bundle: dict) -> None:
+    """When the legacy install had the old global "quality filter on import"
+    switch turned off entirely, that most plausibly reflects Auto-Import
+    specifically: it scans an already-acquired Staging folder with no
+    alternative version to search for, so rejecting/quarantining those files
+    on import was rarely the intent — unlike a fresh Wishlist download, where
+    there IS a better version to look for. Give Auto-Import its own lenient
+    clone of the migrated settings (same ranked targets, fallback forced on)
+    instead of loosening the one profile every normal download/Wishlist item
+    also uses, which would silently start accepting low-quality files there
+    too. Only assigns it when Auto-Import doesn't already have an explicit
+    override (never clobber a real user choice).
+    """
+    clone_fields = dict(fields)
+    clone_fields["fallback_enabled"] = 1
+    cursor.execute(
+        """
+        INSERT INTO quality_profiles
+            (name, description, ranked_targets, fallback_enabled, search_mode,
+             rank_candidates_by_quality, upgrade_policy, upgrade_cutoff_index,
+             acoustid_required, downsample_enabled, deep_audio_verify,
+             replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
+             lossy_copy_bitrate, lossy_copy_delete_original, is_default)
+        VALUES (:name, :description, :ranked_targets, :fallback_enabled, :search_mode,
+                :rank_candidates_by_quality, :upgrade_policy, :upgrade_cutoff_index,
+                :acoustid_required, :downsample_enabled, :deep_audio_verify,
+                :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
+                :lossy_copy_bitrate, :lossy_copy_delete_original, 0)
+        """,
+        {
+            "name": "Auto-Import (accept anything)",
+            "description": (
+                "Migrated: your previous install had quality filtering on "
+                "import disabled entirely. Assigned to Auto-Import so it "
+                "keeps accepting files it always used to; normal downloads "
+                "and Wishlist items stay on your real quality settings."
+            ),
+            **clone_fields, **bundle,
+        },
+    )
+    new_profile_id = cursor.lastrowid
+    try:
+        if not config_manager.get("auto_import.quality_profile_id"):
+            config_manager.set("auto_import.quality_profile_id", new_profile_id)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("could not assign migrated relaxed profile to Auto-Import: %s", e)
+
+
 def materialize_default_profile_and_backfill(database, conn) -> bool:
     """Materialize the pre-migration global settings into the default
     ``quality_profiles`` row and backfill existing ``wishlist_tracks`` rows.
@@ -167,8 +219,7 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         legacy_profile = database._legacy_quality_profile_from_preferences()
         fields = _profile_row_fields(legacy_profile)
         bundle = _resolve_settings_bundle(config_manager)
-        if _legacy_import_quality_filter_disabled(config_manager):
-            fields["fallback_enabled"] = 1
+        needs_relaxed_auto_import_profile = _legacy_import_quality_filter_disabled(config_manager)
         default_profile_id = _default_profile_id(cursor)
 
         # Overwrite (not INSERT OR IGNORE) — `_seed_quality_profiles` already
@@ -230,6 +281,12 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         except Exception as e:  # noqa: BLE001 — column may not exist yet on a very old schema
             logger.debug("library track backfill skipped: %s", e)
             library_backfilled = 0
+
+        if needs_relaxed_auto_import_profile:
+            try:
+                _materialize_relaxed_auto_import_profile(cursor, config_manager, fields, bundle)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Could not create migrated Auto-Import profile: %s", e)
 
         cursor.execute(
             "INSERT OR IGNORE INTO metadata (key, value, updated_at) "
