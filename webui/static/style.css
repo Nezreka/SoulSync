@@ -173,10 +173,12 @@ body.max-performance .sidebar::after {
     top: 0;
     bottom: 0;
     width: 10px;
-    /* Low on purpose: this strip belongs WITH the sidebar, so any fullscreen overlay that covers
-       the sidebar (artist map/web at z 100, modals higher) must cover it too. It was z 100, which
-       tied the overlays and poked through them. */
-    z-index: 5;
+    /* z:1 on purpose: the artist map/web overlays live INSIDE .page (position:relative; z-index:1),
+       so their z:100 is trapped in the page's stacking context — at root level the whole page paints
+       at z:1. The strip must TIE that (not beat it): tie -> DOM order wins -> the page (later in the
+       DOM) and any fullscreen overlay inside it paint over the strip. Anything higher (the old 100,
+       even 5) pokes through the overlays. */
+    z-index: 1;
     opacity: 0;
     transition: opacity 0.5s ease;
     pointer-events: none;
