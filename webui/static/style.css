@@ -173,7 +173,12 @@ body.max-performance .sidebar::after {
     top: 0;
     bottom: 0;
     width: 10px;
-    z-index: 100;
+    /* z:1 on purpose: the artist map/web overlays live INSIDE .page (position:relative; z-index:1),
+       so their z:100 is trapped in the page's stacking context — at root level the whole page paints
+       at z:1. The strip must TIE that (not beat it): tie -> DOM order wins -> the page (later in the
+       DOM) and any fullscreen overlay inside it paint over the strip. Anything higher (the old 100,
+       even 5) pokes through the overlays. */
+    z-index: 1;
     opacity: 0;
     transition: opacity 0.5s ease;
     pointer-events: none;
@@ -35519,6 +35524,23 @@ div.artist-hero-badge {
     position: fixed; inset: 0; z-index: 100;
     background: #0a0a14; flex-direction: column;
 }
+/* Artist Web "Group by" lens toggle (Genre | Communities) */
+.artweb-lens-toggle {
+    display: inline-flex; align-items: center; gap: 2px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 9px; padding: 2px;
+}
+.artweb-lens-btn {
+    border: none; background: transparent; color: rgba(255,255,255,0.6);
+    font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 7px; cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.artweb-lens-btn:hover { color: #fff; }
+.artweb-lens-btn.active { background: rgba(255,255,255,0.14); color: #fff; }
+/* Toolbar toggle buttons (Path, Filter) when engaged */
+#artist-web-container .artmap-tool-btn.active {
+    background: rgba(29,185,84,0.28); border-color: rgba(29,185,84,0.5); color: #fff;
+}
 .artist-map-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 16px; background: linear-gradient(180deg, rgba(14,14,22,0.98) 0%, rgba(14,14,22,0.92) 100%);
@@ -35688,7 +35710,38 @@ div.artist-hero-badge {
     background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);
     text-transform: capitalize;
 }
-.artmap-content-row { display: flex; flex: 1; overflow: hidden; }
+.artmap-content-row { display: flex; flex: 1; overflow: hidden; position: relative; }
+/* Artist Web color legend — floating bottom-left over the canvas, decodes node colors per lens */
+.artweb-legend {
+    position: absolute; left: 14px; bottom: 14px; z-index: 6;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 10px 12px; max-width: 220px;
+    background: rgba(14, 13, 20, 0.72); backdrop-filter: blur(6px);
+    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+    pointer-events: none;
+}
+.artweb-legend-row { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.72); }
+.artweb-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 6px rgba(0,0,0,0.4); }
+.artweb-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artweb-legend-count { margin-left: auto; color: rgba(255,255,255,0.38); font-variant-numeric: tabular-nums; }
+/* Artist Web empty/error state card — centered, with an optional Retry action */
+.artweb-state-card {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+}
+.artweb-state-msg { color: rgba(255,255,255,0.5); font-size: 14px; max-width: 380px; line-height: 1.5; }
+.artweb-state-btn {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.85);
+    padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.15s ease;
+}
+.artweb-state-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
+/* Artist Web guide modal (extends the shared shortcuts-modal) */
+.artweb-help-modal { max-width: 520px; }
+.artweb-help-body { padding: 4px 4px 2px; }
+.artweb-help-section { margin-bottom: 14px; }
+.artweb-help-section h4 { margin: 0 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,0.5); }
+.artweb-help-section p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.78); }
+.artweb-help-section b { color: rgba(255,255,255,0.95); font-weight: 600; }
 #artist-map-canvas { flex: 1; display: block; cursor: grab; }
 #artist-map-canvas:active { cursor: grabbing; }
 #artist-map-loading {
