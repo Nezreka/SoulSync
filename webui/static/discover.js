@@ -7386,6 +7386,30 @@ function artWebFitToView() {
 }
 
 // ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
+// Resolved artist-thumb cache for the hover tooltip, keyed by library artist id. Value: a URL
+// string, '' (tried, none), or null (in-flight) — any non-undefined means "don't refetch".
+const _artWebThumbCache = {};
+let _artWebTipThumbTimer = null;
+
+// Resolve one owned artist's browser-loadable thumb (same endpoint the side-panel avatar uses),
+// cache it, and swap it into the tooltip IF we're still hovering that exact node.
+function _artWebResolveTipThumb(nodeKey, artistId) {
+    _artWebThumbCache[artistId] = null;   // in-flight
+    fetch(`/api/library/artist/${encodeURIComponent(artistId)}/thumb`)
+        .then(r => r.json())
+        .then(d => {
+            const url = (d && d.success && d.image_url) ? d.image_url : '';
+            _artWebThumbCache[artistId] = url;
+            const tip = document.getElementById('artist-web-tooltip');
+            if (url && tip && tip._node === nodeKey && tip.style.display !== 'none') {
+                const slot = tip.querySelector('.artmap-tip-img');
+                if (slot) slot.outerHTML =
+                    `<img class="artmap-tip-img" src="${escapeHtml(url)}" alt="" onerror="this.style.display='none'">`;
+            }
+        })
+        .catch(() => { _artWebThumbCache[artistId] = ''; });
+}
+
 // Hover tooltip — identify any node without clicking (name + genre + connection count). Rebuilt only
 // when the hovered node changes; a plain mousemove just repositions it. Positioned at the pointer.
 function _artWebShowTooltip(nodeKey) {
@@ -7405,7 +7429,12 @@ function _artWebShowTooltip(nodeKey) {
         const noun = kind === 'genre' ? 'artist' : 'connection';
         const badge = kind === 'discovery' ? '<span class="artmap-tip-badge">To discover</span>'
                     : kind === 'genre' ? '<span class="artmap-tip-badge">Genre</span>' : '';
-        const imgSrc = a.thumb || a.image_url;   // discovery candidates store image_url, not thumb
+        // Image: discovery candidates ship a full image_url. Owned artists carry a Plex-RELATIVE
+        // thumb that won't load as-is (like the side panel's avatar), so resolve it lazily via the
+        // same /thumb endpoint and cache it — only for artists you actually pause on (cheap; the
+        // endpoint does a DB write per call so eager-resolving all ~5k would take minutes).
+        const cached = (a.artistId != null) ? _artWebThumbCache[a.artistId] : undefined;
+        const imgSrc = (kind === 'discovery') ? a.image_url : (cached || null);
         const img = imgSrc
             ? `<img class="artmap-tip-img" src="${escapeHtml(imgSrc)}" alt="" onerror="this.style.display='none'">`
             : (kind === 'genre' ? '' : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
@@ -7415,6 +7444,17 @@ function _artWebShowTooltip(nodeKey) {
         tip.innerHTML = `<div class="artmap-tip-row">${img}<div class="artmap-tip-info">` +
             `<div class="artmap-tip-name">${escapeHtml(a.label || '')}</div>${badge}${connHTML}${genreHTML}</div></div>`;
         tip.style.display = 'block';
+
+        // Kick off a debounced lazy thumb resolve for an owned artist we haven't cached yet — the
+        // ~140ms delay means a fast sweep across nodes doesn't fetch for every one you graze past.
+        if (!imgSrc && kind !== 'genre' && kind !== 'discovery'
+            && a.artistId != null && _artWebThumbCache[a.artistId] === undefined) {
+            clearTimeout(_artWebTipThumbTimer);
+            const aid = a.artistId;
+            _artWebTipThumbTimer = setTimeout(() => {
+                if (tip._node === nodeKey && _artWebThumbCache[aid] === undefined) _artWebResolveTipThumb(nodeKey, aid);
+            }, 140);
+        }
     }
     const m = _artistWeb._mouse;
     if (m) {
