@@ -161,6 +161,7 @@ export function AutoImportPanel({
     statusQuery.error && !statusQuery.data ? getErrorMessage(statusQuery.error) : '';
   const resultsError =
     resultsQuery.error && !resultsQuery.data ? getErrorMessage(resultsQuery.error) : '';
+  const settingsReady = Boolean(settingsQuery.data);
 
   return (
     <>
@@ -232,6 +233,7 @@ export function AutoImportPanel({
               <Select
                 id="auto-import-quality-profile"
                 size="sm"
+                disabled={!settingsReady}
                 value={qualityProfileId ?? ''}
                 onChange={(event) =>
                   setQualityProfileId(event.target.value ? Number(event.target.value) : null)
@@ -249,7 +251,7 @@ export function AutoImportPanel({
             <Button
               variant="primary"
               size="sm"
-              disabled={saveSettingsMutation.isPending}
+              disabled={saveSettingsMutation.isPending || !settingsReady}
               onClick={() =>
                 saveSettingsMutation.mutate({
                   confidenceThreshold: confidence / 100,

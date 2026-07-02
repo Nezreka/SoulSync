@@ -70,6 +70,23 @@ def test_add_to_wishlist_falls_back_to_default_for_unknown_profile_id(db):
     assert _wishlist_profile_id(db, "sp3") == 1
 
 
+def test_add_to_wishlist_does_not_hardcode_deleted_profile_one(db):
+    """Users may delete the factory id=1 row. Unknown/omitted assignments must
+    resolve to the promoted default, not leave a dangling quality_profile_id=1."""
+    pid = db.create_quality_profile("Remaining Default", {"ranked_targets": []})
+    assert pid is not None
+    ok, reason = db.delete_quality_profile(1)
+    assert ok is True and reason == ""
+
+    default = next(p for p in db.list_quality_profiles() if p["is_default"])
+    assert default["id"] != 1
+
+    assert db.add_to_wishlist(
+        _track("sp3b"), source_type="manual", user_initiated=True, quality_profile_id=99999,
+    ) is True
+    assert _wishlist_profile_id(db, "sp3b") == default["id"]
+
+
 def test_get_wishlist_tracks_surfaces_quality_profile_id(db):
     pid = db.create_quality_profile("For Read", {
         "ranked_targets": [{"label": "MP3", "format": "mp3", "min_bitrate": 320}],

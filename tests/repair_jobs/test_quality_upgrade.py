@@ -13,6 +13,7 @@ from __future__ import annotations
 import types
 
 import core.repair_jobs.quality_upgrade as qu
+import core.repair_jobs.quality_upgrade_scanner as qs
 from core.repair_jobs.base import JobContext, JobResult
 
 
@@ -424,6 +425,78 @@ def test_scan_flags_accepted_track_below_profile_cutoff(monkeypatch):
     assert findings[0]['details']['quality_profile_id'] == 11
     assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
     assert 'FLAC 24-bit' in findings[0]['description']
+
+
+def test_flag_only_scanner_finding_carries_profile_for_redownload(monkeypatch, tmp_path):
+    """The passive Quality Check scanner does not pre-search a replacement, so
+    the finding itself must remember the profile that made the file below
+    cutoff; the redownload action then queues the replacement under that same
+    profile."""
+    audio_path = tmp_path / "song.mp3"
+    audio_path.write_bytes(b"fake")
+    profile = {
+        'id': 12,
+        'name': 'Strict FLAC',
+        'upgrade_policy': 'until_cutoff',
+        'upgrade_cutoff_index': 0,
+        'ranked_targets': [
+            {'label': 'FLAC 24-bit', 'format': 'flac', 'bit_depth': 24},
+            {'label': 'MP3 320', 'format': 'mp3', 'min_bitrate': 320},
+        ],
+    }
+    from core.quality.model import AudioQuality, QualityTarget
+    targets = [
+        QualityTarget(label='FLAC 24-bit', format='flac', bit_depth=24),
+        QualityTarget(label='MP3 320', format='mp3', min_bitrate=320),
+    ]
+
+    class _DB:
+        def get_quality_profile(self):
+            return profile
+
+    monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(qs, 'rank_candidate', lambda aq, ts: (1, 0))
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda aq, ts: True)
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        '_collect_music_dirs',
+        lambda self, context: [str(tmp_path)],
+    )
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob,
+        '_build_db_suffix_index',
+        lambda self, context: {
+            'song.mp3': {
+                'track_id': 5,
+                'title': 'Song',
+                'artist': 'Artist A',
+                'album': 'Album X',
+                'track_number': 1,
+                'quality_profile_id': 12,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        'core.imports.file_ops.probe_audio_quality',
+        lambda path: AudioQuality(format='mp3', bitrate=320),
+    )
+    monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
+
+    findings = []
+    ctx = JobContext(
+        db=_DB(),
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        should_stop=lambda: False,
+        is_paused=lambda: False,
+    )
+
+    result = qs.QualityUpgradeScannerJob().scan(ctx)
+
+    assert result.findings_created == 1
+    assert findings[0]['details']['quality_profile_id'] == 12
+    assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
 
 
 # --- fix handler adds to wishlist ------------------------------------------

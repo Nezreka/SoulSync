@@ -9271,7 +9271,9 @@ class MusicDatabase:
             # way). Outside the DB transaction — config is a separate store.
             try:
                 from config.settings import config_manager
-                if config_manager.get('auto_import.quality_profile_id') == profile_id:
+                current_auto_import_profile = config_manager.get('auto_import.quality_profile_id')
+                if (current_auto_import_profile is not None
+                        and str(current_auto_import_profile) == str(profile_id)):
                     config_manager.set('auto_import.quality_profile_id', None)
             except Exception as e:  # noqa: BLE001
                 logger.debug("auto-import profile reference cleanup skipped: %s", e)
@@ -9640,15 +9642,16 @@ class MusicDatabase:
             logger.debug("blocklist guard skipped: %s", e)
             return None
 
-    def _resolve_quality_profile_id(self, cursor, quality_profile_id: Optional[int] = None) -> int:
+    def _resolve_quality_profile_id(self, cursor, quality_profile_id: Optional[int] = None) -> Optional[int]:
         """Resolve a ``quality_profile_id`` (or ``None`` -> the app-wide
         default) into a concrete profile id to store on a wishlist row at
         insert time. This is only ever a pointer — every pipeline stage
         resolves the profile's actual settings LIVE via
         ``core/quality/selection.py::load_profile_by_id`` when it needs them,
         so editing a profile later takes effect immediately for every item
-        assigned to it. Never raises; falls back to id 1 (the factory
-        default) on any error."""
+        assigned to it. Never raises; falls back to any existing profile, then
+        NULL if the table is unreadable/empty (NULL means "use the default" at
+        read time)."""
         try:
             row = None
             if quality_profile_id:
@@ -9659,10 +9662,14 @@ class MusicDatabase:
                 row = cursor.execute(
                     "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
                 ).fetchone()
-            return row["id"] if row is not None else 1
+            if row is None:
+                row = cursor.execute(
+                    "SELECT id FROM quality_profiles ORDER BY id LIMIT 1"
+                ).fetchone()
+            return int(row["id"]) if row is not None else None
         except Exception as e:
             logger.debug("Could not resolve quality profile id: %s", e)
-            return 1
+            return None
 
     def add_to_wishlist(
         self,

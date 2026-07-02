@@ -69,6 +69,22 @@ def _str(config_manager, key: str, default: str) -> str:
         return default
 
 
+def _legacy_import_quality_filter_disabled(config_manager) -> bool:
+    """Whether the old import-only quality gate was explicitly disabled.
+
+    That switch no longer exists as a separate setting: "accept anything" is
+    represented by the profile's fallback behaviour. Preserve upgrades from
+    installs where the user had deliberately turned the old gate off.
+    """
+    try:
+        value = config_manager.get("import.quality_filter_enabled", True)
+    except Exception:  # noqa: BLE001
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in ("0", "false", "no", "off")
+    return value is False
+
+
 def _resolve_settings_bundle(config_manager) -> dict:
     """Read every Settings -> Quality toggle the profile now captures.
 
@@ -151,6 +167,8 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         legacy_profile = database._legacy_quality_profile_from_preferences()
         fields = _profile_row_fields(legacy_profile)
         bundle = _resolve_settings_bundle(config_manager)
+        if _legacy_import_quality_filter_disabled(config_manager):
+            fields["fallback_enabled"] = 1
         default_profile_id = _default_profile_id(cursor)
 
         # Overwrite (not INSERT OR IGNORE) — `_seed_quality_profiles` already

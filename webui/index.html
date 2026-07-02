@@ -6659,19 +6659,19 @@
                                     <div class="setting-row">
                                         <label class="checkbox-label">
                                             <input type="checkbox" id="import-folder-artist-override">
-                                            Auto-Import: use the top Staging folder as the artist
+                                            Use the top Staging folder as the artist
                                         </label>
                                         <span class="info-icon" role="button" tabindex="0" title="What's this?"
                                             onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
                                     </div>
                                     <div class="help-text setting-help-body" hidden>
-                                        On by default (legacy behaviour). Only affects <strong>Auto-Import</strong>. With
-                                        Artist/Album staging layouts, the top folder's name overrides the
-                                        metadata-identified artist — handy for mixtapes/compilations whose embedded
-                                        tags carry DJ names. <strong>Turn this off</strong> if you stage a mixed pile
-                                        of songs under one container folder: otherwise every file's artist gets
-                                        overwritten with that folder's name. With it off, the metadata-identified
-                                        artist is always kept.
+                                        On by default (legacy behaviour). When enabled, files staged as
+                                        <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
+                                        folder as the album artist — handy for mixtapes/compilations whose embedded tags
+                                        carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
+                                        under one container folder: otherwise every file's artist gets overwritten with
+                                        that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
+                                        metadata-identified artist is always kept.
                                     </div>
                                 </div>
                                 <div class="form-group">

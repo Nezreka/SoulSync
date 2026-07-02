@@ -52,12 +52,14 @@ def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict):
 
 def _profile_bundle(profile: dict, settings: dict) -> dict:
     """Precompute the per-profile values the scan loop needs (targets, cutoff
-    index) once per distinct profile, so a per-track override only costs a DB
-    lookup the first time that profile is seen."""
+    index, id/name for the finding) once per distinct profile, so a per-track
+    override only costs a DB lookup the first time that profile is seen."""
     targets, _fallback = targets_from_profile(profile)
     return {
         'targets': targets,
         'cutoff_index': _upgrade_cutoff_index(profile, targets, settings),
+        'id': profile.get('id'),
+        'name': profile.get('name') or profile.get('preset') or 'default',
     }
 
 
@@ -220,6 +222,8 @@ class QualityUpgradeScannerJob(RepairJob):
             bundle = _bundle_for(meta.get('quality_profile_id'))
             targets = bundle['targets']
             cutoff_index = bundle['cutoff_index']
+            quality_profile_id = bundle.get('id')
+            quality_profile_name = bundle.get('name')
 
             result.scanned += 1
             if context.report_progress and i % 25 == 0:
@@ -313,6 +317,8 @@ class QualityUpgradeScannerJob(RepairJob):
                         'track_number': meta.get('track_number'),
                         'album_thumb_url': meta.get('album_thumb_url'),
                         'artist_thumb_url': meta.get('artist_thumb_url'),
+                        'quality_profile_id': quality_profile_id,
+                        'quality_profile_name': quality_profile_name,
                     },
                 )
                 if inserted:
