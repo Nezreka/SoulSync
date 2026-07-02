@@ -150,6 +150,15 @@ class ImageCache:
         if not self._is_fetch_allowed(url):
             raise ImageCacheError("Image host is not allowed")
 
+        # Referer must match the image's own origin, not a fixed site — this cache
+        # serves artwork from every metadata source (Deezer, Bandcamp, etc.), and a
+        # CDN with hotlink protection (e.g. Bandcamp's bcbits.com) rejects a referer
+        # for an unrelated site. A same-origin referer is what a real browser would
+        # send navigating the source site directly, so it satisfies that check
+        # everywhere instead of only the one host this used to be hardcoded for.
+        parsed_origin = urlparse(url)
+        referer = f"{parsed_origin.scheme}://{parsed_origin.netloc}/" if parsed_origin.netloc else url
+
         response = self.fetcher(
             url,
             timeout=10,
@@ -160,7 +169,7 @@ class ImageCache:
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 ),
                 "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-                "Referer": "https://www.deezer.com/",
+                "Referer": referer,
             },
         )
         try:
