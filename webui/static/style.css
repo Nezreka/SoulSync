@@ -35233,6 +35233,7 @@ div.artist-hero-badge {
 .ya-why-chip.ya-why-genre { background: rgba(29,185,84,0.6); border-color: rgba(29,185,84,0.45); }
 .ya-why-chip.ya-why-obscure { background: rgba(124,92,224,0.6); border-color: rgba(150,118,240,0.45); }
 .ya-why-chip.ya-why-consensus { background: rgba(0,0,0,0.62); }
+.ya-why-chip.ya-why-explore { background: rgba(255,152,0,0.55); border-color: rgba(255,167,38,0.45); }
 /* Owned / missing indicator on album cards (corner badge). */
 .discover-album-badge {
     width: 20px; height: 20px; border-radius: 50%;

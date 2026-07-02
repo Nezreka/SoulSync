@@ -7,6 +7,7 @@ from core.discovery.listening_recommendations import (
     aggregate_candidate_tracks,
     apply_adventurousness,
     apply_adventurous_blend,
+    diversify_by_genre,
     build_genre_taste_profile,
     build_recency_weighted_seeds,
     genre_affinity,
@@ -506,3 +507,49 @@ def test_blend_empty_and_returns_new_list():
     assert apply_adventurous_blend([], 0.5) == []
     src = [_cand("A", 1, 10)]
     assert apply_adventurous_blend(src, 0.5, base_key="score") is not src
+
+
+# ── diversify_by_genre (spread the discovery surface) ─────────────────────────
+
+def _gi(name, genre):
+    return {"name": name, "genres": [genre] if genre else []}
+
+
+def _pg(it):
+    g = it.get("genres") or []
+    return g[0] if g else None
+
+
+def test_diversify_spreads_a_dominant_genre():
+    items = [_gi(f"r{i}", "rock") for i in range(5)] + [_gi("j", "jazz"), _gi("p", "pop")]
+    out = diversify_by_genre(items, _pg, cap=3)
+    top6 = [_pg(x) for x in out[:6]]
+    assert top6[:3] == ["rock", "rock", "rock"]          # cap respected
+    assert "jazz" in top6 and "pop" in top6              # spread into the top, not buried
+
+
+def test_diversify_preserves_rank_order_within_a_genre():
+    items = [_gi("r0", "rock"), _gi("r1", "rock"), _gi("j", "jazz"), _gi("r2", "rock"), _gi("r3", "rock")]
+    out = diversify_by_genre(items, _pg, cap=2)
+    assert [x["name"] for x in out if _pg(x) == "rock"] == ["r0", "r1", "r2", "r3"]
+
+
+def test_diversify_noop_small_or_single_genre():
+    small = [_gi("a", "rock"), _gi("b", "rock")]
+    assert diversify_by_genre(small, _pg, cap=3) == small
+    single = [_gi(f"a{i}", "rock") for i in range(5)]
+    assert [x["name"] for x in diversify_by_genre(single, _pg, cap=3)] == [f"a{i}" for i in range(5)]
+
+
+def test_diversify_genreless_not_held_back():
+    items = [_gi("r0", "rock"), _gi("r1", "rock"), _gi("r2", "rock"), _gi("r3", "rock"), _gi("n", None)]
+    out = diversify_by_genre(items, _pg, cap=3)
+    assert [x["name"] for x in out][:4] == ["r0", "r1", "r2", "n"]
+
+
+def test_why_chips_off_usual_path_only_on_adventurous_offtaste():
+    assert any(c["label"] == "Off your usual path" for c in why_chips(genre_affinity=0.1, level=0.9))
+    on_taste = why_chips(genre_affinity=0.8, level=0.9)
+    assert any(c["type"] == "genre" for c in on_taste)
+    assert not any(c["label"] == "Off your usual path" for c in on_taste)
+    assert not any(c["label"] == "Off your usual path" for c in why_chips(genre_affinity=0.1, level=0.3))

@@ -10841,12 +10841,18 @@ class MusicDatabase:
                     # scale. Consensus keeps a small floor (0.2 at dial 1) so picks stay relevant;
                     # obscurity grows to dominate, so the adventurous end pulls deep cuts out of the
                     # long tail instead of re-ordering the same rotation window.
-                    # NB: use the aggregates explicitly (SUM/MAX) — inside an ORDER BY *expression* a
-                    # bare `occurrence_count` binds to the per-row base column, not the SUM alias.
-                    order_clause = """ORDER BY (
-                            (SUM(sa.occurrence_count) * 5.0) * (1.0 - 0.8 * ?)
-                            + (100.0 - COALESCE(MAX(sa.popularity), 50)) * (0.2 + 0.8 * ?)
-                        ) DESC,
+                    # Dial-weighted score bucketed into coarse tiers so near-ties can ROTATE by
+                    # last_featured (freshness — you see different deep cuts across sessions instead of
+                    # the same ones). Consensus fades hard (floor 0.1 at dial 1) so the far right is a
+                    # genuine deep dive. NB: use the aggregates explicitly (SUM/MAX) — inside an ORDER
+                    # BY *expression* a bare `occurrence_count` binds to the per-row column, not the alias.
+                    order_clause = """ORDER BY
+                        CAST((
+                            (SUM(sa.occurrence_count) * 5.0) * (1.0 - 0.9 * ?)
+                            + (100.0 - COALESCE(MAX(sa.popularity), 50)) * (0.1 + 0.9 * ?)
+                        ) / 6 AS INTEGER) DESC,
+                        CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,
+                        MAX(sa.last_featured) ASC,
                         SUM(sa.occurrence_count) DESC,
                         AVG(sa.similarity_rank) ASC"""
                     order_params = (_dial, _dial)
