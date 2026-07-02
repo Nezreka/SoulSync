@@ -10023,6 +10023,34 @@ def expand_discovery_graph():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
+def get_library_artist_thumb(artist_id):
+    """Browser-loadable thumb URL for ONE library artist, by library DB id.
+
+    Used by the Artist Web side panel. Two deliberate choices:
+    - Lazily per-click, not eagerly for every node: normalize_image_url registers the URL in the
+      image cache (a DB write transaction each) — doing that for ~5k artists per graph load takes
+      minutes; one artist per panel open is instant.
+    - By LIBRARY id against the artists table — the generic /api/artist/<id>/image resolver sends
+      whatever id it gets to external providers, so a library row id returned whichever Deezer/iTunes
+      artist happened to own that number (wrong photo, essentially always).
+    """
+    try:
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            row = cur.execute("SELECT thumb_url FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        finally:
+            conn.close()
+        thumb = row['thumb_url'] if row else None
+        url = fix_artist_image_url(thumb) if thumb else None
+        return jsonify({"success": True, "image_url": url})
+    except Exception as e:
+        logger.error("[artist-thumb] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "image_url": None}), 500
+
+
 @app.route('/api/library/export/m3u', methods=['GET'])
 def export_library_m3u():
     """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
