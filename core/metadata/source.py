@@ -466,7 +466,7 @@ def _process_deezer_source(pp: dict, metadata: dict, cfg, runtime, track_title: 
 
 
 def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import get_jiosaavn_client, is_jiosaavn_enabled
     if not is_jiosaavn_enabled():
         return
     if cfg.get("jiosaavn.embed_tags", True) is False:
@@ -476,6 +476,8 @@ def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title
 
     jiosaavn_worker = getattr(runtime, "jiosaavn_worker", None)
     js_client = jiosaavn_worker.client if jiosaavn_worker else None
+    if not js_client:
+        js_client = get_jiosaavn_client()
     if not js_client:
         return
 
@@ -500,10 +502,14 @@ def _process_jiosaavn_source(pp: dict, metadata: dict, cfg, runtime, track_title
             album_id = details.get("album_id")
             if album_id:
                 pp["id_tags"]["JIOSAAVN_ALBUM_ID"] = str(album_id)
+            if cfg.get("jiosaavn.tags.artist_id", True):
+                artist_id = details.get("artist_id")
+                if artist_id:
+                    pp["id_tags"]["JIOSAAVN_ARTIST_ID"] = str(artist_id)
         if not pp["release_year"]:
-                release = (getattr(js_result, 'release_date', None) or '') or ''
-                if len(str(release)) >= 4 and str(release)[:4].isdigit():
-                    pp["release_year"] = str(release)[:4]
+            release = (getattr(js_result, 'release_date', None) or '') or ''
+            if len(str(release)) >= 4 and str(release)[:4].isdigit():
+                pp["release_year"] = str(release)[:4]
 
 
 def _process_audiodb_source(pp: dict, metadata: dict, cfg, runtime, track_title: str, artist_name: str) -> None:
@@ -1320,6 +1326,10 @@ def embed_source_ids(audio_file, metadata: dict, context: dict = None, runtime=N
                 if cfg.get("tidal.tags.copyright", True) and cached_meta.get("copyright"):
                     pp["tidal_copyright"] = cached_meta["copyright"]
             source_order = [s for s in source_order if s != "tidal"]
+
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            source_order = [s for s in source_order if s != "jiosaavn"]
 
         db = get_database()
 

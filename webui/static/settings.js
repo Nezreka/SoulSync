@@ -204,6 +204,9 @@ function syncJiosaavnEnrichmentBubble(enabled) {
     if (enabled && typeof renderEnrichmentRail === 'function') {
         renderEnrichmentRail();
     }
+    if (window._lastStatusPayload?.enrichment && typeof renderEnrichmentCards === 'function') {
+        renderEnrichmentCards(window._lastStatusPayload.enrichment);
+    }
 }
 
 async function onExperimentalJiosaavnToggle(checkbox) {

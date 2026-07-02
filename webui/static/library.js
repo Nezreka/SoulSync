@@ -1168,7 +1168,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
         return;
     }
 
-    const services = [
+    const services = filterJiosaavnServiceEntries([
         { name: 'Spotify', key: 'spotify', color: '#1db954' },
         { name: 'MusicBrainz', key: 'musicbrainz', color: '#ba55d3' },
         { name: 'Deezer', key: 'deezer', color: '#a238ff' },
@@ -1180,7 +1180,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
         { name: 'Genius', key: 'genius', color: '#ffff64' },
         { name: 'Tidal', key: 'tidal', color: '#00ffff' },
         { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
-    ];
+    ], 'key');
 
     const r = 20, circ = 2 * Math.PI * r;
 
@@ -3131,7 +3131,7 @@ function renderArtistMetaPanel(artist) {
     // ID badges row (clickable links)
     const idBadges = document.createElement('div');
     idBadges.className = 'enhanced-artist-id-badges';
-    const idSources = [
+    const idSources = filterJiosaavnServiceEntries([
         { key: 'spotify_artist_id', label: 'Spotify', svc: 'spotify' },
         { key: 'musicbrainz_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
@@ -3144,7 +3144,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'tidal_id', label: 'Tidal', svc: 'tidal' },
         { key: 'qobuz_id', label: 'Qobuz', svc: 'qobuz' },
         { key: 'amazon_id', label: 'Amazon Music', svc: 'amazon' },
-    ];
+    ], 'svc');
     idSources.forEach(src => {
         if (artist[src.key]) {
             idBadges.appendChild(makeClickableBadge(src.svc, 'artist', artist[src.key], src.label));
@@ -3191,7 +3191,7 @@ function renderArtistMetaPanel(artist) {
 
         const enrichMenu = document.createElement('div');
         enrichMenu.className = 'enhanced-enrich-menu';
-        const services = [
+        const services = filterJiosaavnServiceEntries([
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
@@ -3203,7 +3203,7 @@ function renderArtistMetaPanel(artist) {
             { id: 'genius', label: 'Genius', icon: '🟡' },
             { id: 'tidal', label: 'Tidal', icon: '⬛' },
             { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
-        ];
+        ], 'id');
         services.forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
@@ -3279,7 +3279,7 @@ function renderArtistMetaPanel(artist) {
     // Match status row (clickable to rematch)
     const statusRow = document.createElement('div');
     statusRow.className = 'enhanced-match-status-row';
-    const statusServices = [
+    const statusServices = filterJiosaavnServiceEntries([
         { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
         { key: 'musicbrainz_match_status', label: 'MusicBrainz', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
@@ -3292,7 +3292,7 @@ function renderArtistMetaPanel(artist) {
         { key: 'tidal_match_status', label: 'Tidal', attempted: 'tidal_last_attempted', svc: 'tidal' },
         { key: 'qobuz_match_status', label: 'Qobuz', attempted: 'qobuz_last_attempted', svc: 'qobuz' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
-    ];
+    ], 'svc');
     statusServices.forEach(s => {
         const status = artist[s.key];
         const attempted = artist[s.attempted];
@@ -3774,7 +3774,7 @@ function renderExpandedAlbumHeader(album) {
     // External ID badges (clickable links)
     const ids = document.createElement('div');
     ids.className = 'enhanced-expanded-ids';
-    const idFields = [
+    const idFields = filterJiosaavnServiceEntries([
         { key: 'spotify_album_id', label: 'Spotify', svc: 'spotify' },
         { key: 'musicbrainz_release_id', label: 'MusicBrainz', svc: 'musicbrainz' },
         { key: 'deezer_id', label: 'Deezer', svc: 'deezer' },
@@ -3783,7 +3783,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
-    ];
+    ], 'svc');
     idFields.forEach(f => {
         if (album[f.key]) {
             ids.appendChild(makeClickableBadge(f.svc, 'album', album[f.key], f.label));
@@ -3797,7 +3797,7 @@ function renderExpandedAlbumHeader(album) {
     // Match status chips (clickable to rematch)
     const statusRow = document.createElement('div');
     statusRow.className = 'enhanced-match-status-row compact';
-    const statusSvcs = [
+    const statusSvcs = filterJiosaavnServiceEntries([
         { key: 'spotify_match_status', label: 'Spotify', attempted: 'spotify_last_attempted', svc: 'spotify' },
         { key: 'musicbrainz_match_status', label: 'MB', attempted: 'musicbrainz_last_attempted', svc: 'musicbrainz' },
         { key: 'deezer_match_status', label: 'Deezer', attempted: 'deezer_last_attempted', svc: 'deezer' },
@@ -3807,7 +3807,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
-    ];
+    ], 'svc');
     statusSvcs.forEach(s => {
         const status = album[s.key];
         const attempted = album[s.attempted];
@@ -3841,7 +3841,7 @@ function renderExpandedAlbumHeader(album) {
         albumEnrichWrap.appendChild(albumEnrichBtn);
         const albumEnrichMenu = document.createElement('div');
         albumEnrichMenu.className = 'enhanced-enrich-menu';
-        [
+        filterJiosaavnServiceEntries([
             { id: 'spotify', label: 'Spotify', icon: '🟢' },
             { id: 'musicbrainz', label: 'MusicBrainz', icon: '🟠' },
             { id: 'deezer', label: 'Deezer', icon: '🟣' },
@@ -3851,7 +3851,7 @@ function renderExpandedAlbumHeader(album) {
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
             { id: 'genius', label: 'Genius', icon: '🟡' },
-        ].forEach(svc => {
+        ], 'id').forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
             item.textContent = `${svc.icon} ${svc.label}`;
@@ -4277,7 +4277,7 @@ function _buildTrackRow(track, album, admin) {
     matchTd.className = 'col-match';
     const matchCell = document.createElement('div');
     matchCell.className = 'enhanced-track-match-cell';
-    const trackServices = [
+    const trackServices = filterJiosaavnServiceEntries([
         { svc: 'spotify', col: 'spotify_track_id', label: 'SP' },
         { svc: 'musicbrainz', col: 'musicbrainz_recording_id', label: 'MB' },
         { svc: 'deezer', col: 'deezer_id', label: 'Dz' },
@@ -4286,7 +4286,7 @@ function _buildTrackRow(track, album, admin) {
         { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
         { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
         { svc: 'genius', col: 'genius_id', label: 'Gen' },
-    ];
+    ], 'svc');
     trackServices.forEach(s => {
         const hasId = !!track[s.col];
         const chip = document.createElement('span');

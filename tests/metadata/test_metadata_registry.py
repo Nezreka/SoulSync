@@ -84,6 +84,36 @@ def test_apply_primary_metadata_source_rejects_disabled_experimental(monkeypatch
     assert not stored
 
 
+def test_resolve_settings_metadata_primary_enable_and_select():
+    err, override = registry.resolve_settings_metadata_primary(
+        {"jiosaavn_enabled": True},
+        {"fallback_source": "jiosaavn"},
+        lambda _key: False,
+    )
+    assert err is None
+    assert override is None
+
+
+def test_resolve_settings_metadata_primary_rejects_explicit_without_enable():
+    err, override = registry.resolve_settings_metadata_primary(
+        {"jiosaavn_enabled": False},
+        {"fallback_source": "jiosaavn"},
+        lambda _key: False,
+    )
+    assert err is not None
+    assert override is None
+
+
+def test_resolve_settings_metadata_primary_resets_when_disabling_experimental():
+    err, override = registry.resolve_settings_metadata_primary(
+        {"jiosaavn_enabled": False},
+        None,
+        lambda key: "jiosaavn" if key == "metadata.fallback_source" else True,
+    )
+    assert err is None
+    assert override == "deezer"
+
+
 def test_experimental_source_is_first_class_metadata_client(monkeypatch):
     monkeypatch.setattr(registry, "is_source_enabled", lambda source: True)
     registry.clear_cached_metadata_clients()

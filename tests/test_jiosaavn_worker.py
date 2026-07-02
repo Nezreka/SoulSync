@@ -208,6 +208,22 @@ class TestJioSaavnWorkerMatching:
         assert album[1] is not None
 
 
+    @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
+    def test_album_details_unavailable_leaves_status_unmarked(self, _enabled, worker, db):
+        _insert_artist(db)
+        _insert_album(db)
+
+        class _ClientNoAlbumDetails(_FakeJioSaavnClient):
+            def get_album(self, album_id):
+                return None
+
+        worker._client = _ClientNoAlbumDetails()
+        worker._process_album("al1", "Test Album", "Test Artist")
+        status, js_id = _status(db, "albums", "al1")
+        assert status is None
+        assert js_id is None
+
+
 class TestJioSaavnWorkerQueue:
     @patch("core.jiosaavn_worker.is_jiosaavn_enabled", return_value=True)
     def test_queue_prefers_artists(self, _enabled, worker, db):
@@ -230,3 +246,10 @@ class TestJioSaavnDbMigration:
 
 def test_jiosaavn_in_service_entity_support():
     assert SERVICE_ENTITY_SUPPORT["jiosaavn"] == ("artist", "album", "track")
+
+
+def test_enrichment_status_omits_jiosaavn_when_disabled(monkeypatch):
+    web_server = pytest.importorskip("web_server")
+    monkeypatch.setattr("core.metadata.registry.is_jiosaavn_enabled", lambda: False)
+    status = web_server._get_enrichment_status()
+    assert "jiosaavn_enrichment" not in status
