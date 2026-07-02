@@ -80,16 +80,32 @@ def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict) -> Optio
     return max(0, min(idx, len(targets) - 1))
 
 
+def _config_fingerprint(targets: list, cutoff_index: Optional[int]) -> str:
+    """Stable string identifying the exact upgrade decision this bundle would
+    make — the ranked targets themselves (not just the profile id, which
+    stays the same if the user edits an existing profile's targets in place)
+    plus the cutoff index. Stored on every finding at creation time so a
+    dismissed finding can be told apart from one that's stale only because
+    the profile/cutoff genuinely changed since — see
+    ``_load_dismissed_findings`` / the dismissed-track branch in ``scan``.
+    """
+    import json
+    return json.dumps({'targets': [t.to_dict() for t in targets], 'cutoff_index': cutoff_index},
+                       sort_keys=True)
+
+
 def _profile_bundle(profile: dict, settings: dict) -> Dict[str, Any]:
     """Precompute the per-profile values the scan loop needs (targets, cutoff
     index, id/name for the finding) once per distinct profile, so a per-track
     override only costs a DB lookup the first time that profile is seen."""
     targets, _fallback = targets_from_profile(profile)
+    cutoff_index = _upgrade_cutoff_index(profile, targets, settings)
     return {
         'targets': targets,
-        'cutoff_index': _upgrade_cutoff_index(profile, targets, settings),
+        'cutoff_index': cutoff_index,
         'id': profile.get('id'),
         'name': profile.get('name') or profile.get('preset') or 'default',
+        'config_fingerprint': _config_fingerprint(targets, cutoff_index),
     }
 
 
@@ -463,17 +479,76 @@ class QualityUpgradeJob(RepairJob):
             conn.close()
 
     def _load_existing_finding_ids(self, db: Any) -> set:
-        """Track IDs that already have a finding for this job (any status). Lets a
-        re-run skip tracks we've already proposed/dismissed without re-hitting the
-        metadata API — pending stays deduped, and a dismissed track stays dismissed."""
+        """Track IDs with a still-open (pending) or already-actioned
+        (resolved/auto_fixed) finding for this job — safe to skip re-matching
+        entirely on a re-run, without re-hitting the metadata API.
+
+        Deliberately excludes ``dismissed`` rows: a user dismissing one
+        proposal shouldn't permanently block re-evaluation forever. If the
+        profile changes later (stricter targets, a lowered upgrade cutoff),
+        a previously-dismissed track should get a fresh look — see
+        ``_load_dismissed_findings`` / ``_clear_stale_dismissed_finding``.
+        """
         conn = db._get_connection()
         try:
             rows = conn.execute(
-                "SELECT entity_id FROM repair_findings WHERE job_id = ? AND entity_type = 'track'",
+                "SELECT entity_id FROM repair_findings WHERE job_id = ? AND entity_type = 'track' "
+                "AND status IN ('pending', 'resolved', 'auto_fixed')",
                 (self.job_id,)).fetchall()
             return {str(r[0]) for r in rows if r and r[0] is not None}
         except Exception:
             return set()
+        finally:
+            conn.close()
+
+    def _load_dismissed_findings(self, db: Any) -> Dict[str, Optional[str]]:
+        """Map of {track_id: config_fingerprint} for tracks with a DISMISSED
+        finding for this job. The fingerprint (see ``_config_fingerprint``) is
+        whatever was stored in the finding's ``details_json`` at creation
+        time, so ``scan`` can tell a genuinely-stale dismissal (profile or
+        upgrade cutoff changed since) apart from one where nothing changed —
+        a track re-measuring as below-profile on every re-run must NOT keep
+        resurrecting a proposal the user already said no to. Findings created
+        before this fingerprint existed have no ``profile_config_fingerprint``
+        key and map to ``None``, which never equals a real fingerprint — that
+        one-time re-flag is an acceptable tradeoff for older installs."""
+        import json
+        conn = db._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT entity_id, details_json FROM repair_findings WHERE job_id = ? "
+                "AND entity_type = 'track' AND status = 'dismissed'",
+                (self.job_id,)).fetchall()
+            out: Dict[str, Optional[str]] = {}
+            for r in rows:
+                if not r or r[0] is None:
+                    continue
+                fingerprint = None
+                try:
+                    details = json.loads(r[1]) if r[1] else {}
+                    fingerprint = details.get('profile_config_fingerprint')
+                except (TypeError, ValueError):
+                    pass
+                out[str(r[0])] = fingerprint
+            return out
+        except Exception:
+            return {}
+        finally:
+            conn.close()
+
+    def _clear_stale_dismissed_finding(self, db: Any, track_id: Any) -> None:
+        """Delete a track's old dismissed finding for this job right before
+        re-flagging it under a changed profile, so the shared dedup in
+        ``RepairWorker._create_finding`` doesn't silently drop the new one."""
+        conn = db._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM repair_findings WHERE job_id = ? AND entity_type = 'track' "
+                "AND entity_id = ? AND status = 'dismissed'",
+                (self.job_id, str(track_id)))
+            conn.commit()
+        except Exception as e:
+            logger.debug("[Quality Upgrade] Could not clear stale dismissed finding for track %s: %s", track_id, e)
         finally:
             conn.close()
 
@@ -501,8 +576,17 @@ class QualityUpgradeJob(RepairJob):
         targets = default_bundle['targets']
         cutoff_index = default_bundle['cutoff_index']
         if not targets:
-            logger.info("[Quality Upgrade] No quality targets in profile — nothing to flag")
-            return result
+            # The default profile alone has nothing to enforce, but we can't
+            # bail out here: a per-track profile override (`_bundle_for_track`
+            # below) may still have real targets, and deep-audio-verify (if
+            # enabled) still needs to probe every file for broken/silent audio
+            # regardless of quality targets. `quality_meets_profile`/
+            # `rank_candidate` already treat an empty target list as "anything
+            # passes", so tracks resolving to this bundle simply skip cleanly
+            # further down instead of being excluded from the scan entirely.
+            logger.info("[Quality Upgrade] Default profile has no quality targets — "
+                        "scanning will still run deep-audio-verify (if enabled) and "
+                        "honor any stricter per-track profile overrides")
 
         logger.info(
             "[Quality Upgrade] scope=%s cutoff=%s · all targets: %s",
@@ -539,9 +623,14 @@ class QualityUpgradeJob(RepairJob):
         if context.report_progress:
             context.report_progress(phase=f'Checking quality on {total} tracks...', total=total)
 
-        # Tracks we've already proposed/dismissed — skip them so a re-run doesn't
-        # re-resolve the same tracks against the metadata API.
+        # Tracks with an open/actioned finding already — skip them so a re-run
+        # doesn't re-resolve the same tracks against the metadata API. Dismissed
+        # tracks are handled separately below: still evaluated, and only
+        # actually re-flagged if the applicable bundle's config_fingerprint has
+        # changed since the dismissal (a real profile/cutoff change) — not on
+        # every re-run just because the track still measures below profile.
         already_found = self._load_existing_finding_ids(db)
+        previously_dismissed = self._load_dismissed_findings(db)
 
         # Metadata source for matching — resolved lazily so we only fail if we
         # actually find a low-quality track that needs a match.
@@ -575,8 +664,19 @@ class QualityUpgradeJob(RepairJob):
             bundle = _bundle_for_track(row.get('quality_profile_id'))
             targets = bundle['targets']
             cutoff_index = bundle['cutoff_index']
+            config_fingerprint = bundle['config_fingerprint']
             quality_profile_id = bundle['id']
             quality_profile_name = bundle['name']
+
+            # A dismissed finding whose profile/cutoff hasn't changed since
+            # must NOT keep resurrecting on every re-run — skip before doing
+            # any audio probe or metadata matching at all, same as
+            # `already_found`. A CHANGED fingerprint falls through and is
+            # handled right before `create_finding` below (clear + re-flag).
+            if (str(track_id) in previously_dismissed
+                    and previously_dismissed[str(track_id)] == config_fingerprint):
+                result.findings_skipped_dedup += 1
+                continue
 
             # v3 quality decision — probe the REAL file. Resolve the library path
             # first (the DB stores a possibly-relative path). Pass config_manager so
@@ -713,6 +813,15 @@ class QualityUpgradeJob(RepairJob):
             if (not isinstance(alb, dict) or not alb.get('name')) and album_title:
                 matched['album'] = {'name': album_title, 'images': (alb or {}).get('images', []) if isinstance(alb, dict) else []}
 
+            if str(track_id) in previously_dismissed:
+                # Reaching this point at all means the fingerprint check near
+                # the top of the loop already found this dismissal stale
+                # (config genuinely changed) — clear the old dismissed row
+                # before re-inserting, or the shared dedup in
+                # RepairWorker._create_finding would silently drop the new
+                # one (same job_id+entity, any status).
+                self._clear_stale_dismissed_finding(db, track_id)
+
             if context.create_finding:
                 try:
                     inserted = context.create_finding(
@@ -740,6 +849,7 @@ class QualityUpgradeJob(RepairJob):
                             'current_bitrate': bitrate,
                             'quality_profile_id': quality_profile_id,
                             'quality_profile_name': quality_profile_name,
+                            'profile_config_fingerprint': config_fingerprint,
                             'match_confidence': conf,
                             'matched_via': matched_via,
                             'provider': source,

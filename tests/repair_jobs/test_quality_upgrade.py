@@ -92,37 +92,58 @@ def test_nothing_enabled_flags_nothing():
 # --- scan produces a finding (seam) ----------------------------------------
 
 class _FakeConn:
-    def __init__(self, rows, finding_ids=()):
+    def __init__(self, rows, finding_ids=(), dismissed=()):
+        import json as _json
         self._rows = rows
         self._finding_ids = list(finding_ids)
+        # dismissed: iterable of (track_id, stored_fingerprint_or_None) —
+        # mirrors what `_load_dismissed_findings` reads out of details_json.
+        self._dismissed_rows = [
+            (str(tid), _json.dumps({'profile_config_fingerprint': fp}) if fp is not None else '{}')
+            for tid, fp in dismissed
+        ]
         self._sql = ''
+        self.deleted_dismissed_params = []
 
-    def execute(self, sql='', *a, **k):
+    def execute(self, sql='', params=(), *a, **k):
         self._sql = sql or ''
+        if self._sql.strip().startswith('DELETE'):
+            self.deleted_dismissed_params.append(params)
         return self
 
     def fetchall(self):
-        # The existing-findings query reads repair_findings; everything else is the
-        # track load.
+        # The existing-findings queries read repair_findings; everything else
+        # is the track load. Distinguish "already found" (pending/resolved/
+        # auto_fixed — see _load_existing_finding_ids) from "dismissed" (see
+        # _load_dismissed_findings) by their distinct WHERE clauses.
         if 'repair_findings' in self._sql:
+            if "status = 'dismissed'" in self._sql:
+                return self._dismissed_rows
             return [(fid,) for fid in self._finding_ids]
         return self._rows
+
+    def commit(self):
+        pass
 
     def close(self):
         pass
 
 
 class _FakeDB:
-    def __init__(self, rows, profile, finding_ids=()):
+    def __init__(self, rows, profile, finding_ids=(), dismissed=()):
         self._rows = rows
         self._profile = profile
         self._finding_ids = finding_ids
+        self._dismissed = dismissed
+        self.conns = []
 
     def get_quality_profile(self):
         return self._profile
 
     def _get_connection(self):
-        return _FakeConn(self._rows, self._finding_ids)
+        conn = _FakeConn(self._rows, self._finding_ids, self._dismissed)
+        self.conns.append(conn)
+        return conn
 
     def get_watchlist_artists(self, profile_id=1):
         return [types.SimpleNamespace(artist_name='Artist A')]
@@ -259,6 +280,82 @@ def test_scan_skips_already_proposed_tracks(monkeypatch):
     result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
     assert findings == []
     assert result.findings_skipped_dedup == 1
+
+
+def test_scan_with_empty_default_targets_still_processes_tracks(monkeypatch):
+    """Before the fix, a default profile with no ranked targets (e.g. an
+    "accept anything" profile) made scan() return immediately WITHOUT ever
+    loading or probing a single track — silently skipping deep-audio-verify
+    and any per-track profile override too. It must now proceed: a track that
+    resolves to the empty-target bundle is still scanned/probed, just safely
+    skipped (quality_meets_profile with no targets is vacuously true)."""
+    from core.quality.model import AudioQuality
+    db = _FakeDB([_row(bitrate=128)], NOTHING_ENABLED)
+    monkeypatch.setattr(qu, 'resolve_library_file_path', lambda p, **kw: p)
+    monkeypatch.setattr(qu, 'probe_audio_quality', lambda p: AudioQuality(format='mp3', bitrate=128))
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.scanned == 1
+    assert result.skipped == 1
+    assert result.findings_created == 0
+    assert findings == []
+
+
+def test_dismissed_finding_is_cleared_and_reflagged_when_config_changed(monkeypatch):
+    """A dismissed finding must not permanently block re-evaluation: if the
+    profile/cutoff this track resolves to has genuinely changed since the
+    dismissal (here: an old finding with no stored fingerprint at all, from
+    before this field existed), the stale dismissed row is deleted before a
+    fresh finding is created — otherwise the shared repair-findings dedup
+    would silently refuse to insert a duplicate for the same job_id+entity
+    forever."""
+    db = _FakeDB([_row(track_id=7, bitrate=128)], BALANCED, dismissed=[(7, None)])
+    _stub_engine(monkeypatch)
+    fake_match = {'id': 'sp1', 'name': 'Song One', 'artists': ['Artist A'],
+                  'album': {'name': 'Album X', 'images': []}}
+    monkeypatch.setattr(qu, '_read_file_ids', lambda fp, **kw: {})
+    monkeypatch.setattr(qu, '_match_via_track_id', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_match_via_album', lambda *a, **k: (None, None))
+    monkeypatch.setattr(qu, '_find_best_match',
+                        lambda *a, **k: (fake_match, 0.95, 'spotify', True))
+    monkeypatch.setattr(qu, '_normalize_track_match', lambda track, src: dict(fake_match))
+    monkeypatch.setattr(qu, '_track_name', lambda t: 'Song One')
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['entity_id'] == '7'
+    assert 'profile_config_fingerprint' in findings[0]['details']
+    # The stale dismissed row for track 7 was deleted before the re-insert.
+    deletes = [p for conn in db.conns for p in conn.deleted_dismissed_params]
+    assert any('7' in params for params in deletes)
+
+
+def test_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch):
+    """The opposite of the test above: if the profile/cutoff hasn't changed
+    since the dismissal, a track that still measures below-profile on every
+    re-run must NOT keep resurrecting a proposal the user already said no to."""
+    from core.quality.model import QualityTarget
+    _stub_engine(monkeypatch)  # forces targets_from_profile → [MP3 320 target], cutoff None
+    stable_fingerprint = qu._config_fingerprint(
+        [QualityTarget(label='MP3 320', format='mp3', min_bitrate=320)], None)
+    db = _FakeDB([_row(track_id=7, bitrate=128)], BALANCED, dismissed=[(7, stable_fingerprint)])
+
+    def _boom(*a, **k):
+        raise AssertionError("no matching for a dismissed track whose config hasn't changed")
+    monkeypatch.setattr(qu, '_match_via_track_id', _boom)
+    monkeypatch.setattr(qu, '_find_best_match', _boom)
+
+    findings = []
+    result = qu.QualityUpgradeJob().scan(_ctx(db, findings))
+
+    assert findings == []
+    assert result.findings_skipped_dedup == 1
+    deletes = [p for conn in db.conns for p in conn.deleted_dismissed_params]
+    assert deletes == []
 
 
 def test_match_via_isrc_accepts_exact_match(monkeypatch):

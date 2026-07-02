@@ -17,6 +17,7 @@ import pytest
 from database.music_database import MusicDatabase
 from core.quality.migrate_to_profiles import (
     materialize_default_profile_and_backfill,
+    apply_pending_quality_profile_config_writes,
     _MIGRATION_FLAG_KEY,
 )
 
@@ -136,6 +137,11 @@ def test_migration_gives_auto_import_its_own_relaxed_profile_when_filter_was_off
         conn.commit()
 
         assert materialize_default_profile_and_backfill(db, conn) is True
+        conn.commit()
+        # The config write is deliberately deferred until after commit — see
+        # `apply_pending_quality_profile_config_writes`'s docstring.
+        assert "auto_import.quality_profile_id" not in set_calls
+        apply_pending_quality_profile_config_writes(db)
 
         # Default profile keeps the user's real fallback setting — untouched.
         default_row = conn.execute(
@@ -178,7 +184,75 @@ def test_migration_does_not_overwrite_existing_auto_import_override(db, monkeypa
         conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
         conn.commit()
         assert materialize_default_profile_and_backfill(db, conn) is True
+        conn.commit()
+        apply_pending_quality_profile_config_writes(db)
         assert "auto_import.quality_profile_id" not in set_calls
+    finally:
+        conn.close()
+
+
+def test_migration_not_marked_done_when_relaxed_profile_creation_fails(db, monkeypatch):
+    """If creating the Auto-Import relaxed profile blows up, the whole
+    migration must NOT be marked complete — otherwise a transient failure
+    would silently and permanently drop the user's "quality filter off"
+    preference (the migration flag gates a one-time run; once set, it never
+    retries)."""
+    import core.quality.migrate_to_profiles as migrate_mod
+
+    class _FakeCfg:
+        def get(self, key, default=None):
+            return {"import.quality_filter_enabled": False}.get(key, default)
+
+        def set(self, key, value):
+            raise AssertionError("config_manager.set must not be called when migration fails")
+
+    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated insert failure")
+
+    monkeypatch.setattr(migrate_mod, "_materialize_relaxed_auto_import_profile", _boom)
+
+    _insert_wishlist_row(db, "sp_atomicity_1")
+
+    conn = db._get_connection()
+    try:
+        conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
+        # This row predates the fresh attempt below — quality_profile_id must
+        # come back out NULL if (and only if) the SAVEPOINT rollback actually
+        # undid the backfill UPDATE that ran earlier in the SAME failed attempt.
+        conn.execute(
+            "UPDATE wishlist_tracks SET quality_profile_id = NULL WHERE spotify_track_id = ?",
+            ("sp_atomicity_1",),
+        )
+        conn.commit()
+
+        assert materialize_default_profile_and_backfill(db, conn) is False
+
+        # Migration flag must still be absent — a later startup will retry.
+        row = conn.execute(
+            "SELECT value FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,)
+        ).fetchone()
+        assert row is None
+
+        # No pending config write survives a rolled-back migration.
+        pending_row = conn.execute(
+            "SELECT value FROM metadata WHERE key=?",
+            ("quality_profile_pending_config_writes",),
+        ).fetchone()
+        assert pending_row is None
+
+        # The atomicity fix: the wishlist backfill UPDATE that ran BEFORE the
+        # simulated failure must have been rolled back via SAVEPOINT, not left
+        # sitting in the (uncommitted-by-this-test) transaction. Read via the
+        # SAME connection/cursor — SQLite shows a connection its own
+        # uncommitted changes, so this only comes back NULL if the rollback
+        # genuinely happened.
+        wl_row = conn.execute(
+            "SELECT quality_profile_id FROM wishlist_tracks WHERE spotify_track_id = ?",
+            ("sp_atomicity_1",),
+        ).fetchone()
+        assert wl_row["quality_profile_id"] is None
     finally:
         conn.close()
 

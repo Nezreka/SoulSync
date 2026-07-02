@@ -3185,16 +3185,21 @@ async function applyCustomQualityProfile(profileId, name) {
     }
 }
 
-// The ONLY path that makes a profile the live default — every normal
-// download and Wishlist item (including anything downloading right now)
-// follows it from this moment on. Deliberately gated behind a confirmation:
-// the side panel's row-text click below only PREVIEWS a profile's settings
-// and must never have this side effect (that conflation was the bug —
-// clicking a profile to look at/edit it was silently making it live).
+// The ONLY path that makes a profile the live default. Anything with no
+// profile of its own (a brand-new download, or a library track whose
+// `quality_profile_id` is still NULL) resolves to this default immediately.
+// Existing Wishlist rows do NOT switch: `add_to_wishlist` pins a concrete,
+// resolved profile id on the row at insert time (see
+// `MusicDatabase._resolve_quality_profile_id`), so they keep following
+// whichever profile was default when they were queued — only NEW Wishlist
+// adds pick up this change. Deliberately gated behind a confirmation: the
+// side panel's row-text click below only PREVIEWS a profile's settings and
+// must never have this side effect (that conflation was the bug — clicking
+// a profile to look at/edit it was silently making it live).
 async function confirmSetDefaultQualityProfile(profileId, name) {
     if (!await showConfirmDialog({
         title: 'Set Active Profile',
-        message: `Make '${name}' the active default profile? Every normal download and Wishlist item — including anything downloading right now — immediately follows it.`,
+        message: `Make '${name}' the active default profile? New downloads and anything without its own profile follow it immediately — existing Wishlist items keep the profile they were queued with.`,
         confirmText: 'Set Active',
     })) return;
     await applyCustomQualityProfile(profileId, name);
@@ -3333,9 +3338,11 @@ async function toggleAutoImportQualityProfile(profileId) {
 
 // ── Manage overview modal ────────────────────────────────────────────────
 // The single place that answers "which profile does what right now": the
-// app-wide Default (every normal download/Wishlist item, including anything
-// downloading this second) and the Auto-Import override (Settings → Import,
-// falls back to Default when unset). Both assignments are also reachable
+// app-wide Default (new downloads and anything with no profile of its own —
+// existing Wishlist rows keep whichever profile was default when they were
+// queued, see confirmSetDefaultQualityProfile) and the Auto-Import override
+// (Settings → Import, falls back to Default when unset). Both assignments
+// are also reachable
 // inline from the row list (the dot / the ⇩ button); this is the overview +
 // explanation surface, not a second way to edit a profile's own settings —
 // that only ever happens via previewQualityProfile + a row's Update (✎).

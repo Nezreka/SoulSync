@@ -25,13 +25,22 @@ blocks app startup.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger("quality.migrate_to_profiles")
 
 _MIGRATION_FLAG_KEY = "quality_profiles_migrated_v1"
+# Holds any config.json write(s) the migration queued (JSON-encoded dict),
+# committed atomically alongside the migration's own DB changes (see the
+# SAVEPOINT in `materialize_default_profile_and_backfill`) so it can never
+# exist without the DB row it points at. Cleared only once
+# `apply_pending_quality_profile_config_writes` actually applies it — see
+# that function's docstring for why this key is checked on EVERY startup,
+# not just the one right after a fresh migration.
+_PENDING_CONFIG_WRITES_KEY = "quality_profile_pending_config_writes"
+_SAVEPOINT_NAME = "quality_profile_migration"
 
 
 def _profile_row_fields(profile: dict) -> dict:
@@ -142,7 +151,7 @@ def _default_profile_id(cursor) -> int:
     return profile_id
 
 
-def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dict, bundle: dict) -> None:
+def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dict, bundle: dict) -> Optional[int]:
     """When the legacy install had the old global "quality filter on import"
     switch turned off entirely, that most plausibly reflects Auto-Import
     specifically: it scans an already-acquired Staging folder with no
@@ -154,6 +163,15 @@ def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dic
     also uses, which would silently start accepting low-quality files there
     too. Only assigns it when Auto-Import doesn't already have an explicit
     override (never clobber a real user choice).
+
+    Returns the new profile's id if Auto-Import should be pointed at it, else
+    ``None``. Deliberately does NOT call ``config_manager.set(...)`` itself —
+    that writes to config.json immediately, while this INSERT only takes
+    effect when the caller's DB transaction commits. The caller applies the
+    returned id to config only after that commit actually succeeds (see
+    ``materialize_default_profile_and_backfill`` / `_initialize_database`),
+    so a later failure in the same transaction can't leave config.json
+    pointing at a profile row that got rolled back.
     """
     clone_fields = dict(fields)
     clone_fields["fallback_enabled"] = 1
@@ -183,11 +201,9 @@ def _materialize_relaxed_auto_import_profile(cursor, config_manager, fields: dic
         },
     )
     new_profile_id = cursor.lastrowid
-    try:
-        if not config_manager.get("auto_import.quality_profile_id"):
-            config_manager.set("auto_import.quality_profile_id", new_profile_id)
-    except Exception as e:  # noqa: BLE001
-        logger.debug("could not assign migrated relaxed profile to Auto-Import: %s", e)
+    if config_manager.get("auto_import.quality_profile_id"):
+        return None
+    return new_profile_id
 
 
 def materialize_default_profile_and_backfill(database, conn) -> bool:
@@ -196,8 +212,20 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
 
     ``database`` is the ``MusicDatabase`` instance (for
     ``_legacy_quality_profile_from_preferences`` + ``config_manager`` access);
-    ``conn`` is the already-open connection from ``_initialize_database`` (the
-    caller commits — this function does not commit or close it).
+    ``conn`` is the already-open connection from ``_initialize_database``,
+    which already ran other (unrelated, additive) schema-init steps earlier
+    in the SAME transaction and commits once at the very end regardless of
+    what this function returns — so this function CANNOT rely on the caller
+    to roll anything back on failure. Its own writes are wrapped in a SQL
+    SAVEPOINT instead: on any error, only THIS function's changes are undone
+    (``ROLLBACK TO SAVEPOINT``), leaving the caller's earlier, unrelated
+    schema work intact for its final commit. Without this, a failure partway
+    through (e.g. the relaxed Auto-Import profile insert) would still get the
+    default-profile UPDATE + wishlist/track backfill committed by the
+    caller's unconditional ``conn.commit()``, even though the migration flag
+    below never got set — meaning every subsequent startup would redo the
+    (idempotent but wasteful) backfill AND, worse, blindly INSERT another
+    duplicate relaxed profile every single restart.
 
     Returns True if the migration ran, False if it was already applied or
     skipped due to an error (fail-open: never blocks startup).
@@ -213,6 +241,7 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         logger.debug("quality-profile migration flag check failed: %s", e)
         return False
 
+    cursor.execute(f"SAVEPOINT {_SAVEPOINT_NAME}")
     try:
         from config.settings import config_manager
 
@@ -282,17 +311,36 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
             logger.debug("library track backfill skipped: %s", e)
             library_backfilled = 0
 
+        # Deliberately NOT wrapped in its own try/except: if this raises, the
+        # outer except below catches it, rolls back to the savepoint, and
+        # returns False — so the whole migration (including the parts already
+        # queued above) retries on the next startup instead of being marked
+        # done with the user's "quality filter off" preference silently
+        # dropped forever.
+        pending_auto_import_profile_id = None
         if needs_relaxed_auto_import_profile:
-            try:
-                _materialize_relaxed_auto_import_profile(cursor, config_manager, fields, bundle)
-            except Exception as e:  # noqa: BLE001
-                logger.error("Could not create migrated Auto-Import profile: %s", e)
+            pending_auto_import_profile_id = _materialize_relaxed_auto_import_profile(
+                cursor, config_manager, fields, bundle)
 
         cursor.execute(
             "INSERT OR IGNORE INTO metadata (key, value, updated_at) "
             "VALUES (?, 'true', CURRENT_TIMESTAMP)",
             (_MIGRATION_FLAG_KEY,),
         )
+        # Queued for `apply_pending_quality_profile_config_writes` to apply to
+        # config.json ONLY after `conn` actually commits — writing it directly
+        # here would touch config.json immediately while this INSERT only
+        # takes effect on commit (see `_materialize_relaxed_auto_import_profile`'s
+        # docstring). Persisted in the SAME savepoint as everything else above
+        # so it can never survive without the DB row it points at, and never
+        # gets lost if the migration itself fails after this point.
+        if pending_auto_import_profile_id is not None:
+            cursor.execute(
+                "INSERT OR REPLACE INTO metadata (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (_PENDING_CONFIG_WRITES_KEY,
+                 json.dumps({"auto_import.quality_profile_id": pending_auto_import_profile_id})),
+            )
+        cursor.execute(f"RELEASE SAVEPOINT {_SAVEPOINT_NAME}")
         logger.info(
             "Quality-profile migration: materialized default profile, backfilled "
             "%d wishlist row(s), %d library track(s)",
@@ -301,7 +349,50 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
         return True
     except Exception as e:  # noqa: BLE001
         logger.error("Quality-profile migration failed: %s", e)
+        try:
+            cursor.execute(f"ROLLBACK TO SAVEPOINT {_SAVEPOINT_NAME}")
+            cursor.execute(f"RELEASE SAVEPOINT {_SAVEPOINT_NAME}")
+        except Exception as rollback_err:  # noqa: BLE001
+            logger.error("Could not roll back failed quality-profile migration: %s", rollback_err)
         return False
 
 
-__all__ = ["materialize_default_profile_and_backfill"]
+def apply_pending_quality_profile_config_writes(database) -> None:
+    """Apply any config.json write(s) queued under the
+    ``quality_profile_pending_config_writes`` metadata key (see
+    ``materialize_default_profile_and_backfill``).
+
+    Runs on EVERY ``_initialize_database()`` call — not just immediately
+    after a fresh migration — so a config.json write that failed on some
+    earlier startup (e.g. a disk error) keeps retrying on every subsequent
+    boot until it actually succeeds, instead of being silently dropped
+    forever the moment the one-time migration flag is already set. The
+    metadata row is only deleted once every write in it has actually
+    succeeded.
+    """
+    conn = database._get_connection()
+    try:
+        row = conn.execute(
+            "SELECT value FROM metadata WHERE key = ? LIMIT 1", (_PENDING_CONFIG_WRITES_KEY,)
+        ).fetchone()
+        if not row or not row[0]:
+            return
+        try:
+            pending = json.loads(row[0]) or {}
+        except (TypeError, ValueError):
+            pending = {}
+
+        if pending:
+            from config.settings import config_manager
+            for key, value in pending.items():
+                config_manager.set(key, value)
+
+        conn.execute("DELETE FROM metadata WHERE key = ?", (_PENDING_CONFIG_WRITES_KEY,))
+        conn.commit()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Could not apply migrated quality-profile config write(s) — will retry next startup: %s", e)
+    finally:
+        conn.close()
+
+
+__all__ = ["materialize_default_profile_and_backfill", "apply_pending_quality_profile_config_writes"]

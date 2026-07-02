@@ -10916,16 +10916,25 @@ def get_artist_quality_analysis(artist_id):
         artist = result.get('artist', {})
         albums = result.get('albums', [])
 
-        # Get user's quality profile to determine min acceptable tier
+        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
+        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
         quality_profile = database.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        ranked_targets = quality_profile.get('ranked_targets') or []
         min_acceptable_tier = 999
-        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
-        for qname, qconfig in preferred_qualities.items():
-            if qconfig.get('enabled', False):
-                tname = tier_map.get(qname)
-                if tname and tname in QUALITY_TIERS:
-                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
+        # `format` (as edited in the Settings ranked-targets picker — see
+        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
+        # same tier this scan buckets library files into.
+        format_tier_map = {
+            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
+            'opus': 'high_lossy', 'ogg': 'high_lossy',
+            'aac': 'standard_lossy',
+            'mp3': 'low_lossy', 'wma': 'low_lossy',
+        }
+        for target in ranked_targets:
+            tname = format_tier_map.get((target or {}).get('format'))
+            if tname and tname in QUALITY_TIERS:
+                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
 
         tracks = []
         summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}

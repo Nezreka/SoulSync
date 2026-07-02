@@ -122,11 +122,19 @@ class QualityUpgradeScannerJob(RepairJob):
         targets = default_bundle['targets']
         cutoff_index = default_bundle['cutoff_index']
         if not targets:
-            logger.info("Quality profile has no targets — nothing to check against")
-            return result
+            # Don't bail out here: a per-track profile override (`_bundle_for`
+            # below) may still have real targets, and deep-audio-verify (if
+            # enabled) still needs to probe every file for broken/silent audio
+            # regardless of quality targets. `quality_meets_profile`/
+            # `rank_candidate` already treat an empty target list as "anything
+            # passes", so files resolving to this bundle skip cleanly further
+            # down instead of being excluded from the scan entirely.
+            logger.info("Default quality profile has no targets — scan will still run "
+                        "deep-audio-verify (if enabled) and honor any stricter "
+                        "per-track profile overrides")
 
         logger.info("Quality upgrade scan — profile targets (strict): %s",
-                    [t.label for t in targets])
+                    [t.label for t in targets] if targets else '(none — all pass)')
 
         # Per-track profile override (`tracks.quality_profile_id`, still NULL
         # for almost every install — there's no assignment UI yet, only the
