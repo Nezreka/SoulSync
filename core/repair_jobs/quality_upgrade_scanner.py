@@ -50,16 +50,33 @@ def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict):
     return max(0, min(idx, len(targets) - 1))
 
 
+def _config_fingerprint(targets: list, cutoff_index) -> str:
+    """Stable string identifying the exact flagging decision this bundle
+    would make — the ranked targets themselves (not just the profile id,
+    which stays the same if the user edits an existing profile's targets in
+    place) plus the cutoff index. Stored on every finding at creation time so
+    a dismissed finding can be told apart from one that's stale only because
+    the profile/cutoff genuinely changed since — mirrors
+    core/repair_jobs/quality_upgrade.py's identical helper (kept duplicated
+    rather than shared, matching how `_profile_bundle`/`_upgrade_cutoff_index`
+    are already duplicated between these two jobs)."""
+    import json
+    return json.dumps({'targets': [t.to_dict() for t in targets], 'cutoff_index': cutoff_index},
+                       sort_keys=True)
+
+
 def _profile_bundle(profile: dict, settings: dict) -> dict:
     """Precompute the per-profile values the scan loop needs (targets, cutoff
     index, id/name for the finding) once per distinct profile, so a per-track
     override only costs a DB lookup the first time that profile is seen."""
     targets, _fallback = targets_from_profile(profile)
+    cutoff_index = _upgrade_cutoff_index(profile, targets, settings)
     return {
         'targets': targets,
-        'cutoff_index': _upgrade_cutoff_index(profile, targets, settings),
+        'cutoff_index': cutoff_index,
         'id': profile.get('id'),
         'name': profile.get('name') or profile.get('preset') or 'default',
+        'config_fingerprint': _config_fingerprint(targets, cutoff_index),
     }
 
 
@@ -105,6 +122,61 @@ class QualityUpgradeScannerJob(RepairJob):
     setting_options = {'library_tracks_only': [True, False],
                        'deep_audio_verify': [True, False]}
     auto_fix = False  # User chooses fix action per finding
+
+    def _load_dismissed_findings(self, db):
+        """Two lookups — by track id and by file path, mirroring the OR in
+        RepairWorker._create_finding's own dedup key — mapping to the
+        config_fingerprint stored on that dismissed finding at creation time
+        (see _config_fingerprint). A dismissed finding whose fingerprint
+        still matches the CURRENT bundle stays dismissed; one whose profile/
+        cutoff has genuinely changed since gets cleared and re-flagged (see
+        the scan loop). Findings created before this fingerprint existed have
+        no ``profile_config_fingerprint`` key and map to ``None``, which never
+        equals a real fingerprint — that one-time re-flag is an acceptable
+        tradeoff for older installs."""
+        import json as _json
+        by_entity: dict = {}
+        by_path: dict = {}
+        conn = db._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT entity_id, file_path, details_json FROM repair_findings "
+                "WHERE job_id = ? AND status = 'dismissed'",
+                (self.job_id,)).fetchall()
+            for r in rows:
+                fingerprint = None
+                try:
+                    details = _json.loads(r[2]) if r[2] else {}
+                    fingerprint = details.get('profile_config_fingerprint')
+                except (TypeError, ValueError):
+                    pass
+                if r[0] is not None:
+                    by_entity[str(r[0])] = fingerprint
+                if r[1]:
+                    by_path[r[1]] = fingerprint
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not load dismissed quality findings: %s", e)
+        finally:
+            conn.close()
+        return by_entity, by_path
+
+    def _clear_stale_dismissed_finding(self, db, entity_id, file_path) -> None:
+        """Delete a stale dismissed finding for this job (matched by entity id
+        OR file path, same OR the shared dedup uses) right before re-flagging
+        it under a changed profile — otherwise RepairWorker._create_finding's
+        dedup would silently drop the new insert."""
+        conn = db._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM repair_findings WHERE job_id = ? AND status = 'dismissed' "
+                "AND ((entity_id = ? AND entity_id IS NOT NULL) OR (file_path = ? AND file_path IS NOT NULL))",
+                (self.job_id, str(entity_id) if entity_id is not None else None, file_path))
+            conn.commit()
+        except Exception as e:
+            logger.debug("Could not clear stale dismissed finding (entity=%s, path=%s): %s",
+                         entity_id, file_path, e)
+        finally:
+            conn.close()
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -158,6 +230,12 @@ class QualityUpgradeScannerJob(RepairJob):
         # DECODES the file (astats + silencedetect) to catch truncated or
         # mostly-silent audio the header can't reveal.
         from core.imports.silence import detect_broken_audio
+
+        # Dismissed findings are still checked on every re-run, but only
+        # actually re-flagged if the applicable bundle's config_fingerprint
+        # has changed since the dismissal — not on every re-run just because
+        # the file still measures below profile (see _load_dismissed_findings).
+        dismissed_by_entity, dismissed_by_path = self._load_dismissed_findings(context.db)
 
         # --- Collect the music folders to walk (real dirs, abspath'd) ---
         base_dirs = self._collect_music_dirs(context)
@@ -230,8 +308,27 @@ class QualityUpgradeScannerJob(RepairJob):
             bundle = _bundle_for(meta.get('quality_profile_id'))
             targets = bundle['targets']
             cutoff_index = bundle['cutoff_index']
+            config_fingerprint = bundle['config_fingerprint']
             quality_profile_id = bundle.get('id')
             quality_profile_name = bundle.get('name')
+
+            # A dismissed finding for this exact track/file whose fingerprint
+            # hasn't changed must NOT keep resurrecting on every re-run — skip
+            # entirely, before doing any (expensive) audio probing. A CHANGED
+            # fingerprint falls through to the normal check below, and the
+            # stale row is cleared right before create_finding.
+            track_id = meta.get('track_id')
+            dismissed_fingerprint = (
+                dismissed_by_entity.get(str(track_id)) if track_id else None
+            )
+            if dismissed_fingerprint is None:
+                dismissed_fingerprint = dismissed_by_path.get(fpath)
+            is_previously_dismissed = (
+                (track_id and str(track_id) in dismissed_by_entity) or fpath in dismissed_by_path
+            )
+            if is_previously_dismissed and dismissed_fingerprint == config_fingerprint:
+                result.skipped += 1
+                continue
 
             result.scanned += 1
             if context.report_progress and i % 25 == 0:
@@ -300,6 +397,13 @@ class QualityUpgradeScannerJob(RepairJob):
 
             if context.report_progress:
                 context.report_progress(log_line=_title, log_type='error')
+            if is_previously_dismissed:
+                # Reaching this point means the fingerprint check above already
+                # found this dismissal stale (config genuinely changed) — clear
+                # the old dismissed row before re-inserting, or the shared
+                # dedup in RepairWorker._create_finding would silently drop
+                # the new one (same job_id + entity/file_path, any status).
+                self._clear_stale_dismissed_finding(context.db, track_id, fpath)
             if context.create_finding:
                 inserted = context.create_finding(
                     job_id=self.job_id,
@@ -325,6 +429,7 @@ class QualityUpgradeScannerJob(RepairJob):
                         'track_number': meta.get('track_number'),
                         'album_thumb_url': meta.get('album_thumb_url'),
                         'artist_thumb_url': meta.get('artist_thumb_url'),
+                        'profile_config_fingerprint': config_fingerprint,
                         'quality_profile_id': quality_profile_id,
                         'quality_profile_name': quality_profile_name,
                     },

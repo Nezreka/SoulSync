@@ -547,9 +547,22 @@ def test_flag_only_scanner_finding_carries_profile_for_redownload(monkeypatch, t
         QualityTarget(label='MP3 320', format='mp3', min_bitrate=320),
     ]
 
+    class _EmptyConn:
+        def execute(self, *a, **k):
+            return self
+
+        def fetchall(self):
+            return []
+
+        def close(self):
+            pass
+
     class _DB:
         def get_quality_profile(self):
             return profile
+
+        def _get_connection(self):
+            return _EmptyConn()
 
     monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
     monkeypatch.setattr(qs, 'rank_candidate', lambda aq, ts: (1, 0))
@@ -594,6 +607,127 @@ def test_flag_only_scanner_finding_carries_profile_for_redownload(monkeypatch, t
     assert result.findings_created == 1
     assert findings[0]['details']['quality_profile_id'] == 12
     assert findings[0]['details']['quality_profile_name'] == 'Strict FLAC'
+
+
+class _ScannerFakeConn:
+    """Fake repair_findings connection for the flag-only scanner's dismissed-
+    findings lookup — mirrors _FakeConn above but keyed by (entity_id,
+    file_path, details_json) triples, matching what
+    QualityUpgradeScannerJob._load_dismissed_findings actually selects."""
+
+    def __init__(self, dismissed_rows=()):
+        self._dismissed_rows = list(dismissed_rows)
+        self._sql = ''
+        self.deleted_params = []
+
+    def execute(self, sql='', params=(), *a, **k):
+        self._sql = sql or ''
+        if self._sql.strip().startswith('DELETE'):
+            self.deleted_params.append(params)
+        return self
+
+    def fetchall(self):
+        if 'repair_findings' in self._sql:
+            return self._dismissed_rows
+        return []
+
+    def commit(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class _ScannerFakeDB:
+    def __init__(self, profile, dismissed_rows=()):
+        self._profile = profile
+        self._dismissed_rows = dismissed_rows
+        self.conns = []
+
+    def get_quality_profile(self):
+        return self._profile
+
+    def _get_connection(self):
+        conn = _ScannerFakeConn(self._dismissed_rows)
+        self.conns.append(conn)
+        return conn
+
+
+def _scanner_ctx(db, tmp_path, findings):
+    return JobContext(
+        db=db,
+        transfer_folder=str(tmp_path),
+        config_manager=None,
+        create_finding=lambda **kw: findings.append(kw) or True,
+        should_stop=lambda: False,
+        is_paused=lambda: False,
+    )
+
+
+def _setup_scanner_common(monkeypatch, tmp_path, targets, aq):
+    (tmp_path / "song.mp3").write_bytes(b"fake")
+    monkeypatch.setattr(qs, 'targets_from_profile', lambda p: (targets, False))
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_collect_music_dirs', lambda self, context: [str(tmp_path)])
+    monkeypatch.setattr(
+        qs.QualityUpgradeScannerJob, '_build_db_suffix_index',
+        lambda self, context: {
+            'song.mp3': {'track_id': 9, 'title': 'Song', 'artist': 'Artist A',
+                         'album': 'Album X', 'track_number': 1},
+        })
+    monkeypatch.setattr('core.imports.silence.detect_broken_audio', lambda path: None)
+    monkeypatch.setattr('core.imports.file_ops.probe_audio_quality', lambda path: aq)
+
+
+def test_scanner_dismissed_finding_stays_dismissed_when_config_unchanged(monkeypatch, tmp_path):
+    """A track dismissed under the SAME profile/cutoff must not resurrect a
+    finding on every re-run just because it still measures below profile."""
+    import json
+    from core.quality.model import AudioQuality, QualityTarget
+
+    profile = {'id': 20, 'name': 'Lossless Only', 'ranked_targets': [{'label': 'FLAC', 'format': 'flac'}]}
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    aq = AudioQuality(format='mp3', bitrate=128)
+    _setup_scanner_common(monkeypatch, tmp_path, targets, aq)
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda a, ts: False)
+    monkeypatch.setattr(qs, 'rank_candidate', lambda a, ts: (len(ts), 0))
+
+    stable_fp = qs._config_fingerprint(targets, None)
+    dismissed_rows = [('9', None, json.dumps({'profile_config_fingerprint': stable_fp}))]
+    db = _ScannerFakeDB(profile, dismissed_rows)
+
+    findings = []
+    result = qs.QualityUpgradeScannerJob().scan(_scanner_ctx(db, tmp_path, findings))
+
+    assert findings == []
+    assert result.findings_created == 0
+    deletes = [p for conn in db.conns for p in conn.deleted_params]
+    assert deletes == []
+
+
+def test_scanner_dismissed_finding_is_cleared_and_reflagged_when_config_changed(monkeypatch, tmp_path):
+    """A dismissed finding with no stored fingerprint (from before this field
+    existed) is treated as stale — the row is cleared and the track re-flagged."""
+    from core.quality.model import AudioQuality, QualityTarget
+
+    profile = {'id': 20, 'name': 'Lossless Only', 'ranked_targets': [{'label': 'FLAC', 'format': 'flac'}]}
+    targets = [QualityTarget(label='FLAC', format='flac')]
+    aq = AudioQuality(format='mp3', bitrate=128)
+    _setup_scanner_common(monkeypatch, tmp_path, targets, aq)
+    monkeypatch.setattr(qs, 'quality_meets_profile', lambda a, ts: False)
+    monkeypatch.setattr(qs, 'rank_candidate', lambda a, ts: (len(ts), 0))
+
+    dismissed_rows = [('9', None, '{}')]  # no fingerprint stored
+    db = _ScannerFakeDB(profile, dismissed_rows)
+
+    findings = []
+    result = qs.QualityUpgradeScannerJob().scan(_scanner_ctx(db, tmp_path, findings))
+
+    assert result.findings_created == 1
+    assert findings[0]['entity_id'] == '9'
+    assert 'profile_config_fingerprint' in findings[0]['details']
+    deletes = [p for conn in db.conns for p in conn.deleted_params]
+    assert any('9' in params for params in deletes)
 
 
 # --- fix handler adds to wishlist ------------------------------------------
