@@ -4700,7 +4700,7 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 
 @media (max-width: 1800px) {
     .qp-layout {
-        flex-direction: column;
+        flex-direction: column-reverse;
         width: 100%;
     }
 
@@ -4713,10 +4713,12 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     .qp-side-panel {
         width: 100%;
         border-left: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
-        padding: 16px 0 0 0;
+        border-top: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 0 0 16px 0;
         margin-left: 0;
-        margin-top: 16px;
+        margin-top: 0;
+        margin-bottom: 16px;
         max-height: none;
         position: static;
     }
