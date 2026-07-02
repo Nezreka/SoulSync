@@ -35724,6 +35724,17 @@ div.artist-hero-badge {
 .artweb-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 6px rgba(0,0,0,0.4); }
 .artweb-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artweb-legend-count { margin-left: auto; color: rgba(255,255,255,0.38); font-variant-numeric: tabular-nums; }
+/* Artist Web empty/error state card — centered, with an optional Retry action */
+.artweb-state-card {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+}
+.artweb-state-msg { color: rgba(255,255,255,0.5); font-size: 14px; max-width: 380px; line-height: 1.5; }
+.artweb-state-btn {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); color: rgba(255,255,255,0.85);
+    padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.15s ease;
+}
+.artweb-state-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
 #artist-map-canvas { flex: 1; display: block; cursor: grab; }
 #artist-map-canvas:active { cursor: grabbing; }
 #artist-map-loading {
