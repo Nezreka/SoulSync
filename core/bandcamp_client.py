@@ -378,7 +378,11 @@ class BandcampClient:
             'url': track_url,
             'title': best.name,
             'artist': (best.artists or [artist_name])[0],
-            'image_url': best.image_url,
+            # The release page's own JSON-LD image is live-verified (it's what
+            # that exact page renders); the autocomplete search index's cached
+            # thumbnail can point at a since-removed CDN size variant (confirmed
+            # 404 in production — e.g. .../img/1811014619_3.jpg). Prefer it.
+            'image_url': (release.get('image_url') if release else None) or best.image_url,
         }
         if release:
             merged['tags'] = release.get('tags') or []
@@ -415,7 +419,11 @@ class BandcampClient:
             'url': album_url,
             'title': best.name,
             'artist': (best.artists or [artist_name])[0],
-            'image_url': best.image_url,
+            # The release page's own JSON-LD image is live-verified (it's what
+            # that exact page renders); the autocomplete search index's cached
+            # thumbnail can point at a since-removed CDN size variant (confirmed
+            # 404 in production — e.g. .../img/1811014619_3.jpg). Prefer it.
+            'image_url': (release.get('image_url') if release else None) or best.image_url,
         }
         if release:
             merged['tags'] = release.get('tags') or []
