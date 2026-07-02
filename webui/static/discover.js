@@ -6403,6 +6403,7 @@ let _artistWeb = {
                                       // only these, never a full ~5k-node sweep per frame.
     fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
     previewAudio: null, previewKey: null,   // 30s Deezer preview playback (discovery candidates)
+    _hoverNode: null, _mouse: null, _mouseBound: false,   // hover tooltip: current node + last pointer
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -6543,8 +6544,22 @@ async function openArtistWeb(lens) {
     } catch (err) {
         if (_artistWeb.gen !== myGen) return;
         console.error('[Artist Web] load failed', err);
-        host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
+        _artWebStateCard(host, 'Failed to load the artist web.', _artistWeb.lens || 'genre');
     }
+}
+
+// Centered empty/error card in the canvas. retryLens set => a Retry button re-opens that lens.
+// Replacing the canvas with a message: tear down any live graph first so no WebGL context / FA2
+// worker leaks (e.g. a lens switch whose fetch failed, or a zero-candidate discovery).
+function _artWebStateCard(host, msg, retryLens) {
+    if (!host) return;
+    _artWebKillLiveLayout();
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    if (_artistWeb.sigma) { try { _artistWeb.sigma.kill(); } catch (e) { /* ignore */ } _artistWeb.sigma = null; }
+    _artistWeb.graph = null;
+    const btn = retryLens
+        ? `<button class="artweb-state-btn" onclick="openArtistWeb('${retryLens}')">Retry</button>` : '';
+    host.innerHTML = `<div class="artweb-state-card"><div class="artweb-state-msg">${escapeHtml(msg)}</div>${btn}</div>`;
 }
 
 // Fetch the discovery payload, then render — only a GOOD payload is cached (a 500 resolves r.json()
@@ -6565,7 +6580,7 @@ function _artWebFetchDiscovery(host) {
         .catch(err => {
             if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
             console.error('[Artist Web] discovery load failed', err);
-            if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery — switch lenses and back to retry.</div>';
+            _artWebStateCard(host, 'Failed to load discovery.', 'discovery');
         });
 }
 
@@ -6696,6 +6711,12 @@ function _artWebRenderLens() {
     if (w.length && thr <= w[0]) thr = w[0] + 1;
     _artistWeb.edgeThreshold = thr;
     _artWebSyncEdgeButton();
+
+    // Empty discovery: a valid payload with zero candidates should GUIDE, not show a blank canvas.
+    if (_artistWeb.lens === 'discovery' && built.graph.order === 0) {
+        _artWebStateCard(host, 'No discovery candidates yet — add artists to your Watchlist so SoulSync can fetch similar artists to explore.', null);
+        return;
+    }
 
     // Pre-seed positions (circlepack, grouped by cluster) so FA2 REFINES a structured start instead
     // of untangling random noise — much faster + calmer settle at library scale. Silent no-op if the
@@ -7042,6 +7063,15 @@ function _artWebMountSigma(host, graph) {
         edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
     });
     const sig = _artistWeb.sigma;
+    // Track the pointer over the canvas so the hover tooltip positions itself (sigma node events
+    // don't carry client coords reliably across versions). Bound once — the host element is static.
+    if (!_artistWeb._mouseBound) {
+        host.addEventListener('mousemove', (e) => {
+            _artistWeb._mouse = { x: e.clientX, y: e.clientY };
+            if (_artistWeb._hoverNode) _artWebShowTooltip(_artistWeb._hoverNode);
+        });
+        _artistWeb._mouseBound = true;
+    }
     sig.on('enterNode', ({ node }) => _artWebHover(node));
     sig.on('leaveNode', () => _artWebHover(null));
     sig.on('clickNode', ({ node }) => _artWebClickNode(node));
@@ -7142,6 +7172,9 @@ function closeArtistWeb() {
     if (sb) sb.style.display = 'none';
     const legend = document.getElementById('artist-web-legend');
     if (legend) legend.style.display = 'none';
+    _artistWeb._hoverNode = null;
+    const tt = document.getElementById('artist-web-tooltip');
+    if (tt) { tt.style.display = 'none'; tt._node = null; }
     _artistWeb.pathMode = false;
     _artistWeb.pathNodes = _artistWeb.pathPairs = _artistWeb.pathResult = _artistWeb.pathSource = _artistWeb.pathTarget = null;
     const pathBtn = document.getElementById('artweb-path-btn');
@@ -7342,9 +7375,48 @@ function artWebFitToView() {
 }
 
 // ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
+// Hover tooltip — identify any node without clicking (name + genre + connection count). Rebuilt only
+// when the hovered node changes; a plain mousemove just repositions it. Positioned at the pointer.
+function _artWebShowTooltip(nodeKey) {
+    const tip = document.getElementById('artist-web-tooltip');
+    if (!tip) return;
+    const g = _artistWeb.graph;
+    if (!nodeKey || !g || !g.hasNode(nodeKey)) { tip.style.display = 'none'; tip._node = null; return; }
+    if (tip._node !== nodeKey) {
+        tip._node = nodeKey;
+        const a = g.getNodeAttributes(nodeKey);
+        const kind = a.kind;
+        // True connection count: similarity links only (skip the membership scaffold edge). Genre
+        // hubs have no similarity edges — their degree IS the member count.
+        let conn = 0;
+        if (kind === 'genre') { conn = g.degree(nodeKey); }
+        else { g.forEachEdge(nodeKey, (e, attr) => { if (attr.kind === 'similarity') conn++; }); }
+        const noun = kind === 'genre' ? 'artist' : 'connection';
+        const badge = kind === 'discovery' ? '<span class="artmap-tip-badge">To discover</span>'
+                    : kind === 'genre' ? '<span class="artmap-tip-badge">Genre</span>' : '';
+        const img = a.thumb
+            ? `<img class="artmap-tip-img" src="${escapeHtml(a.thumb)}" alt="" onerror="this.style.display='none'">`
+            : (kind === 'genre' ? '' : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
+        const gen = a.primaryGenre || '';
+        const genreHTML = gen ? `<div class="artmap-tip-genres"><span>${escapeHtml(gen)}</span></div>` : '';
+        const connHTML = conn ? `<div class="artmap-tip-conn">${conn} ${noun}${conn === 1 ? '' : 's'}</div>` : '';
+        tip.innerHTML = `<div class="artmap-tip-row">${img}<div class="artmap-tip-info">` +
+            `<div class="artmap-tip-name">${escapeHtml(a.label || '')}</div>${badge}${connHTML}${genreHTML}</div></div>`;
+        tip.style.display = 'block';
+    }
+    const m = _artistWeb._mouse;
+    if (m) {
+        tip.style.left = Math.min(m.x + 16, window.innerWidth - tip.offsetWidth - 10) + 'px';
+        tip.style.top = Math.min(m.y - 10, window.innerHeight - tip.offsetHeight - 10) + 'px';
+    }
+}
+
 function _artWebHover(node) {
     const st = _artistWeb;
-    if (!st.sigma || st.pathMode) return;   // no hover-dim while tracing a path
+    if (!st.sigma) return;
+    st._hoverNode = node;
+    _artWebShowTooltip(node);                // tooltip shows even in path mode (helps pick the 2 nodes)
+    if (st.pathMode) return;                 // ...but no hover-dim while tracing a path
     if (node) {
         const set = new Set([node]);
         st.graph.forEachNeighbor(node, nb => set.add(nb));
