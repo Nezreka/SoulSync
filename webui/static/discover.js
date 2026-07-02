@@ -6801,13 +6801,22 @@ function _artWebBuildCommunity(data, Graph) {
 // ---- Lens C: DISCOVERY — owned artists (cool) + their unowned similar candidates (warm) ----------
 function _artWebBuildDiscovery(data, Graph) {
     const nodes = data.nodes || [], edges = data.edges || [];
+    // Count each anchor's candidates up front — anchor size scales with its frontier, and only the
+    // biggest ~25 get an always-on label (the full frontier has ~300 anchors; labeling them all
+    // would wall the view with pills — the rest label on zoom/hover).
+    const anchorDeg = {};
+    edges.forEach(e => { anchorDeg[e.source] = (anchorDeg[e.source] || 0) + 1; });
+    const starAnchors = new Set(Object.keys(anchorDeg).sort((a, b) => anchorDeg[b] - anchorDeg[a]).slice(0, 25));
+
     const graph = new Graph();
     nodes.forEach(n => {
         if (n.kind === 'owned') {
+            const deg = anchorDeg[n.key] || 1;
             graph.addNode(n.key, {
                 label: n.label, x: Math.random(), y: Math.random(),
-                size: 7, color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
-                forceLabel: true, kind: 'owned', genre: 'Your library',
+                size: 5 + Math.sqrt(deg) * 0.9,
+                color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                forceLabel: starAnchors.has(n.key), kind: 'owned', genre: 'Your library',
                 artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
             });
         } else {
@@ -6827,7 +6836,10 @@ function _artWebBuildDiscovery(data, Graph) {
             if (e.weight > maxW) maxW = e.weight;
             graph.addEdge(e.source, e.target, {
                 weight: e.weight, size: _webEdgeSize(e.weight),
-                color: _webHexToRgba(WEB_DISCOVERY_COLOR, 0.28), baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+                // Weight-scaled alpha (like the other lenses) — a fixed alpha washed out around
+                // dense anchors once the full frontier's ~4.4k edges rendered at once.
+                color: _webHexToRgba(WEB_DISCOVERY_COLOR, _webEdgeAlpha(e.weight)),
+                baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
             });
         }
     });

@@ -202,24 +202,28 @@ def build_genre_grouped_map(
     return {"nodes": nodes, "edges": edges}
 
 
-def _merge_target(bucket: Dict[str, list], name: str, sp: Any, dz: Any, it: Any, occ: Any, pop: Any) -> None:
+def _merge_target(bucket: Dict[str, list], name: str, sp: Any, dz: Any, it: Any, occ: Any, pop: Any,
+                  image_url: Any = None, genres: Any = None) -> None:
     """Fold one similar-artist row into a per-target bucket, keyed by normalized name.
 
     The same target often appears in several rows (the anchor was discovered against Spotify AND
     Deezer), so we merge: max occurrence/popularity (a target ranks by its STRONGEST evidence, not
-    whichever row happened first) and the union of external ids (more ids -> better cache enrichment).
-    Bucket value: [label, sp, dz, it, occ, pop].
+    whichever row happened first), the union of external ids, and the first non-empty image/genres
+    (similar_artists rows carry their own enrichment — ~99% have image_url + popularity).
+    Bucket value: [label, sp, dz, it, occ, pop, image_url, genres].
     """
     tkey = _norm(name)
     cur = bucket.get(tkey)
     if cur is None:
-        bucket[tkey] = [name, sp, dz, it, _as_int(occ, 1), _as_int(pop)]
+        bucket[tkey] = [name, sp, dz, it, _as_int(occ, 1), _as_int(pop), image_url or None, genres or None]
         return
     cur[1] = cur[1] or sp
     cur[2] = cur[2] or dz
     cur[3] = cur[3] or it
     cur[4] = max(cur[4], _as_int(occ, 1))
     cur[5] = max(cur[5], _as_int(pop))
+    cur[6] = cur[6] or image_url or None
+    cur[7] = cur[7] or genres or None
 
 
 def _id_pairs(sp: Any, dz: Any, it: Any) -> List[List[Any]]:
@@ -229,62 +233,53 @@ def _id_pairs(sp: Any, dz: Any, it: Any) -> List[List[Any]]:
     return [[s, e] for s, e in (("spotify", sp), ("deezer", dz), ("itunes", it)) if e]
 
 
-def enrich_discovery_nodes(
-    nodes: List[dict],
-    cache_lookup: Dict[Tuple[str, Any], Dict[str, Any]],
-) -> List[dict]:
-    """Fill discovery nodes' image/genres/popularity from cached metadata, in place.
+def _row7(row: Any) -> Tuple[Any, Any, Any, Any, Any, Any, Any]:
+    """The 7 core columns of a similar_artists row; rows may carry image_url/genres at [7]/[8]."""
+    return row[0], row[1], row[2], row[3], row[4], row[5], row[6]
 
-    ``cache_lookup`` is keyed by ``(source, external_id)`` — source-scoped, because Deezer and iTunes
-    ids share the numeric space and an unscoped lookup can return the wrong artist's metadata. The
-    first of the node's id pairs with a cache hit wins; row-level popularity is kept as fallback.
-    """
-    for n in nodes:
-        if n.get("kind") != "discovery":
-            continue
-        for src, eid in n.get("ids", []):
-            hit = cache_lookup.get((src, eid))
-            if hit:
-                n["image_url"] = hit.get("image_url")
-                n["genres"] = hit.get("genres")
-                if hit.get("popularity"):
-                    n["popularity"] = hit["popularity"]
-                break
-    return nodes
+
+def _row_enrich(row: Any) -> Tuple[Any, Any]:
+    """Optional row-level enrichment columns: (image_url, genres). Absent on 7-tuples."""
+    return (row[7] if len(row) > 7 else None), (row[8] if len(row) > 8 else None)
 
 
 def build_discovery_map(
     rows: Iterable[Row],
     owned_names: set,
     owned_meta: Optional[Dict[str, Dict[str, Any]]] = None,
-    seed_count: int = 30,
-    per_anchor: int = 6,
+    seed_count: Optional[int] = None,
+    per_anchor: Optional[int] = None,
 ) -> Dict[str, List[dict]]:
     """Discovery map: owned artists as anchors, their UNOWNED similar artists as discovery candidates.
 
     The inverse of :func:`build_taste_map`'s filter — instead of owned<->owned, we keep owned->UNowned
-    edges (new artists to find). Anchors are ranked by how many DISTINCT unowned neighbors they have;
-    the top ``seed_count`` seed the initial view, each showing its top ``per_anchor`` candidates (by
+    edges (new artists to find). By default the WHOLE frontier is returned (real-world size is modest:
+    only artists whose similars were fetched can anchor). ``seed_count`` optionally keeps just the top
+    anchors (ranked by distinct unowned neighbors) and ``per_anchor`` each anchor's top candidates (by
     max consensus, then popularity — duplicate multi-source rows are merged, see :func:`_merge_target`).
+
+    Rows may be 7-tuples or extended with ``image_url, genres`` at [7]/[8] — similar_artists rows
+    carry their own enrichment (~99% have image_url + real popularity), so no extra lookup is needed.
 
     Node kinds: ``owned`` (anchor: ``{key,label,owned,kind,id,thumb,genres}``) and ``discovery``
     (candidate: ``{key,label,owned,kind,popularity,image_url,genres,ids}`` where ``ids`` is a list of
-    ``[source, external_id]`` pairs). Edges are owned -> discovery. Enrichment is a separate step —
-    see :func:`enrich_discovery_nodes`.
+    ``[source, external_id]`` pairs).
     """
     owned_meta = owned_meta or {}
     rows = list(rows)
 
     # Same self-referential resolution as build_taste_map: source ext id -> name.
     id2name: Dict[str, str] = {}
-    for _src, name, sp, dz, it, _occ, _pop in rows:
+    for row in rows:
+        _src, name, sp, dz, it, _occ, _pop = _row7(row)
         for eid in (sp, dz, it):
             if eid and eid not in id2name:
                 id2name[eid] = name
 
     # Gather each OWNED anchor's UNOWNED similar targets, merged per target name.
     anchors: Dict[str, Dict[str, Any]] = {}
-    for src, name, sp, dz, it, occ, pop in rows:
+    for row in rows:
+        src, name, sp, dz, it, occ, pop = _row7(row)
         src_name = id2name.get(src)
         if not src_name:
             continue
@@ -295,9 +290,12 @@ def build_discovery_map(
         if not tgt_norm or tgt_norm in owned_names:
             continue                              # discovery = UNowned target only
         a = anchors.setdefault(src_norm, {"label": src_name, "targets": {}})
-        _merge_target(a["targets"], name, sp, dz, it, occ, pop)
+        img, gen = _row_enrich(row)
+        _merge_target(a["targets"], name, sp, dz, it, occ, pop, img, gen)
 
-    ranked = sorted(anchors.items(), key=lambda kv: len(kv[1]["targets"]), reverse=True)[:seed_count]
+    ranked = sorted(anchors.items(), key=lambda kv: len(kv[1]["targets"]), reverse=True)
+    if seed_count is not None:
+        ranked = ranked[:seed_count]
 
     nodes: Dict[str, dict] = {}
     edges: List[dict] = []
@@ -310,12 +308,14 @@ def build_discovery_map(
                 "key": anchor_norm, "label": info["label"], "owned": True, "kind": "owned",
                 "id": meta.get("id"), "thumb": meta.get("thumb_url"), "genres": meta.get("genres"),
             }
-        top = sorted(info["targets"].items(), key=lambda kv: (kv[1][4], kv[1][5]), reverse=True)[:per_anchor]
-        for tkey, (tname, sp, dz, it, occ, pop) in top:
+        top = sorted(info["targets"].items(), key=lambda kv: (kv[1][4], kv[1][5]), reverse=True)
+        if per_anchor is not None:
+            top = top[:per_anchor]
+        for tkey, (tname, sp, dz, it, occ, pop, img, gen) in top:
             if tkey not in nodes:
                 nodes[tkey] = {
                     "key": tkey, "label": tname, "owned": False, "kind": "discovery",
-                    "popularity": pop, "image_url": None, "genres": None,
+                    "popularity": pop, "image_url": img, "genres": gen,
                     "ids": _id_pairs(sp, dz, it),
                 }
             ekey = (anchor_norm, tkey)
@@ -341,8 +341,8 @@ def expand_discovery_node(
     ids, flat) — a row matches when its source id resolves to that name or is one of those ids.
     Targets in ``exclude`` (keys already on screen) are skipped; duplicate multi-source rows merge to
     the target's strongest evidence (see :func:`_merge_target`); the strongest ``per`` are returned.
-    Unowned targets become ``discovery`` nodes (enrich via :func:`enrich_discovery_nodes`); owned
-    targets become ``owned`` nodes, so a trail can also reveal how a candidate connects back into your
+    Unowned targets become ``discovery`` nodes (image/genres from the rows themselves); owned targets
+    become ``owned`` nodes, so a trail can also reveal how a candidate connects back into your
     library. Edges run ``node_key -> target``.
     """
     owned_meta = owned_meta or {}
@@ -352,25 +352,28 @@ def expand_discovery_node(
     rows = list(rows)
 
     id2name: Dict[str, str] = {}
-    for _src, name, sp, dz, it, _occ, _pop in rows:
+    for row in rows:
+        _src, name, sp, dz, it, _occ, _pop = _row7(row)
         for eid in (sp, dz, it):
             if eid and eid not in id2name:
                 id2name[eid] = name
 
     targets: Dict[str, list] = {}
-    for src, name, sp, dz, it, occ, pop in rows:
+    for row in rows:
+        src, name, sp, dz, it, occ, pop = _row7(row)
         if src not in ids_set and _norm(id2name.get(src, "")) != node_key:
             continue                              # row isn't about the clicked node
         tkey = _norm(name)
         if not tkey or tkey == node_key or tkey in exclude:
             continue
-        _merge_target(targets, name, sp, dz, it, occ, pop)
+        img, gen = _row_enrich(row)
+        _merge_target(targets, name, sp, dz, it, occ, pop, img, gen)
 
     ranked = sorted(targets.items(), key=lambda kv: (kv[1][4], kv[1][5]), reverse=True)
 
     nodes: List[dict] = []
     edges: List[dict] = []
-    for tkey, (tname, sp, dz, it, occ, pop) in ranked[:per]:
+    for tkey, (tname, sp, dz, it, occ, pop, img, gen) in ranked[:per]:
         if tkey in owned_names:
             meta = owned_meta.get(tkey, {})
             nodes.append({
@@ -380,7 +383,7 @@ def expand_discovery_node(
         else:
             nodes.append({
                 "key": tkey, "label": tname, "owned": False, "kind": "discovery",
-                "popularity": pop, "image_url": None, "genres": None,
+                "popularity": pop, "image_url": img, "genres": gen,
                 "ids": _id_pairs(sp, dz, it),
             })
         edges.append({"source": node_key, "target": tkey, "weight": occ})
