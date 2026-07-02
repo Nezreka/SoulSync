@@ -148,6 +148,10 @@ class RepairWorker:
         self.enabled = False  # Master toggle (replaces 'paused')
         self.should_stop = False
         self._stop_event = threading.Event()
+        # Per-job cancel: stopping ONE running job without tearing down the whole
+        # worker. Set by stop_current_job(), cleared at the start of each _run_job,
+        # and OR'd into the job's check_stop() so its scan loop unwinds (issue #970).
+        self._cancel_current_job = threading.Event()
         self.thread = None
 
         # Current job being executed
@@ -313,10 +317,35 @@ class RepairWorker:
 
         return defaults
 
+    def stop_current_job(self, job_id: str) -> dict:
+        """Stop a running or queued job without touching the rest of the worker.
+
+        A RUNNING job's next ``context.check_stop()`` returns True (jobs poll this
+        in their scan loops), so it unwinds and records its partial result. A job
+        that is only QUEUED (Run Now not yet picked up) is dropped from the queue.
+        Returns ``{stopped, was_running, dequeued}`` so the caller can report back.
+        """
+        was_running = False
+        dequeued = False
+        if self._current_job_id == job_id:
+            self._cancel_current_job.set()
+            was_running = True
+            logger.info("Stop requested for running job %s", job_id)
+        with self._force_run_lock:
+            if job_id in self._force_run_queue:
+                self._force_run_queue = [j for j in self._force_run_queue if j != job_id]
+                dequeued = True
+                logger.info("Removed queued job %s from the run queue", job_id)
+        return {'stopped': was_running or dequeued, 'was_running': was_running, 'dequeued': dequeued}
+
     def set_job_enabled(self, job_id: str, enabled: bool):
         """Enable or disable a specific job."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
+        # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
+        # only affects the NEXT scheduled run and the current scan keeps going (#970).
+        if not enabled:
+            self.stop_current_job(job_id)
 
     def set_job_settings(self, job_id: str, interval_hours: int = None, settings: dict = None):
         """Update job interval and/or settings."""
@@ -661,6 +690,7 @@ class RepairWorker:
         self._current_job_id = job_id
         self._current_job_name = job.display_name
         self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+        self._cancel_current_job.clear()   # fresh per run — a prior stop must not leak here
 
         # Re-read transfer path — prefer config_manager (same source as web_server)
         if self._config_manager:
@@ -698,7 +728,7 @@ class RepairWorker:
             acoustid_client=self.acoustid_client,
             metadata_cache=self.metadata_cache,
             create_finding=self._create_finding,
-            should_stop=lambda: self.should_stop,
+            should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
             is_paused=(lambda: False) if forced else (lambda: not self.enabled),
             update_progress=self._update_progress,
