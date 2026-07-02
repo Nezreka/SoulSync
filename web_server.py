@@ -8943,6 +8943,14 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
     except Exception as e:
         logger.debug(f"JioSaavn client resolution failed: {e}")
 
+    bc = None
+    try:
+        from core.metadata.registry import get_bandcamp_client, is_source_enabled
+        if is_source_enabled('bandcamp'):
+            bc = get_bandcamp_client()
+    except Exception as e:
+        logger.debug(f"Bandcamp client resolution failed: {e}")
+
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
     except Exception:
@@ -8958,6 +8966,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         discogs_client=dc,
         amazon_client=az,
         jiosaavn_client=js,
+        bandcamp_client=bc,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -21696,6 +21705,57 @@ def get_spotify_album_tracks(album_id):
             logger.error(f"JioSaavn album detail failed: {e}")
             return jsonify({"error": str(e)}), 500
 
+    if source_override == 'bandcamp':
+        try:
+            from core.metadata.registry import (
+                get_bandcamp_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "Bandcamp is not enabled"}), 503
+            client = get_bandcamp_client()
+
+            # Fast path: the click carried the exact release URL (Search
+            # results and Discover cards do). Falls back to a name search
+            # when it didn't (e.g. a release clicked from within an artist's
+            # discography grid, which only has a title/id) — Bandcamp has no
+            # numeric-ID lookup API, so a URL or a name is all it can work from.
+            bandcamp_url = request.args.get('bandcamp_url', '').strip()
+            album_name = request.args.get('name', '')
+            album_artist = request.args.get('artist', '')
+
+            release = client.get_release_metadata(bandcamp_url) if bandcamp_url else None
+            if not release and album_artist and album_name:
+                release = client.search_album(album_artist, album_name)
+            if not release:
+                return jsonify({"error": "Album not found"}), 404
+
+            tracks = []
+            for i, t in enumerate(release.get('tracks') or []):
+                tracks.append({
+                    'name': t.get('title', ''),
+                    'track_number': t.get('position') or (i + 1),
+                    'disc_number': 1,
+                    'duration_ms': t.get('duration_ms', 0),
+                    'id': t.get('url', ''),
+                    'artists': [{'name': release.get('artist') or album_artist}],
+                    'uri': '',
+                })
+
+            return jsonify({
+                'id': album_id,
+                'name': release.get('title') or album_name,
+                'artists': [{'name': release.get('artist') or album_artist}],
+                'release_date': release.get('release_date', ''),
+                'total_tracks': release.get('total_tracks', len(tracks)),
+                'album_type': 'album',
+                'images': [{'url': release['image_url']}] if release.get('image_url') else [],
+                'tracks': tracks,
+            })
+        except Exception as e:
+            logger.error(f"Bandcamp album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
     try:
@@ -21787,6 +21847,48 @@ def get_spotify_track(track_id):
             return jsonify(track_data)
         except Exception as e:
             logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    if source_override == 'bandcamp':
+        try:
+            from core.metadata.registry import (
+                get_bandcamp_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "Bandcamp is not enabled"}), 503
+            client = get_bandcamp_client()
+
+            bandcamp_url = request.args.get('bandcamp_url', '').strip()
+            track_name = request.args.get('name', '')
+            track_artist = request.args.get('artist', '')
+
+            release = client.get_release_metadata(bandcamp_url) if bandcamp_url else None
+            result = None
+            if release:
+                result = {
+                    'title': release.get('title', track_name),
+                    'url': bandcamp_url,
+                    'artist': release.get('artist') or track_artist,
+                    'image_url': release.get('image_url'),
+                }
+            elif track_artist and track_name:
+                result = client.search_track(track_artist, track_name)
+            if not result:
+                return jsonify({"error": "Track not found"}), 404
+
+            return jsonify({
+                'id': result.get('url', ''),
+                'name': result.get('title', track_name),
+                'artists': [{'name': result.get('artist') or track_artist}],
+                'album': {'name': '', 'images': [{'url': result['image_url']}] if result.get('image_url') else []},
+                'duration_ms': 0,
+                'preview_url': None,
+                'external_urls': {'bandcamp': result.get('url', '')},
+                'popularity': 0,
+            })
+        except Exception as e:
+            logger.error(f"Bandcamp track detail failed: {e}")
             return jsonify({"error": str(e)}), 500
 
     # Try Hydrabase first when active and track name provided

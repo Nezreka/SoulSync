@@ -483,6 +483,11 @@ def get_artist_albums_for_source(
         }
         if source == 'jiosaavn':
             kwargs['artist_name'] = artist_name
+        if source == 'bandcamp':
+            # Bandcamp has no numeric-ID lookup API — everything is
+            # URL-based — so it always resolves by name regardless of
+            # target_artist_id (same fallback shape as JioSaavn above).
+            kwargs['artist_name'] = artist_name
         if source == 'spotify':
             kwargs['allow_fallback'] = False
             kwargs['skip_cache'] = skip_cache

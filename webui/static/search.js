@@ -711,6 +711,12 @@ function initializeSearchModeToggle() {
             if (album.external_urls?.hydrabase_plugin) {
                 albumParams.set('plugin', album.external_urls.hydrabase_plugin);
             }
+            // Bandcamp has no numeric-ID lookup API — pass the exact release
+            // URL so the server can fetch it directly instead of re-searching
+            // by name (still falls back to that if this is missing).
+            if (activeSource === 'bandcamp' && album.external_urls?.bandcamp) {
+                albumParams.set('bandcamp_url', album.external_urls.bandcamp);
+            }
             const response = await fetch(`/api/spotify/album/${album.id}?${albumParams}`);
 
             if (!response.ok) {

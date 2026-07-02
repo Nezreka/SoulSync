@@ -681,4 +681,7 @@ def get_client_for_source(
     if source == "jiosaavn":
         return get_jiosaavn_client(client_factory=jiosaavn_client_factory)
 
+    if source == "bandcamp":
+        return get_bandcamp_client()
+
     return None
