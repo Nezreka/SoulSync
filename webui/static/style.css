@@ -35735,6 +35735,13 @@ div.artist-hero-badge {
     padding: 8px 18px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: all 0.15s ease;
 }
 .artweb-state-btn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.25); }
+/* Artist Web guide modal (extends the shared shortcuts-modal) */
+.artweb-help-modal { max-width: 520px; }
+.artweb-help-body { padding: 4px 4px 2px; }
+.artweb-help-section { margin-bottom: 14px; }
+.artweb-help-section h4 { margin: 0 0 5px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: rgba(255,255,255,0.5); }
+.artweb-help-section p { margin: 0; font-size: 13px; line-height: 1.55; color: rgba(255,255,255,0.78); }
+.artweb-help-section b { color: rgba(255,255,255,0.95); font-weight: 600; }
 #artist-map-canvas { flex: 1; display: block; cursor: grab; }
 #artist-map-canvas:active { cursor: grabbing; }
 #artist-map-loading {

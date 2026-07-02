@@ -6541,6 +6541,7 @@ async function openArtistWeb(lens) {
         _artWebSyncLensButtons();
         if (_artistWeb.lens === 'discovery') _artWebFetchDiscovery(host);
         else _artWebRenderLens();
+        _artWebMaybeFirstRunHint();
     } catch (err) {
         if (_artistWeb.gen !== myGen) return;
         console.error('[Artist Web] load failed', err);
@@ -7612,6 +7613,74 @@ function _artWebPathHint(html) {
 function _artWebHidePathHint() {
     const el = document.getElementById('artweb-path-hint');
     if (el) el.style.display = 'none';
+}
+
+// One-time first-run hint (a self-dismissing pill), so a cold user knows where to start.
+function _artWebMaybeFirstRunHint() {
+    try {
+        if (localStorage.getItem('artweb_seen_hint')) return;
+        localStorage.setItem('artweb_seen_hint', '1');
+    } catch (e) { return; }
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+    let el = document.getElementById('artweb-firstrun-hint');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'artweb-firstrun-hint';
+        el.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:9px 18px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);'
+            + 'transition:opacity .4s ease;';
+        container.appendChild(el);
+    }
+    el.innerHTML = 'Hover to identify · click an artist to explore · <b>?</b> for the guide';
+    el.style.display = 'block'; el.style.opacity = '1';
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => { el.style.display = 'none'; }, 400); }, 8000);
+}
+
+// Guide modal — explains the lenses, colors, and tools (reuses the Artist Map shortcuts-modal styling).
+function artWebShowHelp() {
+    const existing = document.getElementById('artweb-help-overlay');
+    if (existing) { existing.remove(); return; }
+    const overlay = document.createElement('div');
+    overlay.id = 'artweb-help-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10002';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+        <div class="artmap-shortcuts-modal artweb-help-modal">
+            <div class="artmap-shortcuts-header">
+                <h3>Artist Web — Guide</h3>
+                <button class="watch-all-close" onclick="document.getElementById('artweb-help-overlay').remove()">&times;</button>
+            </div>
+            <div class="artweb-help-body">
+                <div class="artweb-help-section">
+                    <h4>Three lenses</h4>
+                    <p><b>Genre</b> — your artists grouped by genre. <b>Communities</b> — clusters found from who's
+                       actually similar to whom, named by each cluster's hub artist. <b>Discovery</b> — your library
+                       (blue) wired to unowned similar artists (amber) you could add.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Explore</h4>
+                    <p><b>Hover</b> to identify a node · <b>click</b> an artist for details + play. On Discovery,
+                       click a candidate to add it to your watchlist, or an owned node to grow its frontier.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Tools</h4>
+                    <p><b>Path</b> — click two artists to trace how they connect · <b>Size by</b> Popular / Links /
+                       Influence · <b>Edges</b> — strong connections only · <b>Filter</b> — by genre. The
+                       <b>legend</b> (bottom-left) decodes the colors.</p>
+                </div>
+                <div class="artmap-shortcuts-grid">
+                    <div class="artmap-shortcut"><kbd>S</kbd><span>Focus search</span></div>
+                    <div class="artmap-shortcut"><kbd>F</kbd> / <kbd>0</kbd><span>Fit to view</span></div>
+                    <div class="artmap-shortcut"><kbd>+</kbd> / <kbd>-</kbd><span>Zoom in / out</span></div>
+                    <div class="artmap-shortcut"><kbd>Esc</kbd><span>Back / close</span></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
 }
 
 // ---- Artist Web side panel (mirrors the Artist Map card design/interactions) -------------------
