@@ -7414,11 +7414,13 @@ function _artWebShowArtist(node) {
         </div>`;
     p.style.display = 'flex';
 
-    // Resolve the artist photo via the app's image resolver (thumb_url is a Plex path, not loadable
-    // directly). Guarded by selectedKey so a fast re-click doesn't drop the wrong image in.
+    // Resolve the artist's OWN thumb by library id (normalized lazily server-side). The old call —
+    // /api/artist/<library-db-id>/image — sent the library row id to external providers as if it
+    // were THEIR id, so Deezer/iTunes returned whichever artist owns that number: wrong photo,
+    // essentially always. Guarded by selectedKey so a fast re-click can't drop in a stale image.
     if (a.artistId != null) {
         const forNode = node;
-        fetch(`/api/artist/${encodeURIComponent(a.artistId)}/image?name=${encodeURIComponent(a.label || '')}`)
+        fetch(`/api/library/artist/${encodeURIComponent(a.artistId)}/thumb`)
             .then(r => r.json())
             .then(d => {
                 if (!d || !d.success || !d.image_url) return;
