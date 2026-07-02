@@ -30032,12 +30032,19 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
 
+        # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
+        # consensus picks toward obscure long-tail deep cuts as you turn it up.
         similar_artists = database.get_top_similar_artists(
             limit=200,
             profile_id=get_current_profile_id(),
             require_source=active_source,
             exclude_library_server=active_server,
+            adventurousness=_adv_level,
         )
 
         if not similar_artists:
@@ -30093,12 +30100,8 @@ def get_discover_similar_artists():
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
         # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
         # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
-        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
-        # rotation order is left untouched (no regression). Fail-soft.
-        try:
-            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            _adv_level = 0.0
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the fetch order is
+        # left untouched (no regression). Fail-soft. (_adv_level was read above for the fetch.)
         _pid = get_current_profile_id()
         _taste = _discover_genre_taste(database, _pid)
         _plays = database.get_play_counts_by_name(

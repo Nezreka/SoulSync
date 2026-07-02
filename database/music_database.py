@@ -10779,10 +10779,16 @@ class MusicDatabase:
         profile_id: int = 1,
         require_source: str = None,
         exclude_library_server: str = None,
+        adventurousness: float = None,
     ) -> List[SimilarArtist]:
         """Get top similar artists excluding watchlist artists, with cycling support.
         require_source: if set, only returns artists with that source ID.
-        exclude_library_server: if set, also excludes artists already present in that media server."""
+        exclude_library_server: if set, also excludes artists already present in that media server.
+        adventurousness: 0..1 dial. When given, the CANDIDATE SELECTION itself shifts with it — the
+          pool is ordered by a dial-weighted blend of consensus (occurrence, safe end) and obscurity
+          (low popularity, adventurous end), so turning it up pulls genuinely obscure picks out of the
+          long tail instead of only re-ranking the featured-rotation window. None = the classic
+          featured-rotation order (unchanged for every other caller)."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -10820,6 +10826,31 @@ class MusicDatabase:
                     }
                     sql_limit = max(limit * 5, limit + 100)
 
+                if adventurousness is None:
+                    # Classic featured-rotation order (unchanged for every non-dial caller).
+                    order_clause = """ORDER BY
+                        CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,
+                        MAX(sa.last_featured) ASC,
+                        occurrence_count DESC,
+                        similarity_rank ASC"""
+                    order_params = ()
+                else:
+                    _dial = max(0.0, min(1.0, float(adventurousness)))
+                    # Dial-weighted SELECTION: blend consensus (occurrence) with obscurity (low
+                    # popularity). Occurrence (~1..21) is scaled x5 to sit on the 0..100 obscurity
+                    # scale. Consensus keeps a small floor (0.2 at dial 1) so picks stay relevant;
+                    # obscurity grows to dominate, so the adventurous end pulls deep cuts out of the
+                    # long tail instead of re-ordering the same rotation window.
+                    # NB: use the aggregates explicitly (SUM/MAX) — inside an ORDER BY *expression* a
+                    # bare `occurrence_count` binds to the per-row base column, not the SUM alias.
+                    order_clause = """ORDER BY (
+                            (SUM(sa.occurrence_count) * 5.0) * (1.0 - 0.8 * ?)
+                            + (100.0 - COALESCE(MAX(sa.popularity), 50)) * (0.2 + 0.8 * ?)
+                        ) DESC,
+                        SUM(sa.occurrence_count) DESC,
+                        AVG(sa.similarity_rank) ASC"""
+                    order_params = (_dial, _dial)
+
                 cursor.execute(f"""
                     SELECT
                         MAX(sa.id) as id,
@@ -10844,13 +10875,9 @@ class MusicDatabase:
                     ) AND wa.profile_id = ?
                     WHERE wa.id IS NULL AND sa.profile_id = ? {source_filter}
                     GROUP BY sa.similar_artist_name
-                    ORDER BY
-                        CASE WHEN MAX(sa.last_featured) IS NULL THEN 0 ELSE 1 END,
-                        MAX(sa.last_featured) ASC,
-                        occurrence_count DESC,
-                        similarity_rank ASC
+                    {order_clause}
                     LIMIT ?
-                """, (profile_id, profile_id, sql_limit))
+                """, (profile_id, profile_id, *order_params, sql_limit))
 
                 rows = cursor.fetchall()
                 results = []
