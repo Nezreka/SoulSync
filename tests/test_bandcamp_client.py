@@ -399,6 +399,28 @@ class TestSearchTrackConvenience:
     def test_empty_query_returns_none(self, client):
         assert client.search_track('', '') is None
 
+    def test_prefers_release_page_image_over_search_thumbnail(self, client, monkeypatch):
+        """The autocomplete search index's cached thumbnail can point at a
+        since-removed CDN size variant (confirmed 404 in production, e.g.
+        .../img/1811014619_3.jpg — a Full Body Recordings track). The release
+        page's own JSON-LD image is live-verified, so it must win when present."""
+        monkeypatch.setattr(client, 'search_tracks', lambda q, limit=10: [Track.from_bandcamp_dict(_TRACK_RESULT)])
+        monkeypatch.setattr(client, 'get_release_metadata', lambda url: {
+            'image_url': 'https://f4.bcbits.com/img/a3207173692_10.jpg',
+        })
+
+        result = client.search_track('Spotlights', 'All I Need (Radiohead Cover)')
+
+        assert result['image_url'] == 'https://f4.bcbits.com/img/a3207173692_10.jpg'
+
+    def test_falls_back_to_search_thumbnail_when_release_page_has_no_image(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'search_tracks', lambda q, limit=10: [Track.from_bandcamp_dict(_TRACK_RESULT)])
+        monkeypatch.setattr(client, 'get_release_metadata', lambda url: {'tags': []})
+
+        result = client.search_track('Spotlights', 'All I Need (Radiohead Cover)')
+
+        assert result['image_url'] == _TRACK_RESULT['img']
+
 
 class TestSearchAlbumConvenience:
     def test_merges_release_metadata_and_tracklist(self, client, monkeypatch):
@@ -413,6 +435,24 @@ class TestSearchAlbumConvenience:
         assert result['label'] == 'Radiohead'
         assert result['total_tracks'] == 10
         assert len(result['tracks']) == 1
+
+    def test_prefers_release_page_image_over_search_thumbnail(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'search_albums', lambda q, limit=10: [Album.from_bandcamp_dict(_ALBUM_RESULT)])
+        monkeypatch.setattr(client, 'get_release_metadata', lambda url: {
+            'image_url': 'https://f4.bcbits.com/img/a3185643660_10.jpg',
+        })
+
+        result = client.search_album('Radiohead', 'KID A MNESIA')
+
+        assert result['image_url'] == 'https://f4.bcbits.com/img/a3185643660_10.jpg'
+
+    def test_falls_back_to_search_thumbnail_when_release_page_has_no_image(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'search_albums', lambda q, limit=10: [Album.from_bandcamp_dict(_ALBUM_RESULT)])
+        monkeypatch.setattr(client, 'get_release_metadata', lambda url: {'tags': []})
+
+        result = client.search_album('Radiohead', 'KID A MNESIA')
+
+        assert result['image_url'] == _ALBUM_RESULT['img']
 
 
 # ---------------------------------------------------------------------------
