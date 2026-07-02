@@ -6484,11 +6484,15 @@ async function openArtistWeb(lens) {
     // Re-entrancy: drop a stale keydown listener so we never leak/duplicate it.
     if (_artistWeb.onKey) document.removeEventListener('keydown', _artistWeb.onKey);
 
-    // Pseudo-page takeover: hide the other discover sections, show the web container.
-    document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
-        el._prevDisplay = el.style.display;
-        el.style.display = 'none';
-    });
+    // Pseudo-page takeover: hide the other discover sections, show the web container. Only snapshot
+    // when NOT already open — a re-entrant open (the error-card Retry button) would otherwise
+    // overwrite each sibling's real _prevDisplay ('') with 'none', blanking Discover on close.
+    if (container.style.display !== 'flex') {
+        document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
+            el._prevDisplay = el.style.display;
+            el.style.display = 'none';
+        });
+    }
     container.style.display = 'flex';
 
     const host = document.getElementById('artist-web-canvas');
@@ -6517,6 +6521,8 @@ async function openArtistWeb(lens) {
             artWebZoom(0.77);           // ratio<1 = zoom IN
         } else if (e.key === '-' || e.key === '_') {
             artWebZoom(1.3);            // zoom OUT
+        } else if (e.key === '?') {
+            artWebShowHelp();           // the first-run hint advertises "? for the guide"
         }
     };
     document.addEventListener('keydown', _artistWeb.onKey);
@@ -6715,6 +6721,8 @@ function _artWebRenderLens() {
 
     // Empty discovery: a valid payload with zero candidates should GUIDE, not show a blank canvas.
     if (_artistWeb.lens === 'discovery' && built.graph.order === 0) {
+        const lg = document.getElementById('artist-web-legend');
+        if (lg) lg.style.display = 'none';   // don't leave the prior lens's legend over the card
         _artWebStateCard(host, 'No discovery candidates yet — add artists to your Watchlist so SoulSync can fetch similar artists to explore.', null);
         return;
     }
@@ -6809,7 +6817,8 @@ function _artWebStartLiveLayout(graph) {
     const statsEl = document.getElementById('artist-web-stats');
     if (statsEl && statsEl.textContent.indexOf('· settling') === -1) statsEl.textContent += ' · settling…';
     // Run time scales with graph size (a worker iterates as fast as it can; this is wall-clock).
-    const ms = Math.min(6000, 1200 + graph.order * 0.8);
+    const ms = Math.min(11000, 1600 + graph.order * 1.6);   // ~2x the settle budget — more iterations,
+                                                            // tighter islands (the pre-seed makes them pay off)
     _artistWeb.fa2Timer = setTimeout(() => {
         _artWebKillLiveLayout();
         _artWebFinishLayout(graph);
@@ -7034,7 +7043,7 @@ function _artWebRunLayout(graph) {
     const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
     if (!fa2) { console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions'); return; }
     fa2.assign(graph, {
-        iterations: 400,
+        iterations: 800,
         settings: {
             ...fa2.inferSettings(graph),
             barnesHutOptimize: true,
@@ -7166,6 +7175,7 @@ function closeArtistWeb() {
     if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
     _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
     if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = null;   // so a late async re-select (expand-after-close) can't refresh a dead graph
     if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
     const results = document.getElementById('artist-web-search-results');
     if (results) { results.style.display = 'none'; results.innerHTML = ''; }
@@ -7395,8 +7405,9 @@ function _artWebShowTooltip(nodeKey) {
         const noun = kind === 'genre' ? 'artist' : 'connection';
         const badge = kind === 'discovery' ? '<span class="artmap-tip-badge">To discover</span>'
                     : kind === 'genre' ? '<span class="artmap-tip-badge">Genre</span>' : '';
-        const img = a.thumb
-            ? `<img class="artmap-tip-img" src="${escapeHtml(a.thumb)}" alt="" onerror="this.style.display='none'">`
+        const imgSrc = a.thumb || a.image_url;   // discovery candidates store image_url, not thumb
+        const img = imgSrc
+            ? `<img class="artmap-tip-img" src="${escapeHtml(imgSrc)}" alt="" onerror="this.style.display='none'">`
             : (kind === 'genre' ? '' : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
         const gen = a.primaryGenre || '';
         const genreHTML = gen ? `<div class="artmap-tip-genres"><span>${escapeHtml(gen)}</span></div>` : '';
@@ -7731,9 +7742,11 @@ async function artWebTogglePreview(key) {
     const btn = document.getElementById('artweb-preview-btn');
     if (!dz) { if (btn) btn.textContent = 'No preview available'; return; }
     if (btn) { btn.textContent = 'Loading preview…'; btn.disabled = true; }
+    const myGen = st.gen;   // if the Web is closed/reopened mid-fetch, don't start orphaned audio
     try {
         const r = await fetch(`/api/graph/discovery/preview/${encodeURIComponent(dz[1])}`);
         const d = await r.json();
+        if (st.gen !== myGen) return;
         if (!d.success || !d.preview_url) throw new Error(d.reason || 'no preview');
         // Pause the main player so the preview doesn't talk over it.
         if (typeof audioPlayer !== 'undefined' && audioPlayer && !audioPlayer.paused) audioPlayer.pause();
@@ -7741,6 +7754,7 @@ async function artWebTogglePreview(key) {
         audio.volume = 0.9;
         audio.onended = () => { if (st.previewKey === key) _artWebStopPreview(); };
         await audio.play();
+        if (st.gen !== myGen) { try { audio.pause(); } catch (e) {} return; }   // closed during play()
         st.previewAudio = audio;
         st.previewKey = key;
         if (btn) { btn.textContent = `⏸ ${d.track || 'Playing preview'}`; btn.disabled = false; }

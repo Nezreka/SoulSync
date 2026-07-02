@@ -67,13 +67,16 @@ def build_taste_map(
 
     for src, name, _sp, _dz, _it, occ, pop in rows:
         tgt = _norm(name)
-        if tgt not in owned_names:
+        # Skip blank/whitespace names (bad scans put ""-named artists in owned_names, so the
+        # `in owned_names` test alone lets them through) — a ""-keyed node/edge produces a
+        # dangling edge that makes graphology reject the ENTIRE library graph on import.
+        if not tgt or tgt not in owned_names:
             continue
         src_name = id2name.get(src)
         if not src_name:
             continue
         src_norm = _norm(src_name)
-        if src_norm not in owned_names or src_norm == tgt:
+        if not src_norm or src_norm not in owned_names or src_norm == tgt:
             continue
         _touch(src_norm, src_name, None)      # source pop filled if it's a target elsewhere
         _touch(tgt, name, pop)
@@ -284,8 +287,8 @@ def build_discovery_map(
         if not src_name:
             continue
         src_norm = _norm(src_name)
-        if src_norm not in owned_names:
-            continue                              # anchor must be owned
+        if not src_norm or src_norm not in owned_names:
+            continue                              # anchor must be owned (and non-blank)
         tgt_norm = _norm(name)
         if not tgt_norm or tgt_norm in owned_names:
             continue                              # discovery = UNowned target only

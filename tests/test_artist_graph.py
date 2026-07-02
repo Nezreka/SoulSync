@@ -233,3 +233,22 @@ def test_expand_ranks_duplicate_target_by_strongest_row():
     g = expand_discovery_node(rows, {"a"}, "A", per=1)
     assert [n["label"] for n in g["nodes"]] == ["Foo"]   # occ 5 beats Bar's 2 (old code: occ 1 lost)
     assert g["edges"][0]["weight"] == 5
+
+
+def test_blank_named_artist_never_becomes_a_node_or_dangling_edge():
+    # A blank/whitespace-named owned artist (bad scan) must NOT produce a ""-keyed node or an
+    # edge with a "" endpoint — graphology rejects the whole graph on import if an edge references
+    # a missing node, so one dangling edge blanks the entire Artist Web (Pass 5 review).
+    rows = [
+        ("spB", "A", "spA", None, None, 5, 40),        # B -> A (both owned): a real edge
+        ("spA", "B", "spB", None, None, 5, 30),        # A -> B: collapses/sums with the above
+        ("spA", "   ", "spBlank", None, None, 9, 40),  # A -> blank-named owned target: MUST drop
+    ]
+    g = build_taste_map(rows, {"a", "b", ""})
+    keys = {n["key"] for n in g["nodes"]}
+    assert keys == {"a", "b"}                          # blank never becomes a node
+    endpoints = set()
+    for e in g["edges"]:
+        endpoints.add(e["source"]); endpoints.add(e["target"])
+    assert "" not in endpoints                         # no dangling edge endpoint
+    assert endpoints <= keys                           # every edge endpoint resolves to a node
