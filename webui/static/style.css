@@ -53999,6 +53999,21 @@ tr.tag-diff-same {
     color: rgb(248, 113, 113);
     border-color: rgba(239, 68, 68, 0.5);
 }
+/* #970: stop clicked but the run hasn't unwound yet (waiting on its current item) */
+.repair-stop-btn.stopping {
+    cursor: default;
+    opacity: 0.6;
+    animation: repair-stop-pulse 1s ease-in-out infinite;
+}
+.repair-stop-btn.stopping:hover {
+    background: transparent;
+    color: rgba(248, 113, 113, 0.85);
+    border-color: rgba(239, 68, 68, 0.35);
+}
+@keyframes repair-stop-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 0.7; }
+}
 
 .repair-run-btn:hover {
     background: rgba(var(--accent-rgb, 99, 102, 241), 0.15);
