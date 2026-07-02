@@ -9156,7 +9156,7 @@ def get_artist_detail(artist_id):
                                      ('deezer', 'deezer_id'), ('lastfm', 'lastfm_url'),
                                      ('itunes', 'itunes_track_id'), ('audiodb', 'audiodb_id'),
                                      ('genius', 'genius_id'), ('tidal', 'tidal_id'),
-                                     ('qobuz', 'qobuz_id')]:
+                                     ('qobuz', 'qobuz_id'), ('bandcamp', 'bandcamp_id')]:
                         try:
                             cursor.execute(f"""
                                 SELECT COUNT(*) FROM tracks t
@@ -9170,6 +9170,30 @@ def get_artist_detail(artist_id):
                         except Exception:
                             enrichment_coverage[svc] = 0
                     enrichment_coverage['total_tracks'] = total
+
+                # Bandcamp has no artist-level enrichment (no artists.bandcamp_id
+                # column), so derive an artist badge link from any owned album/track's
+                # release URL instead — Bandcamp release URLs are always
+                # https://<artist>.bandcamp.com/album|track/<slug>, so the origin
+                # doubles as the artist's Bandcamp page.
+                cursor.execute("""
+                    SELECT al.bandcamp_url FROM albums al
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.name = ? AND ar.server_source = ?
+                      AND al.bandcamp_url IS NOT NULL AND al.bandcamp_url != ''
+                    UNION ALL
+                    SELECT t.bandcamp_url FROM tracks t
+                    JOIN albums al ON al.id = t.album_id
+                    JOIN artists ar ON ar.id = al.artist_id
+                    WHERE ar.name = ? AND ar.server_source = ?
+                      AND t.bandcamp_url IS NOT NULL AND t.bandcamp_url != ''
+                    LIMIT 1
+                """, (artist_name, server_source, artist_name, server_source))
+                bandcamp_row = cursor.fetchone()
+                if bandcamp_row and bandcamp_row[0]:
+                    parsed_bandcamp_url = urlparse(bandcamp_row[0])
+                    if parsed_bandcamp_url.scheme and parsed_bandcamp_url.netloc:
+                        artist_info['bandcamp_url'] = f"{parsed_bandcamp_url.scheme}://{parsed_bandcamp_url.netloc}/"
         except Exception as e:
             logger.debug("enrichment coverage build failed: %s", e)
 

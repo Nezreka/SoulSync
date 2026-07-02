@@ -1153,6 +1153,7 @@ function updateArtistDetailPageHeaderWithData(artist) {
         if (artist.qobuz_id) badges.push(_hb(QOBUZ_LOGO_URL, 'Qz', 'Qobuz', `https://www.qobuz.com/artist/${artist.qobuz_id}`));
         if (artist.discogs_id) badges.push(_hb(DISCOGS_LOGO_URL, 'DC', 'Discogs', `https://www.discogs.com/artist/${artist.discogs_id}`));
         if (artist.amazon_id) badges.push(_hb(AMAZON_LOGO_URL, 'AMZ', 'Amazon Music', null));
+        if (artist.bandcamp_url) badges.push(_hb(BANDCAMP_LOGO_URL, 'BC', 'Bandcamp', artist.bandcamp_url));
         if (artist.soul_id && !String(artist.soul_id).startsWith('soul_unnamed_')) badges.push(_hb('/static/trans2.png', 'SS', `SoulID: ${artist.soul_id}`, null));
 
         badgesContainer.innerHTML = badges.join('');
@@ -1179,6 +1180,7 @@ function renderArtistEnrichmentCoverage(enrichment) {
         { name: 'Genius', key: 'genius', color: '#ffff64' },
         { name: 'Tidal', key: 'tidal', color: '#00ffff' },
         { name: 'Qobuz', key: 'qobuz', color: '#4285f4' },
+        { name: 'Bandcamp', key: 'bandcamp', color: '#1da0c3' },
     ];
 
     const r = 20, circ = 2 * Math.PI * r;
