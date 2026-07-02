@@ -15,6 +15,7 @@ from core.discovery.endpoints import (
     cancel_sync,
     delete_playlist_state,
     get_sync_status,
+    reconcile_sync_phase,
     playlist_name_strict as _pl_name_strict,
     playlist_name_safe as _pl_name_safe,
 )
@@ -398,6 +399,79 @@ def test_status_strict_getter_missing_playlist_raises_500_after_partial_mutation
     # phase was set to sync_complete BEFORE the strict getter raised (1:1).
     assert states['pl']['phase'] == 'sync_complete'
     assert calls == []  # activity never posted
+
+
+# ---------------------------------------------------------------------------
+# reconcile_sync_phase (#972 — the phase transition, decoupled from the poll)
+# ---------------------------------------------------------------------------
+
+def test_reconcile_finished_flips_phase_and_posts_activity():
+    calls, add = _activity_recorder()
+    state = {'phase': 'syncing', 'playlist': {'name': 'Mix'}}
+    out = reconcile_sync_phase(
+        state, {"status": "finished", "progress": {"done": 3}},
+        activity_subject='YouTube playlist', playlist_name_getter=_pl_name_safe,
+        add_activity_item=add)
+    assert out == 'finished'
+    assert state['phase'] == 'sync_complete'
+    assert state['sync_progress'] == {"done": 3}
+    assert calls == [("", "Sync Complete", "YouTube playlist 'Mix' synced successfully", "Now")]
+
+
+def test_reconcile_error_reverts_to_discovered():
+    calls, add = _activity_recorder()
+    state = {'phase': 'syncing', 'playlist': {'name': 'Mix'}}
+    out = reconcile_sync_phase(
+        state, {"status": "error"},
+        activity_subject='YouTube playlist', playlist_name_getter=_pl_name_safe,
+        add_activity_item=add)
+    assert out == 'error'
+    assert state['phase'] == 'discovered'
+    assert calls == [("", "Sync Failed", "YouTube playlist 'Mix' sync failed", "Now")]
+
+
+def test_reconcile_cancelled_unsticks_without_activity():
+    calls, add = _activity_recorder()
+    state = {'phase': 'syncing'}
+    out = reconcile_sync_phase(state, {"status": "cancelled"}, add_activity_item=add)
+    assert out == 'cancelled'
+    assert state['phase'] == 'discovered'
+    assert calls == []
+
+
+def test_reconcile_non_terminal_status_is_noop():
+    state = {'phase': 'syncing'}
+    for status in ('starting', 'syncing', 'running', 'unknown'):
+        assert reconcile_sync_phase(state, {"status": status}) is None
+        assert state['phase'] == 'syncing'
+    # Missing/empty sync_state too (sync_states entry gone).
+    assert reconcile_sync_phase(state, {}) is None
+    assert reconcile_sync_phase(state, None) is None
+
+
+def test_reconcile_is_one_shot_guarded_on_syncing_phase():
+    """The server loop calls this every second; it must fire EXACTLY once. Once a
+    state has left 'syncing', a repeat 'finished' must not re-flip or re-post."""
+    calls, add = _activity_recorder()
+    state = {'phase': 'syncing', 'playlist': {'name': 'Mix'}}
+    sync_state = {"status": "finished", "progress": {"done": 3}}
+
+    first = reconcile_sync_phase(state, sync_state, activity_subject='YT',
+                                 playlist_name_getter=_pl_name_safe, add_activity_item=add)
+    second = reconcile_sync_phase(state, sync_state, activity_subject='YT',
+                                  playlist_name_getter=_pl_name_safe, add_activity_item=add)
+    assert first == 'finished'
+    assert second is None           # already 'sync_complete' — not re-processed
+    assert state['phase'] == 'sync_complete'
+    assert len(calls) == 1          # activity posted once, not once per loop tick
+
+
+def test_reconcile_without_activity_callable_still_flips_phase():
+    """The server loop may pass a strict name getter that would raise; when no
+    add_activity_item is wired the phase still flips (the essential fix)."""
+    state = {'phase': 'syncing'}
+    assert reconcile_sync_phase(state, {"status": "finished", "progress": {}}) == 'finished'
+    assert state['phase'] == 'sync_complete'
 
 
 # ---------------------------------------------------------------------------
