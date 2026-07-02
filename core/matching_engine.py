@@ -285,6 +285,14 @@ class MusicMatchingEngine:
             def _strip_versions(s: str) -> str:
                 for kw in different_version_keywords:
                     s = re.sub(r'\b' + re.escape(kw) + r'\b', ' ', s)
+                # A "(live)" vs "- live" difference is the SAME version formatted
+                # differently — the source often uses a dash where the metadata
+                # uses parentheses (lilbob5769). Normalise the wrapping punctuation
+                # away so only a GENUINE distinguishing token (venue / remixer /
+                # year) can trip the divergent-version penalty below. Without this,
+                # stripping just the version word left "song ()" vs "song -", which
+                # compared unequal and wrongly blocked the match.
+                s = re.sub(r'[()\[\]\-]', ' ', s)
                 return re.sub(r'\s+', ' ', s).strip()
 
             if v1 != v2 or _strip_versions(str1) != _strip_versions(str2):
