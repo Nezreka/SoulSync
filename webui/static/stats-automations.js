@@ -5247,14 +5247,19 @@ async function checkArtistEnhanceEligibility(artistId) {
 }
 
 async function playArtistRadio() {
-    try {
-        const artistId = artistDetailPageState.currentArtistId;
-        const artistName = artistDetailPageState.currentArtistName || '';
-        if (!artistId) {
-            showToast('No artist selected', 'error');
-            return;
-        }
+    const artistId = artistDetailPageState.currentArtistId;
+    const artistName = artistDetailPageState.currentArtistName || '';
+    if (!artistId) {
+        showToast('No artist selected', 'error');
+        return;
+    }
+    return startArtistRadioById(artistId, artistName);
+}
 
+// Parameterized core of the artist-detail Radio button — also driven by the Artist Web graph panel
+// ("Play radio" on an owned node), so both entry points share one implementation.
+async function startArtistRadioById(artistId, artistName) {
+    try {
         // Get tracks from this artist's library
         const resp = await fetch(`/api/library/artist/${artistId}/enhanced`);
         if (!resp.ok) throw new Error('Failed to load artist data');
