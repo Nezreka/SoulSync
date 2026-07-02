@@ -6469,7 +6469,7 @@ function _webTopArtists(artistNodes, n) {
         .map(a => a.key));
 }
 
-async function openArtistWeb() {
+async function openArtistWeb(lens) {
     const container = document.getElementById('artist-web-container');
     if (!container) return;
 
@@ -6506,13 +6506,32 @@ async function openArtistWeb() {
         _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
         _artistWeb.betweenCache = null;
         _artistWeb.discoveryData = null;  // refetch on next Discovery view — ownership may have changed
+        // The hub cards deep-link a lens: Taste Map -> 'genre', Discovery Web -> 'discovery'.
+        if (lens === 'genre' || lens === 'community' || lens === 'discovery') _artistWeb.lens = lens;
         _artistWeb.lens = _artistWeb.lens || 'genre';
         _artWebSyncLensButtons();
-        _artWebRenderLens();
+        if (_artistWeb.lens === 'discovery') _artWebFetchDiscovery(host);
+        else _artWebRenderLens();
     } catch (err) {
         console.error('[Artist Web] load failed', err);
         host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
     }
+}
+
+// Fetch the discovery payload, then render — only a GOOD payload is cached (a 500 resolves r.json()
+// too, and caching {"error": ...} used to leave the lens permanently blank with no retry).
+function _artWebFetchDiscovery(host) {
+    fetch('/api/graph/discovery')
+        .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+        .then(({ ok, d }) => {
+            if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
+            _artistWeb.discoveryData = d;
+            _artWebRenderLens();
+        })
+        .catch(err => {
+            console.error('[Artist Web] discovery load failed', err);
+            if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery — switch lenses and back to retry.</div>';
+        });
 }
 
 // Switch the organizing lens (genre clusters vs similarity communities) and rebuild.
@@ -6522,21 +6541,9 @@ function artWebSetLens(lens) {
     _artWebSyncLensButtons();
     const host = document.getElementById('artist-web-canvas');
     if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
-    // Discovery uses its own endpoint — fetch it once, then render. Only a GOOD payload is cached:
-    // a 500 resolves r.json() too, and caching {"error": ...} used to leave the lens permanently
-    // blank ("0 artists") with no retry until a full page reload.
+    // Discovery uses its own endpoint — fetch on first view (see _artWebFetchDiscovery).
     if (lens === 'discovery' && !_artistWeb.discoveryData) {
-        fetch('/api/graph/discovery')
-            .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
-            .then(({ ok, d }) => {
-                if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
-                _artistWeb.discoveryData = d;
-                _artWebRenderLens();
-            })
-            .catch(err => {
-                console.error('[Artist Web] discovery load failed', err);
-                if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery — switch lenses and back to retry.</div>';
-            });
+        _artWebFetchDiscovery(host);
     } else {
         setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
     }
