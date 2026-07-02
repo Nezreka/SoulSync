@@ -100,6 +100,12 @@ export function bindWindowWebRouter(router: AnyRouter) {
         const source = options.artistSource ? String(options.artistSource) : 'library';
         href =
           `/artist-detail/${encodeURIComponent(source)}/${encodeURIComponent(String(options.artistId))}` as `/${string}`;
+        // Some sources (Bandcamp) have no numeric-ID lookup API — the name
+        // has to travel with the URL or the route has nothing to resolve
+        // against on mount.
+        if (options.artistName) {
+          href = `${href}?name=${encodeURIComponent(options.artistName)}` as `/${string}`;
+        }
       }
 
       await router.navigate({ href, replace: options?.replace === true });
