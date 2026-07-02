@@ -231,6 +231,7 @@ from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
 from core.genius_worker import GeniusWorker
+from core.bandcamp_worker import BandcampWorker
 from core.tidal_worker import TidalWorker
 from core.qobuz_worker import QobuzWorker
 from core.hydrabase_worker import HydrabaseWorker
@@ -16104,6 +16105,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -16209,6 +16211,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -16333,6 +16336,7 @@ def _post_process_matched_download(context_key, context, file_path):
             qobuz_enrichment_worker=qobuz_enrichment_worker,
             lastfm_worker=lastfm_worker,
             genius_worker=genius_worker,
+            bandcamp_worker=bandcamp_worker,
             spotify_enrichment_worker=spotify_enrichment_worker,
             itunes_enrichment_worker=itunes_enrichment_worker,
             hifi_client=download_orchestrator.client("hifi") if download_orchestrator else None,
@@ -37228,6 +37232,39 @@ except Exception as e:
 # END GENIUS ENRICHMENT INTEGRATION
 # ================================================================================================
 
+
+# ================================================================================================
+# BANDCAMP ENRICHMENT WORKER
+# ================================================================================================
+# Opt-in experimental source (core.metadata.registry.EXPERIMENTAL_SOURCES) —
+# started unconditionally like the other enrichment workers, but the worker
+# loop itself stays idle unless 'experimental.bandcamp_enabled' is on
+# (checked live, so toggling the setting takes effect without a restart).
+
+bandcamp_worker = None
+try:
+    from database.music_database import MusicDatabase
+    bandcamp_db = MusicDatabase()
+    bandcamp_worker = BandcampWorker(database=bandcamp_db)
+    if config_manager.get('bandcamp_enrichment_paused', False):
+        bandcamp_worker.paused = True
+    bandcamp_worker.start()
+    if bandcamp_worker.paused:
+        logger.info("Bandcamp enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("Bandcamp enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"Bandcamp worker initialization failed: {e}")
+    bandcamp_worker = None
+
+# Bandcamp status / pause / resume routes are served by the generic
+# enrichment blueprint at /api/enrichment/bandcamp/{status,pause,resume},
+# same as Genius above.
+
+# ================================================================================================
+# END BANDCAMP ENRICHMENT INTEGRATION
+# ================================================================================================
+
 # ================================================================================================
 # TIDAL ENRICHMENT WORKER
 # ================================================================================================
@@ -38868,6 +38905,11 @@ _register_enrichment_services([
         id='similar_artists', display_name='Similar Artists',
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
+    ),
+    _EnrichmentService(
+        id='bandcamp', display_name='Bandcamp',
+        worker_getter=lambda: bandcamp_worker,
+        config_paused_key='bandcamp_enrichment_paused',
     ),
 ])
 

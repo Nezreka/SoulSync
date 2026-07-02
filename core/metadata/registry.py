@@ -49,6 +49,7 @@ _profile_spotify_credentials_provider: Callable[[int], Any] = lambda profile_id:
 # watchlist, config-status, and the UI `_experimental` payload) automatically.
 EXPERIMENTAL_SOURCES: Dict[str, str] = {
     "jiosaavn": "experimental.jiosaavn_enabled",
+    "bandcamp": "experimental.bandcamp_enabled",
 }
 
 
@@ -209,6 +210,14 @@ def _get_jiosaavn_factory(client_factory: Optional[MetadataClientFactory]) -> Me
     from core.jiosaavn_client import JioSaavnClient
 
     return JioSaavnClient
+
+
+def _get_bandcamp_factory(client_factory: Optional[MetadataClientFactory]) -> MetadataClientFactory:
+    if client_factory is not None:
+        return client_factory
+    from core.bandcamp_client import BandcampClient
+
+    return BandcampClient
 
 
 def get_spotify_client(client_factory: Optional[MetadataClientFactory] = None):
@@ -390,6 +399,18 @@ def get_jiosaavn_client(client_factory: Optional[MetadataClientFactory] = None):
     base_url = _get_config_value("jiosaavn.base_url", "https://saavn.sumit.co") or "https://saavn.sumit.co"
     cache_key = f"jiosaavn::{base_url.rstrip('/')}"
     factory = _get_jiosaavn_factory(client_factory)
+    with _client_cache_lock:
+        client = _client_cache.get(cache_key)
+        if client is None:
+            client = factory()
+            _client_cache[cache_key] = client
+        return client
+
+
+def get_bandcamp_client(client_factory: Optional[MetadataClientFactory] = None):
+    """Get cached Bandcamp client. Keyless — no config-dependent cache key."""
+    cache_key = "bandcamp"
+    factory = _get_bandcamp_factory(client_factory)
     with _client_cache_lock:
         client = _client_cache.get(cache_key)
         if client is None:

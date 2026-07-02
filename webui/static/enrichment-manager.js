@@ -38,6 +38,9 @@ const ENRICHMENT_WORKERS = [
     // manual-match affordance.
     { id: 'similar_artists', name: 'Similar Artists', color: '#a855f7', relationship: true,
       logoUrl: 'https://www.music-map.com/elements/objects/og_logo.png', imgRound: true },
+    // Experimental (core.metadata.registry.EXPERIMENTAL_SOURCES), no dashboard
+    // bubble/logo element — falls back to the colored-initial chip.
+    { id: 'bandcamp',    name: 'Bandcamp',     color: '#1da0c3' },
 ];
 
 const _emWorkerById = Object.fromEntries(ENRICHMENT_WORKERS.map(w => [w.id, w]));

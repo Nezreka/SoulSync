@@ -48,7 +48,7 @@ def test_experimental_source_disabled_by_default(monkeypatch):
     assert registry.experimental_source_rejected("jiosaavn") is True
     assert registry.experimental_source_rejected("deezer") is False
     assert registry.experimental_source_rejected("") is False
-    assert registry.experimental_status() == {"jiosaavn_enabled": False}
+    assert registry.experimental_status() == {"jiosaavn_enabled": False, "bandcamp_enabled": False}
 
 
 def test_experimental_source_not_rejected_when_enabled(monkeypatch):
