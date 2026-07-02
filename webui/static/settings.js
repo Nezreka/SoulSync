@@ -2565,18 +2565,51 @@ async function applyQualityPreset(presetName) {
     if (settingsAutoSaveTimer) { clearTimeout(settingsAutoSaveTimer); settingsAutoSaveTimer = null; }
     if (qualityProfileAutoSaveTimer) { clearTimeout(qualityProfileAutoSaveTimer); qualityProfileAutoSaveTimer = null; }
 
+    // Previewing a specific NON-default profile: POST /preset/<name> below
+    // always overwrites the LIVE default row, no matter what's on screen —
+    // clicking a Quick-Set button while just looking at a different profile
+    // would silently destroy the real default's settings and then swap the
+    // tiles to show it instead (looks like the preview "jumps" to a random
+    // profile). Load the preset's values locally instead — read-only, never
+    // touches the server — same as previewQualityProfile; it only persists
+    // once the user explicitly clicks that profile row's Update (✎).
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        try {
+            const response = await fetch('/api/quality-profile/presets');
+            const data = await response.json();
+            const preset = data.success ? data.presets?.[presetName] : null;
+            if (!preset) {
+                showToast(`Failed to load '${presetName}' preset`, 'error');
+                return;
+            }
+            // Same carry-forward as the live-default path below: the search
+            // strategy is a global choice, not part of the preset itself.
+            const uiState = collectQualityProfileFromUI();
+            const merged = {
+                ...preset,
+                search_mode: uiState.search_mode,
+                rank_candidates_by_quality: uiState.rank_candidates_by_quality,
+            };
+            window._suppressSettingsAutoSave = true;
+            try {
+                populateQualityProfileUI(merged);
+            } finally {
+                window._suppressSettingsAutoSave = false;
+            }
+            showToast(`Previewing '${PRESET_LABELS[presetName] || presetName}' — click ✎ on the profile row to save it here`, 'success');
+        } catch (error) {
+            console.error('Error loading quality preset:', error);
+            showToast('Failed to load preset', 'error');
+        }
+        return;
+    }
+
     try {
         const response = await fetch(`/api/quality-profile/preset/${presetName}`, { method: 'POST' });
         const data = await response.json();
 
         if (data.success) {
             currentQualityProfile = data.profile;
-            // A preset always writes the live default row — the tiles now
-            // show that, not whatever named profile might have been under
-            // preview, so drop that state too (else the editing banner would
-            // keep pointing at a profile the tiles no longer reflect).
-            _qpEditingProfileId = null;
-            qpHideEditingBanner();
             // Suppress the global change→auto-save listener while we programmatically
             // set checkbox + select values — these aren't user edits.
             window._suppressSettingsAutoSave = true;
@@ -2598,6 +2631,16 @@ async function applyQualityPreset(presetName) {
 
 // Discard the active preset's saved edits and restore its factory defaults.
 async function resetActiveQualityPreset() {
+    // "Reset to factory" is a concept the 3 built-in presets have (a
+    // separate stash of saved customizations per preset name) — a named
+    // custom profile (Test/Main/whatever) has no factory counterpart to
+    // reset to. The backend call below would ALSO always write into the
+    // live default row regardless of what's being previewed, same class of
+    // bug as applyQualityPreset — refuse instead of doing that silently.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        showToast("Reset to defaults only applies to the live default profile — this one has no factory preset to reset to", 'info');
+        return;
+    }
     const presetName = currentQualityProfile?.preset;
     if (!presetName || !(presetName in PRESET_LABELS)) {
         showToast('No preset selected to reset', 'info');
@@ -2652,6 +2695,18 @@ function collectQualityProfileFromUI() {
 }
 
 async function saveQualityProfile() {
+    // Same guard as debouncedSaveQualityProfile, enforced here too — this is
+    // also called directly by the page-wide "Save Settings" button
+    // (saveSettings), which bypasses the debounce path entirely. Without
+    // this, clicking Save Settings for some unrelated setting while merely
+    // PREVIEWING a different profile would still silently push what's on
+    // screen into the live default. Returns true (not false/"failed") —
+    // the banner already explains the skip; saveSettings() would otherwise
+    // report it as an error toast, which it isn't.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return true;
+    }
     try {
         const profile = collectQualityProfileFromUI();
 
@@ -2921,7 +2976,9 @@ function qpStartRename(row, profile) {
             });
             const data = await response.json();
             if (data.success) {
-                renderCustomQualityProfiles(data.profiles || []);
+                _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+                renderCustomQualityProfiles(_qpProfileRows);
+                renderQualityProfileManager();
                 showToast(`Renamed to '${newName}'`, 'success');
             } else {
                 showToast(`Failed to rename: ${data.error}`, 'error');
@@ -3044,8 +3101,25 @@ async function saveCurrentAsQualityProfile(name) {
         });
         const data = await response.json();
         if (data.success) {
-            renderCustomQualityProfiles(data.profiles || []);
+            // Bug: this only ever re-rendered with the response's list
+            // without updating the cached _qpProfileRows — every OTHER
+            // function that reads that cache (previewQualityProfile's
+            // default-id check, the Manage modal, the editing banner) kept
+            // seeing the list from before this profile existed, which is
+            // exactly what made a freshly created profile look like it
+            // "vanished" / previewed as an unresolvable "this profile".
+            _qpProfileRows = data.profiles || [];
+            // The tiles already show exactly what was just saved — treat the
+            // new profile as the one now being previewed, same as clicking
+            // its row would.
+            _qpEditingProfileId = data.id ?? null;
+            renderCustomQualityProfiles(_qpProfileRows);
             qpResetNewProfileControl();
+            if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+                qpShowEditingBanner();
+            } else {
+                qpHideEditingBanner();
+            }
             showToast(`Saved profile '${name}'`, 'success');
         } else {
             showToast(`Failed to save profile: ${data.error}`, 'error');
@@ -3074,7 +3148,9 @@ async function updateCustomQualityProfile(profileId, name) {
         });
         const data = await response.json();
         if (data.success) {
-            renderCustomQualityProfiles(data.profiles || []);
+            _qpProfileRows = data.profiles || []; // keep the cache in sync — see saveCurrentAsQualityProfile
+            renderCustomQualityProfiles(_qpProfileRows);
+            renderQualityProfileManager();
             showToast(`Updated '${name}'`, 'success');
         } else {
             showToast(`Failed to update profile: ${data.error}`, 'error');
@@ -3149,6 +3225,12 @@ async function previewQualityProfile(profileId) {
             showToast(`Failed to load profile: ${data.error}`, 'error');
             return;
         }
+        // Keep this in sync with what's actually on screen — collectQualityProfileFromUI
+        // reads currentQualityProfile.preset, and resetActiveQualityPreset reads it to
+        // decide what "reset" even means; leaving it pointed at whatever was loaded
+        // before previewing this profile was exactly the kind of drift that made
+        // preset actions apply to the wrong thing.
+        currentQualityProfile = data.profile;
         _qpEditingProfileId = profileId;
         window._suppressSettingsAutoSave = true;
         try {
@@ -3174,7 +3256,14 @@ function qpShowEditingBanner() {
     const banner = document.getElementById('qp-editing-banner');
     if (!banner) return;
     const profile = _qpProfileRows.find(p => p.id === _qpEditingProfileId);
-    banner.querySelector('.qp-editing-banner-name').textContent = profile ? profile.name : 'this profile';
+    // The id not resolving means the cache is stale or the profile is gone —
+    // showing a nameless "viewing this profile" is just confusing; hide
+    // instead of guessing.
+    if (!profile) {
+        banner.style.display = 'none';
+        return;
+    }
+    banner.querySelector('.qp-editing-banner-name').textContent = profile.name;
     banner.style.display = '';
 }
 
@@ -3286,6 +3375,15 @@ function qpManagerOverlay() {
     return overlay;
 }
 
+// Renders two clearly SEPARATE things — mixing them into one flat list of
+// identical-looking rows was exactly what confused a user into thinking
+// "Auto-Import" was itself a saved profile:
+//   1. "Active now" — the CONTEXTS that consume a profile (Downloads/
+//      Wishlist always via the Default; Auto-Import optionally via its own
+//      override). Read-only status here; changed from the Profiles rows
+//      below, never from here.
+//   2. "Profiles" — the actual named, selectable quality_profiles rows,
+//      with the Set default / Use for import actions.
 function renderQualityProfileManager() {
     const rows = document.getElementById('qp-manager-rows');
     if (!rows) return; // modal not open — nothing to refresh
@@ -3294,19 +3392,25 @@ function renderQualityProfileManager() {
         return;
     }
     const explicitAutoImport = _qpAutoImportProfileId || null;
+    const defaultProfile = _qpProfileRows.find(p => p.is_default);
+    const defaultName = defaultProfile ? defaultProfile.name : '—';
     const autoImportName = explicitAutoImport
         ? (_qpProfileRows.find(profile => profile.id === explicitAutoImport)?.name || 'Unknown profile')
-        : 'Uses the active Default (no override set)';
+        : `Uses Default (${defaultName})`;
 
     rows.innerHTML = `
-        <div class="qp-manager-row">
-            <div class="qp-manager-row-main">
-                <span class="qp-manager-row-name">Auto-Import</span>
-                <span class="qp-manager-row-sub">${escapeHtml(autoImportName)}</span>
-            </div>
-            <button type="button" class="qp-manager-action clear ${explicitAutoImport ? '' : 'active'}" onclick="clearAutoImportQualityProfileFromManager()">Use default</button>
-            <span></span>
+        <div class="qp-manager-section-title">Active now</div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Downloads &amp; Wishlist</span>
+            <span class="qp-manager-status-value">${escapeHtml(defaultName)}</span>
         </div>
+        <div class="qp-manager-status-row">
+            <span class="qp-manager-status-label">Auto-Import</span>
+            <span class="qp-manager-status-value">${escapeHtml(autoImportName)}</span>
+            ${explicitAutoImport ? '<button type="button" class="qp-manager-action clear" onclick="clearAutoImportQualityProfileFromManager()">Use default</button>' : ''}
+        </div>
+
+        <div class="qp-manager-section-title">Profiles</div>
         ${_qpProfileRows.map(profile => `
             <div class="qp-manager-row">
                 <div class="qp-manager-row-main">
