@@ -675,6 +675,12 @@ def _add_discover_cache_headers(response):
             return response
         if response.headers.get('Cache-Control'):
             return response
+        # The two rec rows re-rank on the live adventurousness dial, which lives in server-side config
+        # (NOT the URL). A browser cache would freeze them at the first load's value — the slider would
+        # flicker but never move (the reported bug). Never cache these; the rest of discover still is.
+        if request.path in ('/api/discover/similar-artists', '/api/discover/listening-recommendations'):
+            response.headers['Cache-Control'] = 'no-store'
+            return response
         response.headers['Cache-Control'] = 'private, max-age=300'
     except Exception as exc:
         # Don't let a header-tagging bug turn a successful response into
