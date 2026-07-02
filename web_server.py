@@ -23563,6 +23563,7 @@ from core.discovery.endpoints import (
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
+    reconcile_sync_phase as _reconcile_sync_phase,
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
@@ -39256,11 +39257,57 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _reconcile_discovery_sync_phases():
+    """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
+
+    That transition used to happen ONLY inside the get_*_sync_status HTTP poll, so
+    a socket-driven client — which never hits that endpoint (see the
+    `if (socketConnected) return` fast-path in sync-services.js) — left the server
+    stuck in 'syncing' after a sync finished: re-syncing 400'd with 'not ready for
+    sync' and a reload showed a phantom, never-progressing sync. This runs every
+    second regardless of how (or whether) the client observes progress, using the
+    SAME reconcile helper the poll uses so the activity item still fires once.
+
+    Beatport is intentionally excluded — it has its own sync-status lifecycle, not
+    the shared get_sync_status."""
+    targets = (
+        (tidal_discovery_states, "Tidal playlist", _pl_name_attr_or_unknown),
+        (deezer_discovery_states, "Deezer playlist", _pl_name_strict),
+        (qobuz_discovery_states, "Qobuz playlist", _pl_name_strict),
+        (spotify_public_discovery_states, "Spotify Link playlist", _pl_name_strict),
+        (itunes_link_discovery_states, "iTunes Link", _pl_name_strict),
+        (youtube_playlist_states, "YouTube playlist", _pl_name_safe),
+        (listenbrainz_playlist_states, "ListenBrainz playlist", _pl_name_safe),
+    )
+    for states_dict, activity_subject, name_getter in targets:
+        for state in list(states_dict.values()):
+            if state.get('phase') != 'syncing':
+                continue
+            spid = state.get('sync_playlist_id')
+            if not spid:
+                continue
+            with sync_lock:
+                sync_state = dict(sync_states.get(spid) or {})
+            try:
+                _reconcile_sync_phase(
+                    state, sync_state,
+                    activity_subject=activity_subject,
+                    playlist_name_getter=name_getter,
+                    add_activity_item=add_activity_item,
+                )
+            except Exception as e:
+                logger.debug("sync phase reconcile failed for %s: %s", spid, e)
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
+            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
+            # sync:progress event we push already carries the terminal status.
+            _reconcile_discovery_sync_phases()
+
             with sync_lock:
                 for pid, state in list(sync_states.items()):
                     try:
