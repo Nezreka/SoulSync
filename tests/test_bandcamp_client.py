@@ -29,6 +29,7 @@ from core.bandcamp_client import (
     _normalize_for_match,
     _parse_bandcamp_date,
     _parse_bandcamp_duration,
+    release_to_spotify_shape,
 )
 from core.metadata.types import Album, Artist, Track
 
@@ -640,3 +641,53 @@ class TestGetArtistAlbums:
         ])
         albums = client.get_artist_albums('3957198221', artist_name='Radiohead', limit=3)
         assert len(albums) == 3
+
+
+# ---------------------------------------------------------------------------
+# release_to_spotify_shape — reshapes a get_release_metadata()/search_album()
+# result into the 'Spotify-shaped' dict core.metadata.album_tracks expects.
+# Bandcamp's own field names (title/position) don't match the alias chains
+# _extract_lookup_value checks (name/track_name/trackName), so results must
+# be relabeled here — this was the root cause of the artist-detail
+# discography-grid album click 404ing even after the release was found.
+# ---------------------------------------------------------------------------
+
+
+class TestReleaseToSpotifyShape:
+    def test_reshapes_album_and_tracks(self):
+        release = {
+            'title': 'Hail to the Thief (Live Recordings 2003-2009)',
+            'artist': 'Radiohead',
+            'release_date': '2025-08-13',
+            'image_url': 'https://f4.bcbits.com/img/0454733928_3.jpg',
+            'total_tracks': 2,
+            'tracks': [
+                {'position': 1, 'title': '2 + 2 = 5 (Live)', 'url': 'https://x/track/1', 'duration_ms': 216000},
+                {'position': 2, 'title': 'Sit Down. Stand Up. (Live)', 'url': 'https://x/track/2', 'duration_ms': 240000},
+            ],
+        }
+
+        shaped = release_to_spotify_shape(release, album_id='album-365742988')
+
+        assert shaped['name'] == 'Hail to the Thief (Live Recordings 2003-2009)'
+        assert shaped['artists'] == [{'name': 'Radiohead'}]
+        assert shaped['total_tracks'] == 2
+        assert len(shaped['tracks']) == 2
+        assert shaped['tracks'][0]['name'] == '2 + 2 = 5 (Live)'
+        assert shaped['tracks'][0]['track_number'] == 1
+        assert shaped['tracks'][0]['duration_ms'] == 216000
+        assert shaped['tracks'][1]['track_number'] == 2
+
+    def test_falls_back_to_provided_id_and_names(self):
+        shaped = release_to_spotify_shape(
+            {}, album_id='album-1', fallback_name='Fallback Album', fallback_artist='Fallback Artist',
+        )
+        assert shaped['id'] == 'album-1'
+        assert shaped['name'] == 'Fallback Album'
+        assert shaped['artists'] == [{'name': 'Fallback Artist'}]
+        assert shaped['tracks'] == []
+
+    def test_missing_position_falls_back_to_index(self):
+        release = {'tracks': [{'title': 'Untitled', 'url': 'https://x/1'}]}
+        shaped = release_to_spotify_shape(release)
+        assert shaped['tracks'][0]['track_number'] == 1

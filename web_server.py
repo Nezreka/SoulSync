@@ -21730,28 +21730,8 @@ def get_spotify_album_tracks(album_id):
             if not release:
                 return jsonify({"error": "Album not found"}), 404
 
-            tracks = []
-            for i, t in enumerate(release.get('tracks') or []):
-                tracks.append({
-                    'name': t.get('title', ''),
-                    'track_number': t.get('position') or (i + 1),
-                    'disc_number': 1,
-                    'duration_ms': t.get('duration_ms', 0),
-                    'id': t.get('url', ''),
-                    'artists': [{'name': release.get('artist') or album_artist}],
-                    'uri': '',
-                })
-
-            return jsonify({
-                'id': album_id,
-                'name': release.get('title') or album_name,
-                'artists': [{'name': release.get('artist') or album_artist}],
-                'release_date': release.get('release_date', ''),
-                'total_tracks': release.get('total_tracks', len(tracks)),
-                'album_type': 'album',
-                'images': [{'url': release['image_url']}] if release.get('image_url') else [],
-                'tracks': tracks,
-            })
+            from core.bandcamp_client import release_to_spotify_shape
+            return jsonify(release_to_spotify_shape(release, album_id, album_name, album_artist))
         except Exception as e:
             logger.error(f"Bandcamp album detail failed: {e}")
             return jsonify({"error": str(e)}), 500
