@@ -132,6 +132,25 @@ function parseEnabledExperimental(data) {
     return enabled;
 }
 
+/** True when JioSaavn experimental opt-in is on (settings, payload, or /status). */
+function isJiosaavnExperimentalEnabled() {
+    if (document.getElementById('experimental-jiosaavn-enabled')?.checked === true) return true;
+    if (window._settingsPayload?.experimental?.jiosaavn_enabled === true) return true;
+    if (window._lastStatusPayload && parseEnabledExperimental(window._lastStatusPayload).has('jiosaavn')) {
+        return true;
+    }
+    return false;
+}
+
+/** Drop JioSaavn rows from service lists when experimental is off. */
+function filterJiosaavnServiceEntries(items, idKey = 'key') {
+    if (isJiosaavnExperimentalEnabled()) return items;
+    return items.filter((item) => {
+        const id = item[idKey] ?? item.svc ?? item.id;
+        return id !== 'jiosaavn';
+    });
+}
+
 /** Set of currently-enabled experimental sources (read from /status). */
 async function fetchEnabledExperimentalSources() {
     try {
@@ -3888,9 +3907,11 @@ function renderEnrichmentCards(enrichment) {
     const grid = document.getElementById('enrichment-status-grid');
     if (!grid || !enrichment) return;
 
+    const jiosaavnEnabled = isJiosaavnExperimentalEnabled();
+
     // Service display order
     const serviceOrder = [
-        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment',
+        'musicbrainz', 'spotify_enrichment', 'itunes_enrichment', 'deezer_enrichment', 'jiosaavn_enrichment',
         'tidal_enrichment', 'qobuz_enrichment', 'lastfm', 'genius', 'audiodb',
         'acoustid', 'listenbrainz'
     ];
@@ -3908,6 +3929,7 @@ function renderEnrichmentCards(enrichment) {
 
     const chips = [];
     for (const key of serviceOrder) {
+        if (key === 'jiosaavn_enrichment' && !jiosaavnEnabled) continue;
         const svc = enrichment[key];
         if (!svc) continue;
 

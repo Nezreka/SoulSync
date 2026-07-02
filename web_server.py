@@ -228,6 +228,7 @@ from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.discogs_worker import DiscogsWorker
 from core.deezer_worker import DeezerWorker
+from core.jiosaavn_worker import JioSaavnWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
@@ -1931,6 +1932,7 @@ def _shutdown_runtime_components():
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
+        (jiosaavn_worker, "jiosaavn worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2378,6 +2380,8 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
+    from core.metadata.registry import is_jiosaavn_enabled
+
     services = {}
 
     # Worker-based enrichment services: (key, display_name, worker_var)
@@ -2393,6 +2397,7 @@ def _get_enrichment_status():
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
+        ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2402,9 +2407,12 @@ def _get_enrichment_status():
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
+        'jiosaavn_enrichment': is_jiosaavn_enabled,
     }
 
     for key, name, get_worker in workers_info:
+        if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
         worker = get_worker()
         if worker is not None:
             is_alive = worker.thread is not None and worker.thread.is_alive()
@@ -3312,17 +3320,34 @@ def handle_settings():
                 if write_pasted_cookiefile(_yt_paste, _cookie_path):
                     config_manager.set('youtube.cookies_file', _cookie_path)
 
+            _experimental_in = new_settings.get('experimental')
+            _metadata_in = new_settings.get('metadata')
+
+            from core.metadata.registry import resolve_settings_metadata_primary
+            _primary_err, _primary_override = resolve_settings_metadata_primary(
+                _experimental_in,
+                _metadata_in,
+                config_manager.get,
+            )
+            if _primary_err:
+                return jsonify({"success": False, "error": _primary_err}), 400
+
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
+            if isinstance(_experimental_in, dict):
+                for key, value in _experimental_in.items():
+                    config_manager.set(f'experimental.{key}', value)
+
             for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
+                    if service == 'experimental' and isinstance(_experimental_in, dict):
+                        continue
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import experimental_source_rejected, METADATA_SOURCE_PRIORITY
-            if experimental_source_rejected(config_manager.get('metadata.fallback_source')):
-                config_manager.set('metadata.fallback_source', METADATA_SOURCE_PRIORITY[0])
+            if _primary_override:
+                config_manager.set('metadata.fallback_source', _primary_override)
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -3330,9 +3355,7 @@ def handle_settings():
             changed_services = list(new_settings.keys())
             services_text = ", ".join(changed_services)
             add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
-            add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
+
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
@@ -12737,7 +12760,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -12763,7 +12786,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'bandcamp', 'jiosaavn')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -12853,6 +12876,20 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         elif entity_type == 'track':
             deezer_worker._process_track(entity_id, name, artist_name, item)
         return {"success": True, "message": f"Deezer lookup complete for {entity_type}"}
+
+    elif service == 'jiosaavn':
+        if not jiosaavn_worker:
+            return {"success": False, "error": "JioSaavn worker not initialized"}
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            return {"success": False, "error": "JioSaavn is disabled (experimental feature off)"}
+        if entity_type == 'artist':
+            jiosaavn_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            jiosaavn_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            jiosaavn_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"JioSaavn lookup complete for {entity_type}"}
 
     elif service == 'musicbrainz':
         if not mb_worker:
@@ -13003,6 +13040,7 @@ _SERVICE_ID_COLUMNS = {
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
     'bandcamp': {'album': 'bandcamp_url', 'track': 'bandcamp_url'},  # no artist-level id column
+    'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -16146,6 +16184,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         runtime=metadata_runtime or _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16252,6 +16291,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16377,6 +16417,7 @@ def _post_process_matched_download(context_key, context, file_path):
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16842,7 +16883,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -16858,7 +16899,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -20417,23 +20458,21 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
+        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
-        # a re-resolved durable match actually exists before pairing it.
+        # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
         def _override_lookup(src_id):
-            # 1) Fast override cache (cleared on every rescan).
-            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
-            if cached.get('server_track_id'):
-                return cached['server_track_id']
-            # 2) Durable manual library match — survives a rescan (#787), so a
-            #    Find & Add / manual match keeps pairing after a DB scan. Re-
-            #    resolves a stale id via the stored file path when needed.
-            return resolve_durable_match_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            # Validated fast-cache hit, else durable manual match (#787) which
+            # self-heals a stale library id via the stored file path. A cache hit
+            # that no longer points into THIS playlist must not short-circuit the
+            # durable path, or the manual match silently never applies (wolf39us).
+            return resolve_override_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
+                _db_for_overrides.read_sync_match_cache,
             )
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
@@ -23645,6 +23684,7 @@ from core.discovery.endpoints import (
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
+    reconcile_sync_phase as _reconcile_sync_phase,
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
@@ -27994,20 +28034,13 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            from core.metadata.registry import experimental_source_rejected
-            if experimental_source_rejected(src):
-                return jsonify({
-                    'success': False,
-                    'error': f'{src} is not enabled — turn it on under Settings → Advanced → Experimental.',
-                }), 400
-            # Same composite the Settings save uses: 'spotify_free' is stored as
-            # fallback_source='spotify' + metadata.spotify_free=true.
-            if src == 'spotify_free':
-                config_manager.set('metadata.fallback_source', 'spotify')
-                config_manager.set('metadata.spotify_free', True)
-            else:
-                config_manager.set('metadata.fallback_source', src)
-                config_manager.set('metadata.spotify_free', False)
+            from core.metadata.registry import apply_primary_metadata_source
+            _primary_err = apply_primary_metadata_source(
+                src,
+                config_manager.set,
+            )
+            if _primary_err:
+                return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
 
@@ -37095,6 +37128,32 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+# ================================================================================================
+# JIOSAAVN ENRICHMENT INTEGRATION
+# ================================================================================================
+
+jiosaavn_worker = None
+try:
+    from database.music_database import MusicDatabase
+    jiosaavn_db = MusicDatabase()
+    jiosaavn_worker = JioSaavnWorker(database=jiosaavn_db)
+    jiosaavn_worker.start()
+    if config_manager.get('jiosaavn_enrichment_paused', False):
+        jiosaavn_worker.pause()
+        logger.info("JioSaavn enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("JioSaavn enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"JioSaavn worker initialization failed: {e}")
+    jiosaavn_worker = None
+
+# JioSaavn status / pause / resume routes are served by the
+# generic enrichment blueprint at /api/enrichment/jiosaavn/{status,pause,resume}.
+
+# ================================================================================================
+# END JIOSAAVN INTEGRATION
+# ================================================================================================
+
 amazon_worker = None
 try:
     amazon_db = MusicDatabase()
@@ -37441,6 +37500,7 @@ _init_service_search(
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
     bandcamp_worker_obj=bandcamp_worker,
+    jiosaavn_worker_obj=jiosaavn_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
@@ -38119,6 +38179,20 @@ def repair_job_run(job_id):
         return jsonify({'success': True, 'job_id': job_id}), 200
     except Exception as e:
         logger.error(f"Error running repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/repair/jobs/<job_id>/stop', methods=['POST'])
+def repair_job_stop(job_id):
+    """Stop a running (or queued) job — signals its scan loop to unwind (#970)."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        outcome = repair_worker.stop_current_job(job_id)
+        logger.info("Repair job %s stop requested via UI: %s", job_id, outcome)
+        return jsonify({'success': True, 'job_id': job_id, **outcome}), 200
+    except Exception as e:
+        logger.error(f"Error stopping repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/repair/findings', methods=['GET'])
@@ -39029,6 +39103,11 @@ _register_enrichment_services([
         config_paused_key='amazon_enrichment_paused',
     ),
     _EnrichmentService(
+        id='jiosaavn', display_name='JioSaavn',
+        worker_getter=lambda: jiosaavn_worker,
+        config_paused_key='jiosaavn_enrichment_paused',
+    ),
+    _EnrichmentService(
         id='similar_artists', display_name='Similar Artists',
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
@@ -39060,6 +39139,7 @@ def _emit_rate_monitor_loop():
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
+        'jiosaavn': 'jiosaavn_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -39116,6 +39196,7 @@ def _emit_enrichment_status_loop():
         'audiodb': lambda: audiodb_worker,
         'discogs': lambda: discogs_worker,
         'deezer': lambda: deezer_worker,
+        'jiosaavn': lambda: jiosaavn_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,
         'lastfm-enrichment': lambda: lastfm_worker,
@@ -39344,11 +39425,57 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _reconcile_discovery_sync_phases():
+    """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
+
+    That transition used to happen ONLY inside the get_*_sync_status HTTP poll, so
+    a socket-driven client — which never hits that endpoint (see the
+    `if (socketConnected) return` fast-path in sync-services.js) — left the server
+    stuck in 'syncing' after a sync finished: re-syncing 400'd with 'not ready for
+    sync' and a reload showed a phantom, never-progressing sync. This runs every
+    second regardless of how (or whether) the client observes progress, using the
+    SAME reconcile helper the poll uses so the activity item still fires once.
+
+    Beatport is intentionally excluded — it has its own sync-status lifecycle, not
+    the shared get_sync_status."""
+    targets = (
+        (tidal_discovery_states, "Tidal playlist", _pl_name_attr_or_unknown),
+        (deezer_discovery_states, "Deezer playlist", _pl_name_strict),
+        (qobuz_discovery_states, "Qobuz playlist", _pl_name_strict),
+        (spotify_public_discovery_states, "Spotify Link playlist", _pl_name_strict),
+        (itunes_link_discovery_states, "iTunes Link", _pl_name_strict),
+        (youtube_playlist_states, "YouTube playlist", _pl_name_safe),
+        (listenbrainz_playlist_states, "ListenBrainz playlist", _pl_name_safe),
+    )
+    for states_dict, activity_subject, name_getter in targets:
+        for state in list(states_dict.values()):
+            if state.get('phase') != 'syncing':
+                continue
+            spid = state.get('sync_playlist_id')
+            if not spid:
+                continue
+            with sync_lock:
+                sync_state = dict(sync_states.get(spid) or {})
+            try:
+                _reconcile_sync_phase(
+                    state, sync_state,
+                    activity_subject=activity_subject,
+                    playlist_name_getter=name_getter,
+                    add_activity_item=add_activity_item,
+                )
+            except Exception as e:
+                logger.debug("sync phase reconcile failed for %s: %s", spid, e)
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
+            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
+            # sync:progress event we push already carries the terminal status.
+            _reconcile_discovery_sync_phases()
+
             with sync_lock:
                 for pid, state in list(sync_states.items()):
                     try:

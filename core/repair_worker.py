@@ -148,6 +148,10 @@ class RepairWorker:
         self.enabled = False  # Master toggle (replaces 'paused')
         self.should_stop = False
         self._stop_event = threading.Event()
+        # Per-job cancel: stopping ONE running job without tearing down the whole
+        # worker. Set by stop_current_job(), cleared at the start of each _run_job,
+        # and OR'd into the job's check_stop() so its scan loop unwinds (issue #970).
+        self._cancel_current_job = threading.Event()
         self.thread = None
 
         # Current job being executed
@@ -313,10 +317,35 @@ class RepairWorker:
 
         return defaults
 
+    def stop_current_job(self, job_id: str) -> dict:
+        """Stop a running or queued job without touching the rest of the worker.
+
+        A RUNNING job's next ``context.check_stop()`` returns True (jobs poll this
+        in their scan loops), so it unwinds and records its partial result. A job
+        that is only QUEUED (Run Now not yet picked up) is dropped from the queue.
+        Returns ``{stopped, was_running, dequeued}`` so the caller can report back.
+        """
+        was_running = False
+        dequeued = False
+        if self._current_job_id == job_id:
+            self._cancel_current_job.set()
+            was_running = True
+            logger.info("Stop requested for running job %s", job_id)
+        with self._force_run_lock:
+            if job_id in self._force_run_queue:
+                self._force_run_queue = [j for j in self._force_run_queue if j != job_id]
+                dequeued = True
+                logger.info("Removed queued job %s from the run queue", job_id)
+        return {'stopped': was_running or dequeued, 'was_running': was_running, 'dequeued': dequeued}
+
     def set_job_enabled(self, job_id: str, enabled: bool):
         """Enable or disable a specific job."""
         if self._config_manager:
             self._config_manager.set(f'repair.jobs.{job_id}.enabled', enabled)
+        # Turning a job OFF must also stop it if it's mid-run — otherwise the toggle
+        # only affects the NEXT scheduled run and the current scan keeps going (#970).
+        if not enabled:
+            self.stop_current_job(job_id)
 
     def set_job_settings(self, job_id: str, interval_hours: int = None, settings: dict = None):
         """Update job interval and/or settings."""
@@ -661,6 +690,7 @@ class RepairWorker:
         self._current_job_id = job_id
         self._current_job_name = job.display_name
         self._current_progress = {'scanned': 0, 'total': 0, 'percent': 0}
+        self._cancel_current_job.clear()   # fresh per run — a prior stop must not leak here
 
         # Re-read transfer path — prefer config_manager (same source as web_server)
         if self._config_manager:
@@ -698,7 +728,7 @@ class RepairWorker:
             acoustid_client=self.acoustid_client,
             metadata_cache=self.metadata_cache,
             create_finding=self._create_finding,
-            should_stop=lambda: self.should_stop,
+            should_stop=lambda: self.should_stop or self._cancel_current_job.is_set(),
             stop_event=self._stop_event,
             is_paused=(lambda: False) if forced else (lambda: not self.enabled),
             update_progress=self._update_progress,
@@ -1886,35 +1916,92 @@ class RepairWorker:
             if conn:
                 conn.close()
 
-        # Delete duplicate files from disk (resolve paths for cross-environment compat)
+        # Move duplicate files to the <transfer>/deleted quarantine instead of hard
+        # deleting them — recoverable, and consistent with the older duplicate
+        # cleaner (the reorganizer already skips <transfer>/deleted, #746). Resolve
+        # paths first for cross-environment (Docker) compat.
         download_folder = None
         if self._config_manager:
             download_folder = self._config_manager.get('soulseek.download_path', '')
         transfer_norm = os.path.normpath(self.transfer_folder)
+        deleted_root = os.path.join(self.transfer_folder, 'deleted')
         files_deleted = 0
+        files_failed = 0
         for fpath in remove_paths:
+            resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
+            if not resolved or not os.path.exists(resolved):
+                # #971/Docker: the stored path didn't map to a file the container
+                # can see. Previously this was skipped silently — the DB row was
+                # removed, the file left on disk, and NO log explained why. Surface
+                # it so the user can fix their volume mapping / Music Paths.
+                files_failed += 1
+                logger.warning(
+                    "Duplicate cleanup: could not locate file to remove (DB path %r "
+                    "did not resolve to an existing file). DB entry removed, file left "
+                    "on disk — check your Docker volume mapping and Settings > Library "
+                    "> Music Paths.", fpath)
+                continue
             try:
-                resolved = _resolve_file_path(fpath, self.transfer_folder, download_folder, config_manager=self._config_manager)
-                if resolved and os.path.exists(resolved):
-                    os.remove(resolved)
-                    files_deleted += 1
-                    # Clean up empty parent directories (never remove transfer folder itself)
-                    parent = os.path.dirname(resolved)
-                    for _ in range(3):
-                        if (parent and os.path.isdir(parent)
-                                and os.path.normpath(parent) != transfer_norm
-                                and not os.listdir(parent)):
-                            os.rmdir(parent)
-                            parent = os.path.dirname(parent)
-                        else:
-                            break
+                dest = self._quarantine_dest(resolved, deleted_root)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.move(resolved, dest)
+                files_deleted += 1
+            except OSError as e:
+                # Was `except OSError: pass` — a Docker PUID/PGID permission mismatch
+                # on the media volume silently no-op'd the removal with no log.
+                files_failed += 1
+                logger.warning(
+                    "Duplicate cleanup: failed to move %s to the deleted folder (%s). "
+                    "DB entry removed, file left on disk — in Docker this is usually a "
+                    "PUID/PGID permission mismatch on the media volume.", resolved, e)
+                continue
+            # Clean up empty parent directories (best effort, cosmetic; never remove
+            # the transfer folder itself). A failure here must not count as a failed
+            # removal — the file WAS moved out.
+            try:
+                parent = os.path.dirname(resolved)
+                for _ in range(3):
+                    if (parent and os.path.isdir(parent)
+                            and os.path.normpath(parent) != transfer_norm
+                            and not os.listdir(parent)):
+                        os.rmdir(parent)
+                        parent = os.path.dirname(parent)
+                    else:
+                        break
             except OSError:
-                pass  # Best effort — DB entry already removed
+                pass
 
         msg = f'Kept best quality copy, removed {removed} duplicate(s)'
         if files_deleted:
-            msg += f' and {files_deleted} file(s) from disk'
-        return {'success': True, 'action': 'removed_duplicates', 'message': msg}
+            msg += f' and moved {files_deleted} file(s) to the deleted folder'
+        if files_failed:
+            msg += f' — {files_failed} file(s) could NOT be removed (see logs)'
+        return {'success': True, 'action': 'removed_duplicates', 'message': msg,
+                'files_deleted': files_deleted, 'files_failed': files_failed}
+
+    def _quarantine_dest(self, resolved: str, deleted_root: str) -> str:
+        """Destination under <transfer>/deleted for a removed duplicate.
+
+        Mirrors the duplicate-cleaner convention (#746): preserve the path relative
+        to the transfer folder when the file lives there, else fall back to the
+        basename (files resolved from the media library live outside transfer).
+        Never escapes ``deleted_root``; de-collides with a numeric suffix so two
+        same-named duplicates don't clobber each other in quarantine."""
+        try:
+            rel = os.path.relpath(resolved, self.transfer_folder)
+        except ValueError:
+            # Windows: file and transfer folder on different drives — relpath
+            # raises (and ValueError isn't caught by the caller's except OSError).
+            rel = os.path.basename(resolved)
+        if rel.startswith('..') or os.path.isabs(rel):
+            rel = os.path.basename(resolved)
+        dest = os.path.join(deleted_root, rel)
+        base, ext = os.path.splitext(dest)
+        n = 1
+        while os.path.exists(dest):
+            dest = f"{base}_{n}{ext}"
+            n += 1
+        return dest
 
     def _fix_single_album_redundant(self, entity_type, entity_id, file_path, details):
         """Remove the single/EP version, keeping the album version."""

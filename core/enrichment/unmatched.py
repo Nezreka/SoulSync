@@ -33,6 +33,7 @@ SERVICE_ENTITY_SUPPORT = {
     'qobuz': ('artist', 'album', 'track'),
     'amazon': ('artist', 'album', 'track'),
     'bandcamp': ('album', 'track'),          # no artist-level id column (see core/bandcamp_worker.py)
+    'jiosaavn': ('artist', 'album', 'track'),
     # Relationship enrichment (not a metadata source): the Similar Artists worker
     # only operates at the artist level, and its <service>_match_status tracks
     # whether MusicMap similars were fetched (not a source-id match). So the
