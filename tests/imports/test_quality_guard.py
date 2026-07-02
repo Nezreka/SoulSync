@@ -18,27 +18,21 @@ import pytest
 
 import core.imports.guards as guards
 import core.imports.file_ops as file_ops
+import core.quality.selection as selection
 from core.imports.pipeline import _should_skip_quarantine_check
 from core.quality.model import AudioQuality
 
 
-class _FakeDB:
-    def __init__(self, profile):
-        self._p = profile
-
-    def get_quality_profile(self):
-        return self._p
-
-
-def _patch_guard(monkeypatch, probe_aq, profile, downsample=False, quality_filter=True):
+def _patch_guard(monkeypatch, probe_aq, profile, downsample=False):
     monkeypatch.setattr(file_ops, 'probe_audio_quality', lambda fp: probe_aq)
-    monkeypatch.setattr(guards, 'MusicDatabase', lambda: _FakeDB(profile))
+    # check_quality_target resolves the profile via load_profile_by_id
+    # (context['track_info']['quality_profile_id'] when present, else the
+    # global default) — patch that seam directly rather than faking a DB.
+    monkeypatch.setattr(selection, 'load_profile_by_id', lambda profile_id: profile)
 
     def _cfg_get(k, d=None):
         if 'downsample' in k:
             return downsample
-        if k == 'import.quality_filter_enabled':
-            return quality_filter
         return d
 
     monkeypatch.setattr(
@@ -76,14 +70,21 @@ def test_accepts_via_fallback(monkeypatch):
     assert guards.check_quality_target('/x/song.flac', {}) is None
 
 
-def test_master_toggle_off_skips_filter(monkeypatch):
-    # import.quality_filter_enabled = False → a below-target file is accepted
-    # (imported) regardless of quality, even with fallback off.
+def test_empty_targets_accept_everything(monkeypatch):
+    # There is no separate "skip the check entirely" master toggle: a profile
+    # with an empty ranked_targets list already means "accept anything" —
+    # composing "no quality check" this way (or via fallback_enabled=True)
+    # replaces the old import.quality_filter_enabled setting.
     _patch_guard(
         monkeypatch, AudioQuality('flac', sample_rate=44100, bit_depth=16),
-        _WANT_FLAC24, quality_filter=False,
+        {'fallback_enabled': False, 'ranked_targets': []},
     )
     assert guards.check_quality_target('/x/song.flac', {}) is None
+
+
+def test_accepts_context_with_null_track_info(monkeypatch):
+    _patch_guard(monkeypatch, AudioQuality('flac', sample_rate=96000, bit_depth=24), _WANT_FLAC24)
+    assert guards.check_quality_target('/x/song.flac', {'track_info': None}) is None
 
 
 def test_skips_when_unprobeable(monkeypatch):

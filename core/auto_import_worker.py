@@ -1654,12 +1654,25 @@ class AutoImportWorker:
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
 
-        # Parent folder artist override via import.folder_artist_override.
-        # Default on to preserve the legacy Artist/Album staging behavior.
-        # Users who stage mixed piles under one container folder can turn it off
-        # to keep the metadata-identified artist.
+        # Auto-Import's assigned quality profile (Settings -> Import ->
+        # Auto-Import), independent of the app-wide default used by normal
+        # downloads/Wishlist items. Resolved once per batch (`None`/0 means
+        # "use the app-wide default" via `load_profile_by_id`'s own fallback).
+        auto_import_profile_id = self._config_manager.get('auto_import.quality_profile_id') or None
+        auto_import_profile = {}
         try:
-            if self._config_manager.get('import.folder_artist_override', True):
+            from core.quality.selection import load_profile_by_id
+            auto_import_profile = load_profile_by_id(auto_import_profile_id)
+        except Exception as e:
+            logger.debug("[Auto-Import] quality profile resolution failed: %s", e)
+
+        # Parent folder artist override — now a per-profile setting
+        # (`folder_artist_override`, Auto-Import only). Default on to preserve
+        # the legacy Artist/Album staging behavior. Users who stage mixed
+        # piles under one container folder can turn it off in the assigned
+        # profile to keep the metadata-identified artist.
+        try:
+            if auto_import_profile.get('folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
                 rel_path = os.path.relpath(candidate.path, staging_root)
                 folder_artist = resolve_folder_artist(rel_path, artist_name, enabled=True)
@@ -1855,6 +1868,14 @@ class AutoImportWorker:
                     'has_clean_spotify_data': True,
                     'has_full_spotify_metadata': True,
                 }
+                # Thread the assigned profile into the import pipeline —
+                # everything profile-specific (quality gate, AcoustID
+                # strictness, downsample/lossy-copy) is resolved LIVE from
+                # this id at each pipeline stage (see core/imports/pipeline.py
+                # ::_resolve_context_quality_profile). Unset means "app-wide
+                # default", which the pipeline resolves on its own.
+                if auto_import_profile_id:
+                    context['track_info']['quality_profile_id'] = auto_import_profile_id
 
                 self._process_callback(context_key, context, file_path)
                 processed += 1

@@ -7,8 +7,8 @@ confidently metadata-identified artist — which mass-mislabelled files when a
 user staged everything under one container folder (see the "soulsync" incident).
 
 This module isolates that decision as a pure function so it can be:
-- gated behind an opt-in setting (``import.folder_artist_override``,
-  default on for legacy compatibility), and
+- gated behind an opt-in, per-profile setting (``folder_artist_override`` on
+  the Auto-Import quality profile, default on for legacy compatibility), and
 - unit-tested without standing up the whole import worker.
 """
 
