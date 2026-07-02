@@ -3202,6 +3202,7 @@ function renderArtistMetaPanel(artist) {
             { id: 'genius', label: 'Genius', icon: '🟡' },
             { id: 'tidal', label: 'Tidal', icon: '⬛' },
             { id: 'qobuz', label: 'Qobuz', icon: '🔷' },
+            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
         ];
         services.forEach(svc => {
             const item = document.createElement('div');
@@ -3780,6 +3781,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'discogs_id', label: 'Discogs', svc: 'discogs' },
         { key: 'itunes_album_id', label: 'iTunes', svc: 'itunes' },
         { key: 'lastfm_url', label: 'Last.fm', svc: 'lastfm' },
+        { key: 'bandcamp_url', label: 'Bandcamp', svc: 'bandcamp' },
     ];
     idFields.forEach(f => {
         if (album[f.key]) {
@@ -3803,6 +3805,7 @@ function renderExpandedAlbumHeader(album) {
         { key: 'itunes_match_status', label: 'iTunes', attempted: 'itunes_last_attempted', svc: 'itunes' },
         { key: 'lastfm_match_status', label: 'Last.fm', attempted: 'lastfm_last_attempted', svc: 'lastfm' },
         { key: 'amazon_match_status', label: 'Amazon', attempted: 'amazon_last_attempted', svc: 'amazon' },
+        { key: 'bandcamp_match_status', label: 'Bandcamp', attempted: 'bandcamp_last_attempted', svc: 'bandcamp' },
     ];
     statusSvcs.forEach(s => {
         const status = album[s.key];
@@ -3846,6 +3849,7 @@ function renderExpandedAlbumHeader(album) {
             { id: 'itunes', label: 'iTunes', icon: '🔴' },
             { id: 'lastfm', label: 'Last.fm', icon: '⚪' },
             { id: 'genius', label: 'Genius', icon: '🟡' },
+            { id: 'bandcamp', label: 'Bandcamp', icon: '🔹' },
         ].forEach(svc => {
             const item = document.createElement('div');
             item.className = 'enhanced-enrich-menu-item';
@@ -4280,6 +4284,7 @@ function _buildTrackRow(track, album, admin) {
         { svc: 'itunes', col: 'itunes_track_id', label: 'iT' },
         { svc: 'lastfm', col: 'lastfm_url', label: 'LFM' },
         { svc: 'genius', col: 'genius_id', label: 'Gen' },
+        { svc: 'bandcamp', col: 'bandcamp_url', label: 'BC' },
     ];
     trackServices.forEach(s => {
         const hasId = !!track[s.col];
@@ -4485,7 +4490,12 @@ function _attachTableDelegation(table, album) {
                 e.stopPropagation();
                 const svc = chip.dataset.service;
                 const aId = artistDetailPageState.enhancedData ? artistDetailPageState.enhancedData.artist.id : null;
-                openManualMatchModal('track', track.id, svc, track.title || '', aId);
+                // Include the album name alongside the track title so the search
+                // has more to narrow down on (a bare track title alone is often
+                // ambiguous — compilations, remixes, and cover versions all share
+                // titles across many releases).
+                const trackDefaultQuery = [album.title, track.title].filter(Boolean).join(' ');
+                openManualMatchModal('track', track.id, svc, trackDefaultQuery, aId);
                 return;
             }
         }
@@ -5855,6 +5865,11 @@ function getServiceUrl(service, entityType, id) {
             album: `https://music.amazon.com/albums/${id}`,
             track: `https://music.amazon.com/tracks/${id}`,
         },
+        bandcamp: {
+            artist: id,  // derived artist page origin, already a full URL
+            album: id,   // bandcamp_url is already a full URL
+            track: id,
+        },
     };
     return urls[service] && urls[service][entityType] || null;
 }
@@ -6305,7 +6320,7 @@ function openManualMatchModal(entityType, entityId, service, defaultQuery, artis
     const serviceLabels = {
         spotify: 'Spotify', musicbrainz: 'MusicBrainz', deezer: 'Deezer',
         audiodb: 'AudioDB', itunes: 'iTunes', lastfm: 'Last.fm', genius: 'Genius',
-        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music'
+        tidal: 'Tidal', qobuz: 'Qobuz', amazon: 'Amazon Music', bandcamp: 'Bandcamp'
     };
 
     const overlay = document.createElement('div');
@@ -6926,6 +6941,7 @@ async function runEnrichment(entityType, entityId, service, name, artistName, ar
         'itunes': ['itunes', 'it'],
         'lastfm': ['last.fm', 'lfm'],
         'genius': ['genius', 'gen'],
+        'bandcamp': ['bandcamp', 'bc'],
     };
     const prefixes = chipPrefixes[service] || [service];
     document.querySelectorAll('.enhanced-match-chip').forEach(chip => {

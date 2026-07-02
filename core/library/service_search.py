@@ -20,6 +20,7 @@ qobuz_enrichment_worker = None
 discogs_worker = None
 audiodb_worker = None
 amazon_worker = None
+bandcamp_worker = None
 
 
 def init(
@@ -33,11 +34,13 @@ def init(
     discogs_worker_obj=None,
     audiodb_worker_obj=None,
     amazon_worker_obj=None,
+    bandcamp_worker_obj=None,
 ):
     """Bind enrichment worker handles so the lifted bodies can use them."""
     global spotify_enrichment_worker, itunes_enrichment_worker, mb_worker
     global lastfm_worker, genius_worker, tidal_enrichment_worker
     global qobuz_enrichment_worker, discogs_worker, audiodb_worker, amazon_worker
+    global bandcamp_worker
     spotify_enrichment_worker = spotify_worker
     itunes_enrichment_worker = itunes_worker
     mb_worker = musicbrainz_worker
@@ -48,6 +51,7 @@ def init(
     discogs_worker = discogs_worker_obj
     audiodb_worker = audiodb_worker_obj
     amazon_worker = amazon_worker_obj
+    bandcamp_worker = bandcamp_worker_obj
 
 
 def _detect_provider(items, client):
@@ -370,5 +374,34 @@ def _search_service(service, entity_type, query):
             return [{'id': str(t.id), 'name': t.name, 'image': t.image_url,
                      'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
         return []
+
+    elif service == 'bandcamp':
+        # No artist-level id column (see _SERVICE_ID_COLUMNS) — Bandcamp band/label
+        # pages don't carry enough structured data for a separate artist match.
+        if not bandcamp_worker or not bandcamp_worker.client:
+            raise ValueError("Bandcamp worker not initialized")
+        client = bandcamp_worker.client
+        # Raw multi-result search, NOT the search_album/search_track convenience
+        # methods — those require both a confident title AND artist match
+        # (_best_match's dual similarity thresholds), tuned for the unattended
+        # enrichment worker where a wrong auto-match is worse than no match. A
+        # manual search is a human picking from a list, so surface every
+        # candidate instead of silently filtering results away (was the actual
+        # cause of "no results" here — a query without a strong artist token,
+        # e.g. just an album/track title, scored 0 on the artist half of the
+        # gate and got rejected before ever reaching the modal).
+        items = []
+        if entity_type == 'album':
+            items = client.search_albums(query, limit=8)
+        elif entity_type == 'track':
+            items = client.search_tracks(query, limit=8)
+        # The stored "id" is the release URL, not Bandcamp's internal numeric
+        # id — _SERVICE_ID_COLUMNS['bandcamp'] maps both entity types to the
+        # bandcamp_url column since Bandcamp is URL-addressed, not ID-addressed.
+        return [
+            {'id': a.external_urls.get('bandcamp', ''), 'name': a.name,
+             'image': a.image_url, 'extra': ', '.join(a.artists)}
+            for a in items if a.external_urls.get('bandcamp')
+        ]
 
     return []
