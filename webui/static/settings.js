@@ -2269,11 +2269,34 @@ function updateHybridSecondaryOptions() {
 let currentQualityProfile = null;
 let qualityProfileAutoSaveTimer = null;
 
+// Which profile the tiles currently show. null = "the live default", the
+// only state that existed before profiles were previewable — autosave keeps
+// writing straight into the active default/global config exactly as always.
+// Set to a specific id by previewQualityProfile() when the user clicks a
+// DIFFERENT (non-default) profile's row to look at/edit it; in that state
+// autosave must NOT touch the live default — see debouncedSaveQualityProfile.
+let _qpEditingProfileId = null;
+
+function _qpDefaultProfileId() {
+    const def = _qpProfileRows.find(p => p.is_default);
+    return def ? def.id : null;
+}
+
 // Save just the quality profile (not the whole settings page). Used for quality
 // target edits so reordering a target doesn't re-init every backend client.
 function debouncedSaveQualityProfile() {
     if (window._suppressSettingsAutoSave) return;
     if (window._settingsLoadFailed) return;
+    // Previewing a specific NON-default profile: the legacy save endpoint
+    // below always writes the LIVE default row + pushes into global config —
+    // autosaving here would silently overwrite the active profile (and
+    // anything downloading right now under it) while the user is just
+    // looking at/tweaking a different one. Edits only persist once the user
+    // explicitly clicks that profile row's Update (✎) button.
+    if (_qpEditingProfileId !== null && _qpEditingProfileId !== _qpDefaultProfileId()) {
+        qpShowEditingBanner();
+        return;
+    }
     if (qualityProfileAutoSaveTimer) clearTimeout(qualityProfileAutoSaveTimer);
     qualityProfileAutoSaveTimer = setTimeout(() => saveQualityProfile(), 800);
 }
@@ -2548,6 +2571,12 @@ async function applyQualityPreset(presetName) {
 
         if (data.success) {
             currentQualityProfile = data.profile;
+            // A preset always writes the live default row — the tiles now
+            // show that, not whatever named profile might have been under
+            // preview, so drop that state too (else the editing banner would
+            // keep pointing at a profile the tiles no longer reflect).
+            _qpEditingProfileId = null;
+            qpHideEditingBanner();
             // Suppress the global change→auto-save listener while we programmatically
             // set checkbox + select values — these aren't user edits.
             window._suppressSettingsAutoSave = true;
@@ -2556,6 +2585,7 @@ async function applyQualityPreset(presetName) {
             } finally {
                 window._suppressSettingsAutoSave = false;
             }
+            renderCustomQualityProfiles(_qpProfileRows);
             showToast(`Switched to '${PRESET_LABELS[presetName] || presetName}'`, 'success');
         } else {
             showToast(`Failed to apply preset: ${data.error}`, 'error');
@@ -2730,18 +2760,28 @@ function renderCustomQualityProfiles(profiles) {
 
     profiles.forEach(profile => {
         const row = document.createElement('div');
-        row.className = 'qp-profile-row' + (profile.is_default ? ' active' : '');
+        const isEditing = profile.id === _qpEditingProfileId && !profile.is_default;
+        row.className = 'qp-profile-row' + (profile.is_default ? ' active' : '') + (isEditing ? ' editing' : '');
 
+        // The dot is the ONLY control that actually flips the live default —
+        // deliberately separate from clicking the name/summary below, which
+        // just previews the profile's settings. Conflating the two was the
+        // bug: opening a profile to look at it was silently making it live
+        // for every in-flight download.
         const dot = document.createElement('span');
         dot.className = 'qp-profile-dot';
-        dot.title = profile.is_default ? 'Currently active' : 'Click to make this the active profile';
-        dot.onclick = () => applyCustomQualityProfile(profile.id, profile.name);
+        dot.title = profile.is_default
+            ? 'Currently the active default'
+            : `Set '${profile.name}' as the active default (applies immediately, incl. anything downloading right now)`;
+        dot.onclick = () => confirmSetDefaultQualityProfile(profile.id, profile.name);
         row.appendChild(dot);
 
         const text = document.createElement('span');
         text.className = 'qp-profile-text';
-        text.title = profile.is_default ? 'Currently active' : 'Click to make this the active profile';
-        text.onclick = () => applyCustomQualityProfile(profile.id, profile.name);
+        text.title = profile.is_default
+            ? "View this profile's settings (it's already the active default)"
+            : `View/edit '${profile.name}'s settings — does not activate it`;
+        text.onclick = () => previewQualityProfile(profile.id);
 
         const name = document.createElement('span');
         name.className = 'qp-profile-name';
@@ -2755,14 +2795,26 @@ function renderCustomQualityProfiles(profiles) {
 
         row.appendChild(text);
 
-        if (profile.id === autoImportTarget) {
+        if (profile.is_default || profile.id === autoImportTarget) {
             const tags = document.createElement('span');
             tags.className = 'qp-profile-tags';
-            const tag = document.createElement('span');
-            tag.className = 'qp-profile-tag qp-tag-autoimport';
-            tag.textContent = 'Auto-Import';
-            tag.title = 'Also used by Auto-Import (Settings → Import)';
-            tags.appendChild(tag);
+            // Mirrors the Auto-Import tag below: at-a-glance visibility of
+            // what's actually governing normal downloads right now, without
+            // needing to open Manage.
+            if (profile.is_default) {
+                const dtag = document.createElement('span');
+                dtag.className = 'qp-profile-tag qp-tag-default';
+                dtag.textContent = 'Downloads';
+                dtag.title = 'Used by normal downloads and Wishlist items right now';
+                tags.appendChild(dtag);
+            }
+            if (profile.id === autoImportTarget) {
+                const tag = document.createElement('span');
+                tag.className = 'qp-profile-tag qp-tag-autoimport';
+                tag.textContent = 'Auto-Import';
+                tag.title = 'Also used by Auto-Import (Settings → Import)';
+                tags.appendChild(tag);
+            }
             row.appendChild(tags);
         }
 
@@ -3039,6 +3091,7 @@ async function applyCustomQualityProfile(profileId, name) {
         const data = await response.json();
         if (data.success) {
             currentQualityProfile = data.profile;
+            _qpEditingProfileId = null; // tiles now show the (new) live default again
             window._suppressSettingsAutoSave = true;
             try {
                 populateQualityProfileUI(currentQualityProfile);
@@ -3047,6 +3100,7 @@ async function applyCustomQualityProfile(profileId, name) {
                 window._suppressSettingsAutoSave = false;
             }
             await loadCustomQualityProfiles();
+            qpHideEditingBanner();
             showToast(`Now using '${name}' (all Quality-page settings updated)`, 'success');
         } else {
             showToast(`Failed to apply profile: ${data.error}`, 'error');
@@ -3055,6 +3109,78 @@ async function applyCustomQualityProfile(profileId, name) {
         console.error('Error applying custom quality profile:', error);
         showToast('Failed to apply profile', 'error');
     }
+}
+
+// The ONLY path that makes a profile the live default — every normal
+// download and Wishlist item (including anything downloading right now)
+// follows it from this moment on. Deliberately gated behind a confirmation:
+// the side panel's row-text click below only PREVIEWS a profile's settings
+// and must never have this side effect (that conflation was the bug —
+// clicking a profile to look at/edit it was silently making it live).
+async function confirmSetDefaultQualityProfile(profileId, name) {
+    if (!await showConfirmDialog({
+        title: 'Set Active Profile',
+        message: `Make '${name}' the active default profile? Every normal download and Wishlist item — including anything downloading right now — immediately follows it.`,
+        confirmText: 'Set Active',
+    })) return;
+    await applyCustomQualityProfile(profileId, name);
+    renderQualityProfileManager();
+}
+
+// onclick-safe wrapper for the Manage modal's rows (numeric id only —
+// avoids embedding a profile name, which may contain quotes, into an inline
+// HTML attribute).
+function confirmSetDefaultQualityProfileById(profileId) {
+    const profile = _qpProfileRows.find(p => p.id === profileId);
+    if (profile) confirmSetDefaultQualityProfile(profileId, profile.name);
+}
+
+// Load a profile's settings into the tile editor for viewing/editing —
+// purely read-only against the DB (a dedicated GET, not the mutating
+// /apply endpoint) so it can never make the previewed profile the live
+// default or touch anything mid-download. Edits made while previewing are
+// local until the row's Update (✎) button explicitly saves them into THIS
+// profile — see debouncedSaveQualityProfile.
+async function previewQualityProfile(profileId) {
+    try {
+        const response = await fetch(`/api/quality-profile/custom/${profileId}`);
+        const data = await response.json();
+        if (!data.success) {
+            showToast(`Failed to load profile: ${data.error}`, 'error');
+            return;
+        }
+        _qpEditingProfileId = profileId;
+        window._suppressSettingsAutoSave = true;
+        try {
+            populateQualityProfileUI(data.profile);
+            applyFullQualityBundleToDom(data.profile);
+        } finally {
+            window._suppressSettingsAutoSave = false;
+        }
+        renderCustomQualityProfiles(_qpProfileRows);
+        qpShowEditingBanner();
+    } catch (error) {
+        console.error('Error previewing quality profile:', error);
+        showToast('Failed to load profile', 'error');
+    }
+}
+
+// Persistent notice (not a toast — it needs to stay visible for as long as
+// the state holds) telling the user the tiles show a profile that ISN'T the
+// active default, so edits need an explicit Update click. Directly answers
+// "how do I know what's actually live right now" without needing the
+// Manage overview open.
+function qpShowEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (!banner) return;
+    const profile = _qpProfileRows.find(p => p.id === _qpEditingProfileId);
+    banner.querySelector('.qp-editing-banner-name').textContent = profile ? profile.name : 'this profile';
+    banner.style.display = '';
+}
+
+function qpHideEditingBanner() {
+    const banner = document.getElementById('qp-editing-banner');
+    if (banner) banner.style.display = 'none';
 }
 
 async function deleteCustomQualityProfile(profileId, name) {
@@ -3069,6 +3195,14 @@ async function deleteCustomQualityProfile(profileId, name) {
         const response = await fetch(`/api/quality-profile/custom/${profileId}`, { method: 'DELETE' });
         const data = await response.json();
         if (data.success) {
+            // Deleting the profile currently being previewed would otherwise
+            // leave _qpEditingProfileId pointing at a row that no longer
+            // exists — fall back to "showing the live default" like a fresh
+            // page load.
+            if (_qpEditingProfileId === profileId) {
+                _qpEditingProfileId = null;
+                qpHideEditingBanner();
+            }
             // Full reload (not just re-render): deleting may have cleared the
             // Auto-Import override and/or promoted a new default — both feed
             // the row tags, so refresh them from the server.
@@ -3083,12 +3217,11 @@ async function deleteCustomQualityProfile(profileId, name) {
     }
 }
 
-// Auto-Import assignment lives inline in the profile list (see the
-// qp-action-autoimport button in renderCustomQualityProfiles) instead of a
-// separate "Manage" modal — that modal only ever duplicated "set default"
-// (already one click on a row's dot) and buried the one thing it uniquely
-// did (Auto-Import assignment) behind an extra surface the rename/update/
-// delete actions weren't on. One list, every action, is more discoverable.
+// Quick inline toggle in the row list (see the qp-action-autoimport button
+// in renderCustomQualityProfiles). The Manage modal below shows the same
+// assignment plus the app-wide default side by side, as the one place that
+// answers "what governs what right now" — this stays for one-click access
+// from the row a user is already looking at.
 async function toggleAutoImportQualityProfile(profileId) {
     const nowAssigned = _qpAutoImportProfileId === profileId;
     try {
@@ -3101,6 +3234,7 @@ async function toggleAutoImportQualityProfile(profileId) {
         if (!data.success) throw new Error(data.error || 'Failed to update Auto-Import');
         _qpAutoImportProfileId = nowAssigned ? null : profileId;
         renderCustomQualityProfiles(_qpProfileRows);
+        renderQualityProfileManager();
         showToast(nowAssigned
             ? 'Auto-Import now uses the default profile'
             : 'Auto-Import profile updated', 'success');
@@ -3108,6 +3242,106 @@ async function toggleAutoImportQualityProfile(profileId) {
         console.error('Error updating Auto-Import quality profile:', error);
         showToast('Failed to update Auto-Import profile', 'error');
     }
+}
+
+// ── Manage overview modal ────────────────────────────────────────────────
+// The single place that answers "which profile does what right now": the
+// app-wide Default (every normal download/Wishlist item, including anything
+// downloading this second) and the Auto-Import override (Settings → Import,
+// falls back to Default when unset). Both assignments are also reachable
+// inline from the row list (the dot / the ⇩ button); this is the overview +
+// explanation surface, not a second way to edit a profile's own settings —
+// that only ever happens via previewQualityProfile + a row's Update (✎).
+function qpManagerOverlay() {
+    let overlay = document.getElementById('qp-manager-overlay');
+    if (overlay) return overlay;
+    overlay = document.createElement('div');
+    overlay.id = 'qp-manager-overlay';
+    overlay.className = 'modal-overlay hidden';
+    overlay.onclick = (event) => { if (event.target === overlay) closeQualityProfileManager(); };
+    overlay.innerHTML = `
+        <div class="enhanced-bulk-modal qp-manager-modal" onclick="event.stopPropagation()">
+            <div class="enhanced-bulk-modal-header">
+                <h3>Quality Profiles — Manage</h3>
+                <button class="enhanced-bulk-modal-close" onclick="closeQualityProfileManager()">&times;</button>
+            </div>
+            <div class="enhanced-bulk-modal-body qp-manager-body">
+                <div class="qp-manager-info">
+                    Two things read a profile today: normal downloads/Wishlist
+                    items always follow the <strong>Default</strong> below,
+                    and Auto-Import can optionally use a different one instead
+                    (falls back to Default when unset). A profile's
+                    "Upgrade until" setting controls exactly how far the
+                    Quality Upgrade Finder and Quality Check search for a
+                    replacement for anything judged against it — both jobs
+                    read it live, same as the download pipeline. Per-artist/
+                    album/track assignment is planned for the Library
+                    Manager; it will plug into this exact mechanism.
+                </div>
+                <div id="qp-manager-rows"></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    return overlay;
+}
+
+function renderQualityProfileManager() {
+    const rows = document.getElementById('qp-manager-rows');
+    if (!rows) return; // modal not open — nothing to refresh
+    if (!_qpProfileRows.length) {
+        rows.innerHTML = '<div class="qp-profile-list-empty">No profiles yet.</div>';
+        return;
+    }
+    const explicitAutoImport = _qpAutoImportProfileId || null;
+    const autoImportName = explicitAutoImport
+        ? (_qpProfileRows.find(profile => profile.id === explicitAutoImport)?.name || 'Unknown profile')
+        : 'Uses the active Default (no override set)';
+
+    rows.innerHTML = `
+        <div class="qp-manager-row">
+            <div class="qp-manager-row-main">
+                <span class="qp-manager-row-name">Auto-Import</span>
+                <span class="qp-manager-row-sub">${escapeHtml(autoImportName)}</span>
+            </div>
+            <button type="button" class="qp-manager-action clear ${explicitAutoImport ? '' : 'active'}" onclick="clearAutoImportQualityProfileFromManager()">Use default</button>
+            <span></span>
+        </div>
+        ${_qpProfileRows.map(profile => `
+            <div class="qp-manager-row">
+                <div class="qp-manager-row-main">
+                    <span class="qp-manager-row-name">${escapeHtml(profile.name)}</span>
+                    <span class="qp-manager-row-sub">${escapeHtml(qpProfileSummary(profile))}</span>
+                </div>
+                <button type="button" class="qp-manager-action ${profile.is_default ? 'active' : ''}" onclick="confirmSetDefaultQualityProfileById(${profile.id})">
+                    ${profile.is_default ? 'Default' : 'Set default'}
+                </button>
+                <button type="button" class="qp-manager-action ${explicitAutoImport === profile.id ? 'active' : ''}" onclick="toggleAutoImportQualityProfile(${profile.id})">
+                    ${explicitAutoImport === profile.id ? 'Auto-Import' : 'Use for import'}
+                </button>
+            </div>
+        `).join('')}
+    `;
+}
+
+async function clearAutoImportQualityProfileFromManager() {
+    if (_qpAutoImportProfileId != null) await toggleAutoImportQualityProfile(_qpAutoImportProfileId);
+}
+
+async function openQualityProfileManager() {
+    const overlay = qpManagerOverlay();
+    try {
+        await loadCustomQualityProfiles();
+        renderQualityProfileManager();
+        overlay.classList.remove('hidden');
+    } catch (error) {
+        console.error('Error opening quality profile manager:', error);
+        showToast('Failed to open profile manager', 'error');
+    }
+}
+
+function closeQualityProfileManager() {
+    document.getElementById('qp-manager-overlay')?.classList.add('hidden');
 }
 
 // ===============================

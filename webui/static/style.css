@@ -4235,11 +4235,41 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     white-space: nowrap;
 }
 
+.qp-manage-btn {
+    flex-shrink: 0;
+    padding: 5px 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(var(--accent-rgb), 0.22);
+    background: rgba(var(--accent-rgb), 0.09);
+    color: rgba(var(--accent-light-rgb), 0.86);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+.qp-manage-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.42);
+    background: rgba(var(--accent-rgb), 0.15);
+}
+
 .qp-side-panel-hint {
     font-size: 11px;
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.4);
     margin: 0 0 14px;
+}
+
+.qp-editing-banner {
+    font-size: 11px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    margin: -6px 0 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(245, 191, 66, 0.35);
+    background: rgba(245, 191, 66, 0.08);
+    color: rgba(255, 255, 255, 0.68);
+}
+.qp-editing-banner-name {
+    color: rgb(245, 191, 66);
 }
 
 .qp-profile-list {
@@ -4269,6 +4299,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
             rgba(var(--accent-light-rgb), 0.12) 100%);
     border-color: rgba(var(--accent-rgb), 0.5);
     box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
+}
+
+/* Currently loaded into the tile editor for viewing/editing, but NOT the
+   active default — deliberately a different (amber) accent from .active
+   (accent-colored = live) so the two states are never visually confused. */
+.qp-profile-row.editing {
+    border-color: rgba(245, 191, 66, 0.5);
+    background: linear-gradient(135deg, rgba(245, 191, 66, 0.1) 0%, rgba(245, 191, 66, 0.03) 100%);
 }
 
 .qp-profile-dot {
@@ -4352,6 +4390,10 @@ body.helper-mode-active #dashboard-activity-feed:hover {
 .qp-profile-tag.qp-tag-autoimport {
     background: rgba(var(--accent-rgb), 0.15);
     color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-tag.qp-tag-default {
+    background: rgba(74, 222, 128, 0.15);
+    color: rgb(134, 239, 172);
 }
 
 .qp-profile-actions {
@@ -4465,6 +4507,89 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     max-width: 420px;
 }
 
+.qp-manager-modal {
+    width: min(720px, calc(100vw - 32px));
+    max-height: min(760px, calc(100vh - 48px));
+}
+
+.qp-manager-body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.qp-manager-info {
+    font-size: 11.5px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.55);
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.qp-manager-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.qp-manager-row-main {
+    min-width: 0;
+}
+
+.qp-manager-row-name {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.qp-manager-row-sub {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 2px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.qp-manager-action {
+    min-width: 94px;
+    padding: 7px 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.qp-manager-action:hover {
+    border-color: rgba(var(--accent-rgb), 0.32);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.active {
+    border-color: rgba(var(--accent-rgb), 0.44);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-manager-action.clear {
+    min-width: 132px;
+}
+
 @media (max-width: 1800px) {
     .qp-layout {
         flex-direction: column;
@@ -4494,6 +4619,14 @@ body.helper-mode-active #dashboard-activity-feed:hover {
         align-items: stretch;
         flex-direction: column;
         gap: 6px;
+    }
+
+    .qp-manager-row {
+        grid-template-columns: 1fr;
+    }
+
+    .qp-manager-action {
+        width: 100%;
     }
 }
 
