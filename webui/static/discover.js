@@ -7376,7 +7376,8 @@ function _artWebShowArtist(node) {
             <div style="height:100%;width:${pop}%;background:${color};"></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
-            <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
+            ${_artistWeb.lens === 'discovery' ? `<button id="artweb-expand-btn" onclick="artWebExpandNode('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">${a.expanded ? 'Expanded ✓' : 'Expand connections ✦'}</button>` : ''}
+            <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${_artistWeb.lens === 'discovery' ? 'rgba(255,255,255,0.06)' : color};border:${_artistWeb.lens === 'discovery' ? '1px solid rgba(255,255,255,0.12)' : 'none'};color:${_artistWeb.lens === 'discovery' ? '#fff' : '#0b0b0f'};border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
             ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
         </div>`;
     p.style.display = 'flex';
@@ -7475,6 +7476,81 @@ async function artWebAddToWatchlist(key) {
     } catch (e) {
         if (btn) { btn.textContent = '+ Add to watchlist'; btn.disabled = false; }
         if (typeof showToast === 'function') showToast(`Couldn't add: ${e.message}`, 'error');
+    }
+}
+
+// Expand-on-click (Discovery lens, owned nodes): fetch the node's similar artists and grow the graph
+// around it. New nodes land in a ring around the parent — no full re-layout, the map grows in place.
+async function artWebExpandNode(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key) || st.lens !== 'discovery') return;
+    const a = g.getNodeAttributes(key);
+    const btn = document.getElementById('artweb-expand-btn');
+    if (a.expanded) return;
+    if (btn) { btn.textContent = 'Expanding…'; btn.disabled = true; }
+    try {
+        const exclude = [];
+        g.forEachNode(k => exclude.push(k));
+        const r = await fetch('/api/graph/discovery/expand', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: key, ids: a.ids || [], exclude: exclude, per: 10 }),
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        const newNodes = (d.nodes || []).filter(n => n.key && !g.hasNode(n.key));
+        if (!newNodes.length) {
+            g.setNodeAttribute(key, 'expanded', true);
+            if (btn) btn.textContent = 'No new connections';
+            return;
+        }
+
+        // Ring placement around the parent's home position (stable even mid-spread-animation).
+        const home = st.home || (st.home = {});
+        const ph = home[key] || { x: a.x, y: a.y };
+        const R = (st.spreadPush || 0.1) * 2.2;
+        newNodes.forEach((n, i) => {
+            const th = (2 * Math.PI * i) / newNodes.length + Math.random() * 0.4;
+            const x = ph.x + Math.cos(th) * R, y = ph.y + Math.sin(th) * R;
+            if (n.kind === 'owned') {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 7,
+                    color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                    forceLabel: true, kind: 'owned', genre: 'Your library',
+                    artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+                });
+            } else {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 3.5,
+                    color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                    kind: 'discovery', genre: 'Discovery',
+                    image_url: n.image_url || null, genresList: n.genres || null,
+                    ids: n.ids || [], popularity: n.popularity || 0,
+                });
+            }
+            home[n.key] = { x: x, y: y };
+            st.index.push({ key: n.key, label: n.label });   // searchable immediately
+        });
+        (d.edges || []).forEach(e => {
+            if (g.hasNode(e.source) && g.hasNode(e.target) && !g.hasEdge(e.source, e.target)) {
+                g.addEdge(e.source, e.target, {
+                    weight: e.weight, size: _webEdgeSize(e.weight),
+                    color: _webHexToRgba(WEB_DISCOVERY_COLOR, 0.28), baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+                });
+            }
+        });
+        g.setNodeAttribute(key, 'expanded', true);
+
+        // Re-select the node: focus set now includes the new neighbors, panel re-renders ("Expanded").
+        _artWebClickNode(key);
+        const statsEl = document.getElementById('artist-web-stats');
+        if (statsEl) {
+            let own = 0, disc = 0;
+            g.forEachNode((k2, a2) => { if (a2.kind === 'owned') own++; else if (a2.kind === 'discovery') disc++; });
+            statsEl.textContent = `${own} of your artists · ${disc} to discover`;
+        }
+    } catch (e) {
+        if (btn) { btn.textContent = 'Expand connections ✦'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Expand failed: ${e.message}`, 'error');
     }
 }
 
