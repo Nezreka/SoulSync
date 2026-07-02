@@ -4518,15 +4518,76 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     gap: 10px;
 }
 
-.qp-manager-info {
-    font-size: 11.5px;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.55);
-    padding: 10px 12px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+/* Section titles + status rows + profile rows all render into this single
+   wrapper (see renderQualityProfileManager) — needs its own gap, or every
+   row renders flush against its neighbor with nothing but a row's own
+   padding between them. */
+.qp-manager-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
 }
+
+/* Info icon + collapsible body — same #settings-page .info-icon /
+   .setting-help-body look used everywhere else in Settings, reused here via
+   toggleSettingHelp(). Those rules are scoped to #settings-page though, and
+   this modal is appended straight onto <body> (outside that scope), so the
+   visuals are mirrored here rather than the giant explanation block sitting
+   permanently open and dominating the modal. */
+.qp-manager-info-row {
+    justify-content: space-between;
+}
+.qp-manager-info-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+#qp-manager-overlay .info-icon {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 1px solid rgba(var(--accent-rgb), 0.45);
+    background: transparent;
+    color: rgba(var(--accent-rgb), 0.9);
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 1;
+    text-align: center;
+    margin-left: 6px;
+    flex: 0 0 auto;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+#qp-manager-overlay .info-icon:hover {
+    background: rgba(var(--accent-rgb), 0.16);
+    border-color: rgba(var(--accent-rgb), 0.85);
+    color: rgba(var(--accent-rgb), 1);
+}
+#qp-manager-overlay .info-icon.open {
+    background: rgba(var(--accent-rgb), 0.9);
+    border-color: rgba(var(--accent-rgb), 0.9);
+    color: #0b0f14;
+}
+.qp-manager-info.setting-help-body {
+    margin: 0;
+    padding: 10px 12px;
+    background: rgba(var(--accent-rgb), 0.06);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.5);
+    border-radius: 0 6px 6px 0;
+    font-size: 11.5px;
+    font-style: normal;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+}
+.qp-manager-info.setting-help-body strong { color: rgba(255, 255, 255, 0.82); font-weight: 600; }
 
 .qp-manager-section-title {
     font-size: 10.5px;
@@ -4534,7 +4595,13 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: rgba(255, 255, 255, 0.4);
-    margin: 4px 2px -2px;
+    margin: 4px 2px 4px;
+}
+/* Between "Profiles" and the actual rows specifically — was reading as too
+   cramped, the rows looked glued to the heading. */
+.qp-manager-status-row + .qp-manager-section-title {
+    margin-top: 10px;
+    margin-bottom: 8px;
 }
 
 /* Read-only "what's active" rows — deliberately NOT styled like

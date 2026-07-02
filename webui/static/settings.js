@@ -3355,7 +3355,13 @@ function qpManagerOverlay() {
                 <button class="enhanced-bulk-modal-close" onclick="closeQualityProfileManager()">&times;</button>
             </div>
             <div class="enhanced-bulk-modal-body qp-manager-body">
-                <div class="qp-manager-info">
+                <div class="qp-manager-info-row setting-row">
+                    <span class="qp-manager-info-label">What does this manage?</span>
+                    <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                        onclick="toggleSettingHelp(this)"
+                        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                </div>
+                <div class="help-text setting-help-body qp-manager-info" hidden>
                     Two things read a profile today: normal downloads/Wishlist
                     items always follow the <strong>Default</strong> below,
                     and Auto-Import can optionally use a different one instead
@@ -3367,7 +3373,7 @@ function qpManagerOverlay() {
                     album/track assignment is planned for the Library
                     Manager; it will plug into this exact mechanism.
                 </div>
-                <div id="qp-manager-rows"></div>
+                <div id="qp-manager-rows" class="qp-manager-rows"></div>
             </div>
         </div>
     `;
