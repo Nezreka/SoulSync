@@ -130,22 +130,19 @@ def test_discovery_keeps_owned_to_unowned_only():
     assert ("a", "x") in e and ("a", "y") in e and ("a", "b") not in e
 
 
-def test_discovery_enriches_from_cache_source_scoped():
-    from core.graph.artist_graph import enrich_discovery_nodes
+def test_discovery_enriches_from_row_columns():
+    """similar_artists rows carry their own image_url/genres (cols [7]/[8]); 7-tuples still work."""
     rows = [
-        ("aid", "X", None, "12345", None, 5, 70),   # X has Deezer id 12345
+        ("aid", "X", None, "12345", None, 5, 88, "http://img", '["Pop"]'),  # extended 9-tuple
+        ("aid", "Y", "yid", None, None, 2, 40),                             # plain 7-tuple
         ("bid", "A", "aid", None, None, 1, 40),
     ]
     g = build_discovery_map(rows, {"a"})
     x = next(n for n in g["nodes"] if n["key"] == "x")
+    y = next(n for n in g["nodes"] if n["key"] == "y")
     assert x["ids"] == [["deezer", "12345"]]        # ids carry their source
-    # The cache has an iTunes artist with the SAME numeric id — it must NOT win (source-scoped keys).
-    cache = {
-        ("itunes", "12345"): {"image_url": "http://WRONG", "genres": ["Wrong"], "popularity": 1},
-        ("deezer", "12345"): {"image_url": "http://img", "genres": ["Pop"], "popularity": 88},
-    }
-    enrich_discovery_nodes(g["nodes"], cache)
-    assert x["image_url"] == "http://img" and x["genres"] == ["Pop"] and x["popularity"] == 88
+    assert x["image_url"] == "http://img" and x["genres"] == '["Pop"]' and x["popularity"] == 88
+    assert y["image_url"] is None and y["genres"] is None and y["popularity"] == 40
 
 
 def test_discovery_merges_duplicate_multisource_rows():

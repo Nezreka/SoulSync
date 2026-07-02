@@ -9923,20 +9923,31 @@ def get_discovery_graph():
     """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
 
     Candidates are enriched from the metadata cache (image/genres/popularity) so they render as real
-    artists you could add, not bare dots. Hybrid seed view: the top ``seed`` owned anchors (by neighbor
-    count), each with its top ``per`` unowned candidates. The frontend expands from here on click.
+    artists you could add, not bare dots. Returns the WHOLE frontier by default — its real size is
+    modest (only artists whose similars were fetched can anchor); ``seed``/``per`` query params
+    optionally trim to the top anchors / top candidates per anchor.
     """
     try:
-        from core.graph.artist_graph import build_discovery_map, enrich_discovery_nodes
-        seed = max(1, min(int(request.args.get('seed', 30)), 120))
-        per = max(1, min(int(request.args.get('per', 6)), 20))
+        from core.graph.artist_graph import build_discovery_map
+
+        def _opt_int(name):
+            raw = request.args.get(name)
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return None
+            return max(1, v) if v > 0 else None
+
+        seed = _opt_int('seed')
+        per = _opt_int('per')
         db = get_database()
         conn = db._get_connection()
         try:
             cur = conn.cursor()
             owned, owned_meta, rows = _discovery_load_inputs(cur)
             graph = build_discovery_map(rows, owned, owned_meta, seed_count=seed, per_anchor=per)
-            _discovery_enrich(cur, graph, enrich_discovery_nodes)
         finally:
             conn.close()
 
@@ -9957,6 +9968,10 @@ def _discovery_load_inputs(cur):
     similar_artists is per-profile (unique on profile_id + source + name); without the filter, a
     multi-profile install double-counts every anchor->target pair and leaks one profile's discovery
     taste into another's graph.
+
+    Rows include the table's OWN image_url/genres columns (~99% of rows carry image + real
+    popularity) — enriching from metadata_cache_entities instead measured 18-250s per request
+    (random reads into a 1.3M-row table), for data these rows already have.
     """
     owned = set()
     owned_meta = {}
@@ -9966,39 +9981,11 @@ def _discovery_load_inputs(cur):
         owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
     rows = cur.execute(
         "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
-        "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+        "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity, "
+        "image_url, genres "
         "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
     ).fetchall()
     return owned, owned_meta, rows
-
-
-def _discovery_enrich(cur, graph, enrich_fn):
-    """Single-pass enrichment: collect the built candidates' (source, id) pairs, look them up in the
-    metadata cache, and fill the nodes in place (no second build)."""
-    need = {(src, eid) for n in graph["nodes"] if n.get("kind") == "discovery"
-            for src, eid in n.get("ids", [])}
-    enrich_fn(graph["nodes"], _discovery_cache_lookup(cur, need))
-
-
-def _discovery_cache_lookup(cur, pairs):
-    """Cached artist metadata (image/genres/popularity) for a set of (source, external_id) pairs.
-
-    Keys stay source-scoped: metadata_cache_entities is unique per (source, entity_type, entity_id),
-    and Deezer/iTunes ids share the numeric space — an unscoped id lookup can return the wrong
-    artist's metadata. Batched so we never blow the SQL variable limit.
-    """
-    lookup = {}
-    pairs = [(s, e) for s, e in pairs if s and e]
-    for i in range(0, len(pairs), 200):
-        batch = pairs[i:i + 200]
-        cond = " OR ".join("(source = ? AND entity_id = ?)" for _ in batch)
-        params = [v for p in batch for v in p]
-        for source, eid, image_url, genres, popularity in cur.execute(
-            f"SELECT source, entity_id, image_url, genres, popularity FROM metadata_cache_entities "
-            f"WHERE entity_type='artist' AND ({cond})", params
-        ):
-            lookup.setdefault((source, eid), {"image_url": image_url, "genres": genres, "popularity": popularity})
-    return lookup
 
 
 @app.route('/api/graph/discovery/expand', methods=['POST'])
@@ -10010,7 +9997,7 @@ def expand_discovery_graph():
     names can contain commas), ``per`` (max new nodes). Same node/edge shape as /api/graph/discovery.
     """
     try:
-        from core.graph.artist_graph import expand_discovery_node, enrich_discovery_nodes
+        from core.graph.artist_graph import expand_discovery_node
         payload = request.get_json(silent=True) or {}
         node_key = str(payload.get('key') or '').strip().lower()
         if not node_key:
@@ -10028,7 +10015,6 @@ def expand_discovery_graph():
             cur = conn.cursor()
             owned, owned_meta, rows = _discovery_load_inputs(cur)
             graph = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta, per=per, exclude=exclude)
-            _discovery_enrich(cur, graph, enrich_discovery_nodes)
         finally:
             conn.close()
         return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
