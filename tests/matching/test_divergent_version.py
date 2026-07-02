@@ -98,3 +98,37 @@ def test_wrong_version_below_correct(wanted, candidate):
     right, _ = me.score_track_match(wanted, [artist], 0, wanted, [artist], 0)
     assert right > wrong
     assert wrong < 0.60, f'{candidate!r} scored {wrong:.2f} vs {wanted!r}'
+
+
+# ── regression: SAME version, different WRAPPING punctuation (lilbob5769) ──
+# The download source often writes "- live" where the metadata writes "(live)"
+# (or vice versa). That is the SAME version formatted differently and MUST match.
+# Before the fix, stripping only the version WORD left "song ()" vs "song -",
+# which compared unequal and wrongly tripped the divergent 0.30 penalty.
+
+@pytest.mark.parametrize('a,b', [
+    ('song (live)', 'song - live'),
+    ('song - live', 'song (live)'),
+    ('hey jude (acoustic)', 'hey jude - acoustic'),
+    ('track (unplugged)', 'track - unplugged'),
+])
+def test_paren_vs_dash_same_version_matches(a, b):
+    s = me.similarity_score(a, b)
+    assert s != 0.30, f'{a!r} vs {b!r} wrongly penalised'
+    assert s >= 0.70, f'{a!r} vs {b!r} scored {s:.2f}, should clear the threshold'
+
+
+def test_paren_vs_dash_does_not_leak_across_version_types():
+    # Punctuation-normalisation must NOT let different version TYPES match
+    # (live vs acoustic) — stays below the acceptance threshold either way.
+    assert me.similarity_score('song (live)', 'song - acoustic') < 0.70
+    # Same base, both parenthesised, different type still gets the hard penalty.
+    assert me.similarity_score('song (live)', 'song (acoustic)') == 0.30
+
+
+def test_paren_vs_dash_end_to_end_matches():
+    conf, _ = me.score_track_match(
+        'Hey Jude (Live)', ['The Beatles'], 431_000,
+        'Hey Jude - Live', ['The Beatles'], 431_000,
+    )
+    assert conf >= 0.70, f'paren-vs-dash live scored {conf:.2f}, should match'
