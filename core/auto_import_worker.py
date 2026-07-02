@@ -1659,20 +1659,15 @@ class AutoImportWorker:
         # downloads/Wishlist items. Resolved once per batch (`None`/0 means
         # "use the app-wide default" via `load_profile_by_id`'s own fallback).
         auto_import_profile_id = self._config_manager.get('auto_import.quality_profile_id') or None
-        auto_import_profile = {}
-        try:
-            from core.quality.selection import load_profile_by_id
-            auto_import_profile = load_profile_by_id(auto_import_profile_id)
-        except Exception as e:
-            logger.debug("[Auto-Import] quality profile resolution failed: %s", e)
 
-        # Parent folder artist override — now a per-profile setting
-        # (`folder_artist_override`, Auto-Import only). Default on to preserve
-        # the legacy Artist/Album staging behavior. Users who stage mixed
-        # piles under one container folder can turn it off in the assigned
-        # profile to keep the metadata-identified artist.
+        # Parent folder artist override — a plain global Auto-Import setting
+        # (`import.folder_artist_override`), not a quality preference, so it
+        # doesn't belong on a quality profile. Default on to preserve the
+        # legacy Artist/Album staging behavior. Users who stage mixed piles
+        # under one container folder can turn it off to keep the
+        # metadata-identified artist.
         try:
-            if auto_import_profile.get('folder_artist_override', True):
+            if self._config_manager.get('import.folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
                 rel_path = os.path.relpath(candidate.path, staging_root)
                 folder_artist = resolve_folder_artist(rel_path, artist_name, enabled=True)

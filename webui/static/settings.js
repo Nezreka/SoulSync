@@ -3060,7 +3060,6 @@ function collectFullQualityBundleFromUI() {
         lossy_copy_codec: document.getElementById('lossy-copy-codec')?.value || 'mp3',
         lossy_copy_bitrate: document.getElementById('lossy-copy-bitrate')?.value || '320',
         lossy_copy_delete_original: document.getElementById('lossy-copy-delete-original')?.checked === true,
-        folder_artist_override: document.getElementById('import-folder-artist-override')?.checked !== false,
     };
 }
 
@@ -3079,7 +3078,6 @@ function applyFullQualityBundleToDom(profile) {
     set('downsample-hires', profile.downsample_enabled);
     set('audio-completeness-check', profile.deep_audio_verify);
     set('import-replace-lower-quality', profile.replace_lower_quality);
-    set('import-folder-artist-override', profile.folder_artist_override !== false);
     set('lossy-copy-enabled', profile.lossy_copy_enabled);
     set('lossy-copy-codec', profile.lossy_copy_codec);
     set('lossy-copy-bitrate', profile.lossy_copy_bitrate);

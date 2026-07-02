@@ -268,7 +268,6 @@ def test_migration_captures_full_settings_bundle(db, monkeypatch):
                 "lossy_copy.codec": "aac",
                 "lossy_copy.bitrate": "192",
                 "lossy_copy.delete_original": True,
-                "import.folder_artist_override": False,
             }.get(key, default)
 
     monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
@@ -283,7 +282,6 @@ def test_migration_captures_full_settings_bundle(db, monkeypatch):
         assert row["lossy_copy_codec"] == "aac"
         assert row["lossy_copy_bitrate"] == "192"
         assert row["lossy_copy_delete_original"] == 1
-        assert row["folder_artist_override"] == 0
     finally:
         conn.close()
 
