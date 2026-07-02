@@ -7590,6 +7590,12 @@ function _artWebShowDiscovery(node) {
     let genres = a.genresList;
     if (typeof genres === 'string') { try { genres = JSON.parse(genres); } catch (e) { genres = [genres]; } }
     genres = Array.isArray(genres) ? genres.slice(0, 5) : [];
+    // Unowned artists still get a detail page: /artist-detail/<source>/<external id> synthesizes
+    // name + image + discography from the source (same pattern as the discover recommendation cards).
+    // ids pairs are ordered spotify > deezer > itunes; the first is the best detail source.
+    const pair = (a.ids || [])[0];
+    const detailPath = (pair && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(pair[1], pair[0]) : null;
 
     document.getElementById('artweb-panel-body').innerHTML = `
         <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
@@ -7606,6 +7612,7 @@ function _artWebShowDiscovery(node) {
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
             ${(a.ids || []).some(pr => pr && pr[0] === 'deezer') ? `<button id="artweb-preview-btn" onclick="artWebTogglePreview('${escapeForInlineJs(node)}')" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">&#9654; Preview top track</button>` : ''}
             <button id="artweb-add-btn" onclick="artWebAddToWatchlist('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">+ Add to watchlist</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
         </div>`;
     p.style.display = 'flex';
 }
