@@ -202,27 +202,77 @@ def build_genre_grouped_map(
     return {"nodes": nodes, "edges": edges}
 
 
+def _merge_target(bucket: Dict[str, list], name: str, sp: Any, dz: Any, it: Any, occ: Any, pop: Any) -> None:
+    """Fold one similar-artist row into a per-target bucket, keyed by normalized name.
+
+    The same target often appears in several rows (the anchor was discovered against Spotify AND
+    Deezer), so we merge: max occurrence/popularity (a target ranks by its STRONGEST evidence, not
+    whichever row happened first) and the union of external ids (more ids -> better cache enrichment).
+    Bucket value: [label, sp, dz, it, occ, pop].
+    """
+    tkey = _norm(name)
+    cur = bucket.get(tkey)
+    if cur is None:
+        bucket[tkey] = [name, sp, dz, it, _as_int(occ, 1), _as_int(pop)]
+        return
+    cur[1] = cur[1] or sp
+    cur[2] = cur[2] or dz
+    cur[3] = cur[3] or it
+    cur[4] = max(cur[4], _as_int(occ, 1))
+    cur[5] = max(cur[5], _as_int(pop))
+
+
+def _id_pairs(sp: Any, dz: Any, it: Any) -> List[List[Any]]:
+    """External ids as ``[source, id]`` pairs — the source matters: Deezer and iTunes ids are both
+    numeric and can collide, so consumers (cache enrichment, watchlist add) must know which is which.
+    """
+    return [[s, e] for s, e in (("spotify", sp), ("deezer", dz), ("itunes", it)) if e]
+
+
+def enrich_discovery_nodes(
+    nodes: List[dict],
+    cache_lookup: Dict[Tuple[str, Any], Dict[str, Any]],
+) -> List[dict]:
+    """Fill discovery nodes' image/genres/popularity from cached metadata, in place.
+
+    ``cache_lookup`` is keyed by ``(source, external_id)`` — source-scoped, because Deezer and iTunes
+    ids share the numeric space and an unscoped lookup can return the wrong artist's metadata. The
+    first of the node's id pairs with a cache hit wins; row-level popularity is kept as fallback.
+    """
+    for n in nodes:
+        if n.get("kind") != "discovery":
+            continue
+        for src, eid in n.get("ids", []):
+            hit = cache_lookup.get((src, eid))
+            if hit:
+                n["image_url"] = hit.get("image_url")
+                n["genres"] = hit.get("genres")
+                if hit.get("popularity"):
+                    n["popularity"] = hit["popularity"]
+                break
+    return nodes
+
+
 def build_discovery_map(
     rows: Iterable[Row],
     owned_names: set,
     owned_meta: Optional[Dict[str, Dict[str, Any]]] = None,
-    cache_lookup: Optional[Dict[Any, Dict[str, Any]]] = None,
     seed_count: int = 30,
     per_anchor: int = 6,
 ) -> Dict[str, List[dict]]:
     """Discovery map: owned artists as anchors, their UNOWNED similar artists as discovery candidates.
 
     The inverse of :func:`build_taste_map`'s filter — instead of owned<->owned, we keep owned->UNowned
-    edges (new artists to find). Each unowned candidate is enriched from ``cache_lookup`` — a dict
-    ``{external_id: {"image_url", "genres", "popularity", "name"}}`` (the caller builds it from the
-    metadata cache). Anchors are ranked by how many unowned neighbors they have; the top ``seed_count``
-    seed the initial view, each showing its top ``per_anchor`` candidates (by consensus then popularity).
+    edges (new artists to find). Anchors are ranked by how many DISTINCT unowned neighbors they have;
+    the top ``seed_count`` seed the initial view, each showing its top ``per_anchor`` candidates (by
+    max consensus, then popularity — duplicate multi-source rows are merged, see :func:`_merge_target`).
 
     Node kinds: ``owned`` (anchor: ``{key,label,owned,kind,id,thumb,genres}``) and ``discovery``
-    (candidate: ``{key,label,owned,kind,popularity,image_url,genres}``). Edges are owned -> discovery.
+    (candidate: ``{key,label,owned,kind,popularity,image_url,genres,ids}`` where ``ids`` is a list of
+    ``[source, external_id]`` pairs). Edges are owned -> discovery. Enrichment is a separate step —
+    see :func:`enrich_discovery_nodes`.
     """
     owned_meta = owned_meta or {}
-    cache_lookup = cache_lookup or {}
     rows = list(rows)
 
     # Same self-referential resolution as build_taste_map: source ext id -> name.
@@ -232,7 +282,7 @@ def build_discovery_map(
             if eid and eid not in id2name:
                 id2name[eid] = name
 
-    # Gather each OWNED anchor's UNOWNED similar targets.
+    # Gather each OWNED anchor's UNOWNED similar targets, merged per target name.
     anchors: Dict[str, Dict[str, Any]] = {}
     for src, name, sp, dz, it, occ, pop in rows:
         src_name = id2name.get(src)
@@ -244,8 +294,8 @@ def build_discovery_map(
         tgt_norm = _norm(name)
         if not tgt_norm or tgt_norm in owned_names:
             continue                              # discovery = UNowned target only
-        a = anchors.setdefault(src_norm, {"label": src_name, "targets": []})
-        a["targets"].append((name, sp, dz, it, _as_int(occ, 1), _as_int(pop)))
+        a = anchors.setdefault(src_norm, {"label": src_name, "targets": {}})
+        _merge_target(a["targets"], name, sp, dz, it, occ, pop)
 
     ranked = sorted(anchors.items(), key=lambda kv: len(kv[1]["targets"]), reverse=True)[:seed_count]
 
@@ -260,27 +310,18 @@ def build_discovery_map(
                 "key": anchor_norm, "label": info["label"], "owned": True, "kind": "owned",
                 "id": meta.get("id"), "thumb": meta.get("thumb_url"), "genres": meta.get("genres"),
             }
-        top = sorted(info["targets"], key=lambda t: (t[4], t[5]), reverse=True)[:per_anchor]
-        for (tname, sp, dz, it, occ, pop) in top:
-            tkey = _norm(tname)
-            if not tkey:
-                continue
+        top = sorted(info["targets"].items(), key=lambda kv: (kv[1][4], kv[1][5]), reverse=True)[:per_anchor]
+        for tkey, (tname, sp, dz, it, occ, pop) in top:
             if tkey not in nodes:
-                enrich: Dict[str, Any] = {}
-                for eid in (sp, dz, it):
-                    if eid and eid in cache_lookup:
-                        enrich = cache_lookup[eid]
-                        break
                 nodes[tkey] = {
                     "key": tkey, "label": tname, "owned": False, "kind": "discovery",
-                    "popularity": enrich.get("popularity", pop),
-                    "image_url": enrich.get("image_url"), "genres": enrich.get("genres"),
-                    "ids": [e for e in (sp, dz, it) if e],   # external ids, for cache enrichment + add-to-watchlist
+                    "popularity": pop, "image_url": None, "genres": None,
+                    "ids": _id_pairs(sp, dz, it),
                 }
             ekey = (anchor_norm, tkey)
             if ekey not in edge_seen:
                 edge_seen.add(ekey)
-                edges.append({"source": anchor_norm, "target": tkey, "weight": _as_int(occ, 1)})
+                edges.append({"source": anchor_norm, "target": tkey, "weight": occ})
 
     return {"nodes": list(nodes.values()), "edges": edges}
 
@@ -291,21 +332,20 @@ def expand_discovery_node(
     node_key: str,
     node_ids: Optional[Iterable[Any]] = None,
     owned_meta: Optional[Dict[str, Dict[str, Any]]] = None,
-    cache_lookup: Optional[Dict[Any, Dict[str, Any]]] = None,
     per: int = 10,
     exclude: Optional[set] = None,
 ) -> Dict[str, List[dict]]:
     """One expand-on-click step for the Discovery map: the clicked node's similar artists.
 
     The clicked node is identified by ``node_key`` (normalized name) and/or ``node_ids`` (its external
-    ids) — a row matches when its source id resolves to that name or is one of those ids. Targets in
-    ``exclude`` (keys already on screen) are skipped, then the strongest ``per`` (by consensus, then
-    popularity) are returned. Unowned targets become ``discovery`` nodes (cache-enriched, like
-    :func:`build_discovery_map`); owned targets become ``owned`` nodes, so a trail can also reveal how
-    a candidate connects back into your library. Edges run ``node_key -> target``.
+    ids, flat) — a row matches when its source id resolves to that name or is one of those ids.
+    Targets in ``exclude`` (keys already on screen) are skipped; duplicate multi-source rows merge to
+    the target's strongest evidence (see :func:`_merge_target`); the strongest ``per`` are returned.
+    Unowned targets become ``discovery`` nodes (enrich via :func:`enrich_discovery_nodes`); owned
+    targets become ``owned`` nodes, so a trail can also reveal how a candidate connects back into your
+    library. Edges run ``node_key -> target``.
     """
     owned_meta = owned_meta or {}
-    cache_lookup = cache_lookup or {}
     exclude = exclude or set()
     ids_set = {i for i in (node_ids or []) if i}
     node_key = _norm(node_key)
@@ -317,23 +357,20 @@ def expand_discovery_node(
             if eid and eid not in id2name:
                 id2name[eid] = name
 
-    targets: List[Tuple[str, Any, Any, Any, int, int]] = []
-    seen_targets: set = set()
+    targets: Dict[str, list] = {}
     for src, name, sp, dz, it, occ, pop in rows:
         if src not in ids_set and _norm(id2name.get(src, "")) != node_key:
             continue                              # row isn't about the clicked node
         tkey = _norm(name)
-        if not tkey or tkey == node_key or tkey in exclude or tkey in seen_targets:
+        if not tkey or tkey == node_key or tkey in exclude:
             continue
-        seen_targets.add(tkey)
-        targets.append((name, sp, dz, it, _as_int(occ, 1), _as_int(pop)))
+        _merge_target(targets, name, sp, dz, it, occ, pop)
 
-    targets.sort(key=lambda t: (t[4], t[5]), reverse=True)
+    ranked = sorted(targets.items(), key=lambda kv: (kv[1][4], kv[1][5]), reverse=True)
 
     nodes: List[dict] = []
     edges: List[dict] = []
-    for (tname, sp, dz, it, occ, pop) in targets[:per]:
-        tkey = _norm(tname)
+    for tkey, (tname, sp, dz, it, occ, pop) in ranked[:per]:
         if tkey in owned_names:
             meta = owned_meta.get(tkey, {})
             nodes.append({
@@ -341,17 +378,11 @@ def expand_discovery_node(
                 "id": meta.get("id"), "thumb": meta.get("thumb_url"), "genres": meta.get("genres"),
             })
         else:
-            enrich: Dict[str, Any] = {}
-            for eid in (sp, dz, it):
-                if eid and eid in cache_lookup:
-                    enrich = cache_lookup[eid]
-                    break
             nodes.append({
                 "key": tkey, "label": tname, "owned": False, "kind": "discovery",
-                "popularity": enrich.get("popularity", pop),
-                "image_url": enrich.get("image_url"), "genres": enrich.get("genres"),
-                "ids": [e for e in (sp, dz, it) if e],
+                "popularity": pop, "image_url": None, "genres": None,
+                "ids": _id_pairs(sp, dz, it),
             })
-        edges.append({"source": node_key, "target": tkey, "weight": _as_int(occ, 1)})
+        edges.append({"source": node_key, "target": tkey, "weight": occ})
 
     return {"nodes": nodes, "edges": edges}

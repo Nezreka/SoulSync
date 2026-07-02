@@ -130,12 +130,39 @@ def test_discovery_keeps_owned_to_unowned_only():
     assert ("a", "x") in e and ("a", "y") in e and ("a", "b") not in e
 
 
-def test_discovery_enriches_from_cache():
-    rows = [("aid", "X", "xid", None, None, 5, 70), ("bid", "A", "aid", None, None, 1, 40)]
-    cache = {"xid": {"image_url": "http://img", "genres": ["Pop"], "popularity": 88}}
-    g = build_discovery_map(rows, {"a"}, cache_lookup=cache)
+def test_discovery_enriches_from_cache_source_scoped():
+    from core.graph.artist_graph import enrich_discovery_nodes
+    rows = [
+        ("aid", "X", None, "12345", None, 5, 70),   # X has Deezer id 12345
+        ("bid", "A", "aid", None, None, 1, 40),
+    ]
+    g = build_discovery_map(rows, {"a"})
     x = next(n for n in g["nodes"] if n["key"] == "x")
+    assert x["ids"] == [["deezer", "12345"]]        # ids carry their source
+    # The cache has an iTunes artist with the SAME numeric id — it must NOT win (source-scoped keys).
+    cache = {
+        ("itunes", "12345"): {"image_url": "http://WRONG", "genres": ["Wrong"], "popularity": 1},
+        ("deezer", "12345"): {"image_url": "http://img", "genres": ["Pop"], "popularity": 88},
+    }
+    enrich_discovery_nodes(g["nodes"], cache)
     assert x["image_url"] == "http://img" and x["genres"] == ["Pop"] and x["popularity"] == 88
+
+
+def test_discovery_merges_duplicate_multisource_rows():
+    """Reviewer finding: an anchor discovered against Spotify AND Deezer repeats each target; dupes
+    must merge (max occ/pop, ids unioned) instead of eating per_anchor slots and inflating rank."""
+    rows = [
+        ("aid_sp", "X", "x_sp", None, None, 1, 10),   # X via the Spotify run (weak row)
+        ("aid_dz", "X", None, "x_dz", None, 5, 70),   # X again via the Deezer run (strong row)
+        ("aid_sp", "Y", "y_sp", None, None, 2, 20),
+        ("bid", "A", "aid_sp", "aid_dz", None, 1, 40),  # both source ids resolve to A
+    ]
+    g = build_discovery_map(rows, {"a"}, per_anchor=2)
+    disc = {n["key"]: n for n in g["nodes"] if n["kind"] == "discovery"}
+    assert set(disc) == {"x", "y"}                  # X once, not twice — Y still gets its slot
+    assert disc["x"]["ids"] == [["spotify", "x_sp"], ["deezer", "x_dz"]]   # ids unioned
+    xedge = next(e for e in g["edges"] if e["target"] == "x")
+    assert xedge["weight"] == 5                     # strongest evidence wins, not first-seen
 
 
 def test_discovery_per_anchor_limit_keeps_strongest():
@@ -195,3 +222,17 @@ def test_expand_owned_target_comes_back_as_owned_node():
     assert kinds == {"b": "owned", "x": "discovery"}
     b = next(n for n in g["nodes"] if n["key"] == "b")
     assert b["id"] == 7 and b["thumb"] == "t"
+
+
+def test_expand_ranks_duplicate_target_by_strongest_row():
+    """Reviewer finding: first-seen dedupe let a strong target rank by its weakest row."""
+    from core.graph.artist_graph import expand_discovery_node
+    rows = [
+        ("aid", "Foo", None, "f_dz", None, 1, 0),   # Foo's weak Deezer row comes FIRST
+        ("aid", "Foo", "f_sp", None, None, 5, 0),   # Foo's strong Spotify row
+        ("aid", "Bar", "b_sp", None, None, 2, 0),
+        ("bid", "A", "aid", None, None, 1, 0),
+    ]
+    g = expand_discovery_node(rows, {"a"}, "A", per=1)
+    assert [n["label"] for n in g["nodes"]] == ["Foo"]   # occ 5 beats Bar's 2 (old code: occ 1 lost)
+    assert g["edges"][0]["weight"] == 5
