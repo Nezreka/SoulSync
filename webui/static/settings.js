@@ -218,6 +218,27 @@ async function onExperimentalJiosaavnToggle(checkbox) {
     debouncedAutoSaveSettings();
 }
 
+async function onExperimentalBandcampToggle(checkbox) {
+    if (!checkbox) return;
+
+    if (!checkbox.checked) {
+        debouncedAutoSaveSettings();
+        return;
+    }
+
+    checkbox.checked = false;
+
+    const acknowledged = await showExperimentalEnableDialog({
+        title: 'Enable Bandcamp',
+        message: 'Bandcamp has no official public search/metadata API — this uses Bandcamp\'s own public search and release-page endpoints. Coverage and availability may change without notice. Once enabled, Bandcamp will appear as a search source in Discover and as a metadata enrichment source for downloaded tracks.',
+    });
+
+    if (!acknowledged) return;
+
+    checkbox.checked = true;
+    debouncedAutoSaveSettings();
+}
+
 function _metadataSourceFallback(source) {
     if (source === 'spotify') return 'deezer';
     return 'deezer';
@@ -1396,6 +1417,9 @@ async function loadSettingsData() {
         if (jiosaavnEnabled && _metaSel === 'jiosaavn') {
             document.getElementById('metadata-fallback-source').value = 'jiosaavn';
         }
+
+        const _bandcampExp = document.getElementById('experimental-bandcamp-enabled');
+        if (_bandcampExp) _bandcampExp.checked = settings.experimental?.bandcamp_enabled === true;
 
         // Populate Hydrabase settings
         const hbConfig = settings.hydrabase || {};
@@ -3460,6 +3484,7 @@ async function saveSettings(quiet = false) {
         },
         experimental: {
             jiosaavn_enabled: document.getElementById('experimental-jiosaavn-enabled')?.checked === true,
+            bandcamp_enabled: document.getElementById('experimental-bandcamp-enabled')?.checked === true,
         },
         hydrabase: {
             url: document.getElementById('hydrabase-url').value,

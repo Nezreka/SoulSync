@@ -588,6 +588,33 @@ class Album:
             external_ids=external_ids,
         )
 
+    @classmethod
+    def from_bandcamp_dict(cls, raw: Dict[str, Any]) -> 'Album':
+        """Bandcamp public autocomplete search API album result shape.
+
+        Bandcamp's search API doesn't return release_date/total_tracks/
+        album_type (those only live in the release page's JSON-LD, fetched
+        separately during enrichment) — left at their unknown defaults here."""
+        album_id = raw.get('id')
+        url = raw.get('item_url_path') or raw.get('item_url_root') or ''
+        external_urls = {'bandcamp': url} if url else {}
+        external_ids = {'bandcamp': _str(album_id)} if album_id else {}
+        band_id = raw.get('band_id')
+        return cls(
+            id=_str(album_id),
+            name=_str(raw.get('name')),
+            artists=[_str(raw.get('band_name'), default='Unknown Artist')],
+            release_date='',
+            total_tracks=0,
+            album_type='album',
+            image_url=_str(raw.get('img')) or None,
+            artist_id=_str(band_id) or None,
+            genres=list(raw.get('tag_names') or []),
+            source='bandcamp',
+            external_ids=external_ids,
+            external_urls=external_urls,
+        )
+
     # ------------------------------------------------------------------
     # Consumer-side helpers
     # ------------------------------------------------------------------
@@ -657,6 +684,29 @@ class Track:
     external_ids: Dict[str, str] = field(default_factory=dict)
     external_urls: Dict[str, str] = field(default_factory=dict)
 
+    @classmethod
+    def from_bandcamp_dict(cls, raw: Dict[str, Any]) -> 'Track':
+        """Bandcamp public autocomplete search API track result shape.
+
+        Bandcamp's search API doesn't return duration (only the release
+        page's JSON-LD does, fetched separately during enrichment) —
+        duration_ms is left at 0 (unknown) here."""
+        track_id = raw.get('id')
+        url = raw.get('item_url_path') or raw.get('item_url_root') or ''
+        external_urls = {'bandcamp': url} if url else {}
+        external_ids = {'bandcamp': _str(track_id)} if track_id else {}
+        return cls(
+            id=_str(track_id),
+            name=_str(raw.get('name')),
+            artists=[_str(raw.get('band_name'), default='Unknown Artist')],
+            album=_str(raw.get('album_name')),
+            duration_ms=0,
+            image_url=_str(raw.get('img')) or None,
+            source='bandcamp',
+            external_ids=external_ids,
+            external_urls=external_urls,
+        )
+
 
 @dataclass
 class Artist:
@@ -675,6 +725,23 @@ class Artist:
     source: str = ''
     external_ids: Dict[str, str] = field(default_factory=dict)
     external_urls: Dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_bandcamp_dict(cls, raw: Dict[str, Any]) -> 'Artist':
+        """Bandcamp public autocomplete search API band/label result shape."""
+        band_id = raw.get('id')
+        url = raw.get('item_url_root') or raw.get('item_url_path') or ''
+        external_urls = {'bandcamp': url} if url else {}
+        external_ids = {'bandcamp': _str(band_id)} if band_id else {}
+        return cls(
+            id=_str(band_id),
+            name=_str(raw.get('name')),
+            image_url=_str(raw.get('img')) or None,
+            genres=list(raw.get('tag_names') or []),
+            source='bandcamp',
+            external_ids=external_ids,
+            external_urls=external_urls,
+        )
 
 
 __all__ = ['Album', 'Track', 'Artist']

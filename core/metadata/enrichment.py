@@ -45,6 +45,7 @@ def build_metadata_enrichment_runtime(
     qobuz_enrichment_worker: Any | None = None,
     lastfm_worker: Any | None = None,
     genius_worker: Any | None = None,
+    bandcamp_worker: Any | None = None,
     spotify_enrichment_worker: Any | None = None,
     itunes_enrichment_worker: Any | None = None,
 ) -> SimpleNamespace:
@@ -58,6 +59,7 @@ def build_metadata_enrichment_runtime(
         qobuz_enrichment_worker=qobuz_enrichment_worker,
         lastfm_worker=lastfm_worker,
         genius_worker=genius_worker,
+        bandcamp_worker=bandcamp_worker,
         spotify_enrichment_worker=spotify_enrichment_worker,
         itunes_enrichment_worker=itunes_enrichment_worker,
     )

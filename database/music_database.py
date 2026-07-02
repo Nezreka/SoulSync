@@ -461,6 +461,9 @@ class MusicDatabase:
             # Add Similar-Artists worker tracking columns (migration)
             self._add_similar_artists_worker_columns(cursor)
 
+            # Add Bandcamp enrichment tracking columns (migration)
+            self._add_bandcamp_columns(cursor)
+
             # Backfill match_status for rows that already have an external ID but
             # NULL status. Prevents enrichment workers from re-processing these
             # rows forever. Must run AFTER all *_match_status columns have been
@@ -2897,6 +2900,41 @@ class MusicDatabase:
         except Exception as e:
             logger.error(f"Error adding JioSaavn columns: {e}")
 
+    def _add_bandcamp_columns(self, cursor):
+        """Add Bandcamp enrichment tracking columns to albums and tracks.
+
+        Album+track (unlike Last.fm/Genius, which also enrich artists) —
+        Bandcamp's band/label pages don't carry enough structured data to be
+        worth a separate artist enrichment pass, but releases (albums) are
+        Bandcamp's primary unit — a release's JSON-LD is the richer object
+        (full tracklist, tags, label, credits in one place), so albums get
+        the same enrichment columns tracks do, mirroring the existing
+        Last.fm/Tidal/Qobuz album-level columns."""
+        try:
+            for table in ("albums", "tracks"):
+                cursor.execute(f"PRAGMA table_info({table})")
+                table_columns = [column[1] for column in cursor.fetchall()]
+
+                if 'bandcamp_id' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_id TEXT")
+                if 'bandcamp_match_status' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_match_status TEXT")
+                if 'bandcamp_last_attempted' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_last_attempted TIMESTAMP")
+                if 'bandcamp_url' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_url TEXT")
+                if 'bandcamp_tags' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_tags TEXT")
+                if 'bandcamp_label' not in table_columns:
+                    cursor.execute(f"ALTER TABLE {table} ADD COLUMN bandcamp_label TEXT")
+
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_id ON {table} (bandcamp_id)")
+                cursor.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_bandcamp_status ON {table} (bandcamp_match_status)")
+
+            logger.info("Bandcamp columns added/verified successfully")
+        except Exception as e:
+            logger.error(f"Error adding Bandcamp columns: {e}")
+
     def _backfill_match_status_for_existing_ids(self, cursor):
         """Set `<provider>_match_status = 'matched'` for rows that already have a
         populated external ID but NULL match_status.
@@ -2922,6 +2960,8 @@ class MusicDatabase:
             ('artists', 'qobuz_id', 'qobuz_match_status'),
             ('albums', 'qobuz_id', 'qobuz_match_status'),
             ('tracks', 'qobuz_id', 'qobuz_match_status'),
+            ('albums', 'bandcamp_url', 'bandcamp_match_status'),
+            ('tracks', 'bandcamp_url', 'bandcamp_match_status'),
         ]
 
         total_backfilled = 0
