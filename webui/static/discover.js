@@ -6399,6 +6399,7 @@ let _artistWeb = {
     fxRAF: null, home: null,          // rAF handle + captured resting positions
     spreadRoot: null, spreadSet: null, spreadPush: 0,
     fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
+    previewAudio: null, previewKey: null,   // 30s Deezer preview playback (discovery candidates)
 };
 
 // White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
@@ -7439,6 +7440,60 @@ function _artWebEnsurePanel() {
 function _artWebClosePanel() {
     const p = document.getElementById('artweb-panel');
     if (p) p.style.display = 'none';
+    _artWebStopPreview();   // panel gone -> its preview stops (single choke point: all closes route here)
+}
+
+// ---- 30s Deezer preview playback (discovery candidates): hear it before you add it -------------
+function _artWebStopPreview() {
+    const st = _artistWeb;
+    if (st.previewAudio) {
+        try { st.previewAudio.pause(); } catch (e) { /* ignore */ }
+        st.previewAudio = null;
+    }
+    st.previewKey = null;
+    const btn = document.getElementById('artweb-preview-btn');
+    if (btn) { btn.textContent = '▶ Preview top track'; btn.disabled = false; }
+}
+
+async function artWebTogglePreview(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key)) return;
+    if (st.previewKey === key) { _artWebStopPreview(); return; }   // same node -> toggle off
+    _artWebStopPreview();
+    const pairs = g.getNodeAttribute(key, 'ids') || [];
+    const dz = pairs.find(p => p && p[0] === 'deezer');
+    const btn = document.getElementById('artweb-preview-btn');
+    if (!dz) { if (btn) btn.textContent = 'No preview available'; return; }
+    if (btn) { btn.textContent = 'Loading preview…'; btn.disabled = true; }
+    try {
+        const r = await fetch(`/api/graph/discovery/preview/${encodeURIComponent(dz[1])}`);
+        const d = await r.json();
+        if (!d.success || !d.preview_url) throw new Error(d.reason || 'no preview');
+        // Pause the main player so the preview doesn't talk over it.
+        if (typeof audioPlayer !== 'undefined' && audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+        const audio = new Audio(d.preview_url);
+        audio.volume = 0.9;
+        audio.onended = () => { if (st.previewKey === key) _artWebStopPreview(); };
+        await audio.play();
+        st.previewAudio = audio;
+        st.previewKey = key;
+        if (btn) { btn.textContent = `⏸ ${d.track || 'Playing preview'}`; btn.disabled = false; }
+    } catch (e) {
+        _artWebStopPreview();
+        if (btn) { btn.textContent = 'Preview unavailable'; btn.disabled = false; }
+    }
+}
+
+// "Play radio" from an owned node — hands off to the artist-detail page's radio machinery
+// (startArtistRadioById, the shared parameterized core). Audio starts under the graph overlay.
+function artWebPlayArtist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    if (a.artistId == null) return;
+    _artWebStopPreview();
+    if (typeof startArtistRadioById === 'function') startArtistRadioById(a.artistId, a.label || '');
+    else if (typeof showToast === 'function') showToast('Player not available', 'error');
 }
 
 function _artWebShowArtist(node) {
@@ -7472,6 +7527,7 @@ function _artWebShowArtist(node) {
             <div style="height:100%;width:${pop}%;background:${color};"></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${a.artistId != null ? `<button onclick="artWebPlayArtist('${escapeForInlineJs(node)}')" style="background:#1db954;border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">&#9654; Play radio</button>` : ''}
             ${_artistWeb.lens === 'discovery' ? `<button id="artweb-expand-btn" onclick="artWebExpandNode('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">${a.expanded ? 'Expanded ✓' : 'Expand connections ✦'}</button>` : ''}
             <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${_artistWeb.lens === 'discovery' ? 'rgba(255,255,255,0.06)' : color};border:${_artistWeb.lens === 'discovery' ? '1px solid rgba(255,255,255,0.12)' : 'none'};color:${_artistWeb.lens === 'discovery' ? '#fff' : '#0b0b0f'};border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
             ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
@@ -7548,6 +7604,7 @@ function _artWebShowDiscovery(node) {
             ${genres.map(gname => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:${_webHexToRgba(color, 0.16)};border:1px solid ${_webHexToRgba(color, 0.3)};color:#ffd9a3;">${escapeHtml(String(gname))}</span>`).join('')}
         </div>` : ''}
         <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${(a.ids || []).some(pr => pr && pr[0] === 'deezer') ? `<button id="artweb-preview-btn" onclick="artWebTogglePreview('${escapeForInlineJs(node)}')" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">&#9654; Preview top track</button>` : ''}
             <button id="artweb-add-btn" onclick="artWebAddToWatchlist('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">+ Add to watchlist</button>
         </div>`;
     p.style.display = 'flex';

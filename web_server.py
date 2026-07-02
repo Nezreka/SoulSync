@@ -10023,6 +10023,35 @@ def expand_discovery_graph():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/api/graph/discovery/preview/<deezer_id>', methods=['GET'])
+def get_discovery_preview(deezer_id):
+    """30-second Deezer preview for a discovery candidate's top track (hear it before you add it).
+
+    Deliberately Deezer-only + explicit: the generic top-tracks endpoint routes by the CONFIGURED
+    primary source and resolves ids via the library DB — a candidate isn't in the library, and its
+    Deezer id would be garbage to a Spotify query (whose previews are deprecated anyway).
+    """
+    try:
+        if not str(deezer_id).isdigit():
+            return jsonify({"success": False, "reason": "not_a_deezer_id"}), 400
+        client = _get_deezer_client()
+        if not client:
+            return jsonify({"success": False, "reason": "deezer_unavailable"}), 503
+        tracks = client.get_artist_top_tracks(str(deezer_id), limit=3) or []
+        for t in tracks:
+            if t.get('preview_url'):
+                return jsonify({
+                    "success": True,
+                    "track": t.get('name'),
+                    "artist": ((t.get('artists') or [{}])[0] or {}).get('name'),
+                    "preview_url": t['preview_url'],
+                })
+        return jsonify({"success": False, "reason": "no_preview"})
+    except Exception as e:
+        logger.error("[discovery-preview] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
 @app.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
 def get_library_artist_thumb(artist_id):
     """Browser-loadable thumb URL for ONE library artist, by library DB id.
