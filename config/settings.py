@@ -705,16 +705,18 @@ class ConfigManager:
             },
             "import": {
                 "staging_path": "./Staging",
-                # Both keys mirror the Settings -> Quality page's checkboxes.
-                # The pipeline enforces the PROFILE row (per item, live), not
-                # these keys — they exist as the page's storage and are kept
-                # in sync with the active default profile in both directions
-                # (`apply_quality_profile_to_settings` pushes profile -> config
-                # on Apply; `sync_default_quality_profile_from_config` pushes
-                # config -> default profile on every settings save).
-                # `folder_artist_override` is consulted only by Auto-Import,
-                # via its assigned profile.
+                # `replace_lower_quality` mirrors the Settings -> Quality page's
+                # checkbox. The pipeline enforces the PROFILE row (per item,
+                # live), not this key — it exists as the page's storage and is
+                # kept in sync with the active default profile in both
+                # directions (`apply_quality_profile_to_settings` pushes
+                # profile -> config on Apply; `sync_default_quality_profile_from_config`
+                # pushes config -> default profile on every settings save).
                 "replace_lower_quality": False,
+                # `folder_artist_override` is a plain global Auto-Import
+                # setting, read directly by `core/auto_import_worker.py` — a
+                # Staging folder-layout quirk, not a quality preference, so it
+                # deliberately does NOT live on a quality profile.
                 "folder_artist_override": True
             },
             "m3u_export": {

@@ -8971,8 +8971,8 @@ class MusicDatabase:
 
         Includes every setting a profile now captures beyond the ranked-target
         ladder (AcoustID strictness, downsample, deep audio verify, import
-        replace-lower-quality/folder-artist-override, lossy-copy) — see
-        `core/quality/schema.py`'s `QUALITY_PROFILES_DDL` docstring.
+        replace-lower-quality, lossy-copy) — see `core/quality/schema.py`'s
+        `QUALITY_PROFILES_DDL` docstring.
         """
         import json
         name = (row["name"] or "").strip().lower()
@@ -8999,7 +8999,6 @@ class MusicDatabase:
             "lossy_copy_codec": row["lossy_copy_codec"] or "mp3",
             "lossy_copy_bitrate": row["lossy_copy_bitrate"] or "320",
             "lossy_copy_delete_original": bool(row["lossy_copy_delete_original"]),
-            "folder_artist_override": bool(row["folder_artist_override"]),
             "upgrade_policy": row["upgrade_policy"] or "acceptable",
             "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0),
         }
@@ -9034,7 +9033,6 @@ class MusicDatabase:
             "lossy_copy_codec": str(profile.get("lossy_copy_codec") or "mp3"),
             "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
-            "folder_artist_override": 1 if profile.get("folder_artist_override", True) else 0,
         }
 
     def list_quality_profiles(self) -> list:
@@ -9066,14 +9064,12 @@ class MusicDatabase:
                         search_mode, rank_candidates_by_quality, upgrade_policy,
                         upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
                         replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
-                        lossy_copy_bitrate, lossy_copy_delete_original,
-                        folder_artist_override, is_default)
+                        lossy_copy_bitrate, lossy_copy_delete_original, is_default)
                    VALUES (:name, :description, :ranked_targets, :fallback_enabled,
                            :search_mode, :rank_candidates_by_quality, :upgrade_policy,
                            :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
                            :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
-                           :lossy_copy_bitrate, :lossy_copy_delete_original,
-                           :folder_artist_override, 0)""",
+                           :lossy_copy_bitrate, :lossy_copy_delete_original, 0)""",
                 {"name": name, "description": "Custom profile", **params},
             )
             conn.commit()
@@ -9101,7 +9097,6 @@ class MusicDatabase:
                           replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
                           lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
                           lossy_copy_delete_original=:lossy_copy_delete_original,
-                          folder_artist_override=:folder_artist_override,
                           updated_at=CURRENT_TIMESTAMP
                     WHERE id=:profile_id""",
                 {"profile_id": profile_id, **params},
@@ -9146,7 +9141,6 @@ class MusicDatabase:
             config_manager.set("lossy_copy.codec", profile["lossy_copy_codec"])
             config_manager.set("lossy_copy.bitrate", profile["lossy_copy_bitrate"])
             config_manager.set("lossy_copy.delete_original", profile["lossy_copy_delete_original"])
-            config_manager.set("import.folder_artist_override", profile["folder_artist_override"])
         except Exception as e:
             logger.error(f"Failed to push quality profile {profile_id} into global settings: {e}")
         return profile
@@ -9177,7 +9171,6 @@ class MusicDatabase:
                 "lossy_copy_codec": str(config_manager.get("lossy_copy.codec", "mp3") or "mp3"),
                 "lossy_copy_bitrate": str(config_manager.get("lossy_copy.bitrate", "320") or "320"),
                 "lossy_copy_delete_original": 1 if config_manager.get("lossy_copy.delete_original", False) else 0,
-                "folder_artist_override": 1 if config_manager.get("import.folder_artist_override", True) else 0,
             }
             conn = self._get_connection()
             try:
@@ -9191,7 +9184,6 @@ class MusicDatabase:
                               lossy_copy_codec=:lossy_copy_codec,
                               lossy_copy_bitrate=:lossy_copy_bitrate,
                               lossy_copy_delete_original=:lossy_copy_delete_original,
-                              folder_artist_override=:folder_artist_override,
                               updated_at=CURRENT_TIMESTAMP
                         WHERE is_default=1""",
                     values,

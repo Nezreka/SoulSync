@@ -88,10 +88,6 @@ def _resolve_settings_bundle(config_manager) -> dict:
         "lossy_copy_codec": _str(config_manager, "lossy_copy.codec", "mp3"),
         "lossy_copy_bitrate": _str(config_manager, "lossy_copy.bitrate", "320"),
         "lossy_copy_delete_original": _bool(config_manager, "lossy_copy.delete_original"),
-        # The only consumer of this used to be a standalone global toggle;
-        # it's now purely per-profile (see core/auto_import_worker.py), but
-        # this is still the one-time carry-forward of whatever the user had.
-        "folder_artist_override": _bool(config_manager, "import.folder_artist_override", default=True),
     }
 
 
@@ -185,7 +181,6 @@ def materialize_default_profile_and_backfill(database, conn) -> bool:
                    lossy_copy_codec = :lossy_copy_codec,
                    lossy_copy_bitrate = :lossy_copy_bitrate,
                    lossy_copy_delete_original = :lossy_copy_delete_original,
-                   folder_artist_override = :folder_artist_override,
                    updated_at = CURRENT_TIMESTAMP
              WHERE id = :default_profile_id
             """,

@@ -5300,23 +5300,6 @@
                                         (or Fallback turned on) already means "accept anything."
                                     </div>
                                 </div>
-                                <div class="form-group">
-                                    <div class="setting-row">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="import-folder-artist-override">
-                                            Auto-Import: use the top Staging folder as the artist
-                                        </label>
-                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    </div>
-                                    <div class="setting-help-body" hidden>
-                                        Only affects <strong>Auto-Import</strong> (Import page). With Artist/Album staging layouts,
-                                        the top folder's name overrides the metadata-identified artist — the long-standing default.
-                                        Turn <strong>off</strong> if you stage a mixed pile of songs under one container folder,
-                                        otherwise that folder's name would relabel every track's artist. Like everything on this
-                                        tab, this is saved per quality profile — Auto-Import follows its assigned profile.
-                                    </div>
-                                </div>
                             </div>
                             </div><!-- end Quality on Import body -->
 
@@ -6668,10 +6651,29 @@
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Import</h3>
-                                <span class="settings-section-hint">Permanent library</span>
+                                <span class="settings-section-hint">Folder-artist override, permanent library</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="library">
                             <div class="settings-group" data-stg="library">
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-folder-artist-override">
+                                            Auto-Import: use the top Staging folder as the artist
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        On by default (legacy behaviour). Only affects <strong>Auto-Import</strong>. With
+                                        Artist/Album staging layouts, the top folder's name overrides the
+                                        metadata-identified artist — handy for mixtapes/compilations whose embedded
+                                        tags carry DJ names. <strong>Turn this off</strong> if you stage a mixed pile
+                                        of songs under one container folder: otherwise every file's artist gets
+                                        overwritten with that folder's name. With it off, the metadata-identified
+                                        artist is always kept.
+                                    </div>
+                                </div>
                                 <div class="form-group">
                                     <div class="setting-row">
                                         <label class="checkbox-label">

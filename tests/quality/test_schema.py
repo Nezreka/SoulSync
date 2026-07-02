@@ -29,6 +29,12 @@ def test_fresh_install_has_no_quality_filter_enabled_column(db):
     assert "quality_filter_enabled" not in _columns(db)
 
 
+def test_fresh_install_has_no_folder_artist_override_column(db):
+    # folder_artist_override doesn't belong on a quality profile — it's a
+    # plain global Auto-Import setting (import.folder_artist_override).
+    assert "folder_artist_override" not in _columns(db)
+
+
 def test_fresh_install_seeds_exactly_two_builtin_profiles(db):
     profiles = db.list_quality_profiles()
     names = {p["name"] for p in profiles}
@@ -40,6 +46,10 @@ def test_fresh_install_seeds_exactly_two_builtin_profiles(db):
 
 
 def test_existing_profile_table_gets_upgrade_cutoff_columns(db):
+    """Also covers the `folder_artist_override` DROP COLUMN cleanup: this
+    simulates a table shape from the intermediate build that put it on the
+    profile before that was reverted (see core/quality/schema.py's
+    _DROPPED_COLUMNS)."""
     conn = db._get_connection()
     try:
         conn.execute("DROP TABLE quality_profiles")
@@ -83,6 +93,7 @@ def test_existing_profile_table_gets_upgrade_cutoff_columns(db):
 
     assert "upgrade_policy" in cols
     assert "upgrade_cutoff_index" in cols
+    assert "folder_artist_override" not in cols
     assert row["upgrade_policy"] == "acceptable"
     assert row["upgrade_cutoff_index"] == 0
 

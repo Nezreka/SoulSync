@@ -5,8 +5,8 @@
 Before this work, exactly ONE global setting (`preferences.quality_profile`)
 plus several separate global toggles (`acoustid.require_verified`,
 `lossy_copy.downsample_hires`, `post_processing.audio_completeness_check`,
-`import.replace_lower_quality`, `lossy_copy.*`, `import.folder_artist_override`)
-governed every download/import in the app, for every item, all the time.
+`import.replace_lower_quality`, `lossy_copy.*`) governed every download/
+import in the app, for every item, all the time.
 
 Quality profiles turn that into the single, app-wide, **named**,
 **per-item-assignable** unit of configuration: a wishlist item (or a
@@ -72,8 +72,13 @@ row (see `core/quality/schema.py::QUALITY_PROFILES_DDL`):
   for every wishlist download after migration — caught and fixed in review.)
 - `downsample_enabled`, `deep_audio_verify`, `replace_lower_quality`,
   `lossy_copy_enabled`/`codec`/`bitrate`/`delete_original`.
-- `folder_artist_override` — use the top Staging folder as the artist.
-  Auto-Import-only (it never affected normal downloads/Wishlist imports).
+
+Deliberately NOT on a profile: `import.folder_artist_override` ("use the top
+Staging folder as the artist"). It's a Staging folder-layout quirk Auto-
+Import deals with, not a quality preference — an earlier pass put it on the
+profile anyway before this was noticed; it's since been removed via a real
+`ALTER TABLE ... DROP COLUMN` migration and lives back where it always did,
+a plain global setting `core/auto_import_worker.py` reads directly.
 
 There is deliberately no "run the quality check at all" master toggle: a
 profile with an empty `ranked_targets` list (or `fallback_enabled=True`)
@@ -109,14 +114,19 @@ actually say right now" calls `core/quality/selection.py::load_profile_by_id(pro
    `file_ops.downsample_hires_flac`), and the lossy copy
    (`lossy_copy_*` → `file_ops.create_lossy_copy`). The legacy global config
    key is only a fallback for the rare case profile resolution itself fails.
-4. **Quality Upgrade repair job** — `core/repair_jobs/quality_upgrade.py`
-   judges the whole scan against the app-wide default profile (no per-track
-   override on this branch — see "Known gaps" below).
+4. **Quality Check + Quality Upgrade Finder repair jobs** —
+   `core/repair_jobs/quality_upgrade_scanner.py` /
+   `core/repair_jobs/quality_upgrade.py` resolve each library track's own
+   `quality_profile_id` (cached per distinct profile id), falling back to the
+   app-wide default — see "Known gaps" below for what's still missing
+   (an assignment UI to actually put a *different* id on a track).
 5. **Auto-Import** — `core/auto_import_worker.py::_process_matches()`
    resolves its assigned profile (`auto_import.quality_profile_id`, falling
-   back to the app-wide default) once per batch for
-   `folder_artist_override`, and injects `quality_profile_id` into each
-   file's context so stages 1–3 above enforce the same profile.
+   back to the app-wide default) once per batch and injects
+   `quality_profile_id` into each file's context so stages 1–3 above enforce
+   the same profile. `import.folder_artist_override` (use the top Staging
+   folder as the artist) is read separately, straight from global config —
+   it's not part of the profile (see "Deliberately NOT on a profile" above).
 
 Because every stage resolves live instead of trusting a frozen copy, editing
 a profile takes effect immediately for every item assigned to it — there is

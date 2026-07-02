@@ -42,10 +42,6 @@ logger = get_logger("database.quality_schema")
 # true global capability, not a per-profile preference, and skipping the
 # check entirely remains an explicit per-download user action. Default 0
 # (lenient) to match ``acoustid.require_verified``'s default.
-# ``folder_artist_override`` (use the top Staging folder as the artist) only
-# ever affected Auto-Import (`core/auto_import_worker.py`) -- it's a
-# per-profile field rather than a standalone global toggle for that reason.
-#
 # There is deliberately no "run the quality check at all" master toggle: an
 # empty ``ranked_targets`` list (or ``fallback_enabled=True``) already means
 # "accept anything" (see `core/imports/guards.py::check_quality_target`) --
@@ -72,7 +68,6 @@ CREATE TABLE IF NOT EXISTS quality_profiles (
     lossy_copy_codec TEXT NOT NULL DEFAULT 'mp3',
     lossy_copy_bitrate TEXT NOT NULL DEFAULT '320',
     lossy_copy_delete_original INTEGER NOT NULL DEFAULT 0,
-    folder_artist_override INTEGER NOT NULL DEFAULT 1,
     repair_job_id TEXT NOT NULL DEFAULT 'quality_upgrade',
     repair_settings TEXT NOT NULL DEFAULT '{}',
     is_default INTEGER NOT NULL DEFAULT 0,
@@ -108,8 +103,6 @@ _ADDED_COLUMNS = (
      "ALTER TABLE quality_profiles ADD COLUMN lossy_copy_bitrate TEXT NOT NULL DEFAULT '320'"),
     ("quality_profiles", "lossy_copy_delete_original",
      "ALTER TABLE quality_profiles ADD COLUMN lossy_copy_delete_original INTEGER NOT NULL DEFAULT 0"),
-    ("quality_profiles", "folder_artist_override",
-     "ALTER TABLE quality_profiles ADD COLUMN folder_artist_override INTEGER NOT NULL DEFAULT 1"),
     ("quality_profiles", "repair_job_id",
      "ALTER TABLE quality_profiles ADD COLUMN repair_job_id TEXT NOT NULL DEFAULT 'quality_upgrade'"),
     ("quality_profiles", "repair_settings",
@@ -121,6 +114,10 @@ _ADDED_COLUMNS = (
 # 3.46+. (table, column).
 _DROPPED_COLUMNS = (
     ("quality_profiles", "quality_filter_enabled"),
+    # folder_artist_override doesn't make sense per-profile (it's a Staging
+    # folder-layout quirk Auto-Import deals with, not a quality preference) --
+    # moved back to a plain import.folder_artist_override global setting.
+    ("quality_profiles", "folder_artist_override"),
 )
 
 

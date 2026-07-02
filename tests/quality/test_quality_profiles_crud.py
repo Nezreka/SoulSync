@@ -189,7 +189,6 @@ def test_sync_default_quality_profile_from_config(db, monkeypatch):
                 "lossy_copy.codec": "opus",
                 "lossy_copy.bitrate": "192",
                 "lossy_copy.delete_original": True,
-                "import.folder_artist_override": False,
             }.get(key, default)
 
     monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
@@ -205,7 +204,6 @@ def test_sync_default_quality_profile_from_config(db, monkeypatch):
     assert profile["lossy_copy_codec"] == "opus"
     assert profile["lossy_copy_bitrate"] == "192"
     assert profile["lossy_copy_delete_original"] is True
-    assert profile["folder_artist_override"] is False
 
     # Only the default row is touched — a non-default profile keeps its values.
     conn = db._get_connection()
@@ -261,7 +259,6 @@ _FULL_BUNDLE = {
     "lossy_copy_codec": "opus",
     "lossy_copy_bitrate": "256",
     "lossy_copy_delete_original": True,
-    "folder_artist_override": False,
 }
 
 
@@ -317,7 +314,6 @@ def test_apply_quality_profile_to_settings_pushes_into_config_manager(db, monkey
         "lossy_copy.codec": "opus",
         "lossy_copy.bitrate": "256",
         "lossy_copy.delete_original": True,
-        "import.folder_artist_override": False,
     }
 
     # Also becomes the default row.

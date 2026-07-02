@@ -160,35 +160,23 @@ def _run_one_track_in_folder(worker, tmp_path, folder_name):
     return worker._captured[0]
 
 
-def test_folder_artist_override_defaults_on_when_no_profile_assigned(tmp_path, monkeypatch):
-    # No `auto_import.quality_profile_id` configured -> `load_profile_by_id`
-    # is called with `None` and falls back to the app-wide default profile
-    # (simulated here with a bare dict — `folder_artist_override` is absent,
-    # so the `.get(..., True)` default applies, same as a real default row).
-    from core.quality import selection as selection_mod
-    monkeypatch.setattr(selection_mod, "load_profile_by_id", lambda pid: {})
+def test_folder_artist_override_defaults_on_when_not_configured(tmp_path):
+    # `import.folder_artist_override` is a plain global Auto-Import setting
+    # (not part of the quality profile — see core/imports/folder_artist.py
+    # and core/quality/STATUS.md's "Deliberately NOT on a profile"), default
+    # on for legacy compatibility when absent from config.
     worker = _worker_with_capture(tmp_path, {})
     ctx = _run_one_track_in_folder(worker, tmp_path, "Folder Artist")
     assert ctx["spotify_artist"]["name"] == "Folder Artist"
 
 
-def test_folder_artist_override_disabled_on_assigned_profile_keeps_tag_artist(tmp_path, monkeypatch):
-    from core.quality import selection as selection_mod
-    monkeypatch.setattr(
-        selection_mod, "load_profile_by_id",
-        lambda pid: {"acoustid_required": True, "folder_artist_override": False},
-    )
-    worker = _worker_with_capture(tmp_path, {"auto_import.quality_profile_id": 5})
+def test_folder_artist_override_disabled_keeps_tag_artist(tmp_path):
+    worker = _worker_with_capture(tmp_path, {"import.folder_artist_override": False})
     ctx = _run_one_track_in_folder(worker, tmp_path, "Folder Artist")
     assert ctx["spotify_artist"]["name"] == "Tag Artist"
 
 
-def test_folder_artist_override_enabled_on_assigned_profile_uses_folder_name(tmp_path, monkeypatch):
-    from core.quality import selection as selection_mod
-    monkeypatch.setattr(
-        selection_mod, "load_profile_by_id",
-        lambda pid: {"acoustid_required": True, "folder_artist_override": True},
-    )
-    worker = _worker_with_capture(tmp_path, {"auto_import.quality_profile_id": 5})
+def test_folder_artist_override_enabled_uses_folder_name(tmp_path):
+    worker = _worker_with_capture(tmp_path, {"import.folder_artist_override": True})
     ctx = _run_one_track_in_folder(worker, tmp_path, "Folder Artist")
     assert ctx["spotify_artist"]["name"] == "Folder Artist"
