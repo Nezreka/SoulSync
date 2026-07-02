@@ -80,6 +80,10 @@ const SOURCE_LABELS = {
         text: 'JioSaavn', icon: '🎵',
         tabClass: 'enh-tab-jiosaavn', badgeClass: 'enh-badge-jiosaavn',
     },
+    bandcamp: {
+        text: 'Bandcamp', icon: '🎵',
+        tabClass: 'enh-tab-bandcamp', badgeClass: 'enh-badge-bandcamp',
+    },
     youtube_videos: {
         text: 'Music Videos', icon: '🎬',
         tabClass: 'enh-tab-youtube', badgeClass: 'enh-badge-youtube',
@@ -95,7 +99,7 @@ const SOURCE_LABELS = {
 // Canonical display order for the source picker. Standard metadata sources
 // first, then YouTube Music Videos, then Soulseek (basic-file source).
 const SOURCE_ORDER = [
-    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz', 'jiosaavn',
+    'spotify', 'itunes', 'deezer', 'discogs', 'hydrabase', 'amazon', 'musicbrainz', 'jiosaavn', 'bandcamp',
     'youtube_videos', 'soulseek',
 ];
 
@@ -104,14 +108,14 @@ const SOURCE_ORDER = [
 // Soulseek IS configurable (needs slskd URL), so it's intentionally not here:
 // /api/settings/config-status reports its real state and the picker dims it
 // when no slskd is set up, redirecting clicks to Settings → Downloads.
-const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'youtube_videos']);
+const _ALWAYS_CONFIGURED_SOURCES = new Set(['amazon', 'musicbrainz', 'jiosaavn', 'bandcamp', 'youtube_videos']);
 
 // Experimental metadata sources — each is opt-in via Settings → Advanced →
 // Experimental and individually toggleable. The backend reports their on/off
 // state in the `_experimental` payload ({'<name>_enabled': bool}); the picker
 // hides any experimental source that isn't currently enabled. To add a new
 // experimental provider, add its name here (plus a SOURCE_DEFINITIONS entry).
-const EXPERIMENTAL_SOURCES = new Set(['jiosaavn']);
+const EXPERIMENTAL_SOURCES = new Set(['jiosaavn', 'bandcamp']);
 
 /** Parse an `_experimental` payload into a Set of enabled experimental names. */
 function parseEnabledExperimental(data) {
