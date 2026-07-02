@@ -5446,8 +5446,12 @@
                             <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
                                 <div class="qp-side-panel-header">
                                     <h3 class="qp-side-panel-title">Quality Profiles</h3>
+                                    <button type="button" class="qp-manage-btn" onclick="openQualityProfileManager()">Manage</button>
                                 </div>
-                                <p class="qp-side-panel-hint">Click a profile to make it the app-wide default — everything on the left is saved under it. Per row: ✏ rename, ✎ update with the current page settings, ⇩ use for Auto-Import instead of the default, × delete.</p>
+                                <p class="qp-side-panel-hint">Click a profile's name to view/edit its settings on the left (this alone never activates it). Per row: ● set as the active default, ✏ rename, ✎ save the settings shown on the left into this profile, ⇩ use for Auto-Import instead of the default, × delete. "Manage" above shows what's active for what.</p>
+                                <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
+                                    Viewing <strong class="qp-editing-banner-name">this profile</strong> — not the active default. Changes on the left only save here once you click its ✎.
+                                </div>
                                 <div class="qp-profile-list" id="qp-profile-list">
                                     <!-- rows injected by renderCustomQualityProfiles() -->
                                 </div>
