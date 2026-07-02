@@ -7,9 +7,8 @@ They encode two real RuTracker naming patterns reported by users:
 - artist-prefixed, unnumbered files: ``Nosferatu_-_Beaver_Cleaver.flac``
 - compilation files: ``01 - Artist - Title.flac``
 
-Both are marked strict-xfail while they document the current matcher gap. When
-the album-bundle matcher learns those shapes, the XPASS will fail and remind us
-to remove the marker.
+They exercise real torrent album-bundle search/download/staging code while
+mocking only network-facing services.
 """
 
 from __future__ import annotations
@@ -178,6 +177,8 @@ def _run_album_bundle_then_claim_tracks(
     release_title: str,
     filenames: list[str],
     tracks: list[_Track],
+    result_query: str | None = None,
+    query_log: list[str] | None = None,
 ) -> list[tuple[str, tuple, dict]]:
     state = _BatchState()
     batch_id = 'rutracker_batch'
@@ -186,7 +187,15 @@ def _run_album_bundle_then_claim_tracks(
     _write_downloaded_files(download_dir, filenames)
     plugin = TorrentDownloadPlugin()
     adapter = _FakeTorrentAdapter(download_dir)
-    search = AsyncMock(return_value=[_make_rutracker_result(release_title)])
+
+    async def _search(query, *args, **kwargs):
+        if query_log is not None:
+            query_log.append(query)
+        if result_query is not None and query != result_query:
+            return []
+        return [_make_rutracker_result(release_title)]
+
+    search = AsyncMock(side_effect=_search)
 
     with patch.object(plugin, 'is_configured', return_value=True), \
          patch.object(plugin._prowlarr, 'search', new=search), \
@@ -207,7 +216,7 @@ def _run_album_bundle_then_claim_tracks(
     assert engaged is False
     assert state.rows[batch_id]['album_bundle_state'] == 'staged'
     assert adapter.added_urls == ['magnet:?xt=urn:btih:FAKEHASH']
-    search.assert_awaited_once()
+    assert search.await_count >= 1
     staging_dir = state.rows[batch_id]['album_bundle_staging_path']
 
     deps = ds.StagingDeps(
@@ -279,3 +288,46 @@ def test_rutracker_compilation_album_files_claim_duplicate_title_tracks_by_numbe
 
     assert len(calls) == 5
     assert [matched_downloads_context[f'staging_track_{i:02d}']['track_info']['track_number'] for i in range(1, 6)] == [1, 2, 3, 14, 16]
+
+
+def test_rutracker_album_search_tries_tracker_title_shape_when_plain_query_misses(tmp_path):
+    query_log: list[str] = []
+
+    calls = _run_album_bundle_then_claim_tracks(
+        tmp_path=tmp_path,
+        album_name='Never Met Equals',
+        artist_name='Nosferatu',
+        release_title='(Hardcore, Gabber) Nosferatu - Never Met Equals [WEB] - 2006, FLAC (tracks) lossless',
+        result_query='Nosferatu - Never Met Equals',
+        query_log=query_log,
+        filenames=['Nosferatu_-_Beaver_Cleaver.flac'],
+        tracks=[_Track('Beaver Cleaver', ['Nosferatu'], 'Never Met Equals', 1)],
+    )
+
+    assert calls
+    assert query_log[:2] == [
+        'Nosferatu Never Met Equals',
+        'Nosferatu - Never Met Equals',
+    ]
+
+
+def test_rutracker_compilation_search_tries_va_alias_when_various_artists_misses(tmp_path):
+    query_log: list[str] = []
+
+    calls = _run_album_bundle_then_claim_tracks(
+        tmp_path=tmp_path,
+        album_name='Happy Hardcore vol.1',
+        artist_name='Various Artists',
+        release_title='(Happy Hardcore) VA - Happy Hardcore vol.1 - 1997, FLAC (tracks+.cue), lossless',
+        result_query='VA Happy Hardcore vol.1',
+        query_log=query_log,
+        filenames=['01 - 4 Tune Fairytales - Take Me 2 Wonderland (Extended Mix).flac'],
+        tracks=[_Track('Take Me 2 Wonderland (Extended Mix)', ['4 Tune Fairytales'], 'Happy Hardcore vol.1', 1)],
+    )
+
+    assert calls
+    assert query_log[:3] == [
+        'Various Artists Happy Hardcore vol.1',
+        'Various Artists - Happy Hardcore vol.1',
+        'VA Happy Hardcore vol.1',
+    ]

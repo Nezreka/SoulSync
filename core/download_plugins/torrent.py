@@ -60,6 +60,7 @@ from config.settings import config_manager
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
+    album_search_queries,
     copy_audio_files_atomically,
     get_poll_interval,
     get_poll_timeout,
@@ -542,34 +543,47 @@ class TorrentDownloadPlugin(DownloadSourcePlugin):
                 except Exception as cb_exc:
                     logger.debug("[Torrent album] progress callback failed: %s", cb_exc)
 
-        # Phase 1: search Prowlarr for the album.
-        query = f"{artist_name} {album_name}".strip()
-        _emit('searching', query=query)
-        try:
-            search_results = run_async(self._prowlarr.search(
-                query, categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=_parse_indexer_id_filter(),
-            ))
-        except Exception as e:
-            result['error'] = f'Prowlarr search failed: {e}'
-            return result
+        # Phase 1: search Prowlarr for the album. Try a small query ladder so
+        # tracker-shaped titles like RuTracker's ``Artist - Album`` and
+        # compilation ``VA - Album`` releases can be discovered.
+        picked = None
+        saw_candidates = False
+        queries = album_search_queries(album_name, artist_name)
+        last_query = queries[-1] if queries else f"{artist_name} {album_name}".strip()
+        for query in queries:
+            last_query = query
+            _emit('searching', query=query)
+            try:
+                search_results = run_async(self._prowlarr.search(
+                    query, categories=DEFAULT_MUSIC_CATEGORIES,
+                    indexer_ids=_parse_indexer_id_filter(),
+                ))
+            except Exception as e:
+                result['error'] = f'Prowlarr search failed: {e}'
+                return result
 
-        candidates = [r for r in search_results
-                      if r.protocol == 'torrent' and (r.magnet_uri or r.download_url)]
-        if not candidates:
+            candidates = [r for r in search_results
+                          if r.protocol == 'torrent' and (r.magnet_uri or r.download_url)]
+            if not candidates:
+                continue
+            saw_candidates = True
+            picked = pick_best_album_release(
+                candidates, _guess_quality_from_title, album_name=album_name,
+            )
+            if picked is not None:
+                break
+
+        if not saw_candidates:
             # Album isn't available on this source. Mark the failure as
             # fallback-eligible so the dispatch returns to the per-track flow
             # instead of hard-failing the batch — in hybrid mode that lets the
             # next configured source take over. Without this flag a torrent-first
             # hybrid would get stuck at "searching" forever when Prowlarr
             # returns nothing, never trying the other sources.
-            result['error'] = f'No torrent results found for "{query}"'
+            result['error'] = f'No torrent results found for "{last_query}"'
             result['fallback'] = True
             return result
 
-        picked = pick_best_album_release(
-            candidates, _guess_quality_from_title, album_name=album_name,
-        )
         if picked is None:
             # No candidate matched the requested album (or none passed filtering).
             # Fall back to the per-track flow rather than downloading a wrong

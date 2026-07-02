@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from core.archive_pipeline import collect_audio_after_extraction
 from core.download_plugins.album_bundle import (
     TransientMissCounter,
+    album_search_queries,
     copy_audio_files_atomically,
     get_completed_no_path_window_seconds,
     pick_best_album_release,
@@ -451,31 +452,42 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
                 except Exception as cb_exc:
                     logger.debug("[Usenet album] progress callback failed: %s", cb_exc)
 
-        query = f"{artist_name} {album_name}".strip()
-        _emit('searching', query=query)
-        try:
-            search_results = run_async(self._prowlarr.search(
-                query, categories=DEFAULT_MUSIC_CATEGORIES,
-                indexer_ids=_parse_indexer_id_filter(),
-            ))
-        except Exception as e:
-            result['error'] = f'Prowlarr search failed: {e}'
-            return result
+        picked = None
+        saw_candidates = False
+        queries = album_search_queries(album_name, artist_name)
+        last_query = queries[-1] if queries else f"{artist_name} {album_name}".strip()
+        for query in queries:
+            last_query = query
+            _emit('searching', query=query)
+            try:
+                search_results = run_async(self._prowlarr.search(
+                    query, categories=DEFAULT_MUSIC_CATEGORIES,
+                    indexer_ids=_parse_indexer_id_filter(),
+                ))
+            except Exception as e:
+                result['error'] = f'Prowlarr search failed: {e}'
+                return result
 
-        candidates = [r for r in search_results
-                      if r.protocol == 'usenet' and r.download_url]
-        if not candidates:
+            candidates = [r for r in search_results
+                          if r.protocol == 'usenet' and r.download_url]
+            if not candidates:
+                continue
+            saw_candidates = True
+            picked = pick_best_album_release(
+                candidates, _guess_quality_from_title, album_name=album_name,
+            )
+            if picked is not None:
+                break
+
+        if not saw_candidates:
             # Album isn't available on this source — fall back to the per-track
             # flow (next configured source in hybrid mode) rather than hard-
             # failing the whole batch. Mirrors the torrent plugin + soulseek's
             # default fallback contract.
-            result['error'] = f'No usenet results found for "{query}"'
+            result['error'] = f'No usenet results found for "{last_query}"'
             result['fallback'] = True
             return result
 
-        picked = pick_best_album_release(
-            candidates, _guess_quality_from_title, album_name=album_name,
-        )
         if picked is None:
             # No candidate matched the requested album (or none passed filtering).
             # Fall back to per-track rather than grabbing a wrong album (#730).
@@ -540,4 +552,3 @@ class UsenetDownloadPlugin(DownloadSourcePlugin):
         result['success'] = True
         result['files'] = copied
         return result
-
