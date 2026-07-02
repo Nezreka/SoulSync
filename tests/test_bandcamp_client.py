@@ -24,6 +24,7 @@ from core.bandcamp_client import (
     BandcampClient,
     BandcampRateLimitedError,
     _best_match,
+    _best_name_match,
     _extract_jsonld,
     _normalize_for_match,
     _parse_bandcamp_date,
@@ -459,3 +460,183 @@ class TestRateLimiting:
         with pytest.raises(requests.exceptions.HTTPError):
             call()
         assert bc._rate_limit_until == 0
+
+
+# ---------------------------------------------------------------------------
+# _best_name_match — pure artist-name resolution (no second field to
+# cross-check, unlike _best_match).
+# ---------------------------------------------------------------------------
+
+
+class TestBestNameMatch:
+    def test_picks_closest_name(self):
+        candidates = [
+            Artist(id='1', name='Radiohead'),
+            Artist(id='2', name='Radio Head Tribute Band'),
+        ]
+        best = _best_name_match(candidates, 'Radiohead')
+        assert best is not None
+        assert best.id == '1'
+
+    def test_no_close_match_returns_none(self):
+        candidates = [Artist(id='1', name='Completely Unrelated Artist')]
+        assert _best_name_match(candidates, 'Radiohead') is None
+
+    def test_empty_candidates(self):
+        assert _best_name_match([], 'Radiohead') is None
+
+
+# ---------------------------------------------------------------------------
+# get_artist — resolve-by-name convenience wrapping search_artists.
+# ---------------------------------------------------------------------------
+
+
+class TestGetArtist:
+    def test_resolves_confident_match(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'search_artists', lambda q, limit=5: [Artist.from_bandcamp_dict(_BAND_RESULT)])
+        artist = client.get_artist('Radiohead')
+        assert artist is not None
+        assert artist.name == 'Radiohead'
+
+    def test_empty_name_returns_none(self, client):
+        assert client.get_artist('') is None
+
+    def test_no_candidates_returns_none(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'search_artists', lambda q, limit=5: [])
+        assert client.get_artist('Nobody') is None
+
+
+# ---------------------------------------------------------------------------
+# get_artist_releases — /music discography grid scraping, plus the
+# single-release redirect fallback (Bandcamp redirects /music straight to
+# the one release instead of rendering a grid — confirmed live).
+# ---------------------------------------------------------------------------
+
+
+_MUSIC_GRID_HTML = """
+<html><body>
+<ol id="music-grid" class="editable-grid music-grid columns-4 public">
+    <li data-item-id="album-365742988" data-band-id="3957198221" class="music-grid-item square first-four">
+        <a href="https://radiohead.bandcamp.com/album/hail-to-the-thief-live-recordings-2003-2009">
+            <div class="art"><img src="https://f4.bcbits.com/img/a0454733928_2.jpg" alt="" /></div>
+            <p class="title">
+                Hail to the Thief (Live Recordings 2003-2009)
+            </p>
+        </a>
+    </li>
+    <li data-item-id="album-3317386587" data-band-id="3957198221" class="music-grid-item square first-four">
+        <a href="https://radiohead.bandcamp.com/album/kid-a-mnesia">
+            <div class="art"><img src="https://f4.bcbits.com/img/a3185643660_2.jpg" alt="" /></div>
+            <p class="title">
+                KID A MNESIA
+            </p>
+        </a>
+    </li>
+    <li data-item-id="track-1234567890" data-band-id="3957198221" class="music-grid-item square">
+        <a href="https://radiohead.bandcamp.com/track/a-standalone-track">
+            <div class="art"><img src="https://f4.bcbits.com/img/a9999999999_2.jpg" alt="" /></div>
+            <p class="title">
+                A Standalone Track
+            </p>
+        </a>
+    </li>
+</ol>
+</body></html>
+"""
+
+_SINGLE_RELEASE_REDIRECT_HTML = (
+    '<html><body>\n'
+    '<script>var x = 1;</script>\n'
+    '{"@context":"https://schema.org","@type":"MusicAlbum","@id":"https://fullbodyrecordings.bandcamp.com/album/full-body-recordings-episode-1","name":"Full Body Recordings, Episode 1","image":"https://f4.bcbits.com/img/a1811014619_10.jpg"}\n'
+    '</body></html>'
+)
+
+
+def _mock_page_response(html, url='https://example.bandcamp.com/music'):
+    resp = Mock()
+    resp.raise_for_status = Mock()
+    resp.text = html
+    resp.url = url
+    return resp
+
+
+class TestGetArtistReleases:
+    def test_parses_music_grid(self, client, monkeypatch):
+        _fresh_rate_limit_state(monkeypatch)
+        with patch.object(client.session, 'get', return_value=_mock_page_response(_MUSIC_GRID_HTML)):
+            releases = client.get_artist_releases('https://radiohead.bandcamp.com')
+
+        assert len(releases) == 3
+        assert releases[0] == {
+            'id': 'album-365742988',
+            'type': 'album',
+            'title': 'Hail to the Thief (Live Recordings 2003-2009)',
+            'url': 'https://radiohead.bandcamp.com/album/hail-to-the-thief-live-recordings-2003-2009',
+            'image_url': 'https://f4.bcbits.com/img/a0454733928_2.jpg',
+        }
+        assert releases[2]['type'] == 'track'
+
+    def test_single_release_redirect_fallback(self, client, monkeypatch):
+        _fresh_rate_limit_state(monkeypatch)
+        redirect_url = 'https://fullbodyrecordings.bandcamp.com/album/full-body-recordings-episode-1'
+        with patch.object(
+            client.session, 'get',
+            return_value=_mock_page_response(_SINGLE_RELEASE_REDIRECT_HTML, url=redirect_url),
+        ):
+            releases = client.get_artist_releases('https://fullbodyrecordings.bandcamp.com')
+
+        assert len(releases) == 1
+        assert releases[0]['title'] == 'Full Body Recordings, Episode 1'
+        assert releases[0]['url'] == redirect_url
+        assert releases[0]['type'] == 'album'
+
+    def test_no_grid_and_no_jsonld_returns_empty(self, client, monkeypatch):
+        _fresh_rate_limit_state(monkeypatch)
+        with patch.object(client.session, 'get', return_value=_mock_page_response('<html><body>nothing</body></html>')):
+            assert client.get_artist_releases('https://example.bandcamp.com') == []
+
+    def test_empty_url_returns_empty(self, client):
+        assert client.get_artist_releases('') == []
+
+    def test_fetch_failure_returns_empty(self, client, monkeypatch):
+        _fresh_rate_limit_state(monkeypatch)
+        with patch.object(client.session, 'get', side_effect=requests.exceptions.ConnectionError('boom')):
+            assert client.get_artist_releases('https://example.bandcamp.com') == []
+
+
+# ---------------------------------------------------------------------------
+# get_artist_albums — duck-typed interface for
+# core.metadata.album_tracks.get_artist_albums_for_source.
+# ---------------------------------------------------------------------------
+
+
+class TestGetArtistAlbums:
+    def test_resolves_by_name_and_lists_releases(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'get_artist', lambda name: Artist.from_bandcamp_dict(_BAND_RESULT))
+        monkeypatch.setattr(client, 'get_artist_releases', lambda url: [
+            {'id': 'album-1', 'type': 'album', 'title': 'Album One', 'url': 'https://x/album/one', 'image_url': None},
+            {'id': 'track-2', 'type': 'track', 'title': 'Track Two', 'url': 'https://x/track/two', 'image_url': None},
+        ])
+
+        albums = client.get_artist_albums('3957198221', artist_name='Radiohead')
+
+        assert len(albums) == 2
+        assert albums[0]['album_type'] == 'album'
+        assert albums[1]['album_type'] == 'single'
+        assert albums[0]['artists'] == ['Radiohead']
+
+    def test_no_artist_name_returns_empty(self, client):
+        assert client.get_artist_albums('3957198221') == []
+
+    def test_unresolvable_artist_returns_empty(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'get_artist', lambda name: None)
+        assert client.get_artist_albums('3957198221', artist_name='Nobody') == []
+
+    def test_respects_limit(self, client, monkeypatch):
+        monkeypatch.setattr(client, 'get_artist', lambda name: Artist.from_bandcamp_dict(_BAND_RESULT))
+        monkeypatch.setattr(client, 'get_artist_releases', lambda url: [
+            {'id': f'album-{i}', 'type': 'album', 'title': f'Album {i}', 'url': f'https://x/{i}', 'image_url': None}
+            for i in range(10)
+        ])
+        albums = client.get_artist_albums('3957198221', artist_name='Radiohead', limit=3)
+        assert len(albums) == 3

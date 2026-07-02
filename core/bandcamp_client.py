@@ -47,6 +47,11 @@ _JSONLD_LINE_RE = re.compile(r'.*"@id".*')
 _JSONLD_SCRIPT_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.DOTALL)
 _DURATION_RE = re.compile(r'P(?:(\d+)D)?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?')
 _TRAILING_TZ_RE = re.compile(r'\s+[A-Z]{2,5}$')
+_MUSIC_GRID_RE = re.compile(r'<ol id="music-grid".*?</ol>', re.DOTALL)
+_MUSIC_GRID_ITEM_RE = re.compile(r'<li\s+data-item-id="([^"]+)".*?</li>', re.DOTALL)
+_ITEM_HREF_RE = re.compile(r'<a href="([^"]+)"')
+_ITEM_TITLE_RE = re.compile(r'<p class="title">\s*([^<\n]+)')
+_ITEM_IMG_RE = re.compile(r'<img src="([^"]+)"')
 
 
 class BandcampRateLimitedError(requests.exceptions.RequestException):
@@ -180,6 +185,23 @@ def _best_match(candidates, artist_name: str, title: str):
     return best
 
 
+def _best_name_match(candidates, name: str):
+    """Pick the best of `candidates` (Artist objects) by name similarity alone.
+
+    Used where there's no second field to cross-check against (resolving a
+    plain artist name to a Bandcamp band/label — Bandcamp has no numeric-ID
+    lookup API, only free-text search)."""
+    target = _normalize_for_match(name)
+    best = None
+    best_score = 0.0
+    for candidate in candidates:
+        score = SequenceMatcher(None, target, _normalize_for_match(candidate.name)).ratio()
+        if score > best_score:
+            best_score = score
+            best = candidate
+    return best if best_score >= 0.75 else None
+
+
 class BandcampClient:
     """Client for Bandcamp search and release metadata. No API key required."""
 
@@ -235,11 +257,11 @@ class BandcampClient:
         return results[:limit]
 
     @rate_limited
-    def _get_text(self, url: str, timeout: int = 15) -> Optional[str]:
+    def _get_response(self, url: str, timeout: int = 15) -> Optional[requests.Response]:
         try:
             response = self.session.get(url, timeout=timeout)
             response.raise_for_status()
-            return response.text
+            return response
         except requests.exceptions.Timeout:
             logger.warning(f"Bandcamp page fetch timeout: {url}")
             return None
@@ -252,6 +274,10 @@ class BandcampClient:
         except requests.exceptions.RequestException as e:
             logger.warning(f"Bandcamp page fetch error ({url}): {e}")
             return None
+
+    def _get_text(self, url: str, timeout: int = 15) -> Optional[str]:
+        response = self._get_response(url, timeout=timeout)
+        return response.text if response is not None else None
 
     # ── Search ──
 
@@ -399,3 +425,106 @@ class BandcampClient:
             merged['tracks'] = release.get('tracks') or []
             merged['total_tracks'] = release.get('total_tracks')
         return merged
+
+    # ── Artist discography ──
+    # Bandcamp has no numeric-ID-based lookup API for any entity type —
+    # bands/labels, albums, and tracks are all addressed by URL. These
+    # methods resolve an artist by name (the one thing every caller in
+    # this codebase's generic per-source dispatch always has, even when it
+    # doesn't have a source-native ID) and scrape the artist's own /music
+    # discography page, which is a stable, site-rendered grid — same
+    # "read the page Bandcamp already serves" approach as get_release_metadata.
+
+    def get_artist(self, artist_name: str) -> Optional[Artist]:
+        """Resolve an artist by name via search."""
+        if not artist_name:
+            return None
+        candidates = self.search_artists(artist_name, limit=5)
+        return _best_name_match(candidates, artist_name)
+
+    def get_artist_releases(self, artist_url: str) -> List[Dict[str, Any]]:
+        """List a Bandcamp artist/label's releases from their /music page.
+
+        Falls back to a single-release result when the artist has exactly
+        one release — Bandcamp redirects /music straight to it instead of
+        rendering a grid (confirmed live: a one-release label's /music URL
+        303s to /album/<slug> with no music-grid element on the page at
+        all)."""
+        if not artist_url:
+            return []
+
+        domain = artist_url.split('//', 1)[-1].split('/', 1)[0]
+        response = self._get_response(f"https://{domain}/music")
+        if response is None:
+            return []
+        html = response.text
+
+        grid_match = _MUSIC_GRID_RE.search(html)
+        if grid_match:
+            releases = []
+            for item_match in _MUSIC_GRID_ITEM_RE.finditer(grid_match.group()):
+                item_id = item_match.group(1)
+                block = item_match.group(0)
+                href_match = _ITEM_HREF_RE.search(block)
+                title_match = _ITEM_TITLE_RE.search(block)
+                img_match = _ITEM_IMG_RE.search(block)
+                if not href_match or not title_match:
+                    continue
+                releases.append({
+                    'id': item_id,
+                    'type': 'track' if item_id.startswith('track-') else 'album',
+                    'title': title_match.group(1).strip(),
+                    'url': href_match.group(1),
+                    'image_url': img_match.group(1) if img_match else None,
+                })
+            return releases
+
+        # No grid — likely the single-release redirect. Confirm via JSON-LD
+        # rather than assuming, so an unrelated page (e.g. a login wall)
+        # can't be mistaken for a release.
+        data = _extract_jsonld(html)
+        if data and data.get('@type') in ('MusicAlbum', 'MusicRecording'):
+            kind = 'track' if data.get('@type') == 'MusicRecording' else 'album'
+            return [{
+                'id': f'{kind}-single',
+                'type': kind,
+                'title': data.get('name') or '',
+                'url': data.get('@id') or response.url,
+                'image_url': data.get('image'),
+            }]
+        return []
+
+    def get_artist_albums(
+        self, artist_id: str, artist_name: Optional[str] = None,
+        album_type: str = 'album,single', limit: int = 50, **kwargs,
+    ) -> List[Dict[str, Any]]:
+        """Duck-typed interface expected by
+        core.metadata.album_tracks.get_artist_albums_for_source — same
+        shape as every other source's get_artist_albums.
+
+        `artist_id` (a Discover search result's numeric band_id) isn't
+        independently resolvable on Bandcamp, so it's accepted for
+        interface compatibility but ignored; `artist_name` is what this
+        actually resolves against, matching the 'artist_name kwarg'
+        fallback JioSaavn already uses in the same dispatcher."""
+        if not artist_name:
+            return []
+        artist = self.get_artist(artist_name)
+        if not artist:
+            return []
+        artist_url = artist.external_urls.get('bandcamp')
+        if not artist_url:
+            return []
+
+        releases = self.get_artist_releases(artist_url)
+        result = []
+        for release in releases[:limit]:
+            result.append({
+                'id': release['id'],
+                'name': release['title'],
+                'title': release['title'],
+                'album_type': 'single' if release['type'] == 'track' else 'album',
+                'image_url': release.get('image_url'),
+                'artists': [artist.name],
+            })
+        return result
