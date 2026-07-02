@@ -162,7 +162,7 @@ def test_delete_clears_matching_auto_import_override(db, monkeypatch):
 
     class _FakeCfg:
         def get(self, key, default=None):
-            return {"auto_import.quality_profile_id": 2}.get(key, default)
+            return {"auto_import.quality_profile_id": "2"}.get(key, default)
 
         def set(self, key, value):
             calls[key] = value

@@ -105,6 +105,38 @@ def test_migration_overwrites_factory_seed_with_real_prior_settings(db):
         conn.close()
 
 
+def test_migration_preserves_legacy_import_quality_filter_off_as_fallback(db, monkeypatch):
+    """If an old install had the import-only quality gate disabled, upgrading
+    must not suddenly start quarantining files. In the profile model that maps
+    to fallback acceptance on the migrated default profile."""
+    custom_profile = {
+        "version": 3,
+        "preset": "custom",
+        "fallback_enabled": False,
+        "ranked_targets": [{"label": "Only FLAC", "format": "flac"}],
+    }
+
+    class _FakeCfg:
+        def get(self, key, default=None):
+            return {"import.quality_filter_enabled": False}.get(key, default)
+
+    monkeypatch.setattr("config.settings.config_manager", _FakeCfg(), raising=False)
+
+    conn = db._get_connection()
+    try:
+        db.set_preference("quality_profile", json.dumps(custom_profile))
+        conn.execute("DELETE FROM metadata WHERE key=?", (_MIGRATION_FLAG_KEY,))
+        conn.commit()
+
+        assert materialize_default_profile_and_backfill(db, conn) is True
+        row = conn.execute(
+            "SELECT fallback_enabled FROM quality_profiles WHERE id=1"
+        ).fetchone()
+        assert row["fallback_enabled"] == 1
+    finally:
+        conn.close()
+
+
 def test_migration_renames_seeded_default_row_to_default(db):
     """The seeded name ("Balanced") describes a factory preset the user never
     actually chose; once the row holds their real carried-over settings it
