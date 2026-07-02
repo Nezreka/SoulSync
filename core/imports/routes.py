@@ -16,6 +16,7 @@ from core.imports.filename import parse_filename_metadata
 from core.imports.pipeline import import_rejection_reason
 from core.imports.staging import (
     AUDIO_EXTENSIONS,
+    available_import_sources as _available_import_sources,
     get_import_suggestions_cache,
     get_primary_source as _get_primary_source,
     get_primary_source_label as _get_primary_source_label,
@@ -400,26 +401,43 @@ def staging_suggestions() -> tuple[Dict[str, Any], int]:
     }, 200
 
 
-def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12) -> tuple[Dict[str, Any], int]:
-    """Search albums for manual import using the active metadata provider."""
+def search_albums(runtime: ImportRouteRuntime, query: str, limit: int = 12,
+                   source: str = "") -> tuple[Dict[str, Any], int]:
+    """Search albums for manual import using the active metadata provider,
+    or an explicitly-chosen source when ``source`` is given (the Import
+    Search source picker) — see search_import_albums()'s docstring for why
+    that bypass exists."""
     try:
         query = (query or "").strip()
         if not query:
             return {"success": False, "error": "Missing query parameter"}, 400
 
         limit = min(int(limit), 50)
+        source_override = (source or "").strip().lower() or None
         primary_source = runtime.get_primary_source()
-        if primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
+        if not source_override and primary_source == "hydrabase" and runtime.hydrabase_worker and runtime.dev_mode_enabled:
             runtime.hydrabase_worker.enqueue(query, "albums")
 
-        albums = runtime.search_import_albums(query, limit=limit)
+        albums = runtime.search_import_albums(query, limit=limit, source_override=source_override)
         # The label names the user's CONFIGURED source (Spotify Free reads as
         # 'spotify', not the deezer fallback the functional source downgrades to).
         return {"success": True, "albums": albums,
-                "primary_source": runtime.get_primary_source_label()}, 200
+                "primary_source": runtime.get_primary_source_label(),
+                "source_override": source_override}, 200
     except Exception as exc:
         runtime.logger.error("Error searching albums for import: %s", exc)
         return {"success": False, "error": str(exc)}, 500
+
+
+def search_sources() -> tuple[Dict[str, Any], int]:
+    """Source picker options for Import Search — every metadata source with
+    a live client, the primary one flagged 'active'. Same shape as
+    /api/reidentify/sources (core.imports.rematch_search.available_sources)."""
+    try:
+        return {"success": True, "sources": _available_import_sources()}, 200
+    except Exception as exc:
+        module_logger.error("Error listing import search sources: %s", exc)
+        return {"success": False, "error": str(exc), "sources": []}, 500
 
 
 def album_match(runtime: ImportRouteRuntime, data: Dict[str, Any]) -> tuple[Dict[str, Any], int]:

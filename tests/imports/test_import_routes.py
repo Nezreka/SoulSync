@@ -317,7 +317,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
         get_primary_source_label=lambda: "hydrabase",
         hydrabase_worker=worker,
         dev_mode_enabled=True,
-        search_import_albums=lambda query, limit: calls.append((query, limit)) or [{"id": "album-1"}],
+        search_import_albums=lambda query, limit, source_override=None: calls.append((query, limit)) or [{"id": "album-1"}],
         logger=_FakeLogger(),
     )
 
@@ -328,6 +328,7 @@ def test_search_albums_enqueues_hydrabase_and_caps_limit():
         "success": True,
         "albums": [{"id": "album-1"}],
         "primary_source": "hydrabase",
+        "source_override": None,
     }
     assert worker.enqueued == [("Album", "albums")]
     assert calls == [("Album", 50)]
@@ -353,7 +354,7 @@ def test_search_albums_exposes_primary_source_when_chain_falls_back():
     runtime = ImportRouteRuntime(
         get_primary_source=lambda: "deezer",          # functional (downgraded fallback)
         get_primary_source_label=lambda: "spotify",   # configured intent (Spotify Free)
-        search_import_albums=lambda query, limit: [
+        search_import_albums=lambda query, limit, source_override=None: [
             {"id": "discogs-1", "name": "Album", "source": "discogs"},
         ],
         logger=_FakeLogger(),

@@ -172,6 +172,7 @@ from core.imports.routes import album_match as _import_album_match
 from core.imports.routes import album_process as _import_album_process
 from core.imports.routes import process_single_import_file as _import_process_single_import_file
 from core.imports.routes import search_albums as _import_search_albums
+from core.imports.routes import search_sources as _import_search_sources
 from core.imports.routes import search_tracks as _import_search_tracks
 from core.imports.routes import singles_process as _import_singles_process
 from core.imports.routes import staging_files as _import_staging_files
@@ -38335,7 +38336,14 @@ def import_search_albums():
         _build_import_route_runtime(),
         request.args.get('q', ''),
         request.args.get('limit', 12),
+        request.args.get('source', ''),
     )
+    return jsonify(payload), status
+
+
+@app.route('/api/import/search/sources', methods=['GET'])
+def import_search_sources_route():
+    payload, status = _import_search_sources()
     return jsonify(payload), status
 
 
