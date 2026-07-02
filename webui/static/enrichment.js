@@ -1861,8 +1861,11 @@ async function loadRepairJobs() {
                                    onchange="toggleRepairJob('${job.job_id}', this.checked)">
                             <span class="repair-toggle-slider small"></span>
                         </label>
-                        <button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
-                                title="Run now">&#9654;</button>
+                        ${job.is_running
+                    ? `<button class="repair-stop-btn" onclick="stopRepairJobNow('${job.job_id}')"
+                                title="Stop this run">&#9209;</button>`
+                    : `<button class="repair-run-btn" onclick="runRepairJobNow('${job.job_id}')"
+                                title="Run now">&#9654;</button>`}
                         ${Object.keys(job.settings || {}).length > 0 ?
                     `<button class="repair-settings-btn" onclick="expandRepairJobSettings('${job.job_id}')"
                                      title="Settings">&#9881;</button>` : ''}
@@ -2016,6 +2019,20 @@ async function runRepairJobNow(jobId) {
     } catch (error) {
         console.error('Error running job:', error);
         showToast('Error starting job', 'error');
+    }
+}
+
+async function stopRepairJobNow(jobId) {
+    try {
+        const resp = await fetch(`/api/repair/jobs/${jobId}/stop`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        showToast(data.stopped ? 'Stopping job…' : 'Job is not running', data.stopped ? 'success' : 'info');
+        // The scan unwinds at its next check_stop(); refresh so the card flips back to Run.
+        setTimeout(() => loadRepairJobs(), 600);
+    } catch (error) {
+        console.error('Error stopping job:', error);
+        showToast('Error stopping job', 'error');
     }
 }
 

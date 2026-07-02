@@ -37964,6 +37964,20 @@ def repair_job_run(job_id):
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/jobs/<job_id>/stop', methods=['POST'])
+def repair_job_stop(job_id):
+    """Stop a running (or queued) job — signals its scan loop to unwind (#970)."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        outcome = repair_worker.stop_current_job(job_id)
+        logger.info("Repair job %s stop requested via UI: %s", job_id, outcome)
+        return jsonify({'success': True, 'job_id': job_id, **outcome}), 200
+    except Exception as e:
+        logger.error(f"Error stopping repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/findings', methods=['GET'])
 def repair_findings_list():
     """Get paginated findings with filters"""
