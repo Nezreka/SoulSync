@@ -414,7 +414,7 @@ function initializeSearchModeToggle() {
                 name: artist.name,
                 meta: 'Artist',
                 badge: sourceBadge,
-                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null),
+                href: buildArtistDetailPath(artist.id, searchController.state.activeSource || null, artist.name),
             })
         );
 
@@ -1297,7 +1297,7 @@ async function loadInitialData() {
         if (targetPage === 'artist-detail') {
             const artistRoute = typeof parseArtistDetailPath === 'function' ? parseArtistDetailPath() : null;
             if (artistRoute && typeof navigateToArtistDetail === 'function') {
-                navigateToArtistDetail(artistRoute.artistId, '', artistRoute.source);
+                navigateToArtistDetail(artistRoute.artistId, artistRoute.name || '', artistRoute.source);
             }
             return;
         }
