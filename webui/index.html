@@ -3200,6 +3200,103 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
+                    <!-- Artist Web Hub (sigma.js similarity graph — sibling of the canvas Artist Map) -->
+                    <div class="artmap-hub">
+                        <div class="artmap-hub-bg"></div>
+                        <div class="artmap-hub-content">
+                            <div class="artmap-hub-header">
+                                <svg class="artmap-hub-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg>
+                                <div>
+                                    <h2 class="artmap-hub-title">Artist Web</h2>
+                                    <p class="artmap-hub-subtitle">Your library as an interactive similarity graph</p>
+                                </div>
+                            </div>
+                            <div class="artmap-hub-cards">
+                                <div class="artmap-hub-card" onclick="openArtistWeb('genre')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><circle cx="7" cy="8" r="1.5"/><circle cx="17" cy="8" r="1.5"/><circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><line x1="12" y1="12" x2="7" y2="8"/><line x1="12" y1="12" x2="17" y2="8"/><line x1="12" y1="12" x2="8" y2="16"/><line x1="12" y1="12" x2="16" y2="16"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Taste Map</h3><p>Every artist in your library, wired together by similarity</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                                <div class="artmap-hub-card" onclick="openArtistWeb('community')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="8" r="2.5"/><circle cx="17" cy="8" r="2.5"/><circle cx="12" cy="17" r="2.5"/><line x1="8.8" y1="9.8" x2="10.5" y2="15"/><line x1="15.2" y1="9.8" x2="13.5" y2="15"/><line x1="9.5" y1="8" x2="14.5" y2="8"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Communities</h3><p>Your library's real scenes, found from who sounds alike — not genre tags</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                                <div class="artmap-hub-card" onclick="openArtistWeb('discovery')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 13 13 8.5 15.5 11 11 15.5 8.5"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Discovery Web</h3><p>Artists you don't have yet, mapped from the ones you do</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Artist Web (fullscreen sigma graph, hidden by default) -->
+                    <div class="artist-map-container" id="artist-web-container" style="display:none;">
+                        <div class="artist-map-toolbar">
+                            <div class="artmap-nav-left">
+                                <button class="artmap-back" onclick="closeArtistWeb()" title="Back to Discover (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+                                <div class="artmap-brand"><svg class="artmap-brand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg><span class="artmap-brand-text">Artist Web</span></div>
+                                <div class="artmap-stats" id="artist-web-stats"></div>
+                            </div>
+
+                            <!-- Center: search (mirrors Artist Map) -->
+                            <div class="artmap-nav-center">
+                                <div class="artmap-search-wrap">
+                                    <svg class="artmap-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="artist-web-search" placeholder="Search artists... (S)" oninput="artWebSearch(this.value)" onkeydown="if(event.key==='Enter')artWebSearchEnter()">
+                                </div>
+                            </div>
+
+                            <!-- Right: tools -->
+                            <div class="artmap-nav-right">
+                                <div class="artweb-lens-toggle" title="How to organize the graph">
+                                    <button class="artweb-lens-btn active" data-lens="genre" onclick="artWebSetLens('genre')">Genre</button>
+                                    <button class="artweb-lens-btn" data-lens="community" onclick="artWebSetLens('community')">Communities</button>
+                                    <button class="artweb-lens-btn" data-lens="discovery" onclick="artWebSetLens('discovery')">Discovery</button>
+                                </div>
+                                <div class="artweb-lens-toggle" title="Size nodes by">
+                                    <button class="artweb-lens-btn artweb-size-btn active" data-size="popularity" onclick="artWebSetSize('popularity')">Popular</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="connections" onclick="artWebSetSize('connections')">Links</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="influence" onclick="artWebSetSize('influence')" title="Betweenness — who bridges the network">Influence</button>
+                                </div>
+                                <button class="artmap-tool-btn" id="artweb-path-btn" onclick="artWebTogglePathMode()" title="Trace how two artists connect">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M7 6h6a4 4 0 0 1 4 4v4" stroke-dasharray="1 3"/></svg>
+                                    <span>Path</span>
+                                </button>
+                                <button class="artmap-tool-btn" id="artweb-edges-btn" onclick="artWebToggleEdges()" title="Show only the stronger connections">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12" stroke-opacity="0.4"/><line x1="4" y1="17" x2="20" y2="17" stroke-opacity="0.2"/></svg>
+                                    <span>Edges</span>
+                                </button>
+                                <button class="artmap-tool-btn" id="artweb-filter-btn" onclick="artWebToggleFilter()" title="Filter by genre">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    <span>Filter</span>
+                                </button>
+                                <div class="artmap-zoom-group">
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(0.7)" title="Zoom in (+)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(1.4)" title="Zoom out (-)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebFitToView()" title="Fit to view (F)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+                                </div>
+                                <button class="artmap-tool-btn" onclick="artWebShowHelp()" title="Guide &amp; shortcuts" style="font-weight:700;">?</button>
+                            </div>
+                        </div>
+                        <div class="artmap-content-row">
+                            <div class="artmap-genre-sidebar" id="artweb-genre-sidebar" style="display:none;">
+                                <div class="artmap-genre-sidebar-header">
+                                    <span>Genres</span>
+                                    <input type="text" class="artmap-genre-sidebar-search" placeholder="Filter..." oninput="artWebFilterGenreList(this.value)">
+                                </div>
+                                <div class="artmap-genre-sidebar-list" id="artweb-genre-sidebar-list"></div>
+                            </div>
+                            <div id="artist-web-canvas" style="flex:1; min-width:0; min-height:0;"></div>
+                            <!-- Color legend (decodes the node colors per lens) — populated per render -->
+                            <div id="artist-web-legend" class="artweb-legend" style="display:none;"></div>
+                        </div>
+                        <div class="artist-map-search-results" id="artist-web-search-results"></div>
+                        <!-- Hover tooltip (reuses the Artist Map tooltip styling) — identify a node without clicking -->
+                        <div class="artist-map-tooltip" id="artist-web-tooltip"></div>
+                    </div>
+
                     <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
                          calmer/greener at left (safe) and wilder/redder at right (obscure). Syncs with
                          Settings → Discovery. -->
@@ -8821,6 +8918,11 @@
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
+         graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
+    <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/graphology-library/dist/graphology-library.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
     <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>

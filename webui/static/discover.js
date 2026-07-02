@@ -6365,6 +6365,1756 @@ function _artMapPanelArtistById(id) {
     _artMapEmitRipple(n.x, n.y, n._hue);
 }
 
+// ===== Artist Web — sigma.js similarity graph (sibling of the canvas Artist Map) ===============
+// A genre-clustered force graph of the whole library. Interaction is driven by REDUCERS: we keep a
+// little UI state here (search matches, hovered/selected node) and node/edge reducers read it to
+// recolor/dim per frame — the graph data is never mutated for visual state.
+let _artistWeb = {
+    sigma: null, graph: null, onKey: null,
+    gen: 0,                           // open/close generation — in-flight fetches bail if it changed
+    lens: 'genre',                    // 'genre' | 'community' | 'discovery'
+    data: null,                       // cached /api/graph/library payload (reused when switching lens)
+    discoveryData: null,              // cached /api/graph/discovery payload (owned anchors + unowned candidates)
+    genreColor: null,                 // (group) -> color, set at render
+    index: [],                        // [{key,label}] artist nodes, for client-side search
+    searchMatch: null,                // Set<key> of search hits, or null when search is empty
+    focusSet: null,                   // Set<key> currently emphasized (hover node+neighbors, or selection)
+    focusRoot: null,                  // the node at the center of the focus (gets a halo)
+    selectedKey: null,                // click-selected node (survives hover-out)
+    selectedFocus: null,              // the focus set to restore when hover clears
+    genreFilter: null,                // Set<genre> persistent filter (dims everything outside it)
+    genreCounts: null,                // {genre: artistCount} for the filter sidebar
+    sizeBy: 'popularity',             // node-size metric: popularity | connections | influence(betweenness)
+    betweenCache: null,               // cached betweenness scores (computed once on the similarity graph)
+    edgeDeclutter: false,             // when on, hide the weaker half of similarity edges at rest
+    edgeThreshold: 2,                 // weight cutoff for declutter (computed per render)
+    // Shortest-path mode: click two artists to trace how they connect (via the similarity graph).
+    pathMode: false,
+    pathSource: null, pathTarget: null,
+    pathNodes: null,                  // Set<key> on the path (highlighted)
+    pathPairs: null,                  // Set<"a|b"> consecutive path edges (highlighted)
+    pathResult: null,                 // the node-key array, once complete
+    simGraph: null,                   // cached similarity-only graph for pathfinding (lens-independent)
+    // Node-spread effect: selecting a node fans its neighbors outward; they settle back on deselect.
+    cursorFX: true,                   // master flag (one switch to disable the effect)
+    fxRAF: null, home: null,          // rAF handle + captured resting positions
+    spreadRoot: null, spreadSet: null, spreadPush: 0,
+    spreadActive: null,               // Set of nodes currently displaced/pushed — the FX tick animates
+                                      // only these, never a full ~5k-node sweep per frame.
+    fa2: null, fa2Timer: null,        // live-settle worker layout supervisor + its stop timer
+    previewAudio: null, previewKey: null,   // 30s Deezer preview playback (discovery candidates)
+    _hoverNode: null, _mouse: null, _mouseBound: false,   // hover tooltip: current node + last pointer
+};
+
+// White pill label (black text) — custom sigma labelRenderer. Font + padding scale with the node's
+// rendered size, so a small artist gets a small tag and a big genre hub gets a big one.
+function _webDrawLabel(context, data, settings) {
+    if (!data.label) return;
+    const font = settings.labelFont || 'Arial';
+    const weight = settings.labelWeight || 'normal';
+    const fontSize = Math.max(8, Math.min(18, (data.size || 6) * 0.85));   // scale to node size, clamped
+    const pad = Math.max(3, Math.round(fontSize * 0.45));
+    context.font = `${weight} ${fontSize}px ${font}`;
+    const tw = context.measureText(data.label).width;
+    const boxW = tw + pad * 2, boxH = fontSize + pad * 2;
+    const x = Math.round(data.x + data.size + 4);   // sits just right of the node
+    const y = Math.round(data.y - boxH / 2);
+    context.fillStyle = '#ffffff';
+    if (context.roundRect) { context.beginPath(); context.roundRect(x, y, boxW, boxH, 5); context.fill(); }
+    else context.fillRect(x, y, boxW, boxH);
+    context.fillStyle = '#000000';
+    context.textBaseline = 'middle';
+    context.textAlign = 'left';
+    context.fillText(data.label, x + pad, data.y);
+}
+
+// Distinct colors for the most-common genres; everything in the long tail falls back to gray.
+const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
+    '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
+const WEB_GENRE_FALLBACK = '#6b7aa8';   // slate-periwinkle for "Other" — a real color, not dead gray
+const WEB_OWNED_COLOR = '#5b8def';      // Discovery lens: your library artists (cool blue)
+const WEB_DISCOVERY_COLOR = '#ffb74d';  // Discovery lens: unowned candidates to discover (warm amber)
+const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
+
+// Edge opacity scales with weight (consensus): weak links stay faint so they don't clutter; strong,
+// high-agreement links come forward. Capped so nothing gets fully opaque at rest.
+function _webEdgeAlpha(weight) {
+    return Math.min(0.4, 0.08 + (weight || 1) * 0.025);
+}
+function _webEdgeSize(weight) {
+    return 0.35 + Math.min(1.3, Math.sqrt(weight || 1) * 0.3);
+}
+
+// '#rrggbb' -> 'rgba(r,g,b,a)' so edges can inherit a cluster color at low alpha (the glowing web).
+function _webHexToRgba(hex, alpha) {
+    const h = (hex || '').replace('#', '');
+    if (h.length !== 6) return `rgba(140,140,150,${alpha})`;
+    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Map each genre CLUSTER (anchor) to a palette color; "Other" + unknowns are gray. Return the lookup
+// + per-cluster counts (used for hub sizing + the filter list).
+function _webGenreColorMap(nodes) {
+    const counts = {};
+    nodes.forEach(n => { if (n.kind === 'artist' && n.cluster) counts[n.cluster] = (counts[n.cluster] || 0) + 1; });
+    const ranked = Object.keys(counts).filter(g => g !== 'Other').sort((a, b) => counts[b] - counts[a]);
+    const map = { 'Other': WEB_GENRE_FALLBACK };
+    ranked.forEach((g, i) => { map[g] = WEB_PALETTE[i % WEB_PALETTE.length]; });   // cycle, never gray
+    return { color: (g) => map[g] || WEB_GENRE_FALLBACK, counts };
+}
+
+// The top-N most popular artists — always labeled + a size tier, so they anchor the map as landmarks.
+const WEB_STAR_COUNT = 20;
+const WEB_STAR_SIZE = 8;
+function _webTopArtists(artistNodes, n) {
+    return new Set(artistNodes
+        .filter(a => (a.popularity || 0) > 0)
+        .sort((x, y) => (y.popularity || 0) - (x.popularity || 0))
+        .slice(0, n)
+        .map(a => a.key));
+}
+
+async function openArtistWeb(lens) {
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+
+    // New generation: any fetch still in flight from a prior open/close bails on resolve.
+    const myGen = ++_artistWeb.gen;
+    // Re-entrancy: drop a stale keydown listener so we never leak/duplicate it.
+    if (_artistWeb.onKey) document.removeEventListener('keydown', _artistWeb.onKey);
+
+    // Pseudo-page takeover: hide the other discover sections, show the web container. Only snapshot
+    // when NOT already open — a re-entrant open (the error-card Retry button) would otherwise
+    // overwrite each sibling's real _prevDisplay ('') with 'none', blanking Discover on close.
+    if (container.style.display !== 'flex') {
+        document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
+            el._prevDisplay = el.style.display;
+            el.style.display = 'none';
+        });
+    }
+    container.style.display = 'flex';
+
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
+
+    // Keyboard: Esc unwinds (path mode -> panel -> close); the toolbar advertises S/F/0/+/- so wire
+    // them (skipping while typing in an input, where Esc just blurs the field).
+    _artistWeb.onKey = (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (e.key === 'Escape') t.blur();
+            return;
+        }
+        if (e.key === 'Escape') {
+            if (_artistWeb.pathMode) { _artWebExitPath(); return; }
+            const p = document.getElementById('artweb-panel');
+            if (p && p.style.display !== 'none') _artWebClearSelection();
+            else closeArtistWeb();
+        } else if (e.key === 's' || e.key === 'S') {
+            const inp = document.getElementById('artist-web-search');
+            if (inp) { e.preventDefault(); inp.focus(); }
+        } else if (e.key === 'f' || e.key === 'F' || e.key === '0') {
+            artWebFitToView();
+        } else if (e.key === '+' || e.key === '=') {
+            artWebZoom(0.77);           // ratio<1 = zoom IN
+        } else if (e.key === '-' || e.key === '_') {
+            artWebZoom(1.3);            // zoom OUT
+        } else if (e.key === '?') {
+            artWebShowHelp();           // the first-run hint advertises "? for the guide"
+        }
+    };
+    document.addEventListener('keydown', _artistWeb.onKey);
+
+    // Resolve the CDN globals. graphology's UMD default export IS the Graph class.
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph || !window.Sigma) {
+        host.innerHTML = '<div style="padding:24px;color:#f88">graphology / sigma didn\'t load — check the CDN &lt;script&gt; tags.</div>';
+        return;
+    }
+
+    try {
+        const payload = await (await fetch('/api/graph/library')).json();
+        if (_artistWeb.gen !== myGen) return;   // closed or reopened while fetching — abandon
+        _artistWeb.data = payload;
+        _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
+        _artistWeb.betweenCache = null;
+        _artistWeb.discoveryData = null;  // refetch on next Discovery view — ownership may have changed
+        // The hub cards deep-link a lens: Taste Map -> 'genre', Discovery Web -> 'discovery'.
+        if (lens === 'genre' || lens === 'community' || lens === 'discovery') _artistWeb.lens = lens;
+        _artistWeb.lens = _artistWeb.lens || 'genre';
+        _artWebSyncLensButtons();
+        if (_artistWeb.lens === 'discovery') _artWebFetchDiscovery(host);
+        else _artWebRenderLens();
+        _artWebMaybeFirstRunHint();
+    } catch (err) {
+        if (_artistWeb.gen !== myGen) return;
+        console.error('[Artist Web] load failed', err);
+        _artWebStateCard(host, 'Failed to load the artist web.', _artistWeb.lens || 'genre');
+    }
+}
+
+// Centered empty/error card in the canvas. retryLens set => a Retry button re-opens that lens.
+// Replacing the canvas with a message: tear down any live graph first so no WebGL context / FA2
+// worker leaks (e.g. a lens switch whose fetch failed, or a zero-candidate discovery).
+function _artWebStateCard(host, msg, retryLens) {
+    if (!host) return;
+    _artWebKillLiveLayout();
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    if (_artistWeb.sigma) { try { _artistWeb.sigma.kill(); } catch (e) { /* ignore */ } _artistWeb.sigma = null; }
+    _artistWeb.graph = null;
+    const btn = retryLens
+        ? `<button class="artweb-state-btn" onclick="openArtistWeb('${retryLens}')">Retry</button>` : '';
+    host.innerHTML = `<div class="artweb-state-card"><div class="artweb-state-msg">${escapeHtml(msg)}</div>${btn}</div>`;
+}
+
+// Fetch the discovery payload, then render — only a GOOD payload is cached (a 500 resolves r.json()
+// too, and caching {"error": ...} used to leave the lens permanently blank with no retry).
+function _artWebFetchDiscovery(host) {
+    const myGen = _artistWeb.gen;
+    fetch('/api/graph/discovery')
+        .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+        .then(({ ok, d }) => {
+            if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
+            _artistWeb.discoveryData = d;
+            // Bail if the Web was closed/reopened or the user moved off Discovery while fetching —
+            // otherwise a late response mounts a sigma+worker into a hidden host, or rebuilds the
+            // lens the user is now on, clobbering their selection/camera.
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
+            _artWebRenderLens();
+        })
+        .catch(err => {
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
+            console.error('[Artist Web] discovery load failed', err);
+            _artWebStateCard(host, 'Failed to load discovery.', 'discovery');
+        });
+}
+
+// Switch the organizing lens (genre clusters vs similarity communities) and rebuild.
+function artWebSetLens(lens) {
+    if (!_artistWeb.data || _artistWeb.lens === lens) return;
+    _artistWeb.lens = lens;
+    _artWebSyncLensButtons();
+    // Tear down the prior lens's FA2 worker + settle timer NOW, before any async discovery fetch —
+    // otherwise the old timer fires mid-fetch and finalizes/animates the detached graph.
+    _artWebKillLiveLayout();
+    const host = document.getElementById('artist-web-canvas');
+    if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
+    // Discovery uses its own endpoint — fetch on first view (see _artWebFetchDiscovery).
+    if (lens === 'discovery' && !_artistWeb.discoveryData) {
+        _artWebFetchDiscovery(host);
+    } else {
+        setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
+    }
+}
+
+function _artWebSyncLensButtons() {
+    document.querySelectorAll('.artweb-lens-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.lens === _artistWeb.lens));
+}
+
+// ---- "Size by" toggle: scale nodes by popularity | connections (degree) | influence (betweenness) --
+function _artWebSyncSizeButtons() {
+    document.querySelectorAll('.artweb-size-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.size === _artistWeb.sizeBy));
+}
+
+// Betweenness = "influence" (who bridges the taste network). Computed on the SIMILARITY graph (small,
+// ~1k nodes → fast) not the 5k display graph, and cached — a genre-hub-laden graph would be slow.
+function _artWebBetweenness() {
+    if (_artistWeb.betweenCache) return _artistWeb.betweenCache;
+    const g = _artWebSimGraph();
+    const c = window.graphologyLibrary && window.graphologyLibrary.metrics && window.graphologyLibrary.metrics.centrality;
+    const fn = c && (c.betweenness || c.betweennessCentrality);
+    let res = {};
+    if (fn && g) { try { res = fn(g); } catch (e) { res = {}; } }
+    _artistWeb.betweenCache = res;
+    return res;
+}
+
+function artWebSetSize(mode) {
+    if (_artistWeb.sizeBy === mode || !_artistWeb.graph) return;
+    // Influence needs a (one-time) betweenness pass — show a hint + defer so it paints first.
+    if (mode === 'influence' && !_artistWeb.betweenCache) {
+        _artistWeb.sizeBy = mode; _artWebSyncSizeButtons();
+        _artWebPathHint('Computing influence…');
+        setTimeout(() => { _artWebApplySize(mode); _artWebHidePathHint(); }, 30);
+    } else {
+        _artWebApplySize(mode);
+    }
+}
+
+function _artWebApplySize(mode) {
+    const st = _artistWeb, g = st.graph;
+    if (!g) return;
+    st.sizeBy = mode;
+    _artWebSyncSizeButtons();
+    const sg = (mode === 'connections') ? _artWebSimGraph() : null;
+    const btw = (mode === 'influence') ? _artWebBetweenness() : null;
+    const metric = (k, a) => {
+        if (mode === 'connections') return (sg && sg.hasNode(k)) ? sg.degree(k) : 0;
+        if (mode === 'influence') return btw[k] || 0;
+        return a.popularity || 0;   // popularity
+    };
+    let max = 0;
+    g.forEachNode((k, a) => { if (a.kind === 'artist') { const v = metric(k, a); if (v > max) max = v; } });
+    max = max || 1;
+    g.forEachNode((k, a) => {
+        if (a.kind !== 'artist') return;   // genre hubs stay sized by member count
+        const size = 2 + Math.sqrt(metric(k, a) / max) * 3.5;   // 2..5.5 — matches the original build scale
+        g.setNodeAttribute(k, 'size', a.isStar ? Math.max(size, 6) : size);   // stars stay landmark-sized
+    });
+    if (st.sigma) st.sigma.refresh();
+}
+
+// (Re)build the graph for the current lens, run the layout, and mount sigma.
+function _artWebRenderLens() {
+    const host = document.getElementById('artist-web-canvas');
+    const statsEl = document.getElementById('artist-web-stats');
+    const data = _artistWeb.data;
+    if (!host || !data) return;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    if (!Graph) return;
+
+    // Reset per-render UI state + chrome.
+    _artistWeb.searchMatch = _artistWeb.focusSet = _artistWeb.focusRoot = null;
+    _artistWeb.selectedKey = _artistWeb.selectedFocus = null;
+    _artistWeb.pathSource = _artistWeb.pathTarget = _artistWeb.pathResult = null;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = null;
+    _artistWeb.genreFilter = null;
+    _artistWeb.sizeBy = 'popularity';   // build sizes by popularity; user can re-pick per view
+    _artWebSyncSizeButtons();
+    _artistWeb.index = [];
+    _artWebClosePanel();
+    const sidebar = document.getElementById('artweb-genre-sidebar');
+    if (sidebar) sidebar.style.display = 'none';
+    const searchInput = document.getElementById('artist-web-search');
+    if (searchInput) searchInput.value = '';
+
+    const built = _artistWeb.lens === 'community'
+        ? _artWebBuildCommunity(data, Graph)
+        : _artistWeb.lens === 'discovery'
+        ? _artWebBuildDiscovery(_artistWeb.discoveryData || { nodes: [], edges: [] }, Graph)
+        : _artWebBuildGenre(data, Graph);
+
+    _artistWeb.genreColor = built.colorOf;
+    _artistWeb.genreCounts = built.counts;
+    if (statsEl) statsEl.textContent = built.stats;
+    const sbHeader = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-header span');
+    if (sbHeader) sbHeader.textContent = _artistWeb.lens === 'community' ? 'Communities' : 'Genres';
+
+    // Home positions are captured AFTER the layout settles (_artWebFinishLayout); until then the
+    // selection-spread effect stays dormant (its guards check st.home).
+    _artistWeb.home = null;
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
+
+    // Declutter threshold: hide edges below the median weight — but most edges are weight-1
+    // (single-source), so if the median IS the minimum, bump above it to hide that weakest tier.
+    const w = [];
+    built.graph.forEachEdge((e, a) => { if (a.kind === 'similarity') w.push(a.weight || 1); });
+    w.sort((x, y) => x - y);
+    let thr = w.length ? w[Math.floor(w.length * 0.5)] : 2;
+    if (w.length && thr <= w[0]) thr = w[0] + 1;
+    _artistWeb.edgeThreshold = thr;
+    _artWebSyncEdgeButton();
+
+    // Empty discovery: a valid payload with zero candidates should GUIDE, not show a blank canvas.
+    if (_artistWeb.lens === 'discovery' && built.graph.order === 0) {
+        const lg = document.getElementById('artist-web-legend');
+        if (lg) lg.style.display = 'none';   // don't leave the prior lens's legend over the card
+        _artWebStateCard(host, 'No discovery candidates yet — add artists to your Watchlist so SoulSync can fetch similar artists to explore.', null);
+        return;
+    }
+
+    // Pre-seed positions (circlepack, grouped by cluster) so FA2 REFINES a structured start instead
+    // of untangling random noise — much faster + calmer settle at library scale. Silent no-op if the
+    // CDN bundle lacks the helper (the builders already set random x/y as a fallback).
+    _artWebPreseed(built.graph);
+
+    // Mount FIRST (the pre-seeded islands are visible immediately), then settle live in a Web Worker —
+    // the graph refines into islands without ever blocking the UI.
+    _artWebMountSigma(host, built.graph);
+    _artWebStartLiveLayout(built.graph);
+    _artWebRenderLegend(built);
+}
+
+// Color legend — decodes what the node colors mean for the active lens (Discovery = library vs
+// to-discover; Genre/Community = the top groups by size). Without it the palette is meaningless.
+function _artWebRenderLegend(built) {
+    const box = document.getElementById('artist-web-legend');
+    if (!box) return;
+    let items;
+    if (_artistWeb.lens === 'discovery') {
+        items = [
+            { color: WEB_OWNED_COLOR, label: 'Your library' },
+            { color: WEB_DISCOVERY_COLOR, label: 'To discover' },
+        ];
+    } else {
+        const counts = built.counts || {};
+        const colorOf = built.colorOf || (() => WEB_GENRE_FALLBACK);
+        items = Object.keys(counts)
+            .sort((a, b) => counts[b] - counts[a])
+            .slice(0, 8)
+            .map(g => ({ color: colorOf(g), label: g, count: counts[g] }));
+    }
+    if (!items.length) { box.style.display = 'none'; return; }
+    box.innerHTML = items.map(it =>
+        `<div class="artweb-legend-row">` +
+        `<span class="artweb-legend-dot" style="background:${it.color}"></span>` +
+        `<span class="artweb-legend-label">${escapeHtml(it.label)}</span>` +
+        (it.count != null ? `<span class="artweb-legend-count">${it.count}</span>` : '') +
+        `</div>`
+    ).join('');
+    box.style.display = '';
+}
+
+// Circlepack pre-seed: pack nodes into cluster circles (by the 'genre' attribute the builders set on
+// every node) so FA2 starts from structure, not noise. Discovery has no genre grouping — pack flat.
+function _artWebPreseed(graph) {
+    try {
+        const lib = window.graphologyLibrary;
+        const cp = lib && lib.layout && lib.layout.circlepack;
+        if (!cp || graph.order === 0) return;
+        cp.assign(graph, _artistWeb.lens === 'discovery' ? {} : { hierarchyAttributes: ['genre'] });
+    } catch (e) { /* keep the random positions the builders already set */ }
+}
+
+// ---- Live-settle layout: forceAtlas2 in a Web Worker (FA2Layout supervisor) ---------------------
+// The worker streams positions into the graph; sigma re-renders each frame, so the user watches the
+// blob organize. Falls back to the synchronous pass when the worker build is unavailable or throws.
+function _artWebStartLiveLayout(graph) {
+    _artWebKillLiveLayout();
+    const lib = window.graphologyLibrary;
+    const FA2Layout = lib && lib.FA2Layout;
+    const fa2 = lib && lib.layoutForceAtlas2;
+    if (!FA2Layout || !fa2 || graph.order === 0) {
+        _artWebRunLayout(graph);          // sync fallback (blocks briefly, but always works)
+        _artWebFinishLayout(graph);
+        return;
+    }
+    let layout = null;
+    try {
+        layout = new FA2Layout(graph, {
+            settings: {
+                ...fa2.inferSettings(graph),
+                barnesHutOptimize: true,
+                linLogMode: true,                      // clusters separate into islands
+                outboundAttractionDistribution: true,  // spread the hubs out
+                adjustSizes: true,                     // don't overlap node circles
+                gravity: 1.2, scalingRatio: 3, slowDown: 4,
+            },
+        });
+        layout.start();
+    } catch (e) {
+        console.warn('[Artist Web] worker layout unavailable — falling back to sync', e);
+        try { if (layout) layout.kill(); } catch (_) { /* ignore */ }
+        _artWebRunLayout(graph);
+        _artWebFinishLayout(graph);
+        return;
+    }
+    _artistWeb.fa2 = layout;
+    const statsEl = document.getElementById('artist-web-stats');
+    if (statsEl && statsEl.textContent.indexOf('· settling') === -1) statsEl.textContent += ' · settling…';
+    // Run time scales with graph size (a worker iterates as fast as it can; this is wall-clock).
+    const ms = Math.min(11000, 1600 + graph.order * 1.6);   // ~2x the settle budget — more iterations,
+                                                            // tighter islands (the pre-seed makes them pay off)
+    _artistWeb.fa2Timer = setTimeout(() => {
+        _artWebKillLiveLayout();
+        _artWebFinishLayout(graph);
+        if (statsEl) statsEl.textContent = statsEl.textContent.replace(' · settling…', '');
+        if (_artistWeb.sigma && _artistWeb.graph === graph) {
+            _artistWeb.sigma.getCamera().animatedReset({ duration: 500 });   // fit the settled web
+            // hideEdgesOnMove leaves the LAST frame of the animation edge-less (nothing re-renders
+            // after the camera stops) — force one refresh once the animation has landed.
+            setTimeout(() => {
+                if (_artistWeb.sigma && _artistWeb.graph === graph) _artistWeb.sigma.refresh();
+            }, 650);
+        }
+    }, ms);
+}
+
+function _artWebKillLiveLayout() {
+    if (_artistWeb.fa2Timer) { clearTimeout(_artistWeb.fa2Timer); _artistWeb.fa2Timer = null; }
+    if (_artistWeb.fa2) { try { _artistWeb.fa2.kill(); } catch (e) { /* ignore */ } _artistWeb.fa2 = null; }
+}
+
+// Post-layout bookkeeping: capture resting ("home") positions + scale interaction distances to the
+// settled coordinate range (FA2 output scale is unknown up front).
+function _artWebFinishLayout(graph) {
+    const home = {};
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    graph.forEachNode((k, a) => {
+        home[k] = { x: a.x, y: a.y };
+        if (a.x < minX) minX = a.x; if (a.x > maxX) maxX = a.x;
+        if (a.y < minY) minY = a.y; if (a.y > maxY) maxY = a.y;
+    });
+    const span = Math.max(maxX - minX, maxY - minY) || 1;
+    _artistWeb.home = home;
+    _artistWeb.spreadPush = span * 0.035;    // how far a selected node's neighbors fan out
+    _artistWeb.spreadRoot = null;
+    _artistWeb.spreadSet = null;
+}
+
+// ---- Lens A: GENRE — every artist, grouped by genre-anchor hubs (membership edges = layout only) --
+function _artWebBuildGenre(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const { color: colorOf, counts } = _webGenreColorMap(nodes);
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'genre') {
+            const members = counts[n.genre] || 1;
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 6 + Math.sqrt(members) * 1.5,
+                color: colorOf(n.genre), baseColor: colorOf(n.genre),
+                forceLabel: true, kind: 'genre', genre: n.genre,
+            });
+        } else {
+            const color = colorOf(n.cluster);
+            const star = stars.has(n.key);
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3,
+                color: color, baseColor: color,
+                kind: 'artist', genre: n.cluster, primaryGenre: n.primary_genre,
+                popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star, forceLabel: star,   // top artists are always-labeled landmarks
+            });
+            _artistWeb.index.push({ key: n.key, label: n.label });
+        }
+    });
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            const membership = e.kind === 'membership';
+            const base = graph.getNodeAttribute(e.source, 'baseColor') || WEB_GENRE_FALLBACK;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight,
+                size: membership ? 0.35 : _webEdgeSize(e.weight),
+                color: _webHexToRgba(base, _webEdgeAlpha(e.weight)),
+                baseColor: base,   // hex kept so the reducer can brighten it on focus
+                kind: e.kind,
+            });
+        }
+    });
+    const c = data.counts || {};
+    const simCount = edges.filter(e => e.kind === 'similarity').length;
+    const stats = `${c.artists ?? nodes.length} artists · ${c.genres ?? '?'} genres · ${simCount} similarity links`;
+    return { graph, colorOf, counts, stats };
+}
+
+// ---- Lens B: COMMUNITIES — the similarity-connected core, clustered by Louvain, named by hub artist -
+function _artWebBuildCommunity(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const simEdges = edges.filter(e => e.kind === 'similarity');
+    const artistByKey = {};
+    nodes.forEach(n => { if (n.kind === 'artist') artistByKey[n.key] = n; });
+    const stars = _webTopArtists(nodes.filter(n => n.kind === 'artist'), WEB_STAR_COUNT);
+
+    const graph = new Graph();
+    // Only artists with at least one similarity link — the discoverable "taste" core.
+    simEdges.forEach(e => [e.source, e.target].forEach(k => {
+        if (!graph.hasNode(k) && artistByKey[k]) {
+            const n = artistByKey[k];
+            const star = stars.has(k);
+            graph.addNode(k, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: star ? WEB_STAR_SIZE : 2 + Math.sqrt(n.popularity || 0) / 3, kind: 'artist',
+                primaryGenre: n.primary_genre, popularity: n.popularity || 0, thumb: n.thumb || null,
+                artistId: n.id != null ? n.id : null, source: n.source || null,
+                isStar: star,
+            });
+        }
+    }));
+    simEdges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            graph.addEdge(e.source, e.target, { weight: e.weight, kind: 'similarity', size: 0.7 });
+        }
+    });
+
+    // Louvain community detection on the similarity graph.
+    const louvain = window.graphologyLibrary && window.graphologyLibrary.communitiesLouvain;
+    let comm = {};
+    if (louvain) { try { comm = louvain(graph, { getEdgeWeight: 'weight' }); } catch (e) { comm = {}; } }
+
+    // Group members; name each community by its highest-degree (most central) artist.
+    const members = {};
+    graph.forEachNode(k => { const cid = (comm[k] != null ? comm[k] : 'x'); (members[cid] = members[cid] || []).push(k); });
+    const commIds = Object.keys(members).sort((a, b) => members[b].length - members[a].length);
+    const repOf = {}, colorByRep = {}, countsByRep = {};
+    commIds.forEach((cid, i) => {
+        let best = null, bestDeg = -1;
+        members[cid].forEach(k => { const d = graph.degree(k); if (d > bestDeg) { bestDeg = d; best = k; } });
+        let rep = best ? graph.getNodeAttribute(best, 'label') : ('Group ' + cid);
+        if (countsByRep[rep] != null) rep = rep + ' · ' + cid;   // guard rare rep-name collision
+        repOf[cid] = rep;
+        colorByRep[rep] = WEB_PALETTE[i % WEB_PALETTE.length];   // cycle palette; no community goes gray
+        countsByRep[rep] = members[cid].length;
+        if (best) graph.setNodeAttribute(best, '_rep', true);
+    });
+    graph.forEachNode(k => {
+        const cid = (comm[k] != null ? comm[k] : 'x');
+        const rep = repOf[cid];
+        const color = colorByRep[rep] || WEB_GENRE_FALLBACK;
+        const isRep = graph.getNodeAttribute(k, '_rep') === true;
+        const isStar = graph.getNodeAttribute(k, 'isStar') === true;
+        graph.mergeNodeAttributes(k, {
+            color, baseColor: color, genre: rep,
+            forceLabel: isRep || isStar,   // community leaders AND top artists are labeled landmarks
+            size: isRep ? Math.max(8, graph.getNodeAttribute(k, 'size')) : graph.getNodeAttribute(k, 'size'),
+        });
+        _artistWeb.index.push({ key: k, label: graph.getNodeAttribute(k, 'label') });
+    });
+    graph.forEachEdge((edge, attrs, s) => {
+        const base = graph.getNodeAttribute(s, 'baseColor') || WEB_GENRE_FALLBACK;
+        const w = attrs.weight || 1;
+        graph.mergeEdgeAttributes(edge, {
+            color: _webHexToRgba(base, _webEdgeAlpha(w)),
+            baseColor: base,
+            size: _webEdgeSize(w),
+        });
+    });
+
+    const stats = `${graph.order} connected artists · ${commIds.length} communities · ${graph.size} links`;
+    return { graph, colorOf: (rep) => colorByRep[rep] || WEB_GENRE_FALLBACK, counts: countsByRep, stats };
+}
+
+// ---- Lens C: DISCOVERY — owned artists (cool) + their unowned similar candidates (warm) ----------
+function _artWebBuildDiscovery(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    // Count each anchor's candidates up front — anchor size scales with its frontier, and only the
+    // biggest ~25 get an always-on label (the full frontier has ~300 anchors; labeling them all
+    // would wall the view with pills — the rest label on zoom/hover).
+    const anchorDeg = {};
+    edges.forEach(e => { anchorDeg[e.source] = (anchorDeg[e.source] || 0) + 1; });
+    const starAnchors = new Set(Object.keys(anchorDeg).sort((a, b) => anchorDeg[b] - anchorDeg[a]).slice(0, 25));
+
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'owned') {
+            const deg = anchorDeg[n.key] || 1;
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 5 + Math.sqrt(deg) * 0.9,
+                color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                forceLabel: starAnchors.has(n.key), kind: 'owned', genre: 'Your library',
+                artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+            });
+        } else {
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 3, color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                kind: 'discovery', genre: 'Discovery',
+                image_url: n.image_url || null, genresList: n.genres || null,
+                ids: n.ids || [], popularity: n.popularity || 0,
+            });
+        }
+        _artistWeb.index.push({ key: n.key, label: n.label });
+    });
+    let maxW = 1;
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            if (e.weight > maxW) maxW = e.weight;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight, size: _webEdgeSize(e.weight),
+                // Weight-scaled alpha (like the other lenses) — a fixed alpha washed out around
+                // dense anchors once the full frontier's ~4.4k edges rendered at once.
+                color: _webHexToRgba(WEB_DISCOVERY_COLOR, _webEdgeAlpha(e.weight)),
+                baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+            });
+        }
+    });
+    // Size each discovery candidate by its strongest similarity link (its best reason to check it out).
+    graph.forEachNode((k, a) => {
+        if (a.kind !== 'discovery') return;
+        let w = 1;
+        graph.forEachEdge(k, (e, ea) => { if ((ea.weight || 1) > w) w = ea.weight; });
+        graph.setNodeAttribute(k, 'size', 2.5 + Math.sqrt(w / maxW) * 5);
+    });
+    const c = data.counts || {};
+    const stats = `${c.owned ?? 0} of your artists · ${c.discovery ?? 0} to discover`;
+    return { graph, colorOf: () => WEB_DISCOVERY_COLOR, counts: {}, stats };
+}
+
+// Shared force layout — LinLog + outbound-attraction settles clusters into separated islands.
+function _artWebRunLayout(graph) {
+    const fa2 = window.graphologyLibrary && window.graphologyLibrary.layoutForceAtlas2;
+    if (!fa2) { console.warn('[Artist Web] forceAtlas2 unavailable — nodes stay at random positions'); return; }
+    fa2.assign(graph, {
+        iterations: 800,
+        settings: {
+            ...fa2.inferSettings(graph),
+            barnesHutOptimize: true,
+            linLogMode: true,                      // clusters separate into islands
+            outboundAttractionDistribution: true,  // spread the hubs out
+            adjustSizes: true,                     // don't overlap node circles
+            gravity: 1.2, scalingRatio: 3, slowDown: 4,
+        },
+    });
+}
+
+// Shared sigma mount + interaction wiring (used by both lenses).
+function _artWebMountSigma(host, graph) {
+    host.innerHTML = '';
+    host.style.background = WEB_CANVAS_BG;   // dark charcoal so the cluster colors glow
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = graph;
+    _artistWeb.sigma = new window.Sigma(graph, host, {
+        renderLabels: true,
+        labelRenderedSizeThreshold: 20,
+        labelRenderer: _webDrawLabel,
+        hideEdgesOnMove: true,   // edge cleanup: drop edges while panning/zooming for clarity + perf
+        hideLabelsOnMove: true,  // labels re-measure (measureText) per frame — drop them while moving too
+        labelGridCellSize: 150,  // sparser label grid => fewer simultaneous labels/measureText per frame
+        nodeReducer: (node, data) => _artWebNodeReducer(node, data),
+        edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
+    });
+    const sig = _artistWeb.sigma;
+    // Track the pointer over the canvas so the hover tooltip positions itself (sigma node events
+    // don't carry client coords reliably across versions). Bound once — the host element is static.
+    if (!_artistWeb._mouseBound) {
+        host.addEventListener('mousemove', (e) => {
+            _artistWeb._mouse = { x: e.clientX, y: e.clientY };
+            if (_artistWeb._hoverNode) _artWebShowTooltip(_artistWeb._hoverNode);
+        });
+        _artistWeb._mouseBound = true;
+    }
+    sig.on('enterNode', ({ node }) => _artWebHover(node));
+    sig.on('leaveNode', () => _artWebHover(null));
+    sig.on('clickNode', ({ node }) => _artWebClickNode(node));
+    sig.on('clickStage', () => {
+        if (_artistWeb.pathMode) { _artWebClearPath(); _artWebPathHint('Click an artist, then a second one, to trace how they connect.'); }
+        else _artWebClearSelection();
+    });
+}
+
+// ---- Node-spread effect: selecting a node fans its neighbors outward, then they settle back -------
+// Set the spread to a node's neighbors (skips huge hubs so the whole screen doesn't heave).
+function _artWebSetSpread(root, focusSet) {
+    const st = _artistWeb;
+    if (!st.cursorFX || !st.home) return;
+    const neighbors = new Set(focusSet);
+    neighbors.delete(root);
+    if (neighbors.size === 0) { _artWebClearSpread(); return; }
+    // Genre hubs have hundreds of members — that's fine, the whole cluster just blooms outward from
+    // its label. (Per-frame cost is the full render either way, so member count doesn't hurt perf.)
+    st.spreadRoot = root;
+    st.spreadSet = neighbors;
+    _artWebStartFX();
+}
+
+function _artWebClearSpread() {
+    const st = _artistWeb;
+    st.spreadRoot = null; st.spreadSet = null;
+    _artWebStartFX();   // loop eases any pushed nodes back home, then stops
+}
+
+function _artWebStartFX() {
+    if (!_artistWeb.fxRAF) _artistWeb.fxRAF = requestAnimationFrame(_artWebSpreadTick);
+}
+
+// Each frame: nodes in the spread set ease toward (home pushed away from the selected node); every
+// other node eases toward home. The loop runs only WHILE things are moving, so it's not continuous.
+function _artWebSpreadTick() {
+    const st = _artistWeb;
+    st.fxRAF = null;
+    if (!st.sigma || !st.cursorFX || !st.home || !st.graph) return;
+    const g = st.graph, home = st.home;
+    const set = st.spreadSet, root = st.spreadRoot;
+    const rootHome = root && home[root] ? home[root] : null;
+    const PUSH = st.spreadPush, EASE = 0.18;
+
+    // Animate only the pushed/displaced nodes, not all ~5k every frame. `spreadActive` accumulates
+    // any pushed node and drops it once it eases back home (and isn't currently pushed).
+    if (!st.spreadActive) st.spreadActive = new Set();
+    if (set) set.forEach(k => st.spreadActive.add(k));
+
+    let moving = false;
+    st.spreadActive.forEach(k => {
+        const h = home[k];
+        if (!h) { st.spreadActive.delete(k); return; }
+        const ax = g.getNodeAttribute(k, 'x'), ay = g.getNodeAttribute(k, 'y');
+        let tx = h.x, ty = h.y;
+        const pushed = set && rootHome && set.has(k);
+        if (pushed) {
+            const dx = h.x - rootHome.x, dy = h.y - rootHome.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.0001;
+            tx = h.x + (dx / dist) * PUSH;   // push each neighbor outward from the selected node
+            ty = h.y + (dy / dist) * PUSH;
+        }
+        const nx = ax + (tx - ax) * EASE;
+        const ny = ay + (ty - ay) * EASE;
+        if (Math.abs(nx - ax) > 0.0005 || Math.abs(ny - ay) > 0.0005) {
+            g.setNodeAttribute(k, 'x', nx);
+            g.setNodeAttribute(k, 'y', ny);
+            moving = true;
+        } else if (!pushed) {
+            // Reached home and not being pushed → snap exact + stop tracking it.
+            g.setNodeAttribute(k, 'x', tx);
+            g.setNodeAttribute(k, 'y', ty);
+            st.spreadActive.delete(k);
+        }
+    });
+    if (moving) { st.sigma.refresh(); st.fxRAF = requestAnimationFrame(_artWebSpreadTick); }
+}
+
+function closeArtistWeb() {
+    _artistWeb.gen++;   // invalidate any in-flight library/discovery fetch so it can't render into a closed Web
+    const container = document.getElementById('artist-web-container');
+    // Stamp _prevDisplay='none' so if another overlay (Artist Map) later runs its sibling-restore,
+    // it keeps this container hidden instead of falling back to '' and un-hiding a dead (sigma-killed)
+    // Web. Matters on the Explore-in-Map hand-off, where the Map's open skips recording _prevDisplay.
+    if (container) { container.style.display = 'none'; container._prevDisplay = 'none'; }
+    document.querySelectorAll('#discover-page > .discover-container > *').forEach(el => {
+        if (el.id !== 'artist-web-container' && el._prevDisplay !== undefined) el.style.display = el._prevDisplay;
+    });
+    _artWebKillLiveLayout();
+    if (_artistWeb.fxRAF) { cancelAnimationFrame(_artistWeb.fxRAF); _artistWeb.fxRAF = null; }
+    _artistWeb.spreadRoot = _artistWeb.spreadSet = _artistWeb.spreadActive = null;
+    if (_artistWeb.sigma) { _artistWeb.sigma.kill(); _artistWeb.sigma = null; }
+    _artistWeb.graph = null;   // so a late async re-select (expand-after-close) can't refresh a dead graph
+    if (_artistWeb.onKey) { document.removeEventListener('keydown', _artistWeb.onKey); _artistWeb.onKey = null; }
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+    const sb = document.getElementById('artweb-genre-sidebar');
+    if (sb) sb.style.display = 'none';
+    const legend = document.getElementById('artist-web-legend');
+    if (legend) legend.style.display = 'none';
+    _artistWeb._hoverNode = null;
+    const tt = document.getElementById('artist-web-tooltip');
+    if (tt) { tt.style.display = 'none'; tt._node = null; }
+    _artistWeb.pathMode = false;
+    _artistWeb.pathNodes = _artistWeb.pathPairs = _artistWeb.pathResult = _artistWeb.pathSource = _artistWeb.pathTarget = null;
+    const pathBtn = document.getElementById('artweb-path-btn');
+    if (pathBtn) pathBtn.classList.remove('active');
+    const hint = document.getElementById('artweb-path-hint');
+    if (hint) hint.style.display = 'none';
+    _artWebClosePanel();
+}
+
+// ---- Artist Web reducers: the single place UI state turns into per-frame styling -------------
+// Dimmed nodes fade to a DARK gray (not light — light + WebGL additive blending reads as white).
+// Dimmed edges are hidden outright: thousands of faint edges overlapping accumulate to a white haze.
+const _WEB_DIM_NODE = '#2b2b34';
+
+function _artWebNodeReducer(node, data) {
+    const st = _artistWeb;
+    // Resting fast-path: nothing highlighting/filtering → render base attrs as-is, no per-node
+    // clone. This is the common case and runs once per node (~5k) on EVERY refresh (hover, pan, etc).
+    if (!st.pathNodes && !st.genreFilter && !st.focusSet && !st.searchMatch) return data;
+    const res = Object.assign({}, data);
+    // Shortest-path mode takes priority: the chain lights up, everything else goes dark.
+    if (st.pathNodes) {
+        if (st.pathNodes.has(node)) {
+            res.color = data.baseColor || data.color;
+            res.zIndex = 3;
+            const isEnd = (node === st.pathSource || node === st.pathTarget);
+            res.forceLabel = isEnd || !!st.pathResult;   // label the whole chain once complete
+            if (isEnd) res.highlighted = true;
+        } else {
+            res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        }
+        return res;
+    }
+    // Persistent genre filter dims anything outside the chosen genres, regardless of focus/search.
+    if (st.genreFilter && !st.genreFilter.has(data.genre)) {
+        res.color = _WEB_DIM_NODE; res.label = ''; res.zIndex = 0;
+        return res;
+    }
+    const active = st.focusSet || st.searchMatch;   // focus (hover/select) wins over search
+    if (!active) return res;
+    const searching = !st.focusSet && !!st.searchMatch;   // search labels all its hits (usually few)
+    if (active.has(node)) {
+        res.color = data.baseColor || data.color;
+        res.zIndex = 2;
+        // Only label the hovered/selected node itself (or search hits) — labeling every neighbor
+        // floods the view with white label pills on big genre clusters.
+        res.forceLabel = searching || node === st.focusRoot;
+        if (node === st.focusRoot) res.highlighted = true;   // sigma draws a halo on the root
+    } else {
+        res.color = _WEB_DIM_NODE;
+        res.label = '';
+        res.zIndex = 0;
+    }
+    return res;
+}
+
+function _artWebEdgeReducer(edge, data) {
+    const st = _artistWeb;
+    // Membership edges are a layout scaffold only. Drawing them starbursts big hubs (1000+ faint
+    // spokes overlapping accumulate to solid white), so never render them — clustering is already
+    // conveyed by node position + color. Only similarity edges are drawn.
+    if (data.kind === 'membership') { const r = Object.assign({}, data); r.hidden = true; return r; }
+    // Resting fast-path: no path/focus/search/genre-filter/declutter active → the ~35k similarity
+    // edges render as-is with NO clone and NO source/target lookups. This is the biggest per-refresh
+    // allocation sink; refresh fires on every hover, click, search keystroke, and spread frame.
+    if (!st.pathNodes && !st.focusSet && !st.searchMatch && !st.genreFilter && !st.edgeDeclutter) {
+        return data;
+    }
+    const res = Object.assign({}, data);
+    // Declutter (resting view only): hide the weaker half of SIMILARITY edges. Scoped to that kind —
+    // the threshold is computed from similarity weights, and applying it to the Discovery lens's
+    // (mostly weight-1) edges hid essentially all of them, leaving candidates as floating dots.
+    if (st.edgeDeclutter && data.kind === 'similarity' && !st.pathNodes && !st.focusSet && !st.searchMatch
+        && (data.weight || 1) < st.edgeThreshold) {
+        res.hidden = true; return res;
+    }
+    const g = _artistWeb.graph;
+    // Shortest-path mode: only the consecutive edges along the chain show (bright + thick), rest hidden.
+    if (st.pathNodes) {
+        if (g && st.pathPairs && st.pathPairs.size) {
+            const s = g.source(edge), t = g.target(edge);
+            const key = s < t ? s + '|' + t : t + '|' + s;
+            if (st.pathPairs.has(key)) {
+                res.zIndex = 3;
+                res.color = _webHexToRgba(data.baseColor || '#ffffff', 0.95);
+                res.size = (data.size || 0.7) * 2.4;
+                return res;
+            }
+        }
+        res.hidden = true;
+        return res;
+    }
+    if (st.genreFilter && g) {
+        const sg = g.getNodeAttribute(g.source(edge), 'genre');
+        const tg = g.getNodeAttribute(g.target(edge), 'genre');
+        if (!(st.genreFilter.has(sg) && st.genreFilter.has(tg))) { res.hidden = true; return res; }
+    }
+    const active = st.focusSet || st.searchMatch;
+    if (active && g) {
+        const s = g.source(edge), t = g.target(edge);
+        // Focus (hover/select): show only edges fully inside the set → clean neighborhood.
+        // Search: show any edge touching a match.
+        const show = st.focusSet ? (active.has(s) && active.has(t)) : (active.has(s) || active.has(t));
+        if (show) {
+            // Brighten + thicken the focused neighborhood's links so relationships read clearly.
+            res.zIndex = 1;
+            res.color = _webHexToRgba(data.baseColor || '#888888', 0.75);
+            res.size = (data.size || 0.7) * 1.7;
+        } else {
+            res.hidden = true;   // hide non-focus edges (faint ones accumulate to a white haze)
+        }
+    }
+    return res;
+}
+
+// ---- Artist Web search: client-side over loaded artist nodes (instant), mirrors Artist Map UX --
+function artWebSearch(query) {
+    const results = document.getElementById('artist-web-search-results');
+    if (!results) return;
+    const q = (query || '').trim().toLowerCase();
+
+    if (q.length < 2) {
+        results.style.display = 'none';
+        results.innerHTML = '';
+        _artistWeb.searchMatch = null;
+        if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+        return;
+    }
+
+    const hits = _artistWeb.index.filter(n => n.label.toLowerCase().includes(q));
+    // Dim everything that isn't a hit.
+    _artistWeb.searchMatch = new Set(hits.map(n => n.key));
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+
+    results.style.display = 'block';
+    if (!hits.length) {
+        results.innerHTML = '<div class="artist-map-search-item artist-map-search-empty">No artists found</div>';
+        return;
+    }
+    results.innerHTML = hits.slice(0, 8).map(n =>
+        `<div class="artist-map-search-item" onclick="artWebFocusNode('${escapeForInlineJs(n.key)}')">
+            <span class="artist-map-search-type similar">○</span>
+            ${escapeHtml(n.label)}
+            <span class="artist-map-search-go">Focus &rarr;</span>
+        </div>`
+    ).join('');
+}
+
+// Enter key → jump to the first match.
+function artWebSearchEnter() {
+    if (_artistWeb.searchMatch && _artistWeb.searchMatch.size) {
+        artWebFocusNode(_artistWeb.searchMatch.values().next().value);
+    }
+}
+
+// Center the camera on a node and pulse it (also closes the dropdown).
+function artWebFocusNode(key) {
+    const sig = _artistWeb.sigma, graph = _artistWeb.graph;
+    if (!sig || !graph || !graph.hasNode(key)) return;
+    const results = document.getElementById('artist-web-search-results');
+    if (results) { results.style.display = 'none'; results.innerHTML = ''; }
+
+    // Isolate this node as the single search match so it stands out.
+    _artistWeb.searchMatch = new Set([key]);
+    sig.refresh();
+
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) {
+        sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 });
+        _artWebRefreshAfter(600);
+    }
+}
+
+// ---- Artist Web camera controls ---------------------------------------------------------------
+// hideEdgesOnMove leaves the final frame of any camera ANIMATION edge-less (the last render happens
+// while "moving", and nothing re-renders after the animation stops). Every animated camera move
+// schedules one trailing refresh via this helper.
+function _artWebRefreshAfter(ms) {
+    setTimeout(() => { if (_artistWeb.sigma) _artistWeb.sigma.refresh(); }, ms);
+}
+
+function artWebZoom(factor) {
+    if (!_artistWeb.sigma) return;
+    const cam = _artistWeb.sigma.getCamera();
+    cam.animate({ ratio: cam.ratio * factor }, { duration: 250 });
+    _artWebRefreshAfter(350);
+}
+
+function artWebFitToView() {
+    if (!_artistWeb.sigma) return;
+    _artistWeb.sigma.getCamera().animatedReset({ duration: 400 });
+    _artWebRefreshAfter(500);
+    // Clear any search focus so the whole web is visible again.
+    const input = document.getElementById('artist-web-search');
+    if (input) input.value = '';
+    _artistWeb.searchMatch = null;
+    _artistWeb.sigma.refresh();
+}
+
+// ---- Artist Web hover + selection: highlight a node and its neighbors -------------------------
+// Resolved artist-thumb cache for the hover tooltip, keyed by library artist id. Value: a URL
+// string, '' (tried, none), or null (in-flight) — any non-undefined means "don't refetch".
+const _artWebThumbCache = {};
+let _artWebTipThumbTimer = null;
+
+// Resolve one owned artist's browser-loadable thumb (same endpoint the side-panel avatar uses),
+// cache it, and swap it into the tooltip IF we're still hovering that exact node.
+function _artWebResolveTipThumb(nodeKey, artistId) {
+    _artWebThumbCache[artistId] = null;   // in-flight
+    fetch(`/api/library/artist/${encodeURIComponent(artistId)}/thumb`)
+        .then(r => r.json())
+        .then(d => {
+            const url = (d && d.success && d.image_url) ? d.image_url : '';
+            _artWebThumbCache[artistId] = url;
+            const tip = document.getElementById('artist-web-tooltip');
+            if (url && tip && tip._node === nodeKey && tip.style.display !== 'none') {
+                const slot = tip.querySelector('.artmap-tip-img');
+                if (slot) slot.outerHTML =
+                    `<img class="artmap-tip-img" src="${escapeHtml(url)}" alt="" onerror="this.style.display='none'">`;
+            }
+        })
+        .catch(() => { _artWebThumbCache[artistId] = ''; });
+}
+
+// Hover tooltip — identify any node without clicking (name + genre + connection count). Rebuilt only
+// when the hovered node changes; a plain mousemove just repositions it. Positioned at the pointer.
+function _artWebShowTooltip(nodeKey) {
+    const tip = document.getElementById('artist-web-tooltip');
+    if (!tip) return;
+    const g = _artistWeb.graph;
+    if (!nodeKey || !g || !g.hasNode(nodeKey)) { tip.style.display = 'none'; tip._node = null; return; }
+    if (tip._node !== nodeKey) {
+        tip._node = nodeKey;
+        const a = g.getNodeAttributes(nodeKey);
+        const kind = a.kind;
+        // True connection count: similarity links only (skip the membership scaffold edge). Genre
+        // hubs have no similarity edges — their degree IS the member count.
+        let conn = 0;
+        if (kind === 'genre') { conn = g.degree(nodeKey); }
+        else { g.forEachEdge(nodeKey, (e, attr) => { if (attr.kind === 'similarity') conn++; }); }
+        const noun = kind === 'genre' ? 'artist' : 'connection';
+        const badge = kind === 'discovery' ? '<span class="artmap-tip-badge">To discover</span>'
+                    : kind === 'genre' ? '<span class="artmap-tip-badge">Genre</span>' : '';
+        // Image: discovery candidates ship a full image_url. Owned artists carry a Plex-RELATIVE
+        // thumb that won't load as-is (like the side panel's avatar), so resolve it lazily via the
+        // same /thumb endpoint and cache it — only for artists you actually pause on (cheap; the
+        // endpoint does a DB write per call so eager-resolving all ~5k would take minutes).
+        const cached = (a.artistId != null) ? _artWebThumbCache[a.artistId] : undefined;
+        const imgSrc = (kind === 'discovery') ? a.image_url : (cached || null);
+        const img = imgSrc
+            ? `<img class="artmap-tip-img" src="${escapeHtml(imgSrc)}" alt="" onerror="this.style.display='none'">`
+            : (kind === 'genre' ? '' : '<div class="artmap-tip-img artmap-tip-img-fallback">&#9835;</div>');
+        const gen = a.primaryGenre || '';
+        const genreHTML = gen ? `<div class="artmap-tip-genres"><span>${escapeHtml(gen)}</span></div>` : '';
+        const connHTML = conn ? `<div class="artmap-tip-conn">${conn} ${noun}${conn === 1 ? '' : 's'}</div>` : '';
+        tip.innerHTML = `<div class="artmap-tip-row">${img}<div class="artmap-tip-info">` +
+            `<div class="artmap-tip-name">${escapeHtml(a.label || '')}</div>${badge}${connHTML}${genreHTML}</div></div>`;
+        tip.style.display = 'block';
+
+        // Kick off a debounced lazy thumb resolve for an owned artist we haven't cached yet — the
+        // ~140ms delay means a fast sweep across nodes doesn't fetch for every one you graze past.
+        if (!imgSrc && kind !== 'genre' && kind !== 'discovery'
+            && a.artistId != null && _artWebThumbCache[a.artistId] === undefined) {
+            clearTimeout(_artWebTipThumbTimer);
+            const aid = a.artistId;
+            _artWebTipThumbTimer = setTimeout(() => {
+                if (tip._node === nodeKey && _artWebThumbCache[aid] === undefined) _artWebResolveTipThumb(nodeKey, aid);
+            }, 140);
+        }
+    }
+    const m = _artistWeb._mouse;
+    if (m) {
+        tip.style.left = Math.min(m.x + 16, window.innerWidth - tip.offsetWidth - 10) + 'px';
+        tip.style.top = Math.min(m.y - 10, window.innerHeight - tip.offsetHeight - 10) + 'px';
+    }
+}
+
+function _artWebHover(node) {
+    const st = _artistWeb;
+    if (!st.sigma) return;
+    st._hoverNode = node;
+    _artWebShowTooltip(node);                // tooltip shows even in path mode (helps pick the 2 nodes)
+    if (st.pathMode) return;                 // ...but no hover-dim while tracing a path
+    if (node) {
+        const set = new Set([node]);
+        st.graph.forEachNeighbor(node, nb => set.add(nb));
+        st.focusSet = set;
+        st.focusRoot = node;
+    } else {
+        // Hover-out restores the click-selection's highlight (if any), else clears.
+        st.focusSet = st.selectedFocus || null;
+        st.focusRoot = st.selectedKey || null;
+    }
+    st.sigma.refresh();
+}
+
+function _artWebClickNode(node) {
+    const st = _artistWeb;
+    if (!st.graph || !st.graph.hasNode(node)) return;
+    if (st.pathMode) { _artWebPathClick(node); return; }
+    const set = new Set([node]);
+    st.graph.forEachNeighbor(node, nb => set.add(nb));
+    st.selectedKey = node; st.selectedFocus = set;
+    st.focusSet = set; st.focusRoot = node;
+    st.searchMatch = null;                      // a click supersedes a search dim
+    _artWebSetSpread(node, set);                // fan the neighbors outward
+    st.sigma.refresh();
+    const kind = st.graph.getNodeAttribute(node, 'kind');
+    if (kind === 'genre') _artWebShowGenre(node);
+    else if (kind === 'discovery') _artWebShowDiscovery(node);
+    else _artWebShowArtist(node);
+}
+
+function _artWebClearSelection() {
+    const st = _artistWeb;
+    st.selectedKey = st.selectedFocus = st.focusSet = st.focusRoot = null;
+    _artWebClearSpread();               // let the fanned-out neighbors settle back home
+    if (st.sigma) st.sigma.refresh();
+    _artWebClosePanel();
+}
+
+// Hand off to the Artist Map explorer. The Web is a fixed z-index:100 overlay that sits ON TOP of
+// the Map (later in the DOM), so we must close it first or the Map opens invisibly underneath.
+function artWebExploreInMap(name) {
+    closeArtistWeb();
+    if (typeof artMapExploreArtist === 'function') artMapExploreArtist(name);
+}
+
+// Focus the camera on an artist and open its card (used by the genre panel's member list).
+function _artWebGoToArtist(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph.hasNode(key)) return;
+    _artWebClickNode(key);
+    const disp = sig.getNodeDisplayData(key);
+    if (disp) { sig.getCamera().animate({ x: disp.x, y: disp.y, ratio: 0.15 }, { duration: 500 }); _artWebRefreshAfter(600); }
+}
+
+// ---- Artist Web shortest path: click two artists, trace how they connect via similarity ---------
+// Pathfinding runs on a SIMILARITY-only graph (not the displayed one) so a path means "sounds like ->
+// sounds like", never "both are tagged Rock" (which membership-to-hub edges would allow).
+function _artWebSimGraph() {
+    if (_artistWeb.simGraph) return _artistWeb.simGraph;
+    const Graph = window.graphology && (window.graphology.Graph || window.graphology);
+    const data = _artistWeb.data;
+    if (!Graph || !data) return null;
+    // UNDIRECTED: similarity pairs are stored once (sorted), so a directed graph would miss reverse
+    // traversals and report "no connection" for most pairs.
+    const g = new Graph({ type: 'undirected' });
+    (data.edges || []).forEach(e => {
+        if (e.kind !== 'similarity') return;
+        if (!g.hasNode(e.source)) g.addNode(e.source);
+        if (!g.hasNode(e.target)) g.addNode(e.target);
+        if (!g.hasEdge(e.source, e.target)) g.addEdge(e.source, e.target, { weight: e.weight || 1 });
+    });
+    _artistWeb.simGraph = g;
+    return g;
+}
+
+function artWebTogglePathMode() {
+    const st = _artistWeb;
+    if (st.pathMode) { _artWebExitPath(); return; }
+    st.pathMode = true;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.add('active');
+    _artWebClearSelection();
+    _artWebClearPath();
+    _artWebPathHint('Click an artist, then a second one, to trace how they connect.');
+}
+
+function _artWebPathClick(node) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(node)) return;
+    if (g.getNodeAttribute(node, 'kind') === 'genre') { _artWebPathHint('Pick artists, not genre hubs.'); return; }
+    const label = g.getNodeAttribute(node, 'label') || node;
+
+    if (!st.pathSource || st.pathResult) {
+        // (Re)start from this node.
+        st.pathSource = node; st.pathTarget = null; st.pathResult = null;
+        st.pathNodes = new Set([node]); st.pathPairs = new Set();
+        st.searchMatch = st.focusSet = st.focusRoot = null;
+        _artWebClosePanel();
+        st.sigma.refresh();
+        _artWebPathHint(`Start: <b>${escapeHtml(label)}</b> — now click a second artist.`);
+        return;
+    }
+    if (node === st.pathSource) return;
+    const path = _artWebComputePath(st.pathSource, node);
+    if (!path || path.length < 2) {
+        _artWebPathHint(`No similarity path between <b>${escapeHtml(g.getNodeAttribute(st.pathSource, 'label'))}</b> and <b>${escapeHtml(label)}</b>.`);
+        return;
+    }
+    st.pathTarget = node;
+    st.pathResult = path;
+    st.pathNodes = new Set(path);
+    st.pathPairs = new Set();
+    for (let i = 0; i + 1 < path.length; i++) {
+        const a = path[i], b = path[i + 1];
+        st.pathPairs.add(a < b ? a + '|' + b : b + '|' + a);
+    }
+    st.sigma.refresh();
+    _artWebShowPathPanel(path);
+    _artWebHidePathHint();
+}
+
+function _artWebComputePath(a, b) {
+    const sp = window.graphologyLibrary && window.graphologyLibrary.shortestPath;
+    const g = _artWebSimGraph();
+    if (!sp || !sp.bidirectional || !g || !g.hasNode(a) || !g.hasNode(b)) return null;
+    try { return sp.bidirectional(g, a, b); } catch (e) { return null; }
+}
+
+function _artWebClearPath() {
+    const st = _artistWeb;
+    st.pathSource = st.pathTarget = st.pathResult = st.pathNodes = st.pathPairs = null;
+    if (st.sigma) st.sigma.refresh();
+}
+
+function _artWebExitPath() {
+    _artistWeb.pathMode = false;
+    const btn = document.getElementById('artweb-path-btn');
+    if (btn) btn.classList.remove('active');
+    _artWebHidePathHint();
+    _artWebClosePanel();
+    _artWebClearPath();
+}
+
+function _artWebShowPathPanel(path) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const hops = path.length - 1;
+    const between = path.length - 2;
+    const rows = path.map((k, i) => {
+        const label = g.getNodeAttribute(k, 'label') || k;
+        const color = g.getNodeAttribute(k, 'baseColor') || '#1db954';
+        const tag = i === 0 ? 'start' : (i === path.length - 1 ? 'end' : '');
+        return `<div onclick="_artWebCameraTo('${escapeForInlineJs(k)}')" style="display:flex;align-items:center;gap:10px;padding:7px 8px;border-radius:9px;cursor:pointer;" onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+            <span style="width:11px;height:11px;border-radius:50%;flex:none;background:${color};box-shadow:0 0 0 ${tag ? '2px rgba(255,255,255,0.5)' : '0'};"></span>
+            <span style="flex:1;min-width:0;font-size:13px;font-weight:${tag ? '800' : '600'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(label)}</span>
+            ${tag ? `<span style="font-size:9px;letter-spacing:0.08em;text-transform:uppercase;color:rgba(255,255,255,0.4);">${tag}</span>` : ''}
+        </div>${i < path.length - 1 ? '<div style="margin-left:13px;height:10px;border-left:2px solid rgba(255,255,255,0.12);"></div>' : ''}`;
+    }).join('');
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebExitPath()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Done</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Connection path</div>
+        <div style="font-size:20px;font-weight:800;margin:3px 0 2px;">${hops} hop${hops === 1 ? '' : 's'} apart</div>
+        <div style="font-size:11.5px;color:rgba(255,255,255,0.5);margin-bottom:14px;">${between === 0 ? 'directly similar' : `via ${between} artist${between === 1 ? '' : 's'} in between`}</div>
+        ${rows}`;
+    p.style.display = 'flex';
+}
+
+// Pan/zoom the camera to a node WITHOUT triggering a selection (used by path + genre member lists).
+function _artWebCameraTo(key) {
+    const sig = _artistWeb.sigma;
+    if (!sig || !_artistWeb.graph || !_artistWeb.graph.hasNode(key)) return;
+    const d = sig.getNodeDisplayData(key);
+    if (d) { sig.getCamera().animate({ x: d.x, y: d.y, ratio: 0.12 }, { duration: 500 }); _artWebRefreshAfter(600); }
+}
+
+function _artWebPathHint(html) {
+    let el = document.getElementById('artweb-path-hint');
+    if (!el) {
+        const container = document.getElementById('artist-web-container');
+        if (!container) return;
+        el = document.createElement('div');
+        el.id = 'artweb-path-hint';
+        el.style.cssText = 'position:absolute;top:70px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:8px 16px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:none;';
+        container.appendChild(el);
+    }
+    el.innerHTML = html;
+    el.style.display = 'block';
+}
+
+function _artWebHidePathHint() {
+    const el = document.getElementById('artweb-path-hint');
+    if (el) el.style.display = 'none';
+}
+
+// One-time first-run hint (a self-dismissing pill), so a cold user knows where to start.
+function _artWebMaybeFirstRunHint() {
+    try {
+        if (localStorage.getItem('artweb_seen_hint')) return;
+        localStorage.setItem('artweb_seen_hint', '1');
+    } catch (e) { return; }
+    const container = document.getElementById('artist-web-container');
+    if (!container) return;
+    let el = document.getElementById('artweb-firstrun-hint');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'artweb-firstrun-hint';
+        el.style.cssText = 'position:absolute;bottom:20px;left:50%;transform:translateX(-50%);z-index:25;'
+            + 'background:rgba(20,18,26,0.94);border:1px solid rgba(255,255,255,0.12);border-radius:999px;'
+            + 'padding:9px 18px;font-size:12.5px;color:rgba(255,255,255,0.88);box-shadow:0 8px 24px rgba(0,0,0,0.5);'
+            + 'transition:opacity .4s ease;';
+        container.appendChild(el);
+    }
+    el.innerHTML = 'Hover to identify · click an artist to explore · <b>?</b> for the guide';
+    el.style.display = 'block'; el.style.opacity = '1';
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => { el.style.display = 'none'; }, 400); }, 8000);
+}
+
+// Guide modal — explains the lenses, colors, and tools (reuses the Artist Map shortcuts-modal styling).
+function artWebShowHelp() {
+    const existing = document.getElementById('artweb-help-overlay');
+    if (existing) { existing.remove(); return; }
+    const overlay = document.createElement('div');
+    overlay.id = 'artweb-help-overlay';
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '10002';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `
+        <div class="artmap-shortcuts-modal artweb-help-modal">
+            <div class="artmap-shortcuts-header">
+                <h3>Artist Web — Guide</h3>
+                <button class="watch-all-close" onclick="document.getElementById('artweb-help-overlay').remove()">&times;</button>
+            </div>
+            <div class="artweb-help-body">
+                <div class="artweb-help-section">
+                    <h4>Three lenses</h4>
+                    <p><b>Genre</b> — your artists grouped by genre. <b>Communities</b> — clusters found from who's
+                       actually similar to whom, named by each cluster's hub artist. <b>Discovery</b> — your library
+                       (blue) wired to unowned similar artists (amber) you could add.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Explore</h4>
+                    <p><b>Hover</b> to identify a node · <b>click</b> an artist for details + play. On Discovery,
+                       click a candidate to add it to your watchlist, or an owned node to grow its frontier.</p>
+                </div>
+                <div class="artweb-help-section">
+                    <h4>Tools</h4>
+                    <p><b>Path</b> — click two artists to trace how they connect · <b>Size by</b> Popular / Links /
+                       Influence · <b>Edges</b> — strong connections only · <b>Filter</b> — by genre. The
+                       <b>legend</b> (bottom-left) decodes the colors.</p>
+                </div>
+                <div class="artmap-shortcuts-grid">
+                    <div class="artmap-shortcut"><kbd>S</kbd><span>Focus search</span></div>
+                    <div class="artmap-shortcut"><kbd>F</kbd> / <kbd>0</kbd><span>Fit to view</span></div>
+                    <div class="artmap-shortcut"><kbd>+</kbd> / <kbd>-</kbd><span>Zoom in / out</span></div>
+                    <div class="artmap-shortcut"><kbd>Esc</kbd><span>Back / close</span></div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+// ---- Artist Web side panel (mirrors the Artist Map card design/interactions) -------------------
+function _artWebEnsurePanel() {
+    let p = document.getElementById('artweb-panel');
+    if (p) return p;
+    const container = document.getElementById('artist-web-container');
+    if (!container) return null;
+    // NOTE: do NOT set container.style.position — .artist-map-container is `position:fixed; inset:0`
+    // in CSS, which already anchors this absolute panel. An inline `relative` would clobber the CSS
+    // `fixed`, collapse the fullscreen overlay, and displace the sigma canvas (clicks freeze).
+    p = document.createElement('div');
+    p.id = 'artweb-panel';
+    p.style.cssText = 'position:absolute;top:66px;right:14px;width:300px;max-height:calc(100% - 88px);'
+        + 'background:rgba(20,18,26,0.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);'
+        + 'border:1px solid rgba(255,255,255,0.1);border-radius:16px;display:none;flex-direction:column;'
+        + 'overflow:hidden;z-index:20;box-shadow:0 14px 44px rgba(0,0,0,0.55);';
+    p.innerHTML = '<div id="artweb-panel-body" style="flex:1;overflow-y:auto;padding:16px;-webkit-overflow-scrolling:touch;"></div>';
+    container.appendChild(p);
+    return p;
+}
+
+function _artWebClosePanel() {
+    const p = document.getElementById('artweb-panel');
+    if (p) p.style.display = 'none';
+    _artWebStopPreview();   // panel gone -> its preview stops (single choke point: all closes route here)
+}
+
+// ---- 30s Deezer preview playback (discovery candidates): hear it before you add it -------------
+function _artWebStopPreview() {
+    const st = _artistWeb;
+    if (st.previewAudio) {
+        try { st.previewAudio.pause(); } catch (e) { /* ignore */ }
+        st.previewAudio = null;
+    }
+    st.previewKey = null;
+    const btn = document.getElementById('artweb-preview-btn');
+    if (btn) { btn.textContent = '▶ Preview top track'; btn.disabled = false; }
+}
+
+async function artWebTogglePreview(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key)) return;
+    if (st.previewKey === key) { _artWebStopPreview(); return; }   // same node -> toggle off
+    _artWebStopPreview();
+    const pairs = g.getNodeAttribute(key, 'ids') || [];
+    const dz = pairs.find(p => p && p[0] === 'deezer');
+    const btn = document.getElementById('artweb-preview-btn');
+    if (!dz) { if (btn) btn.textContent = 'No preview available'; return; }
+    if (btn) { btn.textContent = 'Loading preview…'; btn.disabled = true; }
+    const myGen = st.gen;   // if the Web is closed/reopened mid-fetch, don't start orphaned audio
+    try {
+        const r = await fetch(`/api/graph/discovery/preview/${encodeURIComponent(dz[1])}`);
+        const d = await r.json();
+        if (st.gen !== myGen) return;
+        if (!d.success || !d.preview_url) throw new Error(d.reason || 'no preview');
+        // Pause the main player so the preview doesn't talk over it.
+        if (typeof audioPlayer !== 'undefined' && audioPlayer && !audioPlayer.paused) audioPlayer.pause();
+        const audio = new Audio(d.preview_url);
+        audio.volume = 0.9;
+        audio.onended = () => { if (st.previewKey === key) _artWebStopPreview(); };
+        await audio.play();
+        if (st.gen !== myGen) { try { audio.pause(); } catch (e) {} return; }   // closed during play()
+        st.previewAudio = audio;
+        st.previewKey = key;
+        if (btn) { btn.textContent = `⏸ ${d.track || 'Playing preview'}`; btn.disabled = false; }
+    } catch (e) {
+        _artWebStopPreview();
+        if (btn) { btn.textContent = 'Preview unavailable'; btn.disabled = false; }
+    }
+}
+
+// "Play radio" from an owned node — hands off to the artist-detail page's radio machinery
+// (startArtistRadioById, the shared parameterized core). Audio starts under the graph overlay.
+function artWebPlayArtist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    if (a.artistId == null) return;
+    _artWebStopPreview();
+    if (typeof startArtistRadioById === 'function') startArtistRadioById(a.artistId, a.label || '');
+    else if (typeof showToast === 'function') showToast('Player not available', 'error');
+}
+
+function _artWebShowArtist(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = a.baseColor || '#1db954';
+    const conn = g.degree(node);
+    const pop = Math.max(0, Math.min(100, Math.round(a.popularity || 0)));
+    // These are all owned library artists, so the detail page is the library route:
+    // /artist-detail/library/<db id>. (a.source is the server name e.g. 'plex' — NOT a valid
+    // detail source, which is what produced the broken /artist-detail/plex/... link.)
+    const detailPath = (a.artistId != null && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(a.artistId, 'library') : null;
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div id="artweb-avatar" style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                <span style="font-size:34px;opacity:0.5;">&#9835;</span>
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            ${a.primaryGenre ? `<div style="font-size:11px;color:${color};margin-top:3px;">${escapeHtml(a.primaryGenre)}</div>` : ''}
+        </div>
+        <div style="display:flex;gap:8px;margin-top:16px;">
+            ${_miniStat('Popularity', pop, 270)}
+            ${_miniStat('Connections', conn)}
+        </div>
+        <div style="margin-top:8px;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${pop}%;background:${color};"></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${a.artistId != null ? `<button onclick="artWebPlayArtist('${escapeForInlineJs(node)}')" style="background:#1db954;border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">&#9654; Play radio</button>` : ''}
+            ${_artistWeb.lens === 'discovery' ? `<button id="artweb-expand-btn" onclick="artWebExpandNode('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">${a.expanded ? 'Expanded ✓' : 'Expand connections ✦'}</button>` : ''}
+            <button onclick="artWebExploreInMap('${escapeForInlineJs(a.label)}')" style="background:${_artistWeb.lens === 'discovery' ? 'rgba(255,255,255,0.06)' : color};border:${_artistWeb.lens === 'discovery' ? '1px solid rgba(255,255,255,0.12)' : 'none'};color:${_artistWeb.lens === 'discovery' ? '#fff' : '#0b0b0f'};border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">Explore in Artist Map &rarr;</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
+        </div>`;
+    p.style.display = 'flex';
+
+    // Resolve the artist's OWN thumb by library id (normalized lazily server-side). The old call —
+    // /api/artist/<library-db-id>/image — sent the library row id to external providers as if it
+    // were THEIR id, so Deezer/iTunes returned whichever artist owns that number: wrong photo,
+    // essentially always. Guarded by selectedKey so a fast re-click can't drop in a stale image.
+    if (a.artistId != null) {
+        const forNode = node;
+        fetch(`/api/library/artist/${encodeURIComponent(a.artistId)}/thumb`)
+            .then(r => r.json())
+            .then(d => {
+                if (!d || !d.success || !d.image_url) return;
+                if (_artistWeb.selectedKey !== forNode) return;   // selection moved on
+                const el = document.getElementById('artweb-avatar');
+                if (el) el.innerHTML = `<img src="${escapeHtml(d.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">`;
+            })
+            .catch(() => {});
+    }
+}
+
+function _artWebShowGenre(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const genre = g.getNodeAttribute(node, 'genre') || 'Genre';
+    const color = g.getNodeAttribute(node, 'baseColor') || '#1db954';
+    const members = [];
+    g.forEachNeighbor(node, (nb, attrs) => { if (attrs.kind === 'artist') members.push({ key: nb, label: attrs.label, pop: attrs.popularity || 0 }); });
+    members.sort((x, y) => y.pop - x.pop);
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Genre</div>
+        <div style="font-size:20px;font-weight:800;color:${color};margin-top:2px;">${escapeHtml(genre)}</div>
+        <div style="font-size:12px;color:rgba(255,255,255,0.55);margin-top:6px;">${members.length} artist${members.length === 1 ? '' : 's'} in your library</div>
+        <div style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:16px 2px 8px;">Top artists</div>
+        ${members.slice(0, 30).map((m, i) => `
+            <div onclick="_artWebGoToArtist('${escapeForInlineJs(m.key)}')" style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:9px;cursor:pointer;"
+                 onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='transparent'">
+                <span style="width:18px;text-align:center;font-size:11px;font-weight:700;color:rgba(255,255,255,0.35);">${i + 1}</span>
+                <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.label)}</span>
+            </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
+    p.style.display = 'flex';
+}
+
+// ---- Discovery lens: candidate card with "Add to watchlist" ------------------------------------
+// Deliberately NO expand button here: similar_artists only has rows for artists whose similars
+// SoulSync fetched (owned/watchlist), so expanding an unowned candidate always returns empty
+// (validated 0/176 on real data). The trail opens up after the candidate is watchlisted + scanned.
+function _artWebShowDiscovery(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = WEB_DISCOVERY_COLOR;
+    let genres = a.genresList;
+    if (typeof genres === 'string') { try { genres = JSON.parse(genres); } catch (e) { genres = [genres]; } }
+    genres = Array.isArray(genres) ? genres.slice(0, 5) : [];
+    // Unowned artists still get a detail page: /artist-detail/<source>/<external id> synthesizes
+    // name + image + discography from the source (same pattern as the discover recommendation cards).
+    // ids pairs are ordered spotify > deezer > itunes; the first is the best detail source.
+    const pair = (a.ids || [])[0];
+    const detailPath = (pair && typeof buildArtistDetailPath === 'function')
+        ? buildArtistDetailPath(pair[1], pair[0]) : null;
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${a.image_url ? `<img src="${escapeHtml(a.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">` : '<span style="font-size:34px;opacity:0.5;">&#9835;</span>'}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            <div style="display:inline-block;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:${color};border:1px solid ${_webHexToRgba(color, 0.5)};border-radius:999px;padding:2px 9px;margin-top:6px;">Not in your library</div>
+        </div>
+        ${genres.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;">
+            ${genres.map(gname => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:${_webHexToRgba(color, 0.16)};border:1px solid ${_webHexToRgba(color, 0.3)};color:#ffd9a3;">${escapeHtml(String(gname))}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            ${(a.ids || []).some(pr => pr && pr[0] === 'deezer') ? `<button id="artweb-preview-btn" onclick="artWebTogglePreview('${escapeForInlineJs(node)}')" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.14);color:#fff;border-radius:10px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">&#9654; Preview top track</button>` : ''}
+            <button id="artweb-add-btn" onclick="artWebAddToWatchlist('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">+ Add to watchlist</button>
+            ${detailPath ? `<a href="${detailPath}" style="text-align:center;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#fff;border-radius:10px;padding:9px;font-size:12px;text-decoration:none;">Open artist page (discography)</a>` : ''}
+        </div>`;
+    p.style.display = 'flex';
+}
+
+// Add a discovered (unowned) artist to the watchlist. ids are [source, id] PAIRS — we send the id
+// WITH its source so the endpoint never has to guess (a bare numeric Deezer/iTunes id used to be
+// mistaken for a library DB row id and could watch a completely different artist).
+async function artWebAddToWatchlist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    const pairs = a.ids || [];
+    const pair = pairs.find(p => p && p[0] === 'spotify') || pairs[0];
+    const btn = document.getElementById('artweb-add-btn');
+    if (!pair) { if (btn) btn.textContent = 'No id available'; return; }
+    if (btn) { btn.textContent = 'Adding…'; btn.disabled = true; }
+    try {
+        const r = await fetch('/api/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: String(pair[1]), artist_name: a.label, source: pair[0] }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'failed');
+        if (btn) { btn.textContent = '✓ Added to watchlist'; btn.style.background = 'rgba(255,255,255,0.12)'; btn.style.color = '#fff'; }
+        if (typeof showToast === 'function') showToast(`Added ${a.label} to watchlist`, 'success');
+        if (typeof updateWatchlistCount === 'function') updateWatchlistCount();
+    } catch (e) {
+        if (btn) { btn.textContent = '+ Add to watchlist'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Couldn't add: ${e.message}`, 'error');
+    }
+}
+
+// Expand-on-click (Discovery lens, owned nodes): fetch the node's similar artists and grow the graph
+// around it. New nodes land in a ring around the parent — no full re-layout, the map grows in place.
+async function artWebExpandNode(key) {
+    const st = _artistWeb, g = st.graph;
+    if (!g || !g.hasNode(key) || st.lens !== 'discovery') return;
+    const a = g.getNodeAttributes(key);
+    const btn = document.getElementById('artweb-expand-btn');
+    if (a.expanded) return;
+    if (btn) { btn.textContent = 'Expanding…'; btn.disabled = true; }
+    try {
+        const exclude = [];
+        g.forEachNode(k => exclude.push(k));
+        const r = await fetch('/api/graph/discovery/expand', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            // a.ids holds [source, id] pairs; the expand matcher wants the flat ids.
+            body: JSON.stringify({ key: key, ids: (a.ids || []).map(p => p[1]), exclude: exclude, per: 10 }),
+        });
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        const newNodes = (d.nodes || []).filter(n => n.key && !g.hasNode(n.key));
+        if (!newNodes.length) {
+            g.setNodeAttribute(key, 'expanded', true);
+            if (btn) btn.textContent = 'No new connections';
+            return;
+        }
+
+        // Ring placement around the parent's home position (stable even mid-spread-animation).
+        const home = st.home || (st.home = {});
+        const ph = home[key] || { x: a.x, y: a.y };
+        const R = (st.spreadPush || 0.1) * 2.2;
+        newNodes.forEach((n, i) => {
+            const th = (2 * Math.PI * i) / newNodes.length + Math.random() * 0.4;
+            const x = ph.x + Math.cos(th) * R, y = ph.y + Math.sin(th) * R;
+            if (n.kind === 'owned') {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 7,
+                    color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                    forceLabel: true, kind: 'owned', genre: 'Your library',
+                    artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+                });
+            } else {
+                g.addNode(n.key, {
+                    label: n.label, x: x, y: y, size: 3.5,
+                    color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                    kind: 'discovery', genre: 'Discovery',
+                    image_url: n.image_url || null, genresList: n.genres || null,
+                    ids: n.ids || [], popularity: n.popularity || 0,
+                });
+            }
+            home[n.key] = { x: x, y: y };
+            st.index.push({ key: n.key, label: n.label });   // searchable immediately
+        });
+        (d.edges || []).forEach(e => {
+            if (g.hasNode(e.source) && g.hasNode(e.target) && !g.hasEdge(e.source, e.target)) {
+                g.addEdge(e.source, e.target, {
+                    weight: e.weight, size: _webEdgeSize(e.weight),
+                    color: _webHexToRgba(WEB_DISCOVERY_COLOR, 0.28), baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+                });
+            }
+        });
+        g.setNodeAttribute(key, 'expanded', true);
+
+        // Re-select the node: focus set now includes the new neighbors, panel re-renders ("Expanded").
+        _artWebClickNode(key);
+        const statsEl = document.getElementById('artist-web-stats');
+        if (statsEl) {
+            let own = 0, disc = 0;
+            g.forEachNode((k2, a2) => { if (a2.kind === 'owned') own++; else if (a2.kind === 'discovery') disc++; });
+            statsEl.textContent = `${own} of your artists · ${disc} to discover`;
+        }
+    } catch (e) {
+        if (btn) { btn.textContent = 'Expand connections ✦'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Expand failed: ${e.message}`, 'error');
+    }
+}
+
+// ---- Artist Web filter by genre: multi-select sidebar; dims everything outside the chosen genres --
+function artWebToggleFilter() {
+    const sb = document.getElementById('artweb-genre-sidebar');
+    const btn = document.getElementById('artweb-filter-btn');
+    if (!sb) return;
+    const open = sb.style.display !== 'none';
+    if (open) {
+        sb.style.display = 'none';
+        if (btn) btn.classList.remove('active');
+    } else {
+        _artWebPopulateGenreList('');
+        sb.style.display = 'flex';
+        if (btn) btn.classList.add('active');
+    }
+}
+
+function _artWebPopulateGenreList(query) {
+    const list = document.getElementById('artweb-genre-sidebar-list');
+    if (!list) return;
+    const counts = _artistWeb.genreCounts || {};
+    const color = _artistWeb.genreColor || (() => WEB_GENRE_FALLBACK);
+    const active = _artistWeb.genreFilter;
+    const q = (query || '').trim().toLowerCase();
+    const genres = Object.keys(counts).sort((a, b) => counts[b] - counts[a])
+        .filter(g => !q || g.toLowerCase().includes(q));
+
+    const clearRow = active ? `<div onclick="artWebClearGenreFilter()" style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;border-radius:8px;cursor:pointer;color:#fff;font-size:12px;font-weight:700;background:rgba(255,255,255,0.06);">&#10005; Clear filter (${active.size})</div>` : '';
+    list.innerHTML = clearRow + (genres.map(g => {
+        const on = active && active.has(g);
+        return `<div onclick="artWebToggleGenre('${escapeForInlineJs(g)}')" style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;${on ? 'background:rgba(255,255,255,0.09);' : ''}"
+             onmouseover="this.style.background='rgba(255,255,255,0.06)'" onmouseout="this.style.background='${on ? 'rgba(255,255,255,0.09)' : 'transparent'}'">
+            <span style="width:10px;height:10px;border-radius:50%;flex:none;background:${color(g)};"></span>
+            <span style="flex:1;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${on ? 'font-weight:700;' : ''}">${escapeHtml(g)}</span>
+            <span style="font-size:10.5px;color:rgba(255,255,255,0.4);">${counts[g]}</span>
+        </div>`;
+    }).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;font-size:12px;">No genres</div>');
+}
+
+function artWebToggleGenre(genre) {
+    const st = _artistWeb;
+    if (!st.genreFilter) st.genreFilter = new Set();
+    if (st.genreFilter.has(genre)) st.genreFilter.delete(genre);
+    else st.genreFilter.add(genre);
+    if (st.genreFilter.size === 0) st.genreFilter = null;
+    if (st.sigma) st.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+function artWebClearGenreFilter() {
+    _artistWeb.genreFilter = null;
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+    const qi = document.querySelector('#artweb-genre-sidebar .artmap-genre-sidebar-search');
+    _artWebPopulateGenreList(qi ? qi.value : '');
+}
+
+// Sidebar search box just filters which genres are listed.
+function artWebFilterGenreList(query) { _artWebPopulateGenreList(query); }
+
+// ---- Edge declutter toggle: show all connections vs only the stronger (high-consensus) ones -------
+function artWebToggleEdges() {
+    _artistWeb.edgeDeclutter = !_artistWeb.edgeDeclutter;
+    _artWebSyncEdgeButton();
+    if (_artistWeb.sigma) _artistWeb.sigma.refresh();
+}
+
+function _artWebSyncEdgeButton() {
+    const btn = document.getElementById('artweb-edges-btn');
+    if (!btn) return;
+    btn.classList.toggle('active', _artistWeb.edgeDeclutter);
+    const label = btn.querySelector('span');
+    if (label) label.textContent = _artistWeb.edgeDeclutter ? 'Strong' : 'Edges';
+}
+
 async function openArtistMap() {
     const container = document.getElementById('artist-map-container');
     if (!container) return;
