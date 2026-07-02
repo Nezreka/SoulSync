@@ -6371,8 +6371,9 @@ function _artMapPanelArtistById(id) {
 // recolor/dim per frame — the graph data is never mutated for visual state.
 let _artistWeb = {
     sigma: null, graph: null, onKey: null,
-    lens: 'genre',                    // 'genre' (all artists by genre) | 'community' (Louvain on similarity)
+    lens: 'genre',                    // 'genre' | 'community' | 'discovery'
     data: null,                       // cached /api/graph/library payload (reused when switching lens)
+    discoveryData: null,              // cached /api/graph/discovery payload (owned anchors + unowned candidates)
     genreColor: null,                 // (group) -> color, set at render
     index: [],                        // [{key,label}] artist nodes, for client-side search
     searchMatch: null,                // Set<key> of search hits, or null when search is empty
@@ -6425,6 +6426,8 @@ function _webDrawLabel(context, data, settings) {
 const WEB_PALETTE = ['#1db954', '#e91e63', '#3f8cff', '#ff9800', '#9c27b0', '#00bcd4', '#ffd54f',
     '#f44336', '#8bc34a', '#ff5722', '#7c4dff', '#26c6da', '#cddc39', '#ff4081', '#009688', '#c0846b'];
 const WEB_GENRE_FALLBACK = '#6b7aa8';   // slate-periwinkle for "Other" — a real color, not dead gray
+const WEB_OWNED_COLOR = '#5b8def';      // Discovery lens: your library artists (cool blue)
+const WEB_DISCOVERY_COLOR = '#ffb74d';  // Discovery lens: unowned candidates to discover (warm amber)
 const WEB_CANVAS_BG = '#111016';   // near-black charcoal (reference look: colors glow on dark)
 
 // Edge opacity scales with weight (consensus): weak links stay faint so they don't clutter; strong,
@@ -6518,7 +6521,14 @@ function artWebSetLens(lens) {
     _artWebSyncLensButtons();
     const host = document.getElementById('artist-web-canvas');
     if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
-    setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
+    // Discovery uses its own endpoint — fetch it once, then render.
+    if (lens === 'discovery' && !_artistWeb.discoveryData) {
+        fetch('/api/graph/discovery').then(r => r.json())
+            .then(d => { _artistWeb.discoveryData = d; _artWebRenderLens(); })
+            .catch(() => { if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery.</div>'; });
+    } else {
+        setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
+    }
 }
 
 function _artWebSyncLensButtons() {
@@ -6606,6 +6616,8 @@ function _artWebRenderLens() {
 
     const built = _artistWeb.lens === 'community'
         ? _artWebBuildCommunity(data, Graph)
+        : _artistWeb.lens === 'discovery'
+        ? _artWebBuildDiscovery(_artistWeb.discoveryData || { nodes: [], edges: [] }, Graph)
         : _artWebBuildGenre(data, Graph);
 
     _artistWeb.genreColor = built.colorOf;
@@ -6766,6 +6778,51 @@ function _artWebBuildCommunity(data, Graph) {
 
     const stats = `${graph.order} connected artists · ${commIds.length} communities · ${graph.size} links`;
     return { graph, colorOf: (rep) => colorByRep[rep] || WEB_GENRE_FALLBACK, counts: countsByRep, stats };
+}
+
+// ---- Lens C: DISCOVERY — owned artists (cool) + their unowned similar candidates (warm) ----------
+function _artWebBuildDiscovery(data, Graph) {
+    const nodes = data.nodes || [], edges = data.edges || [];
+    const graph = new Graph();
+    nodes.forEach(n => {
+        if (n.kind === 'owned') {
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 7, color: WEB_OWNED_COLOR, baseColor: WEB_OWNED_COLOR,
+                forceLabel: true, kind: 'owned', genre: 'Your library',
+                artistId: n.id != null ? n.id : null, thumb: n.thumb || null,
+            });
+        } else {
+            graph.addNode(n.key, {
+                label: n.label, x: Math.random(), y: Math.random(),
+                size: 3, color: WEB_DISCOVERY_COLOR, baseColor: WEB_DISCOVERY_COLOR,
+                kind: 'discovery', genre: 'Discovery',
+                image_url: n.image_url || null, genresList: n.genres || null,
+                ids: n.ids || [], popularity: n.popularity || 0,
+            });
+        }
+        _artistWeb.index.push({ key: n.key, label: n.label });
+    });
+    let maxW = 1;
+    edges.forEach(e => {
+        if (graph.hasNode(e.source) && graph.hasNode(e.target) && !graph.hasEdge(e.source, e.target)) {
+            if (e.weight > maxW) maxW = e.weight;
+            graph.addEdge(e.source, e.target, {
+                weight: e.weight, size: _webEdgeSize(e.weight),
+                color: _webHexToRgba(WEB_DISCOVERY_COLOR, 0.28), baseColor: WEB_DISCOVERY_COLOR, kind: 'discovery',
+            });
+        }
+    });
+    // Size each discovery candidate by its strongest similarity link (its best reason to check it out).
+    graph.forEachNode((k, a) => {
+        if (a.kind !== 'discovery') return;
+        let w = 1;
+        graph.forEachEdge(k, (e, ea) => { if ((ea.weight || 1) > w) w = ea.weight; });
+        graph.setNodeAttribute(k, 'size', 2.5 + Math.sqrt(w / maxW) * 5);
+    });
+    const c = data.counts || {};
+    const stats = `${c.owned ?? 0} of your artists · ${c.discovery ?? 0} to discover`;
+    return { graph, colorOf: () => WEB_DISCOVERY_COLOR, counts: {}, stats };
 }
 
 // Shared force layout — LinLog + outbound-attraction settles clusters into separated islands.
@@ -7090,7 +7147,9 @@ function _artWebClickNode(node) {
     st.searchMatch = null;                      // a click supersedes a search dim
     _artWebSetSpread(node, set);                // fan the neighbors outward
     st.sigma.refresh();
-    if (st.graph.getNodeAttribute(node, 'kind') === 'genre') _artWebShowGenre(node);
+    const kind = st.graph.getNodeAttribute(node, 'kind');
+    if (kind === 'genre') _artWebShowGenre(node);
+    else if (kind === 'discovery') _artWebShowDiscovery(node);
     else _artWebShowArtist(node);
 }
 
@@ -7361,6 +7420,62 @@ function _artWebShowGenre(node) {
                 <span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(m.label)}</span>
             </div>`).join('') || '<div style="color:rgba(255,255,255,0.4);padding:8px;">No artists</div>'}`;
     p.style.display = 'flex';
+}
+
+// ---- Discovery lens: candidate card with "Add to watchlist" ------------------------------------
+function _artWebShowDiscovery(node) {
+    const p = _artWebEnsurePanel();
+    if (!p) return;
+    const g = _artistWeb.graph;
+    const a = g.getNodeAttributes(node);
+    const color = WEB_DISCOVERY_COLOR;
+    let genres = a.genresList;
+    if (typeof genres === 'string') { try { genres = JSON.parse(genres); } catch (e) { genres = [genres]; } }
+    genres = Array.isArray(genres) ? genres.slice(0, 5) : [];
+
+    document.getElementById('artweb-panel-body').innerHTML = `
+        <button onclick="_artWebClearSelection()" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;margin-bottom:14px;">&#10005; Close</button>
+        <div style="text-align:center;">
+            <div style="width:110px;height:110px;margin:0 auto;border-radius:50%;overflow:hidden;border:2px solid ${color};box-shadow:0 8px 28px ${_webHexToRgba(color, 0.45)};background:rgba(255,255,255,0.05);display:flex;align-items:center;justify-content:center;">
+                ${a.image_url ? `<img src="${escapeHtml(a.image_url)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentNode.innerHTML='<span style=\\'font-size:34px;opacity:0.5;\\'>&#9835;</span>'">` : '<span style="font-size:34px;opacity:0.5;">&#9835;</span>'}
+            </div>
+            <div style="font-size:18px;font-weight:800;margin-top:12px;">${escapeHtml(a.label)}</div>
+            <div style="display:inline-block;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:${color};border:1px solid ${_webHexToRgba(color, 0.5)};border-radius:999px;padding:2px 9px;margin-top:6px;">Not in your library</div>
+        </div>
+        ${genres.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:14px;">
+            ${genres.map(gname => `<span style="font-size:10.5px;padding:3px 9px;border-radius:999px;background:${_webHexToRgba(color, 0.16)};border:1px solid ${_webHexToRgba(color, 0.3)};color:#ffd9a3;">${escapeHtml(String(gname))}</span>`).join('')}
+        </div>` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:18px;">
+            <button id="artweb-add-btn" onclick="artWebAddToWatchlist('${escapeForInlineJs(node)}')" style="background:${color};border:none;color:#0b0b0f;border-radius:10px;padding:10px;font-size:13px;font-weight:800;cursor:pointer;">+ Add to watchlist</button>
+        </div>`;
+    p.style.display = 'flex';
+}
+
+// Add a discovered (unowned) artist to the watchlist. Prefer a Spotify id (non-numeric) so the
+// endpoint treats it as an external artist, not a library DB id (Deezer/iTunes ids are numeric).
+async function artWebAddToWatchlist(key) {
+    const g = _artistWeb.graph;
+    if (!g || !g.hasNode(key)) return;
+    const a = g.getNodeAttributes(key);
+    const ids = a.ids || [];
+    const artistId = ids.find(id => id && /[a-zA-Z]/.test(String(id))) || ids[0];
+    const btn = document.getElementById('artweb-add-btn');
+    if (!artistId) { if (btn) btn.textContent = 'No id available'; return; }
+    if (btn) { btn.textContent = 'Adding…'; btn.disabled = true; }
+    try {
+        const r = await fetch('/api/watchlist/add', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artist_id: String(artistId), artist_name: a.label }),
+        });
+        const d = await r.json();
+        if (!d.success) throw new Error(d.error || 'failed');
+        if (btn) { btn.textContent = '✓ Added to watchlist'; btn.style.background = 'rgba(255,255,255,0.12)'; btn.style.color = '#fff'; }
+        if (typeof showToast === 'function') showToast(`Added ${a.label} to watchlist`, 'success');
+        if (typeof updateWatchlistCount === 'function') updateWatchlistCount();
+    } catch (e) {
+        if (btn) { btn.textContent = '+ Add to watchlist'; btn.disabled = false; }
+        if (typeof showToast === 'function') showToast(`Couldn't add: ${e.message}`, 'error');
+    }
 }
 
 // ---- Artist Web filter by genre: multi-select sidebar; dims everything outside the chosen genres --
