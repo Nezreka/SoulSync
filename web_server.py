@@ -30100,12 +30100,15 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    adventurousness_weights, apply_adventurousness, genre_affinity, novelty_score)
+                    adventurousness_weights, apply_adventurousness, damp_consensus_base,
+                    genre_affinity, novelty_score)
                 _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
-                    _base = _oc + (10.0 - _rank) * 0.1
+                    # Dial-blend how much occurrence dominates: at the adventurous end this flattens so
+                    # obscure/low-consensus picks can actually surface (not just reshuffle the top tier).
+                    _base = damp_consensus_base(_oc, _adv_level) + (10.0 - _rank) * 0.1
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
                     a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
                     _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
@@ -30297,7 +30300,7 @@ def get_discover_listening_recommendations():
         # leaves the score untouched, and at the default dial the weights equal the old constants.
         try:
             from core.discovery.listening_recommendations import (
-                adventurousness_weights, genre_affinity, novelty_score)
+                adventurousness_weights, damp_consensus_base, genre_affinity, novelty_score)
             _w = adventurousness_weights(level)
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
@@ -30316,8 +30319,13 @@ def get_discover_listening_recommendations():
                 nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
                 if nov < 1.0:
                     factor *= (1.0 - _w['novelty'] * (1.0 - nov))
-                if factor != 1.0:
-                    a['score'] = float(a.get('score') or 0) * factor
+                # Dial-blend how much the recommendation-score consensus base dominates (same axis as
+                # the similar-artists row) so the adventurous end genuinely surfaces obscure picks;
+                # at the default dial this is a no-op, so default recs are unchanged.
+                _orig = float(a.get('score') or 0)
+                _damped = damp_consensus_base(_orig, level)
+                if _damped != _orig or factor != 1.0:
+                    a['score'] = _damped * factor
                     changed = True
             if changed:
                 stored.sort(key=lambda a: -float(a.get('score') or 0))

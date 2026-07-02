@@ -258,6 +258,34 @@ _NOVELTY_AT_DEFAULT = 0.4    # novelty (already-heard) penalty weight at the def
 _GENRE_SLOPE = -0.55        # dial 0 -> ~0.77 (very on-taste); dial 1 -> ~0.22 (out-of-taste allowed)
 _NOVELTY_SLOPE = 0.45       # dial 0 -> ~0.27 (familiar OK);   dial 1 -> ~0.72 (strongly prefer unheard)
 
+# The FOURTH axis (the one that actually changes WHICH artists surface): how much the raw "consensus"
+# base — occurrence_count / recommendation score — is allowed to dominate. Applied as base**exp.
+_CONSENSUS_EXP_AT_DEFAULT = 1.0   # exp == 1 at the default dial -> base untouched -> default recs unchanged
+_CONSENSUS_EXP_SLOPE = 1.0        # dial 0 -> exp 1.3 (amplify consensus); dial 1 -> exp 0.3 (flatten it)
+_CONSENSUS_EXP_MIN = 0.3
+_CONSENSUS_EXP_MAX = 1.5
+
+
+def damp_consensus_base(value: object, level: object) -> float:
+    """Dial-blend how much the raw consensus base drives ranking, so the exploration signals
+    (genre / novelty / popularity) can actually change WHICH artists surface — instead of only
+    reshuffling a fixed, occurrence-dominated top-N.
+
+    Returns ``base ** exp`` where ``exp`` is pivoted on the default dial: **exp == 1.0 at the default
+    (0.3)** so a user who never touches the dial sees the exact same ranking; the safe end (dial→0)
+    uses exp > 1 so heavily-recommended "consensus" picks dominate even more (trusted), and the
+    adventurous end (dial→1) uses exp < 1 to FLATTEN the base so low-consensus, obscure picks can
+    climb into view. Works for any positive base scale (occurrence 1..N or a 0..1 score) because a
+    smaller exponent always compresses the ratio between candidates. Pure; non-positive -> unchanged.
+    """
+    v = _coerce_float(value, 0.0)
+    if v <= 0.0:
+        return v
+    lvl = max(0.0, min(1.0, _coerce_float(level, _DIAL_DEFAULT)))
+    exp = _CONSENSUS_EXP_AT_DEFAULT - _CONSENSUS_EXP_SLOPE * (lvl - _DIAL_DEFAULT)
+    exp = max(_CONSENSUS_EXP_MIN, min(_CONSENSUS_EXP_MAX, exp))
+    return v ** exp
+
 
 def adventurousness_weights(level: object) -> dict:
     """Map the 0..1 adventurousness dial to per-signal weights. Pure — the SINGLE source of truth for
