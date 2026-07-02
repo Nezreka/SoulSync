@@ -672,6 +672,14 @@ class ConfigManager:
             "musicbrainz": {
                 "embed_tags": True
             },
+            "jiosaavn": {
+                "embed_tags": True,
+                "tags": {
+                    "track_id": True,
+                    "artist_id": True,
+                    "album_id": True,
+                },
+            },
             "playlist_sync": {
                 "create_backup": True,
                 # How a re-sync writes to the server playlist:

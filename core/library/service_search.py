@@ -21,6 +21,7 @@ discogs_worker = None
 audiodb_worker = None
 amazon_worker = None
 bandcamp_worker = None
+jiosaavn_worker = None
 
 
 def init(
@@ -35,12 +36,13 @@ def init(
     audiodb_worker_obj=None,
     amazon_worker_obj=None,
     bandcamp_worker_obj=None,
+    jiosaavn_worker_obj=None,
 ):
     """Bind enrichment worker handles so the lifted bodies can use them."""
     global spotify_enrichment_worker, itunes_enrichment_worker, mb_worker
     global lastfm_worker, genius_worker, tidal_enrichment_worker
     global qobuz_enrichment_worker, discogs_worker, audiodb_worker, amazon_worker
-    global bandcamp_worker
+    global bandcamp_worker, jiosaavn_worker
     spotify_enrichment_worker = spotify_worker
     itunes_enrichment_worker = itunes_worker
     mb_worker = musicbrainz_worker
@@ -52,6 +54,7 @@ def init(
     audiodb_worker = audiodb_worker_obj
     amazon_worker = amazon_worker_obj
     bandcamp_worker = bandcamp_worker_obj
+    jiosaavn_worker = jiosaavn_worker_obj
 
 
 def _detect_provider(items, client):
@@ -403,5 +406,26 @@ def _search_service(service, entity_type, query):
              'image': a.image_url, 'extra': ', '.join(a.artists)}
             for a in items if a.external_urls.get('bandcamp')
         ]
+
+    elif service == 'jiosaavn':
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            raise ValueError("JioSaavn is disabled (experimental feature off)")
+        if not jiosaavn_worker or not jiosaavn_worker.client:
+            raise ValueError("JioSaavn worker not initialized")
+        client = jiosaavn_worker.client
+        if entity_type == 'artist':
+            items = client.search_artists(query, limit=8)
+            return [{'id': str(a.id), 'name': a.name, 'image': a.image_url,
+                     'extra': ''} for a in items]
+        elif entity_type == 'album':
+            items = client.search_albums(query, limit=8)
+            return [{'id': str(a.id), 'name': a.name, 'image': a.image_url,
+                     'extra': f"{', '.join(a.artists)} · {a.release_date or ''}"} for a in items]
+        elif entity_type == 'track':
+            items = client.search_tracks(query, limit=8)
+            return [{'id': str(t.id), 'name': t.name, 'image': t.image_url,
+                     'extra': f"{', '.join(t.artists)} · {t.album or ''}"} for t in items]
+        return []
 
     return []
