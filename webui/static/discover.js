@@ -6505,6 +6505,7 @@ async function openArtistWeb() {
         _artistWeb.data = await (await fetch('/api/graph/library')).json();
         _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
         _artistWeb.betweenCache = null;
+        _artistWeb.discoveryData = null;  // refetch on next Discovery view — ownership may have changed
         _artistWeb.lens = _artistWeb.lens || 'genre';
         _artWebSyncLensButtons();
         _artWebRenderLens();
@@ -6521,11 +6522,21 @@ function artWebSetLens(lens) {
     _artWebSyncLensButtons();
     const host = document.getElementById('artist-web-canvas');
     if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
-    // Discovery uses its own endpoint — fetch it once, then render.
+    // Discovery uses its own endpoint — fetch it once, then render. Only a GOOD payload is cached:
+    // a 500 resolves r.json() too, and caching {"error": ...} used to leave the lens permanently
+    // blank ("0 artists") with no retry until a full page reload.
     if (lens === 'discovery' && !_artistWeb.discoveryData) {
-        fetch('/api/graph/discovery').then(r => r.json())
-            .then(d => { _artistWeb.discoveryData = d; _artWebRenderLens(); })
-            .catch(() => { if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery.</div>'; });
+        fetch('/api/graph/discovery')
+            .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
+            .then(({ ok, d }) => {
+                if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
+                _artistWeb.discoveryData = d;
+                _artWebRenderLens();
+            })
+            .catch(err => {
+                console.error('[Artist Web] discovery load failed', err);
+                if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery — switch lenses and back to retry.</div>';
+            });
     } else {
         setTimeout(_artWebRenderLens, 20);   // let "Rebuilding…" paint before the sync layout blocks
     }
@@ -7001,9 +7012,11 @@ function _artWebEdgeReducer(edge, data) {
     // spokes overlapping accumulate to solid white), so never render them — clustering is already
     // conveyed by node position + color. Only similarity edges are drawn.
     if (data.kind === 'membership') { res.hidden = true; return res; }
-    // Declutter (resting view only): hide the weaker half of similarity edges. Hover/select/path/search
-    // below still reveal the full detail for whatever you're inspecting.
-    if (st.edgeDeclutter && !st.pathNodes && !st.focusSet && !st.searchMatch && (data.weight || 1) < st.edgeThreshold) {
+    // Declutter (resting view only): hide the weaker half of SIMILARITY edges. Scoped to that kind —
+    // the threshold is computed from similarity weights, and applying it to the Discovery lens's
+    // (mostly weight-1) edges hid essentially all of them, leaving candidates as floating dots.
+    if (st.edgeDeclutter && data.kind === 'similarity' && !st.pathNodes && !st.focusSet && !st.searchMatch
+        && (data.weight || 1) < st.edgeThreshold) {
         res.hidden = true; return res;
     }
     const g = _artistWeb.graph;
@@ -7424,6 +7437,9 @@ function _artWebShowGenre(node) {
 }
 
 // ---- Discovery lens: candidate card with "Add to watchlist" ------------------------------------
+// Deliberately NO expand button here: similar_artists only has rows for artists whose similars
+// SoulSync fetched (owned/watchlist), so expanding an unowned candidate always returns empty
+// (validated 0/176 on real data). The trail opens up after the candidate is watchlisted + scanned.
 function _artWebShowDiscovery(node) {
     const p = _artWebEnsurePanel();
     if (!p) return;
@@ -7452,21 +7468,22 @@ function _artWebShowDiscovery(node) {
     p.style.display = 'flex';
 }
 
-// Add a discovered (unowned) artist to the watchlist. Prefer a Spotify id (non-numeric) so the
-// endpoint treats it as an external artist, not a library DB id (Deezer/iTunes ids are numeric).
+// Add a discovered (unowned) artist to the watchlist. ids are [source, id] PAIRS — we send the id
+// WITH its source so the endpoint never has to guess (a bare numeric Deezer/iTunes id used to be
+// mistaken for a library DB row id and could watch a completely different artist).
 async function artWebAddToWatchlist(key) {
     const g = _artistWeb.graph;
     if (!g || !g.hasNode(key)) return;
     const a = g.getNodeAttributes(key);
-    const ids = a.ids || [];
-    const artistId = ids.find(id => id && /[a-zA-Z]/.test(String(id))) || ids[0];
+    const pairs = a.ids || [];
+    const pair = pairs.find(p => p && p[0] === 'spotify') || pairs[0];
     const btn = document.getElementById('artweb-add-btn');
-    if (!artistId) { if (btn) btn.textContent = 'No id available'; return; }
+    if (!pair) { if (btn) btn.textContent = 'No id available'; return; }
     if (btn) { btn.textContent = 'Adding…'; btn.disabled = true; }
     try {
         const r = await fetch('/api/watchlist/add', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ artist_id: String(artistId), artist_name: a.label }),
+            body: JSON.stringify({ artist_id: String(pair[1]), artist_name: a.label, source: pair[0] }),
         });
         const d = await r.json();
         if (!d.success) throw new Error(d.error || 'failed');
@@ -7493,7 +7510,8 @@ async function artWebExpandNode(key) {
         g.forEachNode(k => exclude.push(k));
         const r = await fetch('/api/graph/discovery/expand', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ key: key, ids: a.ids || [], exclude: exclude, per: 10 }),
+            // a.ids holds [source, id] pairs; the expand matcher wants the flat ids.
+            body: JSON.stringify({ key: key, ids: (a.ids || []).map(p => p[1]), exclude: exclude, per: 10 }),
         });
         const d = await r.json();
         if (d.error) throw new Error(d.error);
