@@ -2023,16 +2023,32 @@ async function runRepairJobNow(jobId) {
 }
 
 async function stopRepairJobNow(jobId) {
+    // Instant feedback: the scan can't unwind until its current item (e.g. an
+    // in-flight LRClib lookup) returns and it loops back to check_stop(), so the
+    // stop is not truly instant. Show a disabled "Stopping…" button meanwhile —
+    // the live-progress poll flips it back to Run once the run reports finished.
+    const stopBtn = document.querySelector(`.repair-job-card[data-job-id="${jobId}"] .repair-stop-btn`);
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.classList.add('stopping');
+        stopBtn.title = 'Stopping…';
+    }
     try {
         const resp = await fetch(`/api/repair/jobs/${jobId}/stop`, { method: 'POST' });
         const data = await resp.json();
         if (data.error) throw new Error(data.error);
         showToast(data.stopped ? 'Stopping job…' : 'Job is not running', data.stopped ? 'success' : 'info');
-        // The scan unwinds at its next check_stop(); refresh so the card flips back to Run.
-        setTimeout(() => loadRepairJobs(), 600);
+        // Fallback reload in case the job was already idle (nothing to flip the
+        // button) or the poll is between ticks.
+        if (!data.stopped) setTimeout(() => loadRepairJobs(), 600);
     } catch (error) {
         console.error('Error stopping job:', error);
         showToast('Error stopping job', 'error');
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.classList.remove('stopping');
+            stopBtn.title = 'Stop this run';
+        }
     }
 }
 
@@ -2122,6 +2138,16 @@ function updateRepairJobProgressFromData(data) {
                 logEl.scrollTop = logEl.scrollHeight;
             }
             _repairProgressLogCounts[jobId] = state.log.length;
+        }
+
+        // #970: the moment a run ends (finished OR stopped), flip the Stop button
+        // back to Run here — don't wait on the 30s auto-hide reload or the next
+        // poll tick, or a stopped job's button looks stuck on "Stopping…".
+        if (state.status === 'finished' || state.status === 'error') {
+            const stopBtn = card.querySelector('.repair-stop-btn');
+            if (stopBtn) {
+                stopBtn.outerHTML = `<button class="repair-run-btn" onclick="runRepairJobNow('${jobId}')" title="Run now">&#9654;</button>`;
+            }
         }
 
         // Auto-hide panel after completion
