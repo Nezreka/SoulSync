@@ -1035,6 +1035,17 @@ class MusicDatabase:
             self._sync_migration_ledger(cursor)
 
             conn.commit()
+
+            # Any config.json write the quality-profile migration queued (e.g.
+            # pointing Auto-Import at its migrated relaxed profile) is applied
+            # only now, after the transaction above actually committed — see
+            # `apply_pending_quality_profile_config_writes`'s docstring for why.
+            try:
+                from core.quality.migrate_to_profiles import apply_pending_quality_profile_config_writes
+                apply_pending_quality_profile_config_writes(self)
+            except Exception as qp_err:
+                logger.error(f"Could not apply quality-profile migration config write(s): {qp_err}")
+
             logger.info("Database initialized successfully")
 
         except Exception as e:
@@ -9035,6 +9046,19 @@ class MusicDatabase:
             "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
         }
 
+    # SQLite has no native boolean type — these columns are stored as 0/1.
+    # Coerced to real bools below so API consumers (the React Import page's
+    # `AutoImportQualityProfile.is_default: boolean`, in particular) get what
+    # their type actually says instead of relying on JS truthiness. NOTE:
+    # `ranked_targets` is deliberately left as its raw JSON-string column
+    # value, not parsed here — `settings.js::qpProfileSummary` does its own
+    # `JSON.parse(profile.ranked_targets || '[]')` on this endpoint's rows.
+    _QUALITY_PROFILE_BOOL_COLUMNS = (
+        "is_default", "fallback_enabled", "rank_candidates_by_quality",
+        "acoustid_required", "downsample_enabled", "deep_audio_verify",
+        "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_delete_original",
+    )
+
     def list_quality_profiles(self) -> list:
         """All app-wide quality profiles (built-ins + custom), default first."""
         conn = self._get_connection()
@@ -9042,7 +9066,14 @@ class MusicDatabase:
             rows = conn.execute(
                 "SELECT * FROM quality_profiles ORDER BY is_default DESC, id"
             ).fetchall()
-            return [dict(row) for row in rows]
+            profiles = []
+            for row in rows:
+                profile = dict(row)
+                for col in self._QUALITY_PROFILE_BOOL_COLUMNS:
+                    if col in profile:
+                        profile[col] = bool(profile[col])
+                profiles.append(profile)
+            return profiles
         finally:
             conn.close()
 

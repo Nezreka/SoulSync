@@ -4,9 +4,11 @@ Quality profiles are the single, named, per-item-assignable unit of
 configuration for "what does 'good enough' mean for this item, and what
 should the pipeline do about it": the ranked-target ladder, whether to accept
 a fallback file that matches none of them, AcoustID strictness, downsample
-behaviour, real-audio verification, lossy-copy settings, and (Auto-Import
-only) whether to trust the staging folder name as the artist. Every
-``wishlist_tracks`` row carries a ``quality_profile_id`` pointing at one of
+behaviour, real-audio verification, and lossy-copy settings. (Whether to
+trust the staging folder name as the artist is a separate, Auto-Import-only
+setting — ``import.folder_artist_override`` — and deliberately NOT part of a
+quality profile.) Every ``wishlist_tracks`` row carries a
+``quality_profile_id`` pointing at one of
 these rows instead of the pipeline consulting a single global setting -- see
 ``core/quality/selection.py::load_profile_by_id`` for how each pipeline stage
 resolves a profile's current settings live (not a frozen snapshot), and
