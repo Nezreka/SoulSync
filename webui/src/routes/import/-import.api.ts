@@ -12,6 +12,7 @@ import type {
   ImportAutoImportStatusPayload,
   ImportOptionsPayload,
   ImportProcessPayload,
+  ImportSearchSourcesPayload,
   ImportStagingFilesPayload,
   ImportStagingGroupsPayload,
   ImportTrackSearchPayload,
@@ -40,15 +41,23 @@ export async function fetchImportStagingSuggestions(): Promise<ImportAlbumSearch
   return readJson<ImportAlbumSearchPayload>(apiClient.get('import/staging/suggestions'));
 }
 
-export async function searchImportAlbums(query: string): Promise<ImportAlbumSearchPayload> {
+export async function searchImportAlbums(
+  query: string,
+  source?: string,
+): Promise<ImportAlbumSearchPayload> {
   return readJson<ImportAlbumSearchPayload>(
     apiClient.get('import/search/albums', {
       searchParams: {
         q: query,
         limit: '12',
+        ...(source ? { source } : {}),
       },
     }),
   );
+}
+
+export async function fetchImportSearchSources(): Promise<ImportSearchSourcesPayload> {
+  return readJson<ImportSearchSourcesPayload>(apiClient.get('import/search/sources'));
 }
 
 export async function matchImportAlbum(input: {
@@ -217,6 +226,14 @@ export function importStagingSuggestionsQueryOptions() {
   return queryOptions({
     queryKey: [...IMPORT_QUERY_KEY, 'staging-suggestions'],
     queryFn: fetchImportStagingSuggestions,
+    ...STAGING_CACHE,
+  });
+}
+
+export function importSearchSourcesQueryOptions() {
+  return queryOptions({
+    queryKey: [...IMPORT_QUERY_KEY, 'search-sources'],
+    queryFn: fetchImportSearchSources,
     ...STAGING_CACHE,
   });
 }

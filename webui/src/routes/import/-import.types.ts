@@ -83,7 +83,21 @@ export interface ImportAlbumSearchPayload {
   suggestions?: ImportAlbumResult[];
   /** Provider used to seed the lookup chain for this response. */
   primary_source?: string | null;
+  /** Explicit source the caller picked, if any (echoed back). */
+  source_override?: string | null;
   ready?: boolean;
+  error?: string;
+}
+
+export interface ImportSearchSource {
+  source: string;
+  label: string;
+  active: boolean;
+}
+
+export interface ImportSearchSourcesPayload {
+  success: boolean;
+  sources?: ImportSearchSource[];
   error?: string;
 }
 
