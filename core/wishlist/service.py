@@ -210,6 +210,12 @@ class WishlistService:
                     "last_attempted": wishlist_track["last_attempted"],
                     "source_type": wishlist_track["source_type"],
                     "source_info": wishlist_track["source_info"],
+                    # Per-item quality-profile pointer, resolved once at
+                    # wishlist-insert time (see core/quality/migrate_to_profiles.py).
+                    # The download/import pipeline resolves the profile's actual
+                    # settings LIVE via core/quality/selection.py::load_profile_by_id
+                    # when it needs them — this is only ever the pointer.
+                    "quality_profile_id": wishlist_track.get("quality_profile_id"),
                     "id": track_id,
                     "name": track_name,
                     "artists": artists,

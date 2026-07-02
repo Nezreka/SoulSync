@@ -20,6 +20,10 @@ from core.quality.model import (
     filter_and_rank,
     v2_qualities_to_ranked_targets,
 )
+from utils.logging_config import get_logger
+
+
+logger = get_logger("quality.selection")
 
 
 def rank_with_targets(
@@ -62,6 +66,41 @@ def targets_from_profile(profile: dict) -> Tuple[List[QualityTarget], bool]:
     targets = [QualityTarget.from_dict(t) for t in (raw_targets or [])]
     fallback_enabled = profile.get('fallback_enabled', True)
     return targets, fallback_enabled
+
+
+def load_profile_by_id(profile_id) -> dict:
+    """Load a specific ``quality_profiles`` row by id, in the same v3 dict
+    shape as ``MusicDatabase.get_quality_profile()`` (``ranked_targets`` /
+    ``fallback_enabled`` / ``search_mode`` / ``rank_candidates_by_quality``
+    plus the full settings bundle — AcoustID strictness, downsample,
+    deep-verify, replace-lower, lossy-copy, folder-artist).
+
+    Falls back to the app-wide default profile when ``profile_id`` is falsy,
+    not found, or on any error. This is THE resolution primitive of the
+    quality-profile architecture: a row/context only ever stores a
+    ``quality_profile_id`` pointer (wishlist rows via ``add_to_wishlist``,
+    Auto-Import via its settings), and every pipeline stage calls this LIVE
+    when it needs the profile's current settings — so editing a profile takes
+    effect immediately everywhere, and callers with no id (manual downloads,
+    staging imports) get the default-profile behaviour.
+    """
+    from database.music_database import MusicDatabase
+
+    db = MusicDatabase()
+    if profile_id:
+        try:
+            conn = db._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM quality_profiles WHERE id=?", (profile_id,)
+                ).fetchone()
+            finally:
+                conn.close()
+            if row:
+                return db._quality_profile_row_to_dict(row)
+        except Exception as exc:
+            logger.debug("quality profile %s unavailable, using default: %s", profile_id, exc)
+    return db.get_quality_profile()
 
 
 def load_profile_targets() -> Tuple[List[QualityTarget], bool]:
