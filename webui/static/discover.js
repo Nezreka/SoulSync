@@ -6371,6 +6371,7 @@ function _artMapPanelArtistById(id) {
 // recolor/dim per frame — the graph data is never mutated for visual state.
 let _artistWeb = {
     sigma: null, graph: null, onKey: null,
+    gen: 0,                           // open/close generation — in-flight fetches bail if it changed
     lens: 'genre',                    // 'genre' | 'community' | 'discovery'
     data: null,                       // cached /api/graph/library payload (reused when switching lens)
     discoveryData: null,              // cached /api/graph/discovery payload (owned anchors + unowned candidates)
@@ -6475,6 +6476,11 @@ async function openArtistWeb(lens) {
     const container = document.getElementById('artist-web-container');
     if (!container) return;
 
+    // New generation: any fetch still in flight from a prior open/close bails on resolve.
+    const myGen = ++_artistWeb.gen;
+    // Re-entrancy: drop a stale keydown listener so we never leak/duplicate it.
+    if (_artistWeb.onKey) document.removeEventListener('keydown', _artistWeb.onKey);
+
     // Pseudo-page takeover: hide the other discover sections, show the web container.
     document.querySelectorAll('#discover-page > .discover-container > *:not(#artist-web-container)').forEach(el => {
         el._prevDisplay = el.style.display;
@@ -6486,13 +6492,29 @@ async function openArtistWeb(lens) {
     const statsEl = document.getElementById('artist-web-stats');
     host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Building your artist web…</div>';
 
-    // Esc: exit path mode, else dismiss an open detail panel, else leave the web.
+    // Keyboard: Esc unwinds (path mode -> panel -> close); the toolbar advertises S/F/0/+/- so wire
+    // them (skipping while typing in an input, where Esc just blurs the field).
     _artistWeb.onKey = (e) => {
-        if (e.key !== 'Escape') return;
-        if (_artistWeb.pathMode) { _artWebExitPath(); return; }
-        const p = document.getElementById('artweb-panel');
-        if (p && p.style.display !== 'none') _artWebClearSelection();
-        else closeArtistWeb();
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) {
+            if (e.key === 'Escape') t.blur();
+            return;
+        }
+        if (e.key === 'Escape') {
+            if (_artistWeb.pathMode) { _artWebExitPath(); return; }
+            const p = document.getElementById('artweb-panel');
+            if (p && p.style.display !== 'none') _artWebClearSelection();
+            else closeArtistWeb();
+        } else if (e.key === 's' || e.key === 'S') {
+            const inp = document.getElementById('artist-web-search');
+            if (inp) { e.preventDefault(); inp.focus(); }
+        } else if (e.key === 'f' || e.key === 'F' || e.key === '0') {
+            artWebFitToView();
+        } else if (e.key === '+' || e.key === '=') {
+            artWebZoom(0.77);           // ratio<1 = zoom IN
+        } else if (e.key === '-' || e.key === '_') {
+            artWebZoom(1.3);            // zoom OUT
+        }
     };
     document.addEventListener('keydown', _artistWeb.onKey);
 
@@ -6504,7 +6526,9 @@ async function openArtistWeb(lens) {
     }
 
     try {
-        _artistWeb.data = await (await fetch('/api/graph/library')).json();
+        const payload = await (await fetch('/api/graph/library')).json();
+        if (_artistWeb.gen !== myGen) return;   // closed or reopened while fetching — abandon
+        _artistWeb.data = payload;
         _artistWeb.simGraph = null;   // rebuild pathfinding graph for this (possibly new) data
         _artistWeb.betweenCache = null;
         _artistWeb.discoveryData = null;  // refetch on next Discovery view — ownership may have changed
@@ -6515,6 +6539,7 @@ async function openArtistWeb(lens) {
         if (_artistWeb.lens === 'discovery') _artWebFetchDiscovery(host);
         else _artWebRenderLens();
     } catch (err) {
+        if (_artistWeb.gen !== myGen) return;
         console.error('[Artist Web] load failed', err);
         host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load the artist web.</div>';
     }
@@ -6523,14 +6548,20 @@ async function openArtistWeb(lens) {
 // Fetch the discovery payload, then render — only a GOOD payload is cached (a 500 resolves r.json()
 // too, and caching {"error": ...} used to leave the lens permanently blank with no retry).
 function _artWebFetchDiscovery(host) {
+    const myGen = _artistWeb.gen;
     fetch('/api/graph/discovery')
         .then(r => r.json().then(d => ({ ok: r.ok, d: d })))
         .then(({ ok, d }) => {
             if (!ok || d.error || !Array.isArray(d.nodes)) throw new Error(d.error || 'bad response');
             _artistWeb.discoveryData = d;
+            // Bail if the Web was closed/reopened or the user moved off Discovery while fetching —
+            // otherwise a late response mounts a sigma+worker into a hidden host, or rebuilds the
+            // lens the user is now on, clobbering their selection/camera.
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
             _artWebRenderLens();
         })
         .catch(err => {
+            if (_artistWeb.gen !== myGen || _artistWeb.lens !== 'discovery') return;
             console.error('[Artist Web] discovery load failed', err);
             if (host) host.innerHTML = '<div style="padding:24px;color:#f88">Failed to load discovery — switch lenses and back to retry.</div>';
         });
@@ -6541,6 +6572,9 @@ function artWebSetLens(lens) {
     if (!_artistWeb.data || _artistWeb.lens === lens) return;
     _artistWeb.lens = lens;
     _artWebSyncLensButtons();
+    // Tear down the prior lens's FA2 worker + settle timer NOW, before any async discovery fetch —
+    // otherwise the old timer fires mid-fetch and finalizes/animates the detached graph.
+    _artWebKillLiveLayout();
     const host = document.getElementById('artist-web-canvas');
     if (host) host.innerHTML = '<div style="padding:24px;color:rgba(255,255,255,.4)">Rebuilding…</div>';
     // Discovery uses its own endpoint — fetch on first view (see _artWebFetchDiscovery).
@@ -6661,10 +6695,57 @@ function _artWebRenderLens() {
     _artistWeb.edgeThreshold = thr;
     _artWebSyncEdgeButton();
 
-    // Mount FIRST (random scatter is visible immediately), then settle live in a Web Worker — the
-    // graph visibly organizes into islands without ever blocking the UI.
+    // Pre-seed positions (circlepack, grouped by cluster) so FA2 REFINES a structured start instead
+    // of untangling random noise — much faster + calmer settle at library scale. Silent no-op if the
+    // CDN bundle lacks the helper (the builders already set random x/y as a fallback).
+    _artWebPreseed(built.graph);
+
+    // Mount FIRST (the pre-seeded islands are visible immediately), then settle live in a Web Worker —
+    // the graph refines into islands without ever blocking the UI.
     _artWebMountSigma(host, built.graph);
     _artWebStartLiveLayout(built.graph);
+    _artWebRenderLegend(built);
+}
+
+// Color legend — decodes what the node colors mean for the active lens (Discovery = library vs
+// to-discover; Genre/Community = the top groups by size). Without it the palette is meaningless.
+function _artWebRenderLegend(built) {
+    const box = document.getElementById('artist-web-legend');
+    if (!box) return;
+    let items;
+    if (_artistWeb.lens === 'discovery') {
+        items = [
+            { color: WEB_OWNED_COLOR, label: 'Your library' },
+            { color: WEB_DISCOVERY_COLOR, label: 'To discover' },
+        ];
+    } else {
+        const counts = built.counts || {};
+        const colorOf = built.colorOf || (() => WEB_GENRE_FALLBACK);
+        items = Object.keys(counts)
+            .sort((a, b) => counts[b] - counts[a])
+            .slice(0, 8)
+            .map(g => ({ color: colorOf(g), label: g, count: counts[g] }));
+    }
+    if (!items.length) { box.style.display = 'none'; return; }
+    box.innerHTML = items.map(it =>
+        `<div class="artweb-legend-row">` +
+        `<span class="artweb-legend-dot" style="background:${it.color}"></span>` +
+        `<span class="artweb-legend-label">${escapeHtml(it.label)}</span>` +
+        (it.count != null ? `<span class="artweb-legend-count">${it.count}</span>` : '') +
+        `</div>`
+    ).join('');
+    box.style.display = '';
+}
+
+// Circlepack pre-seed: pack nodes into cluster circles (by the 'genre' attribute the builders set on
+// every node) so FA2 starts from structure, not noise. Discovery has no genre grouping — pack flat.
+function _artWebPreseed(graph) {
+    try {
+        const lib = window.graphologyLibrary;
+        const cp = lib && lib.layout && lib.layout.circlepack;
+        if (!cp || graph.order === 0) return;
+        cp.assign(graph, _artistWeb.lens === 'discovery' ? {} : { hierarchyAttributes: ['genre'] });
+    } catch (e) { /* keep the random positions the builders already set */ }
 }
 
 // ---- Live-settle layout: forceAtlas2 in a Web Worker (FA2Layout supervisor) ---------------------
@@ -6953,6 +7034,8 @@ function _artWebMountSigma(host, graph) {
         labelRenderedSizeThreshold: 20,
         labelRenderer: _webDrawLabel,
         hideEdgesOnMove: true,   // edge cleanup: drop edges while panning/zooming for clarity + perf
+        hideLabelsOnMove: true,  // labels re-measure (measureText) per frame — drop them while moving too
+        labelGridCellSize: 150,  // sparser label grid => fewer simultaneous labels/measureText per frame
         nodeReducer: (node, data) => _artWebNodeReducer(node, data),
         edgeReducer: (edge, data) => _artWebEdgeReducer(edge, data),
     });
@@ -7024,6 +7107,7 @@ function _artWebSpreadTick() {
 }
 
 function closeArtistWeb() {
+    _artistWeb.gen++;   // invalidate any in-flight library/discovery fetch so it can't render into a closed Web
     const container = document.getElementById('artist-web-container');
     // Stamp _prevDisplay='none' so if another overlay (Artist Map) later runs its sibling-restore,
     // it keeps this container hidden instead of falling back to '' and un-hiding a dead (sigma-killed)
@@ -7041,6 +7125,8 @@ function closeArtistWeb() {
     if (results) { results.style.display = 'none'; results.innerHTML = ''; }
     const sb = document.getElementById('artweb-genre-sidebar');
     if (sb) sb.style.display = 'none';
+    const legend = document.getElementById('artist-web-legend');
+    if (legend) legend.style.display = 'none';
     _artistWeb.pathMode = false;
     _artistWeb.pathNodes = _artistWeb.pathPairs = _artistWeb.pathResult = _artistWeb.pathSource = _artistWeb.pathTarget = null;
     const pathBtn = document.getElementById('artweb-path-btn');
