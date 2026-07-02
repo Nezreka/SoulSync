@@ -6,7 +6,7 @@ from core.discovery.listening_recommendations import (
     adventurousness_weights,
     aggregate_candidate_tracks,
     apply_adventurousness,
-    damp_consensus_base,
+    apply_adventurous_blend,
     build_genre_taste_profile,
     build_recency_weighted_seeds,
     genre_affinity,
@@ -460,43 +460,49 @@ def test_why_chips_empty_when_nothing_notable():
     assert why_chips(genre_affinity=0.1, popularity=80, seed_count=0) == []
 
 
-# ── damp_consensus_base (the fourth axis — dial-blend how much occurrence dominates) ──────────
+# ── apply_adventurous_blend (dial blends consensus <-> obscurity) ─────────────
 
-def test_damp_consensus_base_is_noop_at_default():
-    # exp == 1 at the default dial -> the base is untouched, so default recs are unchanged.
-    for v in (1, 3, 10, 21, 0.5, 100):
-        assert round(damp_consensus_base(v, 0.3), 9) == round(float(v), 9)
+def _cand(name, base, pop, aff=0.0, nov=1.0):
+    return {"name": name, "score": base, "popularity": pop, "_aff": aff, "_nov": nov, "seed_count": base}
 
 
-def test_damp_consensus_base_flattens_at_adventurous_end():
-    # dial 1 compresses the ratio between a high-consensus pick and a low one, so the exploration
-    # signals can actually reorder them (an occ-1 obscure pick is no longer 21x behind an occ-21).
-    hi, lo = damp_consensus_base(21, 1.0), damp_consensus_base(1, 1.0)
-    assert (hi / lo) < 3.0                      # was 21x at raw
-    assert hi > lo                              # still ordered, just compressed
+def test_blend_safe_end_orders_by_consensus():
+    items = [_cand("Obscure", base=1, pop=10), _cand("Consensus", base=10, pop=90)]
+    out = apply_adventurous_blend(items, 0.0, base_key="score")
+    assert [i["name"] for i in out] == ["Consensus", "Obscure"]   # most-recommended first
 
 
-def test_damp_consensus_base_amplifies_at_safe_end():
-    # dial 0 spreads the ratio further -> trusted, heavily-recommended picks dominate even more.
-    ratio_safe = damp_consensus_base(21, 0.0) / damp_consensus_base(1, 0.0)
-    assert ratio_safe > 21.0
+def test_blend_adventurous_end_orders_by_obscurity():
+    items = [_cand("Popular", base=10, pop=90), _cand("Deep", base=1, pop=5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["Deep", "Popular"]        # least popular first
 
 
-def test_damp_consensus_base_monotonic_ordering_preserved():
-    # Whatever the dial, more consensus never scores LOWER than less consensus.
-    for lvl in (0.0, 0.3, 0.6, 1.0):
-        assert damp_consensus_base(20, lvl) >= damp_consensus_base(5, lvl) >= damp_consensus_base(1, lvl)
+def test_blend_demotes_a_strongly_recommended_popular_artist_when_adventurous():
+    # The exact field bug: a big-consensus popular artist (Maluma pop 80) must land BELOW an obscure
+    # low-consensus pick (Binbag Wisdom pop 17) at the adventurous end.
+    items = [_cand("Maluma", base=10, pop=80, aff=1.0), _cand("BinbagWisdom", base=2, pop=17, aff=0.5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["BinbagWisdom", "Maluma"]
 
 
-def test_damp_consensus_base_compresses_a_0_to_1_score_scale_too():
-    # Works for the listening-recs 'score' base (0..1), not just occurrence counts.
-    hi, lo = damp_consensus_base(0.8, 1.0), damp_consensus_base(0.2, 1.0)
-    raw_ratio = 0.8 / 0.2
-    assert (hi / lo) < raw_ratio                # ratio compressed at the adventurous end
-    assert hi > lo
+def test_blend_is_smooth_not_saturated():
+    items = [_cand("A", 10, 90), _cand("B", 6, 40), _cand("C", 1, 5)]
+    o0 = [i["name"] for i in apply_adventurous_blend(items, 0.0, base_key="score")]
+    o5 = [i["name"] for i in apply_adventurous_blend(items, 0.5, base_key="score")]
+    o1 = [i["name"] for i in apply_adventurous_blend(items, 1.0, base_key="score")]
+    assert o0[0] == "A"          # safe -> consensus leader
+    assert o1[0] == "C"          # adventurous -> most obscure
+    assert not (o0 == o5 == o1)  # the middle is genuinely different -> no dead zone
 
 
-def test_damp_consensus_base_nonpositive_unchanged():
-    assert damp_consensus_base(0, 1.0) == 0.0
-    assert damp_consensus_base(-3, 0.0) == -3.0
-    assert damp_consensus_base(None, 0.5) == 0.0
+def test_blend_missing_popularity_is_neutral():
+    items = [_cand("NoPop", 5, None), _cand("HighPop", 5, 95), _cand("LowPop", 5, 5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["LowPop", "NoPop", "HighPop"]   # neutral 0.5 for the missing one
+
+
+def test_blend_empty_and_returns_new_list():
+    assert apply_adventurous_blend([], 0.5) == []
+    src = [_cand("A", 1, 10)]
+    assert apply_adventurous_blend(src, 0.5, base_key="score") is not src

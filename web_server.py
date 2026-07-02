@@ -30100,28 +30100,21 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    adventurousness_weights, apply_adventurousness, damp_consensus_base,
-                    genre_affinity, novelty_score)
-                _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
+                    apply_adventurous_blend, genre_affinity, novelty_score)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
-                    # Dial-blend how much occurrence dominates: at the adventurous end this flattens so
-                    # obscure/low-consensus picks can actually surface (not just reshuffle the top tier).
-                    _base = damp_consensus_base(_oc, _adv_level) + (10.0 - _rank) * 0.1
+                    a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
-                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
-                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
-                    a['_adv_score'] = (_base * (1.0 + _w['genre'] * _aff)
-                                       * (1.0 - _w['novelty'] * (1.0 - _nov)))
-                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
-                # there), so sort by the boosted score first; the dial then layers its penalty on top.
-                result_artists.sort(key=lambda a: -a['_adv_score'])
-                if _adv_level > 0:
-                    result_artists = apply_adventurousness(
-                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                    a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
+                    a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                # Blend the sort axis consensus<->obscurity by the dial (scaled by genre/novelty
+                # quality). dial 0 = most-recommended first; dial 1 = least-popular (deep cuts) first.
+                result_artists = apply_adventurous_blend(
+                    result_artists, _adv_level, base_key='_base', pop_key='popularity',
+                    tiebreak_key='occurrence_count')
                 for a in result_artists:
-                    a.pop('_adv_score', None)
+                    a.pop('_base', None); a.pop('_aff', None); a.pop('_nov', None)
             except Exception as _adv_err:
                 logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
 
@@ -30300,47 +30293,26 @@ def get_discover_listening_recommendations():
         # leaves the score untouched, and at the default dial the weights equal the old constants.
         try:
             from core.discovery.listening_recommendations import (
-                adventurousness_weights, damp_consensus_base, genre_affinity, novelty_score)
-            _w = adventurousness_weights(level)
+                apply_adventurous_blend, genre_affinity, novelty_score)
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
             _names = [a.get('name') for a in stored]
             plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
             pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
-            changed = False
             for a in stored:
                 if a.get('popularity') is None:
                     a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
-                a['_why_genre'] = aff   # captured for the "why this rec" chips
-                factor = 1.0
-                if aff > 0:
-                    factor *= (1.0 + _w['genre'] * aff)
-                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
-                if nov < 1.0:
-                    factor *= (1.0 - _w['novelty'] * (1.0 - nov))
-                # Dial-blend how much the recommendation-score consensus base dominates (same axis as
-                # the similar-artists row) so the adventurous end genuinely surfaces obscure picks;
-                # at the default dial this is a no-op, so default recs are unchanged.
-                _orig = float(a.get('score') or 0)
-                _damped = damp_consensus_base(_orig, level)
-                if _damped != _orig or factor != 1.0:
-                    a['score'] = _damped * factor
-                    changed = True
-            if changed:
-                stored.sort(key=lambda a: -float(a.get('score') or 0))
+                a['_aff'] = a['_why_genre'] = aff   # _why_genre also feeds the "why this rec" chips
+                a['_nov'] = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+            # Blend the sort axis consensus<->obscurity by the dial (base = the recommendation score),
+            # so the adventurous end genuinely surfaces the least-popular on-taste picks.
+            stored = apply_adventurous_blend(
+                stored, level, base_key='score', pop_key='popularity', tiebreak_key='seed_count')
+            for a in stored:
+                a.pop('_aff', None); a.pop('_nov', None)
         except Exception as _qual_err:
             logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
-
-        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
-        # Popularity was already enriched in the quality block above; `level` was read there too (one
-        # popularity query per request, not two). level 0 -> unchanged. Fail-soft: leaves the order.
-        if level > 0 and stored:
-            try:
-                from core.discovery.listening_recommendations import apply_adventurousness
-                stored = apply_adventurousness(stored, level)
-            except Exception as _adv_err:
-                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
 
         result_artists = []
         for a in stored:

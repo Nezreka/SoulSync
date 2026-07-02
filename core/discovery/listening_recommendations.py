@@ -258,34 +258,6 @@ _NOVELTY_AT_DEFAULT = 0.4    # novelty (already-heard) penalty weight at the def
 _GENRE_SLOPE = -0.55        # dial 0 -> ~0.77 (very on-taste); dial 1 -> ~0.22 (out-of-taste allowed)
 _NOVELTY_SLOPE = 0.45       # dial 0 -> ~0.27 (familiar OK);   dial 1 -> ~0.72 (strongly prefer unheard)
 
-# The FOURTH axis (the one that actually changes WHICH artists surface): how much the raw "consensus"
-# base — occurrence_count / recommendation score — is allowed to dominate. Applied as base**exp.
-_CONSENSUS_EXP_AT_DEFAULT = 1.0   # exp == 1 at the default dial -> base untouched -> default recs unchanged
-_CONSENSUS_EXP_SLOPE = 1.0        # dial 0 -> exp 1.3 (amplify consensus); dial 1 -> exp 0.3 (flatten it)
-_CONSENSUS_EXP_MIN = 0.3
-_CONSENSUS_EXP_MAX = 1.5
-
-
-def damp_consensus_base(value: object, level: object) -> float:
-    """Dial-blend how much the raw consensus base drives ranking, so the exploration signals
-    (genre / novelty / popularity) can actually change WHICH artists surface — instead of only
-    reshuffling a fixed, occurrence-dominated top-N.
-
-    Returns ``base ** exp`` where ``exp`` is pivoted on the default dial: **exp == 1.0 at the default
-    (0.3)** so a user who never touches the dial sees the exact same ranking; the safe end (dial→0)
-    uses exp > 1 so heavily-recommended "consensus" picks dominate even more (trusted), and the
-    adventurous end (dial→1) uses exp < 1 to FLATTEN the base so low-consensus, obscure picks can
-    climb into view. Works for any positive base scale (occurrence 1..N or a 0..1 score) because a
-    smaller exponent always compresses the ratio between candidates. Pure; non-positive -> unchanged.
-    """
-    v = _coerce_float(value, 0.0)
-    if v <= 0.0:
-        return v
-    lvl = max(0.0, min(1.0, _coerce_float(level, _DIAL_DEFAULT)))
-    exp = _CONSENSUS_EXP_AT_DEFAULT - _CONSENSUS_EXP_SLOPE * (lvl - _DIAL_DEFAULT)
-    exp = max(_CONSENSUS_EXP_MIN, min(_CONSENSUS_EXP_MAX, exp))
-    return v ** exp
-
 
 def adventurousness_weights(level: object) -> dict:
     """Map the 0..1 adventurousness dial to per-signal weights. Pure — the SINGLE source of truth for
@@ -339,6 +311,57 @@ def apply_adventurousness(
         items,
         key=lambda it: (-_adjusted(it), -_coerce_float(_get(it, tiebreak_key), 0.0), _norm(_get(it, "name"))),
     )
+
+
+def apply_adventurous_blend(
+    items: Sequence[dict],
+    level: object,
+    *,
+    base_key: str = "score",
+    pop_key: str = "popularity",
+    genre_aff_key: str = "_aff",
+    novelty_key: str = "_nov",
+    tiebreak_key: str = "seed_count",
+) -> List[dict]:
+    """Re-rank candidates by BLENDING the sort axis between consensus and obscurity, scaled by
+    always-on quality (genre affinity + novelty). THIS is what makes the adventurousness dial change
+    WHICH artists surface instead of just nudging a fixed order (the old multiplicative penalty was
+    too weak — a strongly-recommended popular artist kept its lead, so 'adventurous' surfaced popular
+    picks, backwards, and saturated).
+
+        axis  = (1 - dial) * consensus  +  dial * obscurity
+        score = (1 + w_genre*aff) * (1 - w_novelty*(1-novelty)) * axis
+
+    - ``consensus`` = base / max(base in pool), 0..1 — how strongly your library points here.
+    - ``obscurity`` = 1 - popularity/100, 0..1 — high = obscure; missing popularity -> 0.5 (neutral).
+    - dial 0 -> order by consensus (most-recommended, on-taste, familiar win).
+    - dial 1 -> order by obscurity (least-popular on-taste picks win — genuine deep cuts).
+    Linear + monotonic in the dial, so no dead zone / saturation. Returns a NEW list, best first. Pure.
+    """
+    lst = list(items)
+    if not lst:
+        return lst
+    lvl = max(0.0, min(1.0, _coerce_float(level, _DIAL_DEFAULT)))
+    w = adventurousness_weights(lvl)
+    bases = [max(0.0, _coerce_float(_get(it, base_key), 0.0)) for it in lst]
+    max_base = max(bases) or 1.0
+
+    def _score(it: object, base: float) -> float:
+        consensus = base / max_base
+        pop = _get(it, pop_key)
+        obscurity = 0.5 if pop is None else max(0.0, min(1.0, 1.0 - _coerce_float(pop, 0.0) / 100.0))
+        aff = max(0.0, _coerce_float(_get(it, genre_aff_key), 0.0))
+        nov = max(0.0, min(1.0, _coerce_float(_get(it, novelty_key), 1.0)))
+        quality = (1.0 + w["genre"] * aff) * (1.0 - w["novelty"] * (1.0 - nov))
+        axis = (1.0 - lvl) * consensus + lvl * obscurity
+        return quality * axis
+
+    scored = [
+        (_score(it, base), _coerce_float(_get(it, tiebreak_key), 0.0), _norm(_get(it, "name")), it)
+        for it, base in zip(lst, bases, strict=True)
+    ]
+    scored.sort(key=lambda t: (-t[0], -t[1], t[2]))
+    return [t[3] for t in scored]
 
 
 # ── Genre / tag affinity (aurral's missing signal) ──────────────────────────────────────────
