@@ -5048,14 +5048,24 @@
                             </div>
                             </div><!-- end Download Settings body -->
 
-                            <!-- ═══ QUALITY PROFILE ═══ -->
+                            <!-- ═══ QUALITY TAB: two-column layout ═══ -->
+                            <!-- Left (.qp-main): the 4 quality tiles, unchanged. Right
+                                 (.qp-side-panel): a DETACHED, sticky profile-management panel —
+                                 same pattern as the Downloads page's .adl-layout/.adl-main/
+                                 .adl-batch-panel. Everything on this whole tab is saved under
+                                 whichever profile is active in that panel; the 3 tiles besides
+                                 "Quality" carry a small badge saying so. -->
+                            <div class="qp-layout" data-stg="quality">
+                            <div class="qp-main" data-stg="quality">
+
+                            <!-- ═══ QUALITY (ranked targets, search mode, fallback) ═══ -->
                             <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
                                  by settings.js updateSourceVisibility — gating only the inner
                                  group would leave an empty expandable shell. -->
                             <div id="quality-profile-tile" data-stg="quality">
                             <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Quality Profile</h3>
+                                <h3>🎚 Quality</h3>
                                 <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5244,29 +5254,11 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality on Import</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
                                 <span class="settings-section-hint">Apply the profile to manually imported files</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
                             <div class="settings-group" data-stg="quality">
-                                <div class="form-group">
-                                    <div class="setting-row">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="import-quality-filter-enabled" checked>
-                                            Quality profile check on import
-                                        </label>
-                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    </div>
-                                    <div class="setting-help-body" hidden>
-                                        On by default. SoulSync probes each imported file's real audio quality and compares it
-                                        with your Quality Profile. <strong>On</strong> — files that don't meet your profile are
-                                        quarantined instead of imported (fallback/downsample settings still apply).
-                                        <strong>Off</strong> — files are imported regardless of format, bitrate, bit depth, or
-                                        sample rate. This does <strong>not</strong> skip AcoustID; fingerprint verification is a
-                                        separate setting below. Either way, the library <em>Quality Upgrade Scanner</em> still
-                                        flags below-profile tracks so you can act on them later.
-                                    </div>
-                                </div>
                                 <div class="form-group">
                                     <div class="setting-row">
                                         <label class="checkbox-label">
@@ -5280,6 +5272,27 @@
                                         When importing from Staging, if a track already exists in your library at a lower quality
                                         (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
                                         If disabled, existing tracks are always kept and the import file is skipped.
+                                        <br><br>
+                                        <strong>Note:</strong> imported files are always checked against your Quality Profile's
+                                        priority list above — there's no separate on/off switch for that, since an empty list
+                                        (or Fallback turned on) already means "accept anything."
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <div class="setting-row">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-folder-artist-override">
+                                            Auto-Import: use the top Staging folder as the artist
+                                        </label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <div class="setting-help-body" hidden>
+                                        Only affects <strong>Auto-Import</strong> (Import page). With Artist/Album staging layouts,
+                                        the top folder's name overrides the metadata-identified artist — the long-standing default.
+                                        Turn <strong>off</strong> if you stage a mixed pile of songs under one container folder,
+                                        otherwise that folder's name would relabel every track's artist. Like everything on this
+                                        tab, this is saved per quality profile — Auto-Import follows its assigned profile.
                                     </div>
                                 </div>
                             </div>
@@ -5289,6 +5302,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Download Conversion</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
                                 <span class="settings-section-hint">Downsample hi-res, make lossy copies</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5352,6 +5366,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Audio Verification</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">🎚 Profile</span>
                                 <span class="settings-section-hint">AcoustID identity match + truncated/silent detection</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5398,6 +5413,28 @@
                                 </div>
                             </div>
                             </div><!-- end Audio Verification body -->
+
+                            </div><!-- end qp-main -->
+
+                            <!-- Right: detached, sticky Quality Profiles panel — everything on
+                                 the 4 tiles to the left is saved under whichever profile is
+                                 active here. Always visible (no collapse), protruding to the
+                                 right of the settings column on wide screens so it never takes
+                                 width away from the tiles. -->
+                            <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
+                                <div class="qp-side-panel-header">
+                                    <h3 class="qp-side-panel-title">🎚 Quality Profiles</h3>
+                                </div>
+                                <p class="qp-side-panel-hint">Click a profile to make it active. Everything on the left is saved under it — ranked targets, AcoustID strictness, downsample, real-audio verification, and lossy-copy.</p>
+                                <div class="qp-profile-list" id="qp-profile-list">
+                                    <!-- rows injected by renderCustomQualityProfiles() -->
+                                </div>
+                                <div class="qp-profile-new" id="qp-profile-new">
+                                    <button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn" onclick="qpShowNewProfileInput()">+ New profile</button>
+                                </div>
+                            </div>
+
+                            </div><!-- end qp-layout -->
 
                             <!-- ═══ INDEXERS & DOWNLOADERS (gated: only shown when torrent/usenet is a selected source — see updateDownloadSourceUI) ═══ -->
                             <div id="indexers-downloaders-section" data-stg="downloads">
@@ -6605,29 +6642,10 @@
                             <div class="settings-section-header collapsed" data-stg="library" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Import</h3>
-                                <span class="settings-section-hint">Folder-artist override, permanent library</span>
+                                <span class="settings-section-hint">Permanent library</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="library">
                             <div class="settings-group" data-stg="library">
-                                <div class="form-group">
-                                    <div class="setting-row">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="import-folder-artist-override">
-                                            Use the top Staging folder as the artist
-                                        </label>
-                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    </div>
-                                    <div class="help-text setting-help-body" hidden>
-                                        On by default (legacy behaviour). When enabled, files staged as
-                                        <code>Artist/Album/…</code> (or <code>Artist/Albums/Album/…</code>) take the top
-                                        folder as the album artist — handy for mixtapes/compilations whose embedded tags
-                                        carry DJ names. <strong>Turn this off</strong> if you drop a mixed pile of songs
-                                        under one container folder: otherwise every file's artist gets overwritten with
-                                        that folder's name (the cause of the "soulsync" mass-mislabel). With it off, the
-                                        metadata-identified artist is always kept.
-                                    </div>
-                                </div>
                                 <div class="form-group">
                                     <div class="setting-row">
                                         <label class="checkbox-label">

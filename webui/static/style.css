@@ -4180,6 +4180,302 @@ body.helper-mode-active #dashboard-activity-feed:hover {
     line-height: 1;
 }
 
+/* Quality tab: two-column layout — the 4 tiles on the left (.qp-main), a
+   DETACHED, sticky profile-management panel on the right (.qp-side-panel).
+   Mirrors the Downloads page's .adl-layout/.adl-main/.adl-batch-panel look,
+   with one deliberate difference: the panel is ALWAYS visible (no collapse)
+   and, on wide screens, PROTRUDES to the right of the centered 920px
+   settings column instead of taking width away from the 4 tiles it governs
+   (.qp-main keeps the full column width via flex-basis 100%; the panel
+   occupies the page's empty right margin — the tab reads slightly
+   off-center, which is intended). On narrower viewports there is no free
+   margin to protrude into, so the panel falls back to sharing the column,
+   and below 900px it stacks underneath. This replaces an earlier attempt
+   that put a control strip ABOVE the tiles — that made it look like only
+   the first tile was "governed", which is wrong: everything on this whole
+   tab belongs to the active profile. */
+.qp-layout {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+}
+
+.qp-main {
+    flex: 1;
+    min-width: 0;
+    /* The tiles never grow past the standard settings column width — the
+       widened tab (below) gives all extra room to the side panel. */
+    max-width: 920px;
+}
+
+/* While the Quality tab is visible, widen the centered settings column by
+   exactly the panel's width (920px tiles + 8px margin + 350px panel), same
+   :has() pattern the Logs tab uses for its full-width terminal. The tiles
+   keep their full 920px (max-width above); the panel takes the extra —
+   the tab as a whole sits a bit left of the other tabs' center, which is
+   the intended "detached, sticking out" look. */
+#settings-page .settings-columns:has(.qp-layout[data-stg="quality"]:not([style*="none"])) {
+    max-width: 1278px;
+}
+
+.qp-side-panel {
+    width: 320px;
+    flex-shrink: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 0 4px 0 22px;
+    margin-left: 8px;
+    position: sticky;
+    top: 80px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.qp-side-panel::-webkit-scrollbar { width: 7px; }
+.qp-side-panel::-webkit-scrollbar-track { background: transparent; }
+.qp-side-panel::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+.qp-side-panel::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
+
+.qp-side-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+}
+
+.qp-side-panel-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+    white-space: nowrap;
+}
+
+.qp-side-panel-hint {
+    font-size: 11px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.4);
+    margin: 0 0 14px;
+}
+
+.qp-profile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.qp-profile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    transition: all 0.2s ease;
+}
+
+.qp-profile-row:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+}
+
+.qp-profile-row.active {
+    background: linear-gradient(135deg,
+            rgba(var(--accent-rgb), 0.2) 0%,
+            rgba(var(--accent-light-rgb), 0.12) 100%);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    box-shadow: 0 4px 12px rgba(var(--accent-rgb), 0.15);
+}
+
+.qp-profile-dot {
+    flex-shrink: 0;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+}
+.qp-profile-row.active .qp-profile-dot {
+    background: rgb(var(--accent-light-rgb));
+    box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.6);
+}
+
+.qp-profile-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    cursor: pointer;
+}
+
+.qp-profile-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.75);
+}
+.qp-profile-row.active .qp-profile-name {
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-sub {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9.5px;
+    color: rgba(255, 255, 255, 0.35);
+}
+.qp-profile-row.active .qp-profile-sub {
+    color: rgba(var(--accent-light-rgb), 0.6);
+}
+
+.qp-profile-name-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-tags {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.qp-profile-tag {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    white-space: nowrap;
+}
+.qp-profile-tag.qp-tag-autoimport {
+    background: rgba(var(--accent-rgb), 0.15);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.qp-profile-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    background: none;
+    border: none;
+}
+.qp-profile-action:hover {
+    background: rgba(var(--accent-rgb), 0.25);
+    color: rgb(var(--accent-light-rgb));
+}
+.qp-profile-action.qp-action-delete:hover {
+    background: rgba(248, 113, 113, 0.2);
+    color: #f87171;
+}
+
+.qp-profile-new {
+    margin-top: 10px;
+}
+
+.qp-profile-new-btn {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    background: transparent;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+.qp-profile-new-btn:hover {
+    border-color: rgba(var(--accent-rgb), 0.4);
+    color: rgb(var(--accent-light-rgb));
+}
+
+.qp-profile-new-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.qp-profile-new-input {
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid rgba(var(--accent-rgb), 0.4);
+    background: rgba(0, 0, 0, 0.25);
+    color: #fff;
+}
+
+.qp-profile-list-empty {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+}
+
+/* Small badge on the 3 tiles governed by the active profile (Quality on
+   Import, Post-Download Conversion, Audio Verification) — signals "this
+   section's settings are part of the active Quality Profile" without
+   repeating the full explanation on every tile. Sits between the title and
+   the existing right-aligned .settings-section-hint. */
+.qp-governed-badge {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 9px;
+    font-weight: 600;
+    background: rgba(var(--accent-rgb), 0.12);
+    color: rgb(var(--accent-light-rgb));
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .qp-layout {
+        flex-direction: column;
+    }
+
+    .qp-side-panel {
+        width: 100%;
+        border-left: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        padding: 16px 0 0 0;
+        margin-left: 0;
+        margin-top: 16px;
+        max-height: none;
+        position: static;
+    }
+}
+
 /* Quality tier cards - upgraded inner cards */
 /* ── Ranked-targets editor (v3 quality profile) ───────────────────────── */
 .ranked-targets-editor {
