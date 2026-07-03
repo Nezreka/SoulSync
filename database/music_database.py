@@ -239,19 +239,36 @@ class MusicDatabase:
     
     def _get_connection(self) -> sqlite3.Connection:
         """Get a NEW database connection for each operation (thread-safe)"""
-        connection = sqlite3.connect(str(self.database_path), timeout=30.0)
-        connection.row_factory = sqlite3.Row
-        # Register Unicode-normalizing function for diacritics-aware LIKE queries
-        try:
-            from unidecode import unidecode as _ud
-            connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
-        except ImportError:
-            connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
-        # Enable foreign key constraints and WAL mode for better concurrency
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
-        connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
-        return connection
+        last_error = None
+        for attempt in range(4):
+            connection = None
+            try:
+                connection = sqlite3.connect(str(self.database_path), timeout=30.0)
+                connection.row_factory = sqlite3.Row
+                # Register Unicode-normalizing function for diacritics-aware LIKE queries
+                try:
+                    from unidecode import unidecode as _ud
+                    connection.create_function("unidecode_lower", 1, lambda x: _ud(x).lower() if x else "")
+                except ImportError:
+                    connection.create_function("unidecode_lower", 1, lambda x: x.lower() if x else "")
+                # Enable foreign key constraints and WAL mode for better concurrency.
+                # Docker Desktop bind mounts can briefly fail while SQLite opens the
+                # sidecar WAL/SHM files; retrying avoids surfacing transient 500s.
+                connection.execute("PRAGMA foreign_keys = ON")
+                connection.execute("PRAGMA journal_mode = WAL")
+                connection.execute("PRAGMA busy_timeout = 30000")  # 30 second timeout
+                return connection
+            except sqlite3.OperationalError as e:
+                last_error = e
+                if connection is not None:
+                    try:
+                        connection.close()
+                    except Exception as close_err:
+                        logger.debug("Error closing failed SQLite connection: %s", close_err)
+                if "unable to open database file" not in str(e).lower() or attempt >= 3:
+                    raise
+                time.sleep(0.25 * (attempt + 1))
+        raise last_error
     
     def _initialize_database(self):
         """Create database tables if they don't exist"""
@@ -988,6 +1005,29 @@ class MusicDatabase:
             except Exception as ps_err:
                 logger.error(f"Personalized-playlist schema init failed: {ps_err}")
 
+            # App-wide quality-profiles schema. Idempotent and additive — only
+            # creates/migrates the `quality_profiles` table, never touches
+            # legacy tables.
+            try:
+                from core.quality.schema import ensure_quality_profiles_schema
+                ensure_quality_profiles_schema(conn)
+                self._record_migration(cursor, 'quality_profiles_schema')
+            except Exception as qp_err:
+                logger.error(f"Quality-profiles schema init failed: {qp_err}")
+
+            self._ensure_wishlist_quality_columns(cursor)
+            self._ensure_library_quality_column(cursor)
+
+            # One-time: materialize the current global quality/AcoustID/downsample
+            # settings into the `quality_profiles` default row and backfill
+            # existing wishlist rows, so every wishlist item is self-sufficient
+            # for the download/import pipeline instead of relying on globals.
+            try:
+                from core.quality.migrate_to_profiles import materialize_default_profile_and_backfill
+                materialize_default_profile_and_backfill(self, conn)
+            except Exception as qp_err:
+                logger.error(f"Quality-profile migration failed: {qp_err}")
+
             self._ensure_core_media_schema_columns(cursor)
             self._normalize_genres_to_json(cursor)
             # Unify scattered migration state into the ledger + stamp the schema
@@ -995,6 +1035,17 @@ class MusicDatabase:
             self._sync_migration_ledger(cursor)
 
             conn.commit()
+
+            # Any config.json write the quality-profile migration queued (e.g.
+            # pointing Auto-Import at its migrated relaxed profile) is applied
+            # only now, after the transaction above actually committed — see
+            # `apply_pending_quality_profile_config_writes`'s docstring for why.
+            try:
+                from core.quality.migrate_to_profiles import apply_pending_quality_profile_config_writes
+                apply_pending_quality_profile_config_writes(self)
+            except Exception as qp_err:
+                logger.error(f"Could not apply quality-profile migration config write(s): {qp_err}")
+
             logger.info("Database initialized successfully")
 
         except Exception as e:
@@ -1063,6 +1114,7 @@ class MusicDatabase:
         'deezer_cache_v2':          ('table', '_deezer_cache_v2_migrated'),
         'cache_junk_artist_purged': ('table', '_cache_junk_artist_purged'),
         'genius_search_fix':        ('table', '_genius_search_fix_applied'),
+        'quality_profiles_schema':  ('table', 'quality_profiles'),
     }
 
     def _record_migration(self, cursor, name):
@@ -1221,6 +1273,68 @@ class MusicDatabase:
                     logger.info("Added %s column to albums table (canonical version)", _col)
         except Exception as e:
             logger.error("Error repairing core media schema columns: %s", e)
+
+    def _ensure_wishlist_quality_columns(self, cursor):
+        """Give every wishlist row a pointer to its own quality profile.
+
+        Historically the download/import pipeline consulted ONE global quality
+        profile + a separate global AcoustID toggle + a separate global
+        downsample toggle for every item it processed. This column lets a
+        wishlist row carry a `quality_profile_id` instead, resolved once at
+        insert time (`add_to_wishlist(quality_profile_id=...)`) or backfilled
+        for pre-existing rows by `core/quality/migrate_to_profiles.py`. Every
+        pipeline stage that needs the profile's actual settings (ranked
+        targets, AcoustID strictness, downsample, ...) resolves them LIVE via
+        `core/quality/selection.py::load_profile_by_id(quality_profile_id)` —
+        this column is only ever the pointer, never a snapshot, so editing a
+        profile takes effect immediately for every item assigned to it.
+
+        Nullable: NULL means "not yet resolved" — callers must fall back to
+        the default `quality_profiles` row until backfilled.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(wishlist_tracks)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'quality_profile_id' not in cols:
+                cursor.execute("ALTER TABLE wishlist_tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
+                logger.info("Added quality_profile_id column to wishlist_tracks table (quality-profile pipeline)")
+            # Cleanup for installs that ran an earlier intermediate version:
+            # acoustid_required/fallback_allowed/downsample_enabled were once
+            # denormalized here too. Two were never read (the import gate
+            # already resolved live from the profile) and the third
+            # (acoustid_required) was the one place a stale snapshot could
+            # drift from a later-edited profile — see
+            # core/downloads/master.py, which now resolves it live instead.
+            for dead_col in ("acoustid_required", "fallback_allowed", "downsample_enabled"):
+                if dead_col in cols:
+                    try:
+                        cursor.execute(f"ALTER TABLE wishlist_tracks DROP COLUMN {dead_col}")
+                        logger.info("Dropped dormant %s column from wishlist_tracks table", dead_col)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("wishlist column removal %s: %s", dead_col, e)
+        except Exception as e:
+            logger.error("Error adding wishlist quality-profile column: %s", e)
+
+    def _ensure_library_quality_column(self, cursor):
+        """Give every library track a pointer to its own quality profile.
+
+        Same pointer-only design as `_ensure_wishlist_quality_columns` above:
+        NULL means "use the app-wide default profile" (resolved live), a
+        concrete id pins the track to a specific profile. Existing rows are
+        backfilled to the migrated default profile by
+        `core/quality/migrate_to_profiles.py` so upgrading installs don't lose
+        the assignment their old global settings implied; new library tracks
+        are inserted with NULL and simply follow whichever profile is default
+        at read time — no insert call site needs to change.
+        """
+        try:
+            cursor.execute("PRAGMA table_info(tracks)")
+            cols = {c[1] for c in cursor.fetchall()}
+            if cols and 'quality_profile_id' not in cols:
+                cursor.execute("ALTER TABLE tracks ADD COLUMN quality_profile_id INTEGER DEFAULT NULL")
+                logger.info("Added quality_profile_id column to tracks table (quality-profile pipeline)")
+        except Exception as e:
+            logger.error("Error adding library quality-profile column: %s", e)
 
     def set_album_canonical(self, album_id, source: str, canonical_album_id: str,
                             score: float, locked: bool = False) -> bool:
@@ -8874,8 +8988,417 @@ class MusicDatabase:
 
     # Quality profile management methods
 
+    # Presets whose per-preset customizations we remember across switches (also
+    # used to recognise a `quality_profiles` row as a built-in when shaping it
+    # back into the legacy v3 dict shape — see `_quality_profile_row_to_dict`).
+    _KNOWN_PRESETS = ('audiophile', 'balanced', 'space_saver')
+
     def get_quality_profile(self) -> dict:
-        """Get the quality profile configuration, returns default if not set."""
+        """Get the active quality profile: the ``is_default=1`` row in the
+        app-wide ``quality_profiles`` table (see `core/quality/schema.py`).
+
+        Falls back to the legacy ``preferences.quality_profile`` singleton if
+        that table is empty/unreadable — defensive only; should not happen
+        once schema init + the one-time migration
+        (`core/quality/migrate_to_profiles.py`) have run.
+        """
+        try:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM quality_profiles WHERE is_default = 1 ORDER BY id LIMIT 1"
+                ).fetchone()
+            finally:
+                conn.close()
+            if row:
+                return self._quality_profile_row_to_dict(row)
+        except Exception as e:
+            logger.debug("get_quality_profile: quality_profiles read failed, falling back: %s", e)
+        return self._legacy_quality_profile_from_preferences()
+
+    def _quality_profile_row_to_dict(self, row) -> dict:
+        """Shape a ``quality_profiles`` row into the legacy v3 profile dict
+        shape every caller actually reads (`ranked_targets`/`fallback_enabled`/
+        `search_mode`/`rank_candidates_by_quality` via `.get()` with defaults —
+        see `core/quality/selection.py::targets_from_profile`). ``preset`` is
+        best-effort (used only by the legacy Settings UI to highlight the
+        active Quick Set button); a custom/migrated profile that isn't one of
+        the three built-in names resolves to ``'custom'``.
+
+        Includes every setting a profile now captures beyond the ranked-target
+        ladder (AcoustID strictness, downsample, deep audio verify, import
+        replace-lower-quality, lossy-copy) — see `core/quality/schema.py`'s
+        `QUALITY_PROFILES_DDL` docstring.
+        """
+        import json
+        name = (row["name"] or "").strip().lower()
+        preset = name if name in self._KNOWN_PRESETS else "custom"
+        try:
+            ranked_targets = json.loads(row["ranked_targets"] or "[]")
+        except (TypeError, ValueError):
+            ranked_targets = []
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "is_default": bool(row["is_default"]),
+            "version": 3,
+            "preset": preset,
+            "fallback_enabled": bool(row["fallback_enabled"]),
+            "search_mode": row["search_mode"] or "priority",
+            "rank_candidates_by_quality": bool(row["rank_candidates_by_quality"]),
+            "ranked_targets": ranked_targets,
+            "acoustid_required": bool(row["acoustid_required"]),
+            "downsample_enabled": bool(row["downsample_enabled"]),
+            "deep_audio_verify": bool(row["deep_audio_verify"]),
+            "replace_lower_quality": bool(row["replace_lower_quality"]),
+            "lossy_copy_enabled": bool(row["lossy_copy_enabled"]),
+            "lossy_copy_codec": row["lossy_copy_codec"] or "mp3",
+            "lossy_copy_bitrate": row["lossy_copy_bitrate"] or "320",
+            "lossy_copy_delete_original": bool(row["lossy_copy_delete_original"]),
+            "upgrade_policy": row["upgrade_policy"] or "acceptable",
+            "upgrade_cutoff_index": int(row["upgrade_cutoff_index"] or 0),
+        }
+
+    @staticmethod
+    def _quality_profile_bundle_params(profile: dict) -> dict:
+        """Extract every profile-capturable setting from a frontend-shaped
+        profile dict into ``quality_profiles`` column values. Shared by
+        ``create_quality_profile`` and ``update_quality_profile``."""
+        import json
+        policy = profile.get("upgrade_policy") or "acceptable"
+        if policy not in ("acceptable", "until_cutoff", "until_top"):
+            policy = "acceptable"
+        try:
+            cutoff_index = int(profile.get("upgrade_cutoff_index") or 0)
+        except (TypeError, ValueError):
+            cutoff_index = 0
+        if cutoff_index < 0:
+            cutoff_index = 0
+        return {
+            "ranked_targets": json.dumps(profile.get("ranked_targets") or []),
+            "fallback_enabled": 1 if profile.get("fallback_enabled", True) else 0,
+            "search_mode": profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
+            "rank_candidates_by_quality": 1 if profile.get("rank_candidates_by_quality") else 0,
+            "upgrade_policy": policy,
+            "upgrade_cutoff_index": cutoff_index,
+            "acoustid_required": 1 if profile.get("acoustid_required") else 0,
+            "downsample_enabled": 1 if profile.get("downsample_enabled") else 0,
+            "deep_audio_verify": 1 if profile.get("deep_audio_verify") else 0,
+            "replace_lower_quality": 1 if profile.get("replace_lower_quality") else 0,
+            "lossy_copy_enabled": 1 if profile.get("lossy_copy_enabled") else 0,
+            "lossy_copy_codec": str(profile.get("lossy_copy_codec") or "mp3"),
+            "lossy_copy_bitrate": str(profile.get("lossy_copy_bitrate") or "320"),
+            "lossy_copy_delete_original": 1 if profile.get("lossy_copy_delete_original") else 0,
+        }
+
+    # SQLite has no native boolean type — these columns are stored as 0/1.
+    # Coerced to real bools below so API consumers (the React Import page's
+    # `AutoImportQualityProfile.is_default: boolean`, in particular) get what
+    # their type actually says instead of relying on JS truthiness. NOTE:
+    # `ranked_targets` is deliberately left as its raw JSON-string column
+    # value, not parsed here — `settings.js::qpProfileSummary` does its own
+    # `JSON.parse(profile.ranked_targets || '[]')` on this endpoint's rows.
+    _QUALITY_PROFILE_BOOL_COLUMNS = (
+        "is_default", "fallback_enabled", "rank_candidates_by_quality",
+        "acoustid_required", "downsample_enabled", "deep_audio_verify",
+        "replace_lower_quality", "lossy_copy_enabled", "lossy_copy_delete_original",
+    )
+
+    def list_quality_profiles(self) -> list:
+        """All app-wide quality profiles (built-ins + custom), default first."""
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM quality_profiles ORDER BY is_default DESC, id"
+            ).fetchall()
+            profiles = []
+            for row in rows:
+                profile = dict(row)
+                for col in self._QUALITY_PROFILE_BOOL_COLUMNS:
+                    if col in profile:
+                        profile[col] = bool(profile[col])
+                profiles.append(profile)
+            return profiles
+        finally:
+            conn.close()
+
+    def create_quality_profile(self, name: str, profile: dict) -> Optional[int]:
+        """Create a new named custom profile capturing every Settings ->
+        Quality setting (see `_quality_profile_bundle_params`), not just the
+        ranked-target ladder. Returns the new profile's id, or None on
+        failure (e.g. duplicate name)."""
+        name = (name or "").strip()
+        if not name:
+            return None
+        params = self._quality_profile_bundle_params(profile)
+        conn = self._get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO quality_profiles
+                       (name, description, ranked_targets, fallback_enabled,
+                        search_mode, rank_candidates_by_quality, upgrade_policy,
+                        upgrade_cutoff_index, acoustid_required, downsample_enabled, deep_audio_verify,
+                        replace_lower_quality, lossy_copy_enabled, lossy_copy_codec,
+                        lossy_copy_bitrate, lossy_copy_delete_original, is_default)
+                   VALUES (:name, :description, :ranked_targets, :fallback_enabled,
+                           :search_mode, :rank_candidates_by_quality, :upgrade_policy,
+                           :upgrade_cutoff_index, :acoustid_required, :downsample_enabled, :deep_audio_verify,
+                           :replace_lower_quality, :lossy_copy_enabled, :lossy_copy_codec,
+                           :lossy_copy_bitrate, :lossy_copy_delete_original, 0)""",
+                {"name": name, "description": "Custom profile", **params},
+            )
+            conn.commit()
+            return cur.lastrowid
+        except Exception as e:
+            logger.error(f"Failed to create quality profile '{name}': {e}")
+            return None
+        finally:
+            conn.close()
+
+    def update_quality_profile(self, profile_id: int, profile: dict) -> bool:
+        """Overwrite an existing profile's captured settings with the given
+        v3 profile dict (edit-in-place — "update this profile with what's
+        currently on the page"). Name/is_default are untouched."""
+        params = self._quality_profile_bundle_params(profile)
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                """UPDATE quality_profiles
+                      SET ranked_targets=:ranked_targets, fallback_enabled=:fallback_enabled,
+                          search_mode=:search_mode, rank_candidates_by_quality=:rank_candidates_by_quality,
+                          upgrade_policy=:upgrade_policy, upgrade_cutoff_index=:upgrade_cutoff_index,
+                          acoustid_required=:acoustid_required, downsample_enabled=:downsample_enabled,
+                          deep_audio_verify=:deep_audio_verify,
+                          replace_lower_quality=:replace_lower_quality, lossy_copy_enabled=:lossy_copy_enabled,
+                          lossy_copy_codec=:lossy_copy_codec, lossy_copy_bitrate=:lossy_copy_bitrate,
+                          lossy_copy_delete_original=:lossy_copy_delete_original,
+                          updated_at=CURRENT_TIMESTAMP
+                    WHERE id=:profile_id""",
+                {"profile_id": profile_id, **params},
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Failed to update quality profile {profile_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def apply_quality_profile_to_settings(self, profile_id: int) -> Optional[dict]:
+        """Make ``profile_id`` the app-wide default AND push every setting it
+        captures into the live global config, so the rest of the app (which
+        reads these via ``config_manager.get(...)`` directly — AcoustID,
+        lossy-copy, import guards) picks up the change immediately, not just
+        the ranked-target ladder. Returns the applied profile dict, or None
+        if the profile doesn't exist."""
+        conn = self._get_connection()
+        try:
+            row = conn.execute("SELECT * FROM quality_profiles WHERE id=?", (profile_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        profile = self._quality_profile_row_to_dict(row)
+
+        if not self.set_default_quality_profile(profile_id):
+            return None
+        # Keep the legacy preferences.quality_profile singleton (still read by
+        # the ranked-targets editor / Quick Set buttons) in sync too.
+        self.set_quality_profile(profile)
+
+        try:
+            from config.settings import config_manager
+            config_manager.set("acoustid.require_verified", profile["acoustid_required"])
+            config_manager.set("lossy_copy.downsample_hires", profile["downsample_enabled"])
+            config_manager.set("post_processing.audio_completeness_check", profile["deep_audio_verify"])
+            config_manager.set("import.replace_lower_quality", profile["replace_lower_quality"])
+            config_manager.set("lossy_copy.enabled", profile["lossy_copy_enabled"])
+            config_manager.set("lossy_copy.codec", profile["lossy_copy_codec"])
+            config_manager.set("lossy_copy.bitrate", profile["lossy_copy_bitrate"])
+            config_manager.set("lossy_copy.delete_original", profile["lossy_copy_delete_original"])
+        except Exception as e:
+            logger.error(f"Failed to push quality profile {profile_id} into global settings: {e}")
+        return profile
+
+    def sync_default_quality_profile_from_config(self) -> bool:
+        """The inverse of ``apply_quality_profile_to_settings``: push the
+        current global config values of every profile-owned setting into the
+        ``is_default=1`` profile row.
+
+        Why: the Settings → Quality page's checkboxes are saved as global
+        config keys (like every other setting on the page), but the pipeline
+        reads the PROFILE row (live, per item — see
+        `core/imports/pipeline.py::_resolve_context_quality_profile`). Without
+        this write-through, editing a checkbox + Save Settings would change
+        the config but the pipeline would keep enforcing the profile's old
+        values. Called after every settings save that touches a quality-owned
+        section (`web_server.py::handle_settings`), keeping "the page edits
+        the active profile" true in both directions.
+        """
+        try:
+            from config.settings import config_manager
+            values = {
+                "acoustid_required": 1 if config_manager.get("acoustid.require_verified", False) else 0,
+                "downsample_enabled": 1 if config_manager.get("lossy_copy.downsample_hires", False) else 0,
+                "deep_audio_verify": 1 if config_manager.get("post_processing.audio_completeness_check", False) else 0,
+                "replace_lower_quality": 1 if config_manager.get("import.replace_lower_quality", False) else 0,
+                "lossy_copy_enabled": 1 if config_manager.get("lossy_copy.enabled", False) else 0,
+                "lossy_copy_codec": str(config_manager.get("lossy_copy.codec", "mp3") or "mp3"),
+                "lossy_copy_bitrate": str(config_manager.get("lossy_copy.bitrate", "320") or "320"),
+                "lossy_copy_delete_original": 1 if config_manager.get("lossy_copy.delete_original", False) else 0,
+            }
+            conn = self._get_connection()
+            try:
+                conn.execute(
+                    """UPDATE quality_profiles
+                          SET acoustid_required=:acoustid_required,
+                              downsample_enabled=:downsample_enabled,
+                              deep_audio_verify=:deep_audio_verify,
+                              replace_lower_quality=:replace_lower_quality,
+                              lossy_copy_enabled=:lossy_copy_enabled,
+                              lossy_copy_codec=:lossy_copy_codec,
+                              lossy_copy_bitrate=:lossy_copy_bitrate,
+                              lossy_copy_delete_original=:lossy_copy_delete_original,
+                              updated_at=CURRENT_TIMESTAMP
+                        WHERE is_default=1""",
+                    values,
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to sync default quality profile from config: {e}")
+            return False
+
+    def rename_quality_profile(self, profile_id: int, new_name: str) -> Tuple[bool, str]:
+        """Rename any profile. Returns ``(success, reason)`` — ``reason`` is
+        empty on success, and distinguishes a duplicate name from a missing
+        profile so the UI can say something useful."""
+        new_name = (new_name or "").strip()
+        if not new_name:
+            return False, "Name is required"
+        conn = self._get_connection()
+        try:
+            cur = conn.execute(
+                "UPDATE quality_profiles SET name=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (new_name, profile_id),
+            )
+            conn.commit()
+            if cur.rowcount > 0:
+                return True, ""
+            return False, "Profile not found"
+        except sqlite3.IntegrityError:
+            return False, f"A profile named '{new_name}' already exists"
+        except Exception as e:
+            logger.error(f"Failed to rename quality profile {profile_id}: {e}")
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def delete_quality_profile(self, profile_id: int) -> Tuple[bool, str]:
+        """Delete any profile, including the two starter ones (nothing is
+        permanently protected — a user may not want "Balanced" at all).
+
+        Two guards keep the app always in a valid state:
+        - Refuses if this would be the LAST remaining profile — there must
+          always be at least one to fall back to.
+        - If this profile is the current app-wide default, another
+          remaining profile (lowest id) is automatically promoted to
+          default first, so deleting your active profile never leaves the
+          app without one.
+
+        References to the deleted id are cleaned up in the same transaction
+        (wishlist rows AND library tracks are re-pointed to NULL = "use the
+        default", and a matching Auto-Import override is cleared) — and even
+        a reference missed by that (or written concurrently) safely falls
+        back to the default via `core/quality/selection.py::load_profile_by_id`.
+
+        Returns ``(success, reason)`` — ``reason`` is empty on success.
+        """
+        conn = self._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT id, is_default FROM quality_profiles ORDER BY id"
+            ).fetchall()
+            if len(rows) <= 1:
+                return False, "At least one quality profile must always exist"
+            target = next((r for r in rows if r["id"] == profile_id), None)
+            if target is None:
+                return False, "Profile not found"
+            if target["is_default"]:
+                promote_id = next(r["id"] for r in rows if r["id"] != profile_id)
+                conn.execute("UPDATE quality_profiles SET is_default=0 WHERE is_default=1")
+                conn.execute(
+                    "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (promote_id,),
+                )
+            conn.execute(
+                "UPDATE wishlist_tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
+                (profile_id,),
+            )
+            conn.execute(
+                "UPDATE tracks SET quality_profile_id=NULL WHERE quality_profile_id=?",
+                (profile_id,),
+            )
+            cur = conn.execute("DELETE FROM quality_profiles WHERE id=?", (profile_id,))
+            conn.commit()
+            if cur.rowcount == 0:
+                return False, "Profile not found"
+            # Clear a matching Auto-Import override so its Settings UI doesn't
+            # show a stale id (the pipeline would fall back correctly either
+            # way). Outside the DB transaction — config is a separate store.
+            try:
+                from config.settings import config_manager
+                current_auto_import_profile = config_manager.get('auto_import.quality_profile_id')
+                if (current_auto_import_profile is not None
+                        and str(current_auto_import_profile) == str(profile_id)):
+                    config_manager.set('auto_import.quality_profile_id', None)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("auto-import profile reference cleanup skipped: %s", e)
+            return True, ""
+        except Exception as e:
+            logger.error(f"Failed to delete quality profile {profile_id}: {e}")
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def set_default_quality_profile(self, profile_id: int) -> bool:
+        """Make ``profile_id`` the app-wide default (used by every download/
+        import that doesn't specify its own quality_profile_id)."""
+        conn = self._get_connection()
+        try:
+            exists = conn.execute(
+                "SELECT id FROM quality_profiles WHERE id=?", (profile_id,)
+            ).fetchone()
+            if not exists:
+                return False
+            conn.execute("UPDATE quality_profiles SET is_default=0 WHERE is_default=1")
+            conn.execute(
+                "UPDATE quality_profiles SET is_default=1, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (profile_id,),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to set default quality profile {profile_id}: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def _legacy_quality_profile_from_preferences(self) -> dict:
+        """Read the quality profile from the legacy ``preferences.quality_profile``
+        singleton (v1/v2/v3 auto-migrated), independent of the newer
+        ``quality_profiles`` table.
+
+        Kept as its own method (rather than inlined into ``get_quality_profile``)
+        so the one-time startup migration (``core/quality/migrate_to_profiles.py``)
+        has a stable, non-circular way to read "what the user's global settings
+        said before the migration" — it must NOT go through ``get_quality_profile``
+        once that method is repointed at the ``quality_profiles`` table, or the
+        migration would just read back its own not-yet-written output.
+        """
         import json
 
         profile_json = self.get_preference('quality_profile')
@@ -9001,16 +9524,18 @@ class MusicDatabase:
             },
         }
 
-    # Presets whose per-preset customizations we remember across switches.
-    _KNOWN_PRESETS = ('audiophile', 'balanced', 'space_saver')
-
     def set_quality_profile(self, profile: dict) -> bool:
         """Save quality profile configuration.
 
         Besides the single active profile (read by the download pipeline), we also
         stash the profile under its preset name so switching presets and coming
         back restores the user's edits instead of the factory defaults. 'custom'
-        and unknown preset names are not stashed."""
+        and unknown preset names are not stashed.
+
+        Also writes through to the ``is_default=1`` row in ``quality_profiles``
+        (the new app-wide source of truth `get_quality_profile` now reads from),
+        so the legacy Settings UI keeps working unchanged until it's migrated
+        to talk to `quality_profiles` directly."""
         import json
 
         try:
@@ -9023,11 +9548,48 @@ class MusicDatabase:
                 store[preset_name] = profile
                 self.set_preference('quality_profile_presets', json.dumps(store))
 
+            try:
+                self._write_default_quality_profile_row(profile)
+            except Exception as e:
+                logger.debug("set_quality_profile: quality_profiles write-through failed: %s", e)
+
             logger.info(f"Quality profile saved: preset={profile.get('preset', 'custom')}")
             return True
         except Exception as e:
             logger.error(f"Failed to save quality profile: {e}")
             return False
+
+    def _write_default_quality_profile_row(self, profile: dict) -> None:
+        """Write-through helper for `set_quality_profile`: updates the
+        ``is_default=1`` row in `quality_profiles` to match."""
+        import json
+        try:
+            cutoff_index = max(0, int(profile.get("upgrade_cutoff_index") or 0))
+        except (TypeError, ValueError):
+            cutoff_index = 0
+        upgrade_policy = profile.get("upgrade_policy")
+        if upgrade_policy not in ("acceptable", "until_cutoff", "until_top"):
+            upgrade_policy = "acceptable"
+        conn = self._get_connection()
+        try:
+            conn.execute(
+                """UPDATE quality_profiles
+                      SET ranked_targets=?, fallback_enabled=?, search_mode=?,
+                          rank_candidates_by_quality=?, upgrade_policy=?,
+                          upgrade_cutoff_index=?, updated_at=CURRENT_TIMESTAMP
+                    WHERE is_default=1""",
+                (
+                    json.dumps(profile.get("ranked_targets") or []),
+                    1 if profile.get("fallback_enabled", True) else 0,
+                    profile.get("search_mode") if profile.get("search_mode") in ("priority", "best_quality") else "priority",
+                    1 if profile.get("rank_candidates_by_quality") else 0,
+                    upgrade_policy,
+                    cutoff_index,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def _load_preset_store(self) -> dict:
         """Per-preset customizations, keyed by preset name. {} if none saved."""
@@ -9160,6 +9722,35 @@ class MusicDatabase:
             logger.debug("blocklist guard skipped: %s", e)
             return None
 
+    def _resolve_quality_profile_id(self, cursor, quality_profile_id: Optional[int] = None) -> Optional[int]:
+        """Resolve a ``quality_profile_id`` (or ``None`` -> the app-wide
+        default) into a concrete profile id to store on a wishlist row at
+        insert time. This is only ever a pointer — every pipeline stage
+        resolves the profile's actual settings LIVE via
+        ``core/quality/selection.py::load_profile_by_id`` when it needs them,
+        so editing a profile later takes effect immediately for every item
+        assigned to it. Never raises; falls back to any existing profile, then
+        NULL if the table is unreadable/empty (NULL means "use the default" at
+        read time)."""
+        try:
+            row = None
+            if quality_profile_id:
+                row = cursor.execute(
+                    "SELECT id FROM quality_profiles WHERE id=?", (quality_profile_id,)
+                ).fetchone()
+            if row is None:
+                row = cursor.execute(
+                    "SELECT id FROM quality_profiles WHERE is_default=1 ORDER BY id LIMIT 1"
+                ).fetchone()
+            if row is None:
+                row = cursor.execute(
+                    "SELECT id FROM quality_profiles ORDER BY id LIMIT 1"
+                ).fetchone()
+            return int(row["id"]) if row is not None else None
+        except Exception as e:
+            logger.debug("Could not resolve quality profile id: %s", e)
+            return None
+
     def add_to_wishlist(
         self,
         spotify_track_data: Dict[str, Any] = None,
@@ -9169,8 +9760,17 @@ class MusicDatabase:
         profile_id: int = 1,
         track_data: Dict[str, Any] = None,
         user_initiated: bool = False,
+        quality_profile_id: Optional[int] = None,
     ) -> bool:
         """Add a failed track to the wishlist for retry.
+
+        ``quality_profile_id`` selects which ``quality_profiles`` row this
+        item's download/import must satisfy; omitted (``None``, the default)
+        resolves to the app-wide default profile. Only the resolved id is
+        stored on the row (see ``_resolve_quality_profile_id``) — every
+        pipeline stage looks up that profile's actual settings live when it
+        needs them, so the pipeline never needs a global setting, and editing
+        the profile later is picked up immediately.
 
         ``user_initiated`` marks an explicit user add (e.g. the library album
         "add to wishlist" modal). Like ``source_type == 'manual'`` it bypasses
@@ -9323,12 +9923,16 @@ class MusicDatabase:
                             # Same track exists from different album — use composite ID
                             insert_track_id = composite_id
 
+                resolved_qp_id = self._resolve_quality_profile_id(cursor, quality_profile_id)
+
                 # Insert the track
                 cursor.execute("""
                     INSERT OR REPLACE INTO wishlist_tracks
-                    (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added, profile_id)
-                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
-                """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id))
+                    (spotify_track_id, spotify_data, failure_reason, source_type, source_info, date_added, profile_id,
+                     quality_profile_id)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?)
+                """, (insert_track_id, spotify_json, failure_reason, source_type, source_json, profile_id,
+                      resolved_qp_id))
 
                 conn.commit()
 
@@ -9513,7 +10117,8 @@ class MusicDatabase:
 
                 query = """
                     SELECT id, spotify_track_id, spotify_data, failure_reason, retry_count,
-                           last_attempted, date_added, source_type, source_info
+                           last_attempted, date_added, source_type, source_info,
+                           quality_profile_id
                     FROM wishlist_tracks
                     WHERE profile_id = ?
                 """
@@ -9555,7 +10160,8 @@ class MusicDatabase:
                             'last_attempted': row['last_attempted'],
                             'date_added': row['date_added'],
                             'source_type': row['source_type'],
-                            'source_info': source_info
+                            'source_info': source_info,
+                            'quality_profile_id': row['quality_profile_id'],
                         })
                     except json.JSONDecodeError as e:
                         logger.error(f"Error parsing wishlist track data: {e}")

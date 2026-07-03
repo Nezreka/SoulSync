@@ -1654,10 +1654,18 @@ class AutoImportWorker:
         album_name = identification.get('album_name', 'Unknown')
         image_url = identification.get('image_url', '')
 
-        # Parent folder artist override via import.folder_artist_override.
-        # Default on to preserve the legacy Artist/Album staging behavior.
-        # Users who stage mixed piles under one container folder can turn it off
-        # to keep the metadata-identified artist.
+        # Auto-Import's assigned quality profile (Settings -> Import ->
+        # Auto-Import), independent of the app-wide default used by normal
+        # downloads/Wishlist items. Resolved once per batch (`None`/0 means
+        # "use the app-wide default" via `load_profile_by_id`'s own fallback).
+        auto_import_profile_id = self._config_manager.get('auto_import.quality_profile_id') or None
+
+        # Parent folder artist override — a plain global Auto-Import setting
+        # (`import.folder_artist_override`), not a quality preference, so it
+        # doesn't belong on a quality profile. Default on to preserve the
+        # legacy Artist/Album staging behavior. Users who stage mixed piles
+        # under one container folder can turn it off to keep the
+        # metadata-identified artist.
         try:
             if self._config_manager.get('import.folder_artist_override', True):
                 staging_root = self._resolve_staging_path() or self.staging_path
@@ -1855,6 +1863,14 @@ class AutoImportWorker:
                     'has_clean_spotify_data': True,
                     'has_full_spotify_metadata': True,
                 }
+                # Thread the assigned profile into the import pipeline —
+                # everything profile-specific (quality gate, AcoustID
+                # strictness, downsample/lossy-copy) is resolved LIVE from
+                # this id at each pipeline stage (see core/imports/pipeline.py
+                # ::_resolve_context_quality_profile). Unset means "app-wide
+                # default", which the pipeline resolves on its own.
+                if auto_import_profile_id:
+                    context['track_info']['quality_profile_id'] = auto_import_profile_id
 
                 self._process_callback(context_key, context, file_path)
                 processed += 1

@@ -645,6 +645,13 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
             # to a watchlist.
             track_mbid = (track_info.get("musicbrainz_recording_id") or "").strip().lower() or None
             track_isrc = (track_info.get("isrc") or "").strip().upper() or None
+            # Carries whatever the pipeline resolved for this item (a wishlist
+            # row's or Auto-Import's own override, or None for "follow the
+            # app-wide default") — see `_resolve_context_quality_profile` in
+            # core/imports/pipeline.py. Without this, later Quality Check /
+            # Quality Upgrade Finder passes re-resolve the track against the
+            # default profile instead of the one it was actually imported under.
+            track_quality_profile_id = track_info.get("quality_profile_id")
 
             cursor.execute("SELECT id FROM tracks WHERE file_path = ?", (final_path,))
             if not cursor.fetchone():
@@ -652,9 +659,9 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                     """
                     INSERT INTO tracks (id, album_id, artist_id, title, track_number,
                                         duration, file_path, bitrate, file_size, track_artist,
-                                        musicbrainz_recording_id, isrc, server_source,
+                                        musicbrainz_recording_id, isrc, quality_profile_id, server_source,
                                         created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'soulsync', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     """,
                     (
                         track_id,
@@ -669,6 +676,7 @@ def record_soulsync_library_entry(context: Dict[str, Any], artist_context: Dict[
                         track_artist,
                         track_mbid,
                         track_isrc,
+                        track_quality_profile_id,
                     ),
                 )
                 track_source_col = source_columns.get("track")

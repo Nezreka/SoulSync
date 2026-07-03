@@ -13,15 +13,8 @@ from types import SimpleNamespace
 
 import core.imports.guards as guards
 import core.imports.file_ops as file_ops
+import core.quality.selection as selection
 from core.quality.model import AudioQuality
-
-
-class _FakeDB:
-    def __init__(self, profile):
-        self._profile = profile
-
-    def get_quality_profile(self):
-        return self._profile
 
 
 _WANT_FLAC24 = {
@@ -34,19 +27,14 @@ _WANT_FLAC24 = {
 
 def _patch(monkeypatch, aq, profile):
     monkeypatch.setattr(file_ops, "probe_audio_quality", lambda fp: aq)
-    monkeypatch.setattr(guards, "MusicDatabase", lambda: _FakeDB(profile))
+    # check_quality_target resolves the profile via load_profile_by_id — patch
+    # that seam directly rather than faking a DB (see test_quality_guard.py).
+    monkeypatch.setattr(selection, "load_profile_by_id", lambda profile_id: profile)
 
-    # Key-aware config stub: the import quality filter is ON (its default), so
-    # the guard runs; everything else (downsample, etc.) is OFF. A blanket False
-    # would wrongly disable the filter itself via import.quality_filter_enabled.
-    def _cfg_get(key, default=None):
-        if key == "import.quality_filter_enabled":
-            return True
-        return False
-
+    # Everything read via config_manager.get() (downsample, etc.) is OFF.
     monkeypatch.setattr(
         guards, "_get_config_manager",
-        lambda: SimpleNamespace(get=_cfg_get),
+        lambda: SimpleNamespace(get=lambda key, default=None: False),
     )
 
 
