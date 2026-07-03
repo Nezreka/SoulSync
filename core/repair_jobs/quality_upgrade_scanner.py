@@ -23,11 +23,65 @@ import os
 
 from core.repair_jobs import register_job
 from core.repair_jobs.base import JobContext, JobResult, RepairJob
+# Same v3 quality primitives the download import guard and Quality Upgrade
+# Finder use. Module-level (not a local import inside scan()) so tests can
+# monkeypatch them the same way tests/repair_jobs/test_quality_upgrade.py does.
+from core.quality.model import rank_candidate
+from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.quality_upgrade")
 
 AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.opus', '.m4a', '.aac', '.wav', '.wma', '.aiff', '.aif'}
+
+
+def _upgrade_cutoff_index(profile: dict, targets: list, settings: dict):
+    """See core/repair_jobs/quality_upgrade.py's identical function for why
+    "acceptable" (not just None) must also bridge in the legacy
+    require_top_target job setting — a DB-loaded profile's upgrade_policy is
+    never actually None."""
+    policy = profile.get("upgrade_policy")
+    if policy == "until_top":
+        policy = "until_cutoff"
+    if policy in (None, "acceptable") and settings.get("require_top_target"):
+        policy = "until_cutoff"
+    if policy != "until_cutoff" or not targets:
+        return None
+    try:
+        idx = int(profile.get("upgrade_cutoff_index") or 0)
+    except (TypeError, ValueError):
+        idx = 0
+    return max(0, min(idx, len(targets) - 1))
+
+
+def _config_fingerprint(targets: list, cutoff_index) -> str:
+    """Stable string identifying the exact flagging decision this bundle
+    would make — the ranked targets themselves (not just the profile id,
+    which stays the same if the user edits an existing profile's targets in
+    place) plus the cutoff index. Stored on every finding at creation time so
+    a dismissed finding can be told apart from one that's stale only because
+    the profile/cutoff genuinely changed since — mirrors
+    core/repair_jobs/quality_upgrade.py's identical helper (kept duplicated
+    rather than shared, matching how `_profile_bundle`/`_upgrade_cutoff_index`
+    are already duplicated between these two jobs)."""
+    import json
+    return json.dumps({'targets': [t.to_dict() for t in targets], 'cutoff_index': cutoff_index},
+                       sort_keys=True)
+
+
+def _profile_bundle(profile: dict, settings: dict) -> dict:
+    """Precompute the per-profile values the scan loop needs (targets, cutoff
+    index, id/name for the finding) once per distinct profile, so a per-track
+    override only costs a DB lookup the first time that profile is seen."""
+    targets, _fallback = targets_from_profile(profile)
+    cutoff_index = _upgrade_cutoff_index(profile, targets, settings)
+    return {
+        'targets': targets,
+        'cutoff_index': cutoff_index,
+        'id': profile.get('id'),
+        'name': profile.get('name') or profile.get('preset') or 'default',
+        'config_fingerprint': _config_fingerprint(targets, cutoff_index),
+    }
 
 
 @register_job
@@ -68,11 +122,65 @@ class QualityUpgradeScannerJob(RepairJob):
     # deep_audio_verify default OFF: the ffmpeg decode is the CPU-heavy step. Most
     # users want the fast header-only quality pass; turn it on for a deep scan that
     # also catches broken/silent audio. (Matches the download pipeline's default.)
-    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False, 'require_top_target': False}
+    default_settings = {'library_tracks_only': False, 'deep_audio_verify': False}
     setting_options = {'library_tracks_only': [True, False],
-                       'deep_audio_verify': [True, False],
-                       'require_top_target': [True, False]}
+                       'deep_audio_verify': [True, False]}
     auto_fix = False  # User chooses fix action per finding
+
+    def _load_dismissed_findings(self, db):
+        """Two lookups — by track id and by file path, mirroring the OR in
+        RepairWorker._create_finding's own dedup key — mapping to the
+        config_fingerprint stored on that dismissed finding at creation time
+        (see _config_fingerprint). A dismissed finding whose fingerprint
+        still matches the CURRENT bundle stays dismissed; one whose profile/
+        cutoff has genuinely changed since gets cleared and re-flagged (see
+        the scan loop). Findings created before this fingerprint existed have
+        no ``profile_config_fingerprint`` key and map to ``None``, which never
+        equals a real fingerprint — that one-time re-flag is an acceptable
+        tradeoff for older installs."""
+        import json as _json
+        by_entity: dict = {}
+        by_path: dict = {}
+        conn = db._get_connection()
+        try:
+            rows = conn.execute(
+                "SELECT entity_id, file_path, details_json FROM repair_findings "
+                "WHERE job_id = ? AND status = 'dismissed'",
+                (self.job_id,)).fetchall()
+            for r in rows:
+                fingerprint = None
+                try:
+                    details = _json.loads(r[2]) if r[2] else {}
+                    fingerprint = details.get('profile_config_fingerprint')
+                except (TypeError, ValueError):
+                    pass
+                if r[0] is not None:
+                    by_entity[str(r[0])] = fingerprint
+                if r[1]:
+                    by_path[r[1]] = fingerprint
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Could not load dismissed quality findings: %s", e)
+        finally:
+            conn.close()
+        return by_entity, by_path
+
+    def _clear_stale_dismissed_finding(self, db, entity_id, file_path) -> None:
+        """Delete a stale dismissed finding for this job (matched by entity id
+        OR file path, same OR the shared dedup uses) right before re-flagging
+        it under a changed profile — otherwise RepairWorker._create_finding's
+        dedup would silently drop the new insert."""
+        conn = db._get_connection()
+        try:
+            conn.execute(
+                "DELETE FROM repair_findings WHERE job_id = ? AND status = 'dismissed' "
+                "AND ((entity_id = ? AND entity_id IS NOT NULL) OR (file_path = ? AND file_path IS NOT NULL))",
+                (self.job_id, str(entity_id) if entity_id is not None else None, file_path))
+            conn.commit()
+        except Exception as e:
+            logger.debug("Could not clear stale dismissed finding (entity=%s, path=%s): %s",
+                         entity_id, file_path, e)
+        finally:
+            conn.close()
 
     def scan(self, context: JobContext) -> JobResult:
         result = JobResult()
@@ -80,25 +188,58 @@ class QualityUpgradeScannerJob(RepairJob):
         # Load the user's v3 ranked targets — the SAME definition the download
         # import guard uses. Strict: a track is below-profile when its measured
         # quality satisfies NONE of the targets (fallback is not consulted).
-        from core.quality.selection import targets_from_profile, quality_meets_profile
         try:
             profile = context.db.get_quality_profile()
         except Exception as e:
             logger.warning("Could not load quality profile: %s", e)
             return result
-        targets, _fallback = targets_from_profile(profile)
+        settings = self._get_settings(context)
+        default_bundle = _profile_bundle(profile, settings)
+        targets = default_bundle['targets']
+        cutoff_index = default_bundle['cutoff_index']
         if not targets:
-            logger.info("Quality profile has no targets — nothing to check against")
-            return result
+            # Don't bail out here: a per-track profile override (`_bundle_for`
+            # below) may still have real targets, and deep-audio-verify (if
+            # enabled) still needs to probe every file for broken/silent audio
+            # regardless of quality targets. `quality_meets_profile`/
+            # `rank_candidate` already treat an empty target list as "anything
+            # passes", so files resolving to this bundle skip cleanly further
+            # down instead of being excluded from the scan entirely.
+            logger.info("Default quality profile has no targets — scan will still run "
+                        "deep-audio-verify (if enabled) and honor any stricter "
+                        "per-track profile overrides")
 
         logger.info("Quality upgrade scan — profile targets (strict): %s",
-                    [t.label for t in targets])
+                    [t.label for t in targets] if targets else '(none — all pass)')
+
+        # Per-track profile override (`tracks.quality_profile_id`, still NULL
+        # for almost every install — there's no assignment UI yet, only the
+        # migration backfill): resolved lazily and cached per distinct id so a
+        # library with one profile everywhere costs exactly one DB read, same
+        # as before this existed. Loose files with no DB match (meta has no
+        # 'quality_profile_id' key) always fall back to the default.
+        profile_id = profile.get('id')
+        profile_bundle_cache = {profile_id: default_bundle}
+
+        def _bundle_for(row_profile_id):
+            if not row_profile_id or row_profile_id == profile_id:
+                return default_bundle
+            if row_profile_id not in profile_bundle_cache:
+                profile_bundle_cache[row_profile_id] = _profile_bundle(
+                    load_profile_by_id(row_profile_id), settings)
+            return profile_bundle_cache[row_profile_id]
 
         from core.imports.file_ops import probe_audio_quality
         # Same real-file AudioGuard the download/import pipeline runs: ffmpeg
         # DECODES the file (astats + silencedetect) to catch truncated or
         # mostly-silent audio the header can't reveal.
         from core.imports.silence import detect_broken_audio
+
+        # Dismissed findings are still checked on every re-run, but only
+        # actually re-flagged if the applicable bundle's config_fingerprint
+        # has changed since the dismissal — not on every re-run just because
+        # the file still measures below profile (see _load_dismissed_findings).
+        dismissed_by_entity, dismissed_by_path = self._load_dismissed_findings(context.db)
 
         # --- Collect the music folders to walk (real dirs, abspath'd) ---
         base_dirs = self._collect_music_dirs(context)
@@ -141,18 +282,12 @@ class QualityUpgradeScannerJob(RepairJob):
         # residue after a DB reset) — those are orphans, not library tracks, and
         # belong to the Orphan File Detector, not a quality upgrade scan. Default
         # ON so the scan reflects the user's actual library, not download junk.
-        _settings = self._get_settings(context)
-        library_only = _settings.get('library_tracks_only', False)
+        library_only = settings.get('library_tracks_only', False)
         # Deep verify = run the ffmpeg AudioGuard (real decode) per file, exactly
         # like the download pipeline. Slower than a header read (seconds vs ms) but
         # it verifies the REAL audio, not just the metadata. OFF by default (the
         # decode is the CPU-heavy step); turn on for a deep scan.
-        deep_verify = _settings.get('deep_audio_verify', False)
-        # require_top_target: flag files that meet a lower target but not the
-        # highest-priority one (e.g. 16-bit FLAC when 24-bit is preferred).
-        require_top = _settings.get('require_top_target', False)
-        check_targets = targets[:1] if require_top and len(targets) > 1 else targets
-
+        deep_verify = settings.get('deep_audio_verify', False)
         probe_failed = 0
         not_in_library = 0
         for i, fpath in enumerate(audio_files):
@@ -173,6 +308,31 @@ class QualityUpgradeScannerJob(RepairJob):
                 continue
             if meta is None:
                 meta = self._read_file_tags(fpath)
+
+            bundle = _bundle_for(meta.get('quality_profile_id'))
+            targets = bundle['targets']
+            cutoff_index = bundle['cutoff_index']
+            config_fingerprint = bundle['config_fingerprint']
+            quality_profile_id = bundle.get('id')
+            quality_profile_name = bundle.get('name')
+
+            # A dismissed finding for this exact track/file whose fingerprint
+            # hasn't changed must NOT keep resurrecting on every re-run — skip
+            # entirely, before doing any (expensive) audio probing. A CHANGED
+            # fingerprint falls through to the normal check below, and the
+            # stale row is cleared right before create_finding.
+            track_id = meta.get('track_id')
+            dismissed_fingerprint = (
+                dismissed_by_entity.get(str(track_id)) if track_id else None
+            )
+            if dismissed_fingerprint is None:
+                dismissed_fingerprint = dismissed_by_path.get(fpath)
+            is_previously_dismissed = (
+                (track_id and str(track_id) in dismissed_by_entity) or fpath in dismissed_by_path
+            )
+            if is_previously_dismissed and dismissed_fingerprint == config_fingerprint:
+                result.skipped += 1
+                continue
 
             result.scanned += 1
             if context.report_progress and i % 25 == 0:
@@ -208,7 +368,10 @@ class QualityUpgradeScannerJob(RepairJob):
                 probe_failed += 1
                 result.skipped += 1
                 continue
-            elif not quality_meets_profile(aq, check_targets):
+            elif cutoff_index is not None and rank_candidate(aq, targets)[0] > cutoff_index:
+                issue = 'below_profile'
+                current_label = aq.label()
+            elif cutoff_index is None and not quality_meets_profile(aq, targets):
                 issue = 'below_profile'
                 current_label = aq.label()
             else:
@@ -227,7 +390,7 @@ class QualityUpgradeScannerJob(RepairJob):
                          f'verification (ffmpeg): {broken_reason}')
                 _severity = 'warning'
             else:
-                _pref = targets[0].label if require_top and len(targets) > 1 else None
+                _pref = targets[cutoff_index].label if cutoff_index is not None else None
                 _title = f'{"Upgradeable" if _pref else "Below quality"}: {disp_title} ({current_label})'
                 _desc = (f'"{disp_title}" by {disp_artist} is {current_label}'
                          + (f', below your preferred quality ({_pref}).' if _pref else
@@ -238,6 +401,13 @@ class QualityUpgradeScannerJob(RepairJob):
 
             if context.report_progress:
                 context.report_progress(log_line=_title, log_type='error')
+            if is_previously_dismissed:
+                # Reaching this point means the fingerprint check above already
+                # found this dismissal stale (config genuinely changed) — clear
+                # the old dismissed row before re-inserting, or the shared
+                # dedup in RepairWorker._create_finding would silently drop
+                # the new one (same job_id + entity/file_path, any status).
+                self._clear_stale_dismissed_finding(context.db, track_id, fpath)
             if context.create_finding:
                 inserted = context.create_finding(
                     job_id=self.job_id,
@@ -263,6 +433,9 @@ class QualityUpgradeScannerJob(RepairJob):
                         'track_number': meta.get('track_number'),
                         'album_thumb_url': meta.get('album_thumb_url'),
                         'artist_thumb_url': meta.get('artist_thumb_url'),
+                        'profile_config_fingerprint': config_fingerprint,
+                        'quality_profile_id': quality_profile_id,
+                        'quality_profile_name': quality_profile_name,
                     },
                 )
                 if inserted:
@@ -350,7 +523,8 @@ class QualityUpgradeScannerJob(RepairJob):
                 SELECT t.id, t.title,
                        COALESCE(NULLIF(t.track_artist, ''), ar.name) AS artist,
                        t.file_path, t.track_number,
-                       al.title AS album_title, al.thumb_url, ar.thumb_url
+                       al.title AS album_title, al.thumb_url, ar.thumb_url,
+                       t.quality_profile_id
                 FROM tracks t
                 LEFT JOIN artists ar ON ar.id = t.artist_id
                 LEFT JOIN albums al ON al.id = t.album_id
@@ -369,6 +543,7 @@ class QualityUpgradeScannerJob(RepairJob):
                     'album': row[5] or '',
                     'album_thumb_url': row[6] or None,
                     'artist_thumb_url': row[7] or None,
+                    'quality_profile_id': row[8],
                 }
                 for depth in range(1, min(4, len(parts) + 1)):
                     suffix = '/'.join(parts[-depth:]).lower()

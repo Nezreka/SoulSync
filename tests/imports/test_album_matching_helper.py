@@ -91,10 +91,10 @@ def test_match_threshold_requires_more_than_position_alone():
 def test_dedupe_keeps_higher_quality_at_same_position():
     files = ['/a/track1.mp3', '/a/track1.flac']
     file_tags = {
-        '/a/track1.mp3': _tags(track=1, disc=1),
-        '/a/track1.flac': _tags(track=1, disc=1),
+        '/a/track1.mp3': _tags(title='Song One', track=1, disc=1),
+        '/a/track1.flac': _tags(title='Song One', track=1, disc=1),
     }
-    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank)
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
     assert result == ['/a/track1.flac']
 
 
@@ -103,10 +103,10 @@ def test_dedupe_preserves_same_track_across_discs():
     track_number=1 on disc 2 are different positions, both survive."""
     files = ['/a/d1t1.flac', '/a/d2t1.flac']
     file_tags = {
-        '/a/d1t1.flac': _tags(track=1, disc=1),
-        '/a/d2t1.flac': _tags(track=1, disc=2),
+        '/a/d1t1.flac': _tags(title='Song One', track=1, disc=1),
+        '/a/d2t1.flac': _tags(title='Other Song', track=1, disc=2),
     }
-    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank)
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
     assert set(result) == {'/a/d1t1.flac', '/a/d2t1.flac'}
 
 
@@ -115,19 +115,45 @@ def test_dedupe_passes_through_files_with_no_track_number():
     all so the matcher gets a chance to title-match them."""
     files = ['/a/no_tag_a.mp3', '/a/no_tag_b.mp3', '/a/no_tag_c.mp3']
     file_tags = {f: _tags(title='Untagged', track=0, disc=1) for f in files}
-    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank)
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
     assert set(result) == set(files)
 
 
 def test_dedupe_keeps_first_when_quality_equal():
-    """Two files at same position, same quality — first one wins."""
+    """Two copies of the SAME song at the same position, same quality — first one wins."""
     files = ['/a/first.flac', '/a/second.flac']
     file_tags = {
-        '/a/first.flac': _tags(track=1, disc=1),
-        '/a/second.flac': _tags(track=1, disc=1),
+        '/a/first.flac': _tags(title='Same Song', track=1, disc=1),
+        '/a/second.flac': _tags(title='Same Song', track=1, disc=1),
     }
-    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank)
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
     assert result == ['/a/first.flac']
+
+
+def test_dedupe_keeps_different_songs_sharing_a_position():
+    """#963: a mixed-album staging pool has several albums, each with a track 1. Different songs at
+    the same (disc, track) must NOT be collapsed — collapsing dropped the correct file and made the
+    matcher put songs in the wrong slots (DAMN.'s 'BLOOD' matched Chris Brown's 'Deuces')."""
+    files = ['/a/01 - BLOOD.m4a', '/a/01 - Deuces.flac']
+    file_tags = {
+        '/a/01 - BLOOD.m4a': _tags(title='BLOOD', track=1, disc=1),
+        '/a/01 - Deuces.flac': _tags(title='Deuces (feat. Tyga & Kevin McCall)', track=1, disc=1),
+    }
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
+    # Both survive — BLOOD is NOT dropped just because a higher-quality FLAC shares track 1.
+    assert set(result) == set(files)
+
+
+def test_dedupe_still_collapses_genuine_same_song_quality_dupes():
+    """The same song downloaded twice (m4a + flac) at one position still dedupes to the better file —
+    title-awareness must not break legitimate quality dedup."""
+    files = ['/a/01 - BLOOD.m4a', '/a/01 - BLOOD.flac']
+    file_tags = {
+        '/a/01 - BLOOD.m4a': _tags(title='BLOOD', track=1, disc=1),
+        '/a/01 - BLOOD.flac': _tags(title='BLOOD', track=1, disc=1),
+    }
+    result = dedupe_files_by_position(files, file_tags, quality_rank=_qrank, similarity=_sim)
+    assert result == ['/a/01 - BLOOD.flac']
 
 
 # ---------------------------------------------------------------------------

@@ -54,7 +54,7 @@ def _cand_user_file(candidate):
     return getattr(candidate, 'username', None), getattr(candidate, 'filename', None)
 
 
-def _candidate_ordering():
+def _candidate_ordering(track_info: Optional[dict] = None):
     """Return ``(quality_first, targets)`` for the active search mode + toggle.
 
     The candidate walk is ordered by the user's profile quality rank
@@ -62,6 +62,13 @@ def _candidate_ordering():
       - best-quality search mode is active (always quality-first), OR
       - priority mode and the ``rank_candidates_by_quality`` toggle is on
         (opt-in; default off keeps the byte-for-byte confidence-first walk).
+
+    When ``track_info`` carries its own ``quality_profile_id`` (a wishlist row
+    — see ``add_to_wishlist``/``core/downloads/master.py``), THAT profile's
+    search_mode/rank_candidates_by_quality/ranked_targets are used instead of
+    the global default, so per-item profile assignment actually changes
+    download-time candidate ordering. Falls back to the global profile when
+    absent (manual downloads, staging imports — unaffected).
 
     Quality-first ordering also makes the version-mismatch force-import pick
     the highest-quality candidate, because that fallback accepts the
@@ -72,13 +79,12 @@ def _candidate_ordering():
     docs/superpowers/specs/2026-06-14-best-quality-search-mode-design.md.
     """
     try:
-        from core.quality.selection import (
-            load_search_mode,
-            load_profile_targets,
-            load_rank_candidates_by_quality,
-        )
-        if load_search_mode() == 'best_quality' or load_rank_candidates_by_quality():
-            targets, _ = load_profile_targets()
+        from core.quality.selection import targets_from_profile, load_profile_by_id
+
+        profile_id = track_info.get('quality_profile_id') if track_info else None
+        profile = load_profile_by_id(profile_id)
+        if profile.get('search_mode') == 'best_quality' or profile.get('rank_candidates_by_quality'):
+            targets, _ = targets_from_profile(profile)
             return True, targets
     except Exception as exc:
         logger.debug("[Modal Worker] quality ordering unavailable: %s", exc)
@@ -103,6 +109,7 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         cached = list(task.get('cached_candidates') or [])
         used = set(task.get('used_sources') or ())
         exhausted = {str(s).lower() for s in (task.get('exhausted_download_sources') or ())}
+        task_track_info = task.get('track_info')
 
     remaining = []
     for c in cached:
@@ -122,7 +129,7 @@ def _try_cached_candidates(task_id, batch_id, track, deps):
         f"[Modal Worker] Quarantine retry: trying {len(remaining)} cached "
         f"candidate(s) before re-searching (task {task_id})"
     )
-    _qf, _qt = _candidate_ordering()
+    _qf, _qt = _candidate_ordering(task_track_info)
     return deps.attempt_download_with_candidates(
         task_id, remaining, track, batch_id, quality_first=_qf, quality_targets=_qt,
     )
@@ -406,7 +413,7 @@ def download_track_worker(task_id: str, batch_id: Optional[str], deps: TaskWorke
         # Best-quality search mode: the orchestrator already pooled candidates
         # across every source for each query, so order the candidate walk by the
         # user's profile quality rank (best→worst). Computed once per task.
-        _best_quality, _quality_targets = _candidate_ordering()
+        _best_quality, _quality_targets = _candidate_ordering(track_data)
 
         # 2. Sequential Query Search (matches GUI's start_search_worker_parallel logic)
         search_diagnostics = []  # Track what happened per query for detailed error messages

@@ -18,7 +18,6 @@ from core.imports.context import (
     normalize_import_context,
 )
 from core.imports.file_ops import safe_move_file
-from database.music_database import MusicDatabase
 from utils.logging_config import get_logger
 
 
@@ -121,39 +120,45 @@ def check_quality_target(file_path: str, context: dict) -> Optional[str]:
     bit_depth, bitrate) and checks it against the profile's
     ``ranked_targets``.  Falls back gracefully when fallback_enabled=True.
 
+    There is deliberately no separate "run this check at all" master toggle:
+    an empty ``ranked_targets`` list (or ``fallback_enabled=True``) already
+    means "accept anything" via the `if not targets` / fallback branches
+    below, so a redundant on/off switch would just be a second way to say the
+    same thing — compose "accept everything" through the profile instead.
+
+    When ``context['track_info']`` carries its own ``quality_profile_id`` (a
+    wishlist row — see ``add_to_wishlist``/``core/downloads/master.py``), THAT
+    profile's targets/fallback/downsample settings are used instead of the
+    global default, so per-item profile assignment actually changes import
+    acceptance. Falls back to the global profile when absent (manual
+    downloads, staging imports — unaffected).
+
     Works for all formats and all download sources — no Soulseek-specific
     logic here.
     """
     from core.imports.file_ops import probe_audio_quality
-    from core.quality.selection import targets_from_profile, quality_meets_profile
-
-    # Master toggle (Settings → Import). When OFF, the quality check is skipped
-    # entirely and files import regardless of quality — the user opted out of
-    # quality-filtering on import. Default ON preserves existing behaviour. The
-    # library Quality Upgrade scanner still flags below-profile files either way.
-    if _get_config_manager().get("import.quality_filter_enabled", True) is False:
-        logger.debug(
-            "[QualityGuard] import.quality_filter_enabled=False — skipping quality "
-            "filter for %s", os.path.basename(file_path),
-        )
-        return None
+    from core.quality.selection import targets_from_profile, quality_meets_profile, load_profile_by_id
 
     aq = probe_audio_quality(file_path)
     if aq is None:
         logger.debug("[QualityGuard] Could not probe %s — skipping check", os.path.basename(file_path))
         return None
 
-    profile = MusicDatabase().get_quality_profile()
+    track_info = context.get("track_info")
+    if not isinstance(track_info, dict):
+        track_info = {}
+    profile = load_profile_by_id(track_info.get("quality_profile_id"))
     targets, fallback_enabled = targets_from_profile(profile)
 
     if not targets:
         return None
 
-    downsample_enabled = _get_config_manager().get("lossy_copy.downsample_hires", False)
+    downsample_enabled = bool(profile.get(
+        "downsample_enabled", _get_config_manager().get("lossy_copy.downsample_hires", False)
+    ))
 
     matched = quality_meets_profile(aq, targets)
 
-    track_info = context.get("track_info", {})
     track_name = track_info.get("name", os.path.basename(file_path))
     actual_label = aq.label()
 

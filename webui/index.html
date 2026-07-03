@@ -253,10 +253,10 @@
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="4" rx="1"/><rect x="3" y="14" width="7" height="4" rx="1"/><rect x="14" y="11" width="7" height="7" rx="1"/><line x1="5" y1="20" x2="5" y2="22"/><line x1="8" y1="19" x2="8" y2="22"/></svg></span>
                     <span class="nav-text">Dashboard</span>
                 </a>
-                <a class="nav-button" data-page="sync" href="/sync">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
-                    <span class="nav-text">Sync</span>
-                </a>
+                <button type="button" class="nav-section-label" data-section="find" onclick="toggleNavSection(this)">
+                    <span class="nav-section-title">Find</span>
+                    <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
                 <a class="nav-button" data-page="search" href="/search">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><polyline points="8 11 11 14 14 11"/></svg></span>
                     <span class="nav-text">Search</span>
@@ -268,6 +268,18 @@
                 <a class="nav-button" data-page="playlist-explorer" href="/playlist-explorer">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="3"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="12" x2="5" y2="18"/><line x1="12" y1="12" x2="19" y2="18"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><line x1="12" y1="12" x2="12" y2="18"/><circle cx="12" cy="19" r="2"/></svg></span>
                     <span class="nav-text">Explorer</span>
+                </a>
+                <a class="nav-button" data-page="sync" href="/sync">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg></span>
+                    <span class="nav-text">Sync</span>
+                </a>
+                <button type="button" class="nav-section-label" data-section="music" onclick="toggleNavSection(this)">
+                    <span class="nav-section-title">Music</span>
+                    <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <a class="nav-button" data-page="library" href="/library">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
+                    <span class="nav-text">Library</span>
                 </a>
                 <a class="nav-button" data-page="watchlist" href="/watchlist">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></span>
@@ -284,25 +296,25 @@
                     <span class="nav-text">Downloads</span>
                     <span class="dl-nav-badge hidden" id="dl-nav-badge">0</span>
                 </a>
-                <a class="nav-button" data-page="automations" href="/automations">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-                    <span class="nav-text">Automations</span>
-                </a>
                 <a class="nav-button" data-page="import" href="/import">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/><polyline points="7 9 12 4 17 9"/><line x1="12" y1="4" x2="12" y2="16"/></svg></span>
                     <span class="nav-text">Import</span>
                 </a>
-                <a class="nav-button" data-page="library" href="/library">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><line x1="9" y1="7" x2="16" y2="7"/><line x1="9" y1="11" x2="14" y2="11"/></svg></span>
-                    <span class="nav-text">Library</span>
+                <a class="nav-button" data-page="stats" href="/stats">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
+                    <span class="nav-text">Stats</span>
+                </a>
+                <button type="button" class="nav-section-label" data-section="system" onclick="toggleNavSection(this)">
+                    <span class="nav-section-title">System</span>
+                    <svg class="nav-section-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <a class="nav-button" data-page="automations" href="/automations">
+                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+                    <span class="nav-text">Automations</span>
                 </a>
                 <a class="nav-button" data-page="tools" href="/tools">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>
                     <span class="nav-text">Tools</span>
-                </a>
-                <a class="nav-button" data-page="stats" href="/stats">
-                    <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10"/><path d="M12 20V4"/><path d="M6 20v-6"/></svg></span>
-                    <span class="nav-text">Stats</span>
                 </a>
                 <a class="nav-button" data-page="settings" href="/settings">
                     <span class="nav-icon"><svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
@@ -322,6 +334,31 @@
                     <span class="nav-text">Hydrabase</span>
                 </a>
             </nav>
+            <script>
+            /* Apply collapsed sidebar sections synchronously (before paint) to avoid a load flash —
+               the async nav init runs after awaits, so JS-collapsing there would flicker. Mirrors
+               restoreNavSections(): collapsed by default, but the current page's section stays open. */
+            (function () {
+                var saved = {};
+                try { saved = JSON.parse(localStorage.getItem('navSections') || '{}'); } catch (e) {}
+                var path = window.location.pathname;
+                document.querySelectorAll('.nav-section-label').forEach(function (label) {
+                    var collapsed = saved[label.dataset.section] === true;
+                    var el = label.nextElementSibling;
+                    while (collapsed && el && !el.classList.contains('nav-section-label')) {
+                        if (el.classList.contains('nav-button') && el.getAttribute('href') === path) collapsed = false;
+                        el = el.nextElementSibling;
+                    }
+                    if (!collapsed) return;
+                    label.classList.add('collapsed');
+                    var e2 = label.nextElementSibling;
+                    while (e2 && !e2.classList.contains('nav-section-label')) {
+                        if (e2.classList.contains('nav-button')) e2.classList.add('nav-item-hidden');
+                        e2 = e2.nextElementSibling;
+                    }
+                });
+            })();
+            </script>
 
             <!-- Spacer -->
             <div class="sidebar-spacer"></div>
@@ -435,6 +472,23 @@
                                             </div>
                                             <div class="tooltip-progress" id="deezer-tooltip-progress">Progress: 0 / 0
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- JioSaavn Enrichment Status Icon (hidden until experimental flag on) -->
+                            <div class="jiosaavn-button-container" style="display:none">
+                                <button class="jiosaavn-button" id="jiosaavn-button" title="JioSaavn Library Enrichment">
+                                    <span class="jiosaavn-logo" aria-hidden="true">🎵</span>
+                                    <div class="jiosaavn-spinner"></div>
+                                </button>
+                                <div class="jiosaavn-tooltip" id="jiosaavn-tooltip">
+                                    <div class="jiosaavn-tooltip-content">
+                                        <div class="jiosaavn-tooltip-header">JioSaavn Enrichment</div>
+                                        <div class="jiosaavn-tooltip-body" id="jiosaavn-tooltip-body">
+                                            <div class="tooltip-status">Status: <span id="jiosaavn-tooltip-status">Idle</span></div>
+                                            <div class="tooltip-current" id="jiosaavn-tooltip-current">No active matches</div>
+                                            <div class="tooltip-progress" id="jiosaavn-tooltip-progress">Progress: 0 / 0</div>
                                         </div>
                                     </div>
                                 </div>
@@ -3146,6 +3200,103 @@
                         <div class="artist-map-search-results" id="artist-map-search-results"></div>
                     </div>
 
+                    <!-- Artist Web Hub (sigma.js similarity graph — sibling of the canvas Artist Map) -->
+                    <div class="artmap-hub">
+                        <div class="artmap-hub-bg"></div>
+                        <div class="artmap-hub-content">
+                            <div class="artmap-hub-header">
+                                <svg class="artmap-hub-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg>
+                                <div>
+                                    <h2 class="artmap-hub-title">Artist Web</h2>
+                                    <p class="artmap-hub-subtitle">Your library as an interactive similarity graph</p>
+                                </div>
+                            </div>
+                            <div class="artmap-hub-cards">
+                                <div class="artmap-hub-card" onclick="openArtistWeb('genre')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2"/><circle cx="7" cy="8" r="1.5"/><circle cx="17" cy="8" r="1.5"/><circle cx="8" cy="16" r="1.5"/><circle cx="16" cy="16" r="1.5"/><line x1="12" y1="12" x2="7" y2="8"/><line x1="12" y1="12" x2="17" y2="8"/><line x1="12" y1="12" x2="8" y2="16"/><line x1="12" y1="12" x2="16" y2="16"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Taste Map</h3><p>Every artist in your library, wired together by similarity</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                                <div class="artmap-hub-card" onclick="openArtistWeb('community')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="8" r="2.5"/><circle cx="17" cy="8" r="2.5"/><circle cx="12" cy="17" r="2.5"/><line x1="8.8" y1="9.8" x2="10.5" y2="15"/><line x1="15.2" y1="9.8" x2="13.5" y2="15"/><line x1="9.5" y1="8" x2="14.5" y2="8"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Communities</h3><p>Your library's real scenes, found from who sounds alike — not genre tags</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                                <div class="artmap-hub-card" onclick="openArtistWeb('discovery')">
+                                    <div class="artmap-hub-card-icon"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><polygon points="15.5 8.5 13 13 8.5 15.5 11 11 15.5 8.5"/></svg></div>
+                                    <div class="artmap-hub-card-text"><h3>Discovery Web</h3><p>Artists you don't have yet, mapped from the ones you do</p></div>
+                                    <svg class="artmap-hub-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M12 5l7 7-7 7"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Artist Web (fullscreen sigma graph, hidden by default) -->
+                    <div class="artist-map-container" id="artist-web-container" style="display:none;">
+                        <div class="artist-map-toolbar">
+                            <div class="artmap-nav-left">
+                                <button class="artmap-back" onclick="closeArtistWeb()" title="Back to Discover (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg></button>
+                                <div class="artmap-brand"><svg class="artmap-brand-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="2"/><circle cx="5" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/><line x1="12" y1="12" x2="5" y2="5"/><line x1="12" y1="12" x2="19" y2="5"/><line x1="12" y1="12" x2="5" y2="19"/><line x1="12" y1="12" x2="19" y2="19"/></svg><span class="artmap-brand-text">Artist Web</span></div>
+                                <div class="artmap-stats" id="artist-web-stats"></div>
+                            </div>
+
+                            <!-- Center: search (mirrors Artist Map) -->
+                            <div class="artmap-nav-center">
+                                <div class="artmap-search-wrap">
+                                    <svg class="artmap-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    <input type="text" id="artist-web-search" placeholder="Search artists... (S)" oninput="artWebSearch(this.value)" onkeydown="if(event.key==='Enter')artWebSearchEnter()">
+                                </div>
+                            </div>
+
+                            <!-- Right: tools -->
+                            <div class="artmap-nav-right">
+                                <div class="artweb-lens-toggle" title="How to organize the graph">
+                                    <button class="artweb-lens-btn active" data-lens="genre" onclick="artWebSetLens('genre')">Genre</button>
+                                    <button class="artweb-lens-btn" data-lens="community" onclick="artWebSetLens('community')">Communities</button>
+                                    <button class="artweb-lens-btn" data-lens="discovery" onclick="artWebSetLens('discovery')">Discovery</button>
+                                </div>
+                                <div class="artweb-lens-toggle" title="Size nodes by">
+                                    <button class="artweb-lens-btn artweb-size-btn active" data-size="popularity" onclick="artWebSetSize('popularity')">Popular</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="connections" onclick="artWebSetSize('connections')">Links</button>
+                                    <button class="artweb-lens-btn artweb-size-btn" data-size="influence" onclick="artWebSetSize('influence')" title="Betweenness — who bridges the network">Influence</button>
+                                </div>
+                                <button class="artmap-tool-btn" id="artweb-path-btn" onclick="artWebTogglePathMode()" title="Trace how two artists connect">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="18" r="2.2"/><path d="M7 6h6a4 4 0 0 1 4 4v4" stroke-dasharray="1 3"/></svg>
+                                    <span>Path</span>
+                                </button>
+                                <button class="artmap-tool-btn" id="artweb-edges-btn" onclick="artWebToggleEdges()" title="Show only the stronger connections">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12" stroke-opacity="0.4"/><line x1="4" y1="17" x2="20" y2="17" stroke-opacity="0.2"/></svg>
+                                    <span>Edges</span>
+                                </button>
+                                <button class="artmap-tool-btn" id="artweb-filter-btn" onclick="artWebToggleFilter()" title="Filter by genre">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    <span>Filter</span>
+                                </button>
+                                <div class="artmap-zoom-group">
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(0.7)" title="Zoom in (+)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebZoom(1.4)" title="Zoom out (-)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+                                    <button class="artmap-tool-btn artmap-zoom" onclick="artWebFitToView()" title="Fit to view (F)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg></button>
+                                </div>
+                                <button class="artmap-tool-btn" onclick="artWebShowHelp()" title="Guide &amp; shortcuts" style="font-weight:700;">?</button>
+                            </div>
+                        </div>
+                        <div class="artmap-content-row">
+                            <div class="artmap-genre-sidebar" id="artweb-genre-sidebar" style="display:none;">
+                                <div class="artmap-genre-sidebar-header">
+                                    <span>Genres</span>
+                                    <input type="text" class="artmap-genre-sidebar-search" placeholder="Filter..." oninput="artWebFilterGenreList(this.value)">
+                                </div>
+                                <div class="artmap-genre-sidebar-list" id="artweb-genre-sidebar-list"></div>
+                            </div>
+                            <div id="artist-web-canvas" style="flex:1; min-width:0; min-height:0;"></div>
+                            <!-- Color legend (decodes the node colors per lens) — populated per render -->
+                            <div id="artist-web-legend" class="artweb-legend" style="display:none;"></div>
+                        </div>
+                        <div class="artist-map-search-results" id="artist-web-search-results"></div>
+                        <!-- Hover tooltip (reuses the Artist Map tooltip styling) — identify a node without clicking -->
+                        <div class="artist-map-tooltip" id="artist-web-tooltip"></div>
+                    </div>
+
                     <!-- Discovery Adventurousness — living wave dial. Drag the orb; the line waves
                          calmer/greener at left (safe) and wilder/redder at right (obscure). Syncs with
                          Settings → Discovery. -->
@@ -5011,14 +5162,24 @@
                             </div>
                             </div><!-- end Download Settings body -->
 
-                            <!-- ═══ QUALITY PROFILE ═══ -->
+                            <!-- ═══ QUALITY TAB: two-column layout ═══ -->
+                            <!-- Left (.qp-main): the 4 quality tiles on the standard Settings
+                                 column. Right (.qp-side-panel): a detached, sticky
+                                 profile-management panel. Everything on this whole tab is saved
+                                 under whichever profile is active in that panel; each tile carries
+                                 a small badge saying so. -->
+                            <div class="qp-layout" data-stg="quality">
+                            <div class="qp-main" data-stg="quality">
+
+                            <!-- ═══ QUALITY (ranked targets, search mode, fallback) ═══ -->
                             <!-- Whole tile is gated as a unit (Soulseek-only + downloads tab)
                                  by settings.js updateSourceVisibility — gating only the inner
                                  group would leave an empty expandable shell. -->
                             <div id="quality-profile-tile" data-stg="quality">
                             <div class="settings-section-header collapsed" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
-                                <h3>Quality Profile</h3>
+                                <h3>Quality</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Format priorities, bitrate, bit depth</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5131,6 +5292,28 @@
                                     </div>
                                 </div>
 
+                                <!-- Upgrade cutoff -->
+                                <div class="form-group">
+                                    <div class="setting-row" style="margin-bottom:4px;">
+                                        <label for="quality-upgrade-policy" style="font-weight:600;">Upgrade until</label>
+                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
+                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    </div>
+                                    <select id="quality-upgrade-policy" style="width:100%;max-width:420px;" onchange="onUpgradePolicyChange(); debouncedSaveQualityProfile();">
+                                        <option value="acceptable">Any accepted target</option>
+                                        <option value="until_cutoff">Selected target or better</option>
+                                    </select>
+                                    <div id="quality-upgrade-cutoff-group" class="quality-upgrade-cutoff-group">
+                                        <label for="quality-upgrade-cutoff">Cutoff target</label>
+                                        <select id="quality-upgrade-cutoff" onchange="debouncedSaveQualityProfile()"></select>
+                                    </div>
+                                    <div class="help-text setting-help-body" hidden>
+                                        <strong>Any accepted target</strong> stops upgrade findings as soon as a file matches any target in the list.
+                                        <br><br>
+                                        <strong>Selected target or better</strong> keeps the Quality Upgrade job proposing replacements until the file reaches the selected rank.
+                                    </div>
+                                </div>
+
                                 <!-- Search strategy -->
                                 <div class="form-group">
                                     <div class="setting-row" style="margin-bottom:4px;">
@@ -5207,29 +5390,11 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Quality on Import</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Apply the profile to manually imported files</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
                             <div class="settings-group" data-stg="quality">
-                                <div class="form-group">
-                                    <div class="setting-row">
-                                        <label class="checkbox-label">
-                                            <input type="checkbox" id="import-quality-filter-enabled" checked>
-                                            Quality profile check on import
-                                        </label>
-                                        <span class="info-icon" role="button" tabindex="0" title="What's this?"
-                                            onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
-                                    </div>
-                                    <div class="setting-help-body" hidden>
-                                        On by default. SoulSync probes each imported file's real audio quality and compares it
-                                        with your Quality Profile. <strong>On</strong> — files that don't meet your profile are
-                                        quarantined instead of imported (fallback/downsample settings still apply).
-                                        <strong>Off</strong> — files are imported regardless of format, bitrate, bit depth, or
-                                        sample rate. This does <strong>not</strong> skip AcoustID; fingerprint verification is a
-                                        separate setting below. Either way, the library <em>Quality Upgrade Scanner</em> still
-                                        flags below-profile tracks so you can act on them later.
-                                    </div>
-                                </div>
                                 <div class="form-group">
                                     <div class="setting-row">
                                         <label class="checkbox-label">
@@ -5243,6 +5408,10 @@
                                         When importing from Staging, if a track already exists in your library at a lower quality
                                         (e.g. MP3), it will be replaced with the higher quality version (e.g. FLAC).
                                         If disabled, existing tracks are always kept and the import file is skipped.
+                                        <br><br>
+                                        <strong>Note:</strong> imported files are always checked against your Quality Profile's
+                                        priority list above — there's no separate on/off switch for that, since an empty list
+                                        (or Fallback turned on) already means "accept anything."
                                     </div>
                                 </div>
                             </div>
@@ -5252,6 +5421,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Post-Download Conversion</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">Downsample hi-res, make lossy copies</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5315,6 +5485,7 @@
                             <div class="settings-section-header collapsed" data-stg="quality" onclick="this.classList.toggle('collapsed'); const b=this.nextElementSibling; b.classList.toggle('collapsed'); b.style.display=b.classList.contains('collapsed')?'none':''">
                                 <span class="settings-section-arrow">&#9660;</span>
                                 <h3>Audio Verification</h3>
+                                <span class="qp-governed-badge" title="Saved under the active profile in the panel on the right">Profile</span>
                                 <span class="settings-section-hint">AcoustID identity match + truncated/silent detection</span>
                             </div>
                             <div class="settings-section-body collapsed" data-stg="quality">
@@ -5361,6 +5532,32 @@
                                 </div>
                             </div>
                             </div><!-- end Audio Verification body -->
+
+                            </div><!-- end qp-main -->
+
+                            <!-- Right: detached, sticky Quality Profiles panel — everything on
+                                 the 4 tiles to the left is saved under whichever profile is
+                                 active here. Always visible (no collapse), protruding to the
+                                 right of the settings column on wide screens so it never takes
+                                 width away from the tiles. -->
+                            <div class="qp-side-panel" id="qp-side-panel" data-stg="quality">
+                                <div class="qp-side-panel-header">
+                                    <h3 class="qp-side-panel-title">Quality Profiles</h3>
+                                    <button type="button" class="qp-manage-btn" onclick="openQualityProfileManager()">Manage</button>
+                                </div>
+                                <p class="qp-side-panel-hint">Click a profile's name to view/edit its settings on the left (this alone never activates it). Per row: ● set as the active default, ✏ rename, ✎ save the settings shown on the left into this profile, ⇩ use for Auto-Import instead of the default, × delete. "Manage" above shows what's active for what.</p>
+                                <div class="qp-editing-banner" id="qp-editing-banner" style="display:none">
+                                    Viewing <strong class="qp-editing-banner-name">this profile</strong> — not the active default. Changes on the left only save here once you click its ✎.
+                                </div>
+                                <div class="qp-profile-list" id="qp-profile-list">
+                                    <!-- rows injected by renderCustomQualityProfiles() -->
+                                </div>
+                                <div class="qp-profile-new" id="qp-profile-new">
+                                    <button type="button" class="qp-profile-new-btn" id="qp-profile-new-btn" onclick="qpShowNewProfileInput()">+ New profile</button>
+                                </div>
+                            </div>
+
+                            </div><!-- end qp-layout -->
 
                             <!-- ═══ INDEXERS & DOWNLOADERS (gated: only shown when torrent/usenet is a selected source — see updateDownloadSourceUI) ═══ -->
                             <div id="indexers-downloaders-section" data-stg="downloads">
@@ -6672,6 +6869,25 @@
                                 </div>
                                 <div class="help-text setting-help-body" hidden>
                                     Saves an M3U playlist file alongside your music. Albums are skipped — they're already grouped by your media server.
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="library-m3u-enabled">
+                                        Auto-generate a whole-library M3U (updates on every scan)
+                                    </label>
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                </div>
+                                <div class="help-text setting-help-body" hidden>
+                                    Keeps a single <code>soulsync_library.m3u</code> of your entire library, rewritten after every scan (deep, incremental, or full refresh) so it stays in sync with the database.
+                                </div>
+                                <div class="form-group">
+                                    <label>Whole-library M3U output folder:</label>
+                                    <input type="text" id="library-m3u-path" class="form-input" placeholder="leave empty for the Transfer folder">
+                                    <span class="info-icon" role="button" tabindex="0" title="What's this?" onclick="toggleSettingHelp(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleSettingHelp(this);}">i</span>
+                                    <div class="help-text setting-help-body" hidden>
+                                        Where the whole-library M3U is written. Leave empty to use your Transfer folder.
+                                    </div>
                                 </div>
 
                                 <div class="form-group">
@@ -8748,6 +8964,11 @@
     <script src="{{ url_for('static', filename='api-monitor.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='library.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='beatport-ui.js', v=static_v) }}"></script>
+    <!-- Artist Web graph stack (sigma.js): graphology = data model, sigma = WebGL renderer,
+         graphology-library = utils incl. forceAtlas2 layout. CDN/UMD (SoulSync is vanilla). -->
+    <script defer src="https://cdn.jsdelivr.net/npm/graphology@0.25.4/dist/graphology.umd.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/graphology-library/dist/graphology-library.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/sigma@2.4.0/build/sigma.min.js"></script>
     <script src="{{ url_for('static', filename='discover-section-controller.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='discover.js', v=static_v) }}"></script>
     <script src="{{ url_for('static', filename='enrichment.js', v=static_v) }}"></script>

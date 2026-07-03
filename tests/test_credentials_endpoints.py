@@ -189,6 +189,54 @@ def test_jiosaavn_primary_rejected_when_experimental_disabled(client):
     assert resp.status_code == 400
 
 
+def test_settings_save_jiosaavn_primary_with_experimental_enabled(client):
+    """Settings and sidebar must agree: enable + primary in one save sticks."""
+    from config.settings import config_manager
+    resp = client.post('/api/settings', json={
+        'experimental': {'jiosaavn_enabled': True},
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 200 and resp.get_json()['success']
+    assert config_manager.get('experimental.jiosaavn_enabled') is True
+    assert config_manager.get('metadata.fallback_source') == 'jiosaavn'
+    payload = client.get('/api/profiles/me/active-sources').get_json()
+    assert payload['metadata']['active'] == 'jiosaavn'
+    assert payload['metadata']['effective'] == 'jiosaavn'
+
+
+def test_settings_save_jiosaavn_primary_rejected_when_experimental_disabled(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', False)
+    config_manager.set('metadata.fallback_source', 'deezer')
+    resp = client.post('/api/settings', json={
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 400
+    assert config_manager.get('metadata.fallback_source') == 'deezer'
+
+
+def test_settings_save_rejected_does_not_persist_other_changes(client):
+    from config.settings import config_manager
+    original_client_id = config_manager.get('spotify.client_id')
+    config_manager.set('experimental.jiosaavn_enabled', False)
+    resp = client.post('/api/settings', json={
+        'spotify': {'client_id': 'should-not-stick'},
+        'metadata': {'fallback_source': 'jiosaavn', 'spotify_free': False},
+    })
+    assert resp.status_code == 400
+    assert config_manager.get('spotify.client_id') == original_client_id
+
+
+def test_settings_disable_jiosaavn_resets_primary(client):
+    from config.settings import config_manager
+    config_manager.set('experimental.jiosaavn_enabled', True)
+    config_manager.set('metadata.fallback_source', 'jiosaavn')
+    resp = client.post('/api/settings', json={'experimental': {'jiosaavn_enabled': False}})
+    assert resp.status_code == 200
+    assert config_manager.get('experimental.jiosaavn_enabled') is False
+    assert config_manager.get('metadata.fallback_source') == 'deezer'
+
+
 def test_active_sources_rejects_bad_values(client):
     assert client.post('/api/profiles/active-sources', json={'metadata_source': 'nope'}).status_code == 400
     assert client.post('/api/profiles/active-sources', json={'media_server': 'nope'}).status_code == 400

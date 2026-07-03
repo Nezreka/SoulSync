@@ -32,6 +32,7 @@ EXPECTED_SOURCE_ID_FIELD = {
     "hydrabase": "soul_id",
     "musicbrainz": "musicbrainz_id",
     "amazon": "amazon_id",
+    "jiosaavn": "jiosaavn_id",
 }
 
 
@@ -69,11 +70,11 @@ class TestSourceIdFieldMapping:
             "(and the test body) to match."
         )
 
-    def test_source_only_set_matches_mapping_keys(self):
-        """Sources eligible for the source-only fallback must all have a
-        column to look them up by — otherwise the upgrade path silently
-        returns None."""
-        assert SOURCE_ONLY_ARTIST_SOURCES == frozenset(SOURCE_ID_FIELD.keys())
+    def test_source_only_set_includes_all_library_lookup_sources(self):
+        """Sources eligible for the source-only fallback must include every
+        source that has a library ID column — plus any source-only providers
+        (e.g. JioSaavn) that don't persist IDs in the library yet."""
+        assert SOURCE_ID_FIELD.keys() <= SOURCE_ONLY_ARTIST_SOURCES
 
     def test_every_mapped_column_exists_on_artists_table(self, db):
         """Regression for the 2026-04 ``deezer_artist_id`` typo: every column

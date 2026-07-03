@@ -18,6 +18,11 @@ ignore = [
 "tests/**" = ["B", "F", "S110"]
 
 [tool.pytest.ini_options]
+# Live/network integration tests are OPT-IN only. A `@pytest.mark.soundcloud_live`
+# does NOT auto-exclude a test — a bare `pytest` still runs it — so the default
+# run (and CI's `python -m pytest`) filters them out here. Run them explicitly
+# with `pytest -m soundcloud_live` (the command-line -m overrides this default).
+addopts = "-m 'not soundcloud_live'"
 markers = [
     "soundcloud_live: live SoundCloud integration test (network-dependent, run with -m soundcloud_live)",
 ]

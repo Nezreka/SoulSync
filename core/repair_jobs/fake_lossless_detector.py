@@ -5,7 +5,7 @@ import os
 import subprocess
 
 from core.repair_jobs import register_job
-from core.repair_jobs.base import JobContext, JobResult, RepairJob
+from core.repair_jobs.base import JobContext, JobResult, RepairJob, skip_deleted_quarantine
 from utils.logging_config import get_logger
 
 logger = get_logger("repair_job.fake_lossless")
@@ -58,7 +58,8 @@ class FakeLosslessDetectorJob(RepairJob):
 
         # Collect lossless files
         lossless_files = []
-        for root, _dirs, files in os.walk(transfer):
+        for root, dirs, files in os.walk(transfer):
+            skip_deleted_quarantine(root, dirs, transfer)
             if context.check_stop():
                 return result
             for fname in files:
@@ -166,7 +167,8 @@ class FakeLosslessDetectorJob(RepairJob):
         if not os.path.isdir(transfer):
             return 0
         count = 0
-        for _root, _dirs, files in os.walk(transfer):
+        for root, dirs, files in os.walk(transfer):
+            skip_deleted_quarantine(root, dirs, transfer)
             for fname in files:
                 if os.path.splitext(fname)[1].lower() in LOSSLESS_EXTENSIONS:
                     count += 1

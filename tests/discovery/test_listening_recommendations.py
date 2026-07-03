@@ -6,6 +6,8 @@ from core.discovery.listening_recommendations import (
     adventurousness_weights,
     aggregate_candidate_tracks,
     apply_adventurousness,
+    apply_adventurous_blend,
+    diversify_by_genre,
     build_genre_taste_profile,
     build_recency_weighted_seeds,
     genre_affinity,
@@ -457,3 +459,97 @@ def test_why_chips_thresholds():
 def test_why_chips_empty_when_nothing_notable():
     assert why_chips() == []
     assert why_chips(genre_affinity=0.1, popularity=80, seed_count=0) == []
+
+
+# ── apply_adventurous_blend (dial blends consensus <-> obscurity) ─────────────
+
+def _cand(name, base, pop, aff=0.0, nov=1.0):
+    return {"name": name, "score": base, "popularity": pop, "_aff": aff, "_nov": nov, "seed_count": base}
+
+
+def test_blend_safe_end_orders_by_consensus():
+    items = [_cand("Obscure", base=1, pop=10), _cand("Consensus", base=10, pop=90)]
+    out = apply_adventurous_blend(items, 0.0, base_key="score")
+    assert [i["name"] for i in out] == ["Consensus", "Obscure"]   # most-recommended first
+
+
+def test_blend_adventurous_end_orders_by_obscurity():
+    items = [_cand("Popular", base=10, pop=90), _cand("Deep", base=1, pop=5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["Deep", "Popular"]        # least popular first
+
+
+def test_blend_demotes_a_strongly_recommended_popular_artist_when_adventurous():
+    # The exact field bug: a big-consensus popular artist (Maluma pop 80) must land BELOW an obscure
+    # low-consensus pick (Binbag Wisdom pop 17) at the adventurous end.
+    items = [_cand("Maluma", base=10, pop=80, aff=1.0), _cand("BinbagWisdom", base=2, pop=17, aff=0.5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["BinbagWisdom", "Maluma"]
+
+
+def test_blend_is_smooth_not_saturated():
+    items = [_cand("A", 10, 90), _cand("B", 6, 40), _cand("C", 1, 5)]
+    o0 = [i["name"] for i in apply_adventurous_blend(items, 0.0, base_key="score")]
+    o5 = [i["name"] for i in apply_adventurous_blend(items, 0.5, base_key="score")]
+    o1 = [i["name"] for i in apply_adventurous_blend(items, 1.0, base_key="score")]
+    assert o0[0] == "A"          # safe -> consensus leader
+    assert o1[0] == "C"          # adventurous -> most obscure
+    assert not (o0 == o5 == o1)  # the middle is genuinely different -> no dead zone
+
+
+def test_blend_missing_popularity_is_neutral():
+    items = [_cand("NoPop", 5, None), _cand("HighPop", 5, 95), _cand("LowPop", 5, 5)]
+    out = apply_adventurous_blend(items, 1.0, base_key="score")
+    assert [i["name"] for i in out] == ["LowPop", "NoPop", "HighPop"]   # neutral 0.5 for the missing one
+
+
+def test_blend_empty_and_returns_new_list():
+    assert apply_adventurous_blend([], 0.5) == []
+    src = [_cand("A", 1, 10)]
+    assert apply_adventurous_blend(src, 0.5, base_key="score") is not src
+
+
+# ── diversify_by_genre (spread the discovery surface) ─────────────────────────
+
+def _gi(name, genre):
+    return {"name": name, "genres": [genre] if genre else []}
+
+
+def _pg(it):
+    g = it.get("genres") or []
+    return g[0] if g else None
+
+
+def test_diversify_spreads_a_dominant_genre():
+    items = [_gi(f"r{i}", "rock") for i in range(5)] + [_gi("j", "jazz"), _gi("p", "pop")]
+    out = diversify_by_genre(items, _pg, cap=3)
+    top6 = [_pg(x) for x in out[:6]]
+    assert top6[:3] == ["rock", "rock", "rock"]          # cap respected
+    assert "jazz" in top6 and "pop" in top6              # spread into the top, not buried
+
+
+def test_diversify_preserves_rank_order_within_a_genre():
+    items = [_gi("r0", "rock"), _gi("r1", "rock"), _gi("j", "jazz"), _gi("r2", "rock"), _gi("r3", "rock")]
+    out = diversify_by_genre(items, _pg, cap=2)
+    assert [x["name"] for x in out if _pg(x) == "rock"] == ["r0", "r1", "r2", "r3"]
+
+
+def test_diversify_noop_small_or_single_genre():
+    small = [_gi("a", "rock"), _gi("b", "rock")]
+    assert diversify_by_genre(small, _pg, cap=3) == small
+    single = [_gi(f"a{i}", "rock") for i in range(5)]
+    assert [x["name"] for x in diversify_by_genre(single, _pg, cap=3)] == [f"a{i}" for i in range(5)]
+
+
+def test_diversify_genreless_not_held_back():
+    items = [_gi("r0", "rock"), _gi("r1", "rock"), _gi("r2", "rock"), _gi("r3", "rock"), _gi("n", None)]
+    out = diversify_by_genre(items, _pg, cap=3)
+    assert [x["name"] for x in out][:4] == ["r0", "r1", "r2", "n"]
+
+
+def test_why_chips_off_usual_path_only_on_adventurous_offtaste():
+    assert any(c["label"] == "Off your usual path" for c in why_chips(genre_affinity=0.1, level=0.9))
+    on_taste = why_chips(genre_affinity=0.8, level=0.9)
+    assert any(c["type"] == "genre" for c in on_taste)
+    assert not any(c["label"] == "Off your usual path" for c in on_taste)
+    assert not any(c["label"] == "Off your usual path" for c in why_chips(genre_affinity=0.1, level=0.3))

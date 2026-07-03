@@ -40,7 +40,7 @@ logger = setup_logging(_log_level, _log_path)
 
 # App version — single source of truth for backup metadata, system-info, update check, etc.
 # Semver: MAJOR.MINOR.PATCH. Bump at each dev→main release.
-_SOULSYNC_BASE_VERSION = "2.8.3"
+_SOULSYNC_BASE_VERSION = "2.8.4"
 
 def _build_version_string():
     """Append short commit hash to version when available (e.g. 2.35+abc1234)."""
@@ -227,6 +227,7 @@ from core.musicbrainz_worker import MusicBrainzWorker
 from core.audiodb_worker import AudioDBWorker
 from core.discogs_worker import DiscogsWorker
 from core.deezer_worker import DeezerWorker
+from core.jiosaavn_worker import JioSaavnWorker
 from core.spotify_worker import SpotifyWorker
 from core.itunes_worker import iTunesWorker
 from core.lastfm_worker import LastFMWorker
@@ -673,6 +674,12 @@ def _add_discover_cache_headers(response):
         if not (200 <= response.status_code < 300):
             return response
         if response.headers.get('Cache-Control'):
+            return response
+        # The two rec rows re-rank on the live adventurousness dial, which lives in server-side config
+        # (NOT the URL). A browser cache would freeze them at the first load's value — the slider would
+        # flicker but never move (the reported bug). Never cache these; the rest of discover still is.
+        if request.path in ('/api/discover/similar-artists', '/api/discover/listening-recommendations'):
+            response.headers['Cache-Control'] = 'no-store'
             return response
         response.headers['Cache-Control'] = 'private, max-age=300'
     except Exception as exc:
@@ -1929,6 +1936,7 @@ def _shutdown_runtime_components():
         (audiodb_worker, "audiodb worker"),
         (discogs_worker, "discogs worker"),
         (deezer_worker, "deezer worker"),
+        (jiosaavn_worker, "jiosaavn worker"),
         (spotify_enrichment_worker, "spotify enrichment worker"),
         (itunes_enrichment_worker, "itunes enrichment worker"),
         (lastfm_worker, "lastfm worker"),
@@ -2376,6 +2384,8 @@ def _get_windowed_calls(key, current_total):
 def _get_enrichment_status():
     """Get lightweight status for all enrichment services (no DB queries).
     Reads worker properties directly to avoid expensive get_stats() calls."""
+    from core.metadata.registry import is_jiosaavn_enabled
+
     services = {}
 
     # Worker-based enrichment services: (key, display_name, worker_var)
@@ -2391,6 +2401,7 @@ def _get_enrichment_status():
         ('audiodb', 'AudioDB', lambda: audiodb_worker),
         ('discogs', 'Discogs', lambda: discogs_worker),
         ('amazon_enrichment', 'Amazon Music', lambda: amazon_worker),
+        ('jiosaavn_enrichment', 'JioSaavn', lambda: jiosaavn_worker),
     ]
 
     # Config-based "configured" checks for services that need API keys/credentials
@@ -2400,9 +2411,12 @@ def _get_enrichment_status():
         'qobuz_enrichment': lambda: bool(qobuz_enrichment_worker and qobuz_enrichment_worker.client and qobuz_enrichment_worker.client.user_auth_token),
         'lastfm': lambda: bool(config_manager.get('lastfm.api_key', '')),
         'genius': lambda: bool(config_manager.get('genius.access_token', '')),
+        'jiosaavn_enrichment': is_jiosaavn_enabled,
     }
 
     for key, name, get_worker in workers_info:
+        if key == 'jiosaavn_enrichment' and not is_jiosaavn_enabled():
+            continue
         worker = get_worker()
         if worker is not None:
             is_alive = worker.thread is not None and worker.thread.is_alive()
@@ -2578,6 +2592,11 @@ def get_status():
             'enrichment': _get_enrichment_status(),
             'active_downloads': active_dl_count,
         }
+        try:
+            from core.metadata.registry import experimental_status
+            status_data['_experimental'] = experimental_status()
+        except Exception:
+            status_data['_experimental'] = {}
         return jsonify(status_data)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -3305,17 +3324,46 @@ def handle_settings():
                 if write_pasted_cookiefile(_yt_paste, _cookie_path):
                     config_manager.set('youtube.cookies_file', _cookie_path)
 
+            _experimental_in = new_settings.get('experimental')
+            _metadata_in = new_settings.get('metadata')
+
+            from core.metadata.registry import resolve_settings_metadata_primary
+            _primary_err, _primary_override = resolve_settings_metadata_primary(
+                _experimental_in,
+                _metadata_in,
+                config_manager.get,
+            )
+            if _primary_err:
+                return jsonify({"success": False, "error": _primary_err}), 400
+
             if 'active_media_server' in new_settings:
                 config_manager.set_active_media_server(new_settings['active_media_server'])
 
+            if isinstance(_experimental_in, dict):
+                for key, value in _experimental_in.items():
+                    config_manager.set(f'experimental.{key}', value)
+
             for service in ['spotify', 'plex', 'jellyfin', 'navidrome', 'soulseek', 'download_source', 'settings', 'database', 'metadata_enhancement', 'file_organization', 'playlist_sync', 'tidal', 'tidal_download', 'qobuz', 'hifi_download', 'deezer_download', 'amazon_download', 'lidarr_download', 'prowlarr', 'torrent_client', 'usenet_client', 'listenbrainz', 'acoustid', 'lastfm', 'genius', 'import', 'lossy_copy', 'listening_stats', 'ui_appearance', 'youtube', 'content_filter', 'itunes', 'm3u_export', 'musicbrainz', 'deezer', 'audiodb', 'metadata', 'hydrabase', 'security', 'discogs', 'library', 'discover', 'wishlist', 'genre_whitelist', 'post_processing', 'playlists', 'experimental']:
                 if service in new_settings:
+                    if service == 'experimental' and isinstance(_experimental_in, dict):
+                        continue
                     for key, value in new_settings[service].items():
                         config_manager.set(f'{service}.{key}', value)
 
-            from core.metadata.registry import is_jiosaavn_enabled
-            if not is_jiosaavn_enabled() and config_manager.get('metadata.fallback_source') == 'jiosaavn':
-                config_manager.set('metadata.fallback_source', 'deezer')
+            if _primary_override:
+                config_manager.set('metadata.fallback_source', _primary_override)
+
+            # The Settings → Quality page's toggles are saved as config keys
+            # (above), but the pipeline enforces the PROFILE row (live, per
+            # item). Write the quality-owned keys through to the active
+            # default profile so "the page edits the active profile" holds —
+            # without this, a checkbox change here would never reach the
+            # pipeline (see MusicDatabase.sync_default_quality_profile_from_config).
+            if any(s in new_settings for s in ('acoustid', 'lossy_copy', 'post_processing', 'import')):
+                try:
+                    get_database().sync_default_quality_profile_from_config()
+                except Exception as _qp_sync_err:
+                    logger.error(f"Default quality profile sync failed: {_qp_sync_err}")
 
             logger.info("Settings saved successfully via Web UI.")
             
@@ -3323,9 +3371,7 @@ def handle_settings():
             changed_services = list(new_settings.keys())
             services_text = ", ".join(changed_services)
             add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
-            add_activity_item("", "Settings Updated", f"{services_text} configuration saved", "Now")
-            
+
             # Reload service clients with new settings (guard against None from partial init)
             if spotify_client:
                 spotify_client.reload_config()
@@ -4093,13 +4139,13 @@ def settings_config_status_endpoint():
     Drives the green/yellow header gradient. No API calls — just config reads.
     """
     try:
-        from core.metadata.registry import is_jiosaavn_enabled
+        from core.metadata.registry import experimental_source_rejected, experimental_status
         result = {
             service: {'configured': _is_service_configured(service)}
             for service in SERVICE_CONFIG_REGISTRY
-            if service != 'jiosaavn' or is_jiosaavn_enabled()
+            if not experimental_source_rejected(service)
         }
-        result['_experimental'] = {'jiosaavn_enabled': is_jiosaavn_enabled()}
+        result['_experimental'] = experimental_status()
         # Spotify Free: Spotify metadata can be available without credentials
         # (opt-in no-creds source). Surface that separately so the search source
         # picker offers Spotify, while `configured` (the Connections indicator)
@@ -4768,6 +4814,156 @@ def reset_quality_preset(preset_name):
 
     except Exception as e:
         logger.error(f"Error resetting quality preset: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# ── Named global quality profiles (assignable to Wishlist items / per-context
+# overrides like Auto-Import, not just the single active default) — CRUD over
+# `quality_profiles`. ──────────
+
+@app.route('/api/quality-profile/custom', methods=['GET'])
+def list_custom_quality_profiles():
+    """List every quality profile (built-ins + user-created), default first."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error listing quality profiles: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom', methods=['POST'])
+def create_custom_quality_profile():
+    """Save the current Quality-page settings as a new named profile."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        profile_id = db.create_quality_profile(name, data)
+        if profile_id is None:
+            return jsonify({"success": False, "error": "A profile with that name may already exist"}), 400
+
+        add_activity_item("", "Quality Profile Created", f"Saved '{name}'", "Now")
+        return jsonify({"success": True, "id": profile_id, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error creating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['GET'])
+def get_custom_quality_profile(profile_id):
+    """Read-only: a single profile in the same full v3 shape `/apply` and
+    `/api/quality-profile` return (parsed ranked_targets, real booleans,
+    `preset`), so the Settings UI can load a profile's settings into the page
+    for viewing/editing WITHOUT the side effects `/apply` has (making it the
+    default, pushing into live config) — purely a SELECT."""
+    try:
+        from core.quality.selection import load_profile_by_id
+        from database.music_database import MusicDatabase
+
+        db = MusicDatabase()
+        if not any(p['id'] == profile_id for p in db.list_quality_profiles()):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        return jsonify({"success": True, "profile": load_profile_by_id(profile_id)})
+    except Exception as e:
+        logger.error(f"Error loading quality profile {profile_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/apply', methods=['POST'])
+def apply_custom_quality_profile(profile_id):
+    """Make a named profile the app-wide default AND push every setting it
+    captures (AcoustID strictness, downsample, deep verify, import
+    quality-filter/replace-lower-quality, lossy-copy) into the live global
+    settings — not just the ranked-target ladder."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        profile = db.apply_quality_profile_to_settings(profile_id)
+        if profile is None:
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        add_activity_item("", "Quality Profile Applied", f"Now using '{profile.get('preset', 'custom')}'", "Now")
+        return jsonify({"success": True, "profile": profile})
+    except Exception as e:
+        logger.error(f"Error applying quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>/update', methods=['POST'])
+def update_custom_quality_profile(profile_id):
+    """Overwrite a named profile's captured settings with whatever is
+    currently on the Quality page (edit-in-place, keeps the name)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        if not db.update_quality_profile(profile_id, data):
+            return jsonify({"success": False, "error": "Profile not found"}), 404
+
+        profiles = db.list_quality_profiles()
+        # Editing the ACTIVE DEFAULT profile must also push the new values
+        # into config.json — every profile-owned key the rest of the app
+        # reads directly (AcoustID, lossy-copy, deep-verify, replace-lower-
+        # quality). Without this, the row and config.json go out of sync,
+        # and the next unrelated Settings save (which mirrors config -> the
+        # default row via sync_default_quality_profile_from_config) silently
+        # reverts this edit back to the stale config values.
+        if any(p['id'] == profile_id and p.get('is_default') for p in profiles):
+            db.apply_quality_profile_to_settings(profile_id)
+            profiles = db.list_quality_profiles()
+
+        add_activity_item("", "Quality Profile Updated", f"Updated saved profile {profile_id}", "Now")
+        return jsonify({"success": True, "profiles": profiles})
+    except Exception as e:
+        logger.error(f"Error updating quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['PUT'])
+def rename_custom_quality_profile(profile_id):
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        data = request.get_json() or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return jsonify({"success": False, "error": "Name is required"}), 400
+
+        ok, reason = db.rename_quality_profile(profile_id, name)
+        if not ok:
+            status = 404 if reason == "Profile not found" else 400
+            return jsonify({"success": False, "error": reason}), status
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error renaming quality profile: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/quality-profile/custom/<int:profile_id>', methods=['DELETE'])
+def delete_custom_quality_profile(profile_id):
+    """Delete any profile, including the built-ins. Only refuses when it
+    would leave zero profiles — deleting the current default auto-promotes
+    another remaining profile first (see `MusicDatabase.delete_quality_profile`)."""
+    try:
+        from database.music_database import MusicDatabase
+        db = MusicDatabase()
+
+        ok, reason = db.delete_quality_profile(profile_id)
+        if not ok:
+            return jsonify({"success": False, "error": reason}), 400
+        return jsonify({"success": True, "profiles": db.list_quality_profiles()})
+    except Exception as e:
+        logger.error(f"Error deleting quality profile: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 # ===============================
@@ -6636,6 +6832,13 @@ def start_download():
                 # Register download for post-processing (simple transfer to /Transfer)
                 context_key = _make_context_key(username, filename)
                 is_streaming_source = username in ('youtube', 'tidal', 'qobuz', 'hifi', 'deezer_dl', 'lidarr', 'soundcloud', 'amazon')
+                # Per-download check overrides: skip AcoustID and/or
+                # quality-quarantine checks on request.
+                _skip_checks = []
+                if data.get('skip_acoustid'):
+                    _skip_checks.append('acoustid')
+                if data.get('quality_check') is False:
+                    _skip_checks.extend(['bit_depth', 'quality'])
                 with matched_context_lock:
                     matched_downloads_context[context_key] = {
                         'search_result': {
@@ -6649,7 +6852,8 @@ def start_download():
                         },
                         'spotify_artist': None,  # No Spotify metadata
                         'spotify_album': None,
-                        'track_info': None
+                        'track_info': None,
+                        '_skip_quarantine_check': _skip_checks or None,
                     }
                     source_label = username.title() if is_streaming_source else 'Soulseek'
                     logger.info(f"[{source_label}] Registered simple download for post-processing: {context_key}")
@@ -8924,11 +9128,18 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         logger.debug(f"Discogs client resolution failed: {e}")
 
     az = None
+    js = None
     try:
         from core.metadata.registry import get_amazon_client
         az = get_amazon_client()
     except Exception as e:
         logger.debug(f"Amazon client resolution failed: {e}")
+    try:
+        from core.metadata.registry import get_jiosaavn_client, is_source_enabled
+        if is_source_enabled('jiosaavn'):
+            js = get_jiosaavn_client()
+    except Exception as e:
+        logger.debug(f"JioSaavn client resolution failed: {e}")
 
     try:
         lastfm_api_key = config_manager.get('lastfm.api_key', '') or None
@@ -8944,6 +9155,7 @@ def _build_source_only_artist_detail(artist_id, artist_name, source):
         itunes_client=it,
         discogs_client=dc,
         amazon_client=az,
+        jiosaavn_client=js,
         lastfm_api_key=lastfm_api_key,
     )
     return jsonify(payload), status
@@ -8965,6 +9177,14 @@ def get_artist_detail(artist_id):
     try:
         source_param = (request.args.get('source', '') or '').strip().lower()
         artist_name_arg = (request.args.get('name', '') or '').strip()
+        if source_param:
+            from core.metadata.registry import experimental_source_rejected
+            if experimental_source_rejected(source_param):
+                return jsonify({
+                    "success": False,
+                    "error": f"{source_param} is not enabled",
+                }), 503
+
         logger.info(
             f"Getting artist detail for ID: {artist_id} "
             f"(source={source_param or 'library'})"
@@ -9739,6 +9959,343 @@ def get_artist_discography(artist_id):
     except Exception as e:
         logger.exception("Error fetching artist discography for %s", artist_id)
         return jsonify({"error": str(e)}), 500
+
+_ART_OPTIONS_CACHE = {}                       # (artist_lower, album_lower) -> (ts, candidates)
+_ART_OPTIONS_CACHE_LOCK = threading.Lock()
+_ART_OPTIONS_TTL_S = 900                       # 15 min — gathering is several slow external calls
+
+
+@app.route('/api/album/<album_id>/art-options', methods=['GET'])
+def get_album_art_options(album_id):
+    """Candidate cover-art images for an album, for the art picker (read-only).
+
+    Gathers from Cover Art Archive (a front cover per edition across the release-group) +
+    Deezer/iTunes/Spotify/AudioDB (their single validated best), fanned out concurrently. ``artist``
+    and ``album`` come from the caller — the enhanced library view already has them. Results are
+    cached briefly since the gather is several slow external calls.
+    """
+    try:
+        artist = (request.args.get('artist') or '').strip()
+        album = (request.args.get('album') or '').strip()
+        if not artist or not album:
+            return jsonify({"error": "artist and album query params are required"}), 400
+
+        cache_key = (artist.lower(), album.lower())
+        now = time.time()
+        with _ART_OPTIONS_CACHE_LOCK:
+            hit = _ART_OPTIONS_CACHE.get(cache_key)
+            if hit and now - hit[0] < _ART_OPTIONS_TTL_S:
+                return jsonify({"album_id": album_id, "count": len(hit[1]),
+                                "candidates": hit[1], "cached": True})
+
+        metadata = {}
+        try:
+            from core.metadata import album_mbid_cache
+            from core.metadata.source import normalize_album_cache_key
+            mbid = album_mbid_cache.lookup(normalize_album_cache_key(album), artist.lower())
+            if mbid:
+                metadata["musicbrainz_release_id"] = mbid
+        except Exception as exc:
+            logger.debug("[art-options] release-MBID resolve failed: %s", exc)
+
+        from core.metadata.art_lookup import gather_album_art_candidates
+        candidates = gather_album_art_candidates(artist, album, metadata)
+        with _ART_OPTIONS_CACHE_LOCK:
+            _ART_OPTIONS_CACHE[cache_key] = (now, candidates)
+        return jsonify({"album_id": album_id, "count": len(candidates), "candidates": candidates})
+    except Exception as e:
+        logger.error("[art-options] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _derive_album_folder(db, album_id):
+    """The album's folder on disk, from the first resolvable track path (Docker-safe). None if no
+    track file can be located (e.g. paths aren't mapped in this container)."""
+    try:
+        tracks = db.get_tracks_by_album(int(album_id))
+    except Exception:
+        return None
+    for tr in (tracks or []):
+        raw = getattr(tr, 'file_path', None)
+        if not raw:
+            continue
+        resolved = _resolve_library_file_path(raw) or raw
+        if resolved and os.path.exists(resolved):
+            return os.path.dirname(resolved)
+    return None
+
+
+def _overwrite_cover_jpg(url, folder):
+    """Download ``url`` and OVERWRITE cover.jpg in ``folder`` (the picker is *replacing* art, so the
+    existing-file guard in download_cover_art doesn't apply). Returns True on success."""
+    import urllib.request  # not bound at module level (only urllib.parse is); matches the local-import pattern used elsewhere
+    req = urllib.request.Request(url, headers={"User-Agent": "SoulSync/1.0", "Accept": "image/*"})
+    with urllib.request.urlopen(req, timeout=15) as resp:   # noqa: S310 (user-chosen art URL)
+        data = resp.read()
+    if not data:
+        return False
+    with open(os.path.join(folder, "cover.jpg"), "wb") as handle:
+        handle.write(data)
+    return True
+
+
+@app.route('/api/album/<album_id>/art', methods=['POST'])
+def set_album_art(album_id):
+    """Apply a cover chosen in the picker: set the album's DB art URL and overwrite cover.jpg in the
+    album folder. The non-empty thumb_url also pins the choice — enrichment workers only fill empty
+    art, so they won't clobber it. Body: ``{"url": "<image url>"}``."""
+    try:
+        data = request.get_json(silent=True) or {}
+        url = (data.get('url') or '').strip()
+        if not url:
+            return jsonify({"error": "url is required"}), 400
+
+        db = get_database()
+        if not db.set_album_thumb_url(album_id, url):
+            return jsonify({"error": "Album not found"}), 404
+
+        # Invalidate the cached options for this album's art so a re-open reflects the change.
+        cover_written = False
+        folder = _derive_album_folder(db, album_id)
+        if folder:
+            try:
+                cover_written = _overwrite_cover_jpg(url, folder)
+                logger.info("[set-art] album %s cover.jpg -> %s", album_id, folder)
+            except Exception as exc:
+                logger.warning("[set-art] cover.jpg write failed for album %s: %s", album_id, exc)
+        else:
+            logger.info("[set-art] no on-disk folder for album %s — DB art updated only", album_id)
+
+        return jsonify({"success": True, "album_id": album_id, "thumb_url": url,
+                        "cover_written": cover_written})
+    except Exception as e:
+        logger.error("[set-art] failed for album %s: %s", album_id, e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/library', methods=['GET'])
+def get_library_graph():
+    """Library "Taste Map": EVERY library artist as a node, grouped by genre + wired by similarity.
+
+    Returns {"nodes": [{key,label,kind,owned,primary_genre,popularity,thumb} | {key,label,kind,genre}],
+    "edges": [{source,target,weight,kind}]}. Every artist is included (attached to a per-genre hub node
+    so a force layout clusters them); similarity edges come from similar_artists (resolved in-memory —
+    a SQL self-join is too slow at 75k rows).
+    """
+    try:
+        from core.graph.artist_graph import build_genre_grouped_map
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned = set()
+            meta = {}
+            artists = []
+            for name, thumb, genres, aid, source in cur.execute(
+                "SELECT name, thumb_url, genres, id, server_source FROM artists"
+            ):
+                key = (name or "").strip().lower()
+                owned.add(key)
+                meta[key] = {"thumb_url": thumb, "genres": genres}
+                artists.append((name, genres, thumb, aid, source))
+            rows = cur.execute(
+                "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+                "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity "
+                "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+            ).fetchall()
+        finally:
+            conn.close()
+        graph = build_genre_grouped_map(artists, rows, owned, artist_meta=meta)
+        n_artists = sum(1 for n in graph["nodes"] if n.get("kind") == "artist")
+        n_genres = sum(1 for n in graph["nodes"] if n.get("kind") == "genre")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "artists": n_artists, "genres": n_genres,
+        }})
+    except Exception as e:
+        logger.error("[library-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery', methods=['GET'])
+def get_discovery_graph():
+    """Discovery Web: owned artists as anchors + their UNOWNED similar artists as discovery candidates.
+
+    Candidates are enriched from the metadata cache (image/genres/popularity) so they render as real
+    artists you could add, not bare dots. Returns the WHOLE frontier by default — its real size is
+    modest (only artists whose similars were fetched can anchor); ``seed``/``per`` query params
+    optionally trim to the top anchors / top candidates per anchor.
+    """
+    try:
+        from core.graph.artist_graph import build_discovery_map
+
+        def _opt_int(name):
+            raw = request.args.get(name)
+            if raw is None:
+                return None
+            try:
+                v = int(raw)
+            except (TypeError, ValueError):
+                return None
+            return max(1, v) if v > 0 else None
+
+        seed = _opt_int('seed')
+        per = _opt_int('per')
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = build_discovery_map(rows, owned, owned_meta, seed_count=seed, per_anchor=per)
+        finally:
+            conn.close()
+
+        n_owned = sum(1 for n in graph["nodes"] if n.get("kind") == "owned")
+        n_disc = sum(1 for n in graph["nodes"] if n.get("kind") == "discovery")
+        return jsonify({**graph, "counts": {
+            "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
+            "owned": n_owned, "discovery": n_disc,
+        }})
+    except Exception as e:
+        logger.error("[discovery-graph] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+def _discovery_load_inputs(cur):
+    """Shared input load for the discovery routes: owned artists + this profile's similar_artists.
+
+    similar_artists is per-profile (unique on profile_id + source + name); without the filter, a
+    multi-profile install double-counts every anchor->target pair and leaks one profile's discovery
+    taste into another's graph.
+
+    Rows include the table's OWN image_url/genres columns (~99% of rows carry image + real
+    popularity) — enriching from metadata_cache_entities instead measured 18-250s per request
+    (random reads into a 1.3M-row table), for data these rows already have.
+    """
+    owned = set()
+    owned_meta = {}
+    for name, thumb, genres, aid in cur.execute("SELECT name, thumb_url, genres, id FROM artists"):
+        key = (name or "").strip().lower()
+        owned.add(key)
+        owned_meta[key] = {"thumb_url": thumb, "genres": genres, "id": aid}
+    rows = cur.execute(
+        "SELECT source_artist_id, similar_artist_name, similar_artist_spotify_id, "
+        "similar_artist_deezer_id, similar_artist_itunes_id, occurrence_count, popularity, "
+        "image_url, genres "
+        "FROM similar_artists WHERE profile_id = ?", (get_current_profile_id(),)
+    ).fetchall()
+    return owned, owned_meta, rows
+
+
+@app.route('/api/graph/discovery/expand', methods=['POST'])
+def expand_discovery_graph():
+    """Expand-on-click for the Discovery Web: one node's similar artists, minus what's on screen.
+
+    POST JSON: ``key`` (normalized artist name), ``ids`` (external ids — for unowned candidates whose
+    similars are keyed by id), ``exclude`` (node keys already in the graph — JSON body because artist
+    names can contain commas), ``per`` (max new nodes). Same node/edge shape as /api/graph/discovery.
+    """
+    try:
+        from core.graph.artist_graph import expand_discovery_node
+        payload = request.get_json(silent=True) or {}
+        node_key = str(payload.get('key') or '').strip().lower()
+        if not node_key:
+            return jsonify({"error": "missing key"}), 400
+        node_ids = [i for i in (payload.get('ids') or []) if i]
+        exclude = {k for k in (payload.get('exclude') or []) if k}
+        try:
+            per = int(payload.get('per') or 10)
+        except (TypeError, ValueError):
+            per = 10
+        per = max(1, min(per, 30))
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            owned, owned_meta, rows = _discovery_load_inputs(cur)
+            graph = expand_discovery_node(rows, owned, node_key, node_ids, owned_meta, per=per, exclude=exclude)
+        finally:
+            conn.close()
+        return jsonify({**graph, "counts": {"nodes": len(graph["nodes"]), "edges": len(graph["edges"])}})
+    except Exception as e:
+        logger.error("[discovery-expand] failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/graph/discovery/preview/<deezer_id>', methods=['GET'])
+def get_discovery_preview(deezer_id):
+    """30-second Deezer preview for a discovery candidate's top track (hear it before you add it).
+
+    Deliberately Deezer-only + explicit: the generic top-tracks endpoint routes by the CONFIGURED
+    primary source and resolves ids via the library DB — a candidate isn't in the library, and its
+    Deezer id would be garbage to a Spotify query (whose previews are deprecated anyway).
+    """
+    try:
+        if not str(deezer_id).isdigit():
+            return jsonify({"success": False, "reason": "not_a_deezer_id"}), 400
+        client = _get_deezer_client()
+        if not client:
+            return jsonify({"success": False, "reason": "deezer_unavailable"}), 503
+        tracks = client.get_artist_top_tracks(str(deezer_id), limit=3) or []
+        for t in tracks:
+            if t.get('preview_url'):
+                return jsonify({
+                    "success": True,
+                    "track": t.get('name'),
+                    "artist": ((t.get('artists') or [{}])[0] or {}).get('name'),
+                    "preview_url": t['preview_url'],
+                })
+        return jsonify({"success": False, "reason": "no_preview"})
+    except Exception as e:
+        logger.error("[discovery-preview] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route('/api/library/artist/<int:artist_id>/thumb', methods=['GET'])
+def get_library_artist_thumb(artist_id):
+    """Browser-loadable thumb URL for ONE library artist, by library DB id.
+
+    Used by the Artist Web side panel. Two deliberate choices:
+    - Lazily per-click, not eagerly for every node: normalize_image_url registers the URL in the
+      image cache (a DB write transaction each) — doing that for ~5k artists per graph load takes
+      minutes; one artist per panel open is instant.
+    - By LIBRARY id against the artists table — the generic /api/artist/<id>/image resolver sends
+      whatever id it gets to external providers, so a library row id returned whichever Deezer/iTunes
+      artist happened to own that number (wrong photo, essentially always).
+    """
+    try:
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            cur = conn.cursor()
+            row = cur.execute("SELECT thumb_url FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        finally:
+            conn.close()
+        thumb = row['thumb_url'] if row else None
+        url = fix_artist_image_url(thumb) if thumb else None
+        return jsonify({"success": True, "image_url": url})
+    except Exception as e:
+        logger.error("[artist-thumb] failed: %s", e, exc_info=True)
+        return jsonify({"success": False, "image_url": None}), 500
+
+
+@app.route('/api/library/export/m3u', methods=['GET'])
+def export_library_m3u():
+    """Download an extended-M3U playlist of the entire library. Always current (built on request)."""
+    try:
+        db = get_database()
+        entries = db.get_all_library_tracks_for_export()
+        from core.library.m3u_export import build_m3u
+        content = build_m3u(entries, entry_base_path=config_manager.get('m3u_export.entry_base_path', '') or '')
+        return Response(
+            content,
+            mimetype='audio/x-mpegurl',
+            headers={'Content-Disposition': 'attachment; filename="soulsync_library.m3u"'},
+        )
+    except Exception as e:
+        logger.error("[library-m3u] export failed: %s", e, exc_info=True)
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/album/<album_id>/tracks', methods=['GET'])
 def get_album_tracks(album_id):
@@ -10606,16 +11163,25 @@ def get_artist_quality_analysis(artist_id):
         artist = result.get('artist', {})
         albums = result.get('albums', [])
 
-        # Get user's quality profile to determine min acceptable tier
+        # Get the app-wide default quality profile (v3 shape — `ranked_targets`,
+        # not the legacy v2 `qualities` dict) to determine min acceptable tier.
         quality_profile = database.get_quality_profile()
-        preferred_qualities = quality_profile.get('qualities', {})
+        ranked_targets = quality_profile.get('ranked_targets') or []
         min_acceptable_tier = 999
-        tier_map = {'flac': 'lossless', 'mp3_320': 'low_lossy', 'mp3_256': 'low_lossy', 'mp3_192': 'low_lossy'}
-        for qname, qconfig in preferred_qualities.items():
-            if qconfig.get('enabled', False):
-                tname = tier_map.get(qname)
-                if tname and tname in QUALITY_TIERS:
-                    min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
+        # Mirrors QUALITY_TIERS' extension groupings so a ranked-target's
+        # `format` (as edited in the Settings ranked-targets picker — see
+        # RT_LOSSLESS_FORMATS/RT_LOSSY_FORMATS in settings.js) lands on the
+        # same tier this scan buckets library files into.
+        format_tier_map = {
+            'flac': 'lossless', 'alac': 'lossless', 'wav': 'lossless', 'dsf': 'lossless',
+            'opus': 'high_lossy', 'ogg': 'high_lossy',
+            'aac': 'standard_lossy',
+            'mp3': 'low_lossy', 'wma': 'low_lossy',
+        }
+        for target in ranked_targets:
+            tname = format_tier_map.get((target or {}).get('format'))
+            if tname and tname in QUALITY_TIERS:
+                min_acceptable_tier = min(min_acceptable_tier, QUALITY_TIERS[tname]['tier'])
 
         tracks = []
         summary = {'total': 0, 'lossless': 0, 'high_lossy': 0, 'standard_lossy': 0, 'low_lossy': 0, 'unknown': 0}
@@ -12550,7 +13116,7 @@ def library_log_play():
         logger.debug(f"log-play failed (non-fatal): {e}")
         return jsonify({"success": False, "error": str(e)}), 200
 
-_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')}
+_enrichment_locks = {svc: threading.Lock() for svc in ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')}
 
 @app.route('/api/library/enrich', methods=['POST'])
 def library_enrich_entity():
@@ -12576,7 +13142,7 @@ def library_enrich_entity():
         if entity_type not in ('artist', 'album', 'track'):
             return jsonify({"success": False, "error": "entity_type must be artist, album, or track"}), 400
 
-        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs')
+        valid_services = ('audiodb', 'deezer', 'musicbrainz', 'spotify', 'itunes', 'lastfm', 'genius', 'tidal', 'qobuz', 'discogs', 'jiosaavn')
         if service not in valid_services:
             return jsonify({"success": False, "error": f"service must be one of: {', '.join(valid_services)}"}), 400
 
@@ -12666,6 +13232,20 @@ def _run_single_enrichment(service, entity_type, entity_id, name, artist_name):
         elif entity_type == 'track':
             deezer_worker._process_track(entity_id, name, artist_name, item)
         return {"success": True, "message": f"Deezer lookup complete for {entity_type}"}
+
+    elif service == 'jiosaavn':
+        if not jiosaavn_worker:
+            return {"success": False, "error": "JioSaavn worker not initialized"}
+        from core.metadata.registry import is_jiosaavn_enabled
+        if not is_jiosaavn_enabled():
+            return {"success": False, "error": "JioSaavn is disabled (experimental feature off)"}
+        if entity_type == 'artist':
+            jiosaavn_worker._process_artist(entity_id, name)
+        elif entity_type == 'album':
+            jiosaavn_worker._process_album(entity_id, name, artist_name)
+        elif entity_type == 'track':
+            jiosaavn_worker._process_track(entity_id, name, artist_name)
+        return {"success": True, "message": f"JioSaavn lookup complete for {entity_type}"}
 
     elif service == 'musicbrainz':
         if not mb_worker:
@@ -12804,6 +13384,7 @@ _SERVICE_ID_COLUMNS = {
     'tidal': {'artist': 'tidal_id', 'album': 'tidal_id', 'track': 'tidal_id'},
     'qobuz': {'artist': 'qobuz_id', 'album': 'qobuz_id', 'track': 'qobuz_id'},
     'amazon': {'artist': 'amazon_id', 'album': 'amazon_id', 'track': 'amazon_id'},
+    'jiosaavn': {'artist': 'jiosaavn_id', 'album': 'jiosaavn_id', 'track': 'jiosaavn_id'},
 }
 
 @app.route('/api/library/manual-match', methods=['PUT'])
@@ -15933,7 +16514,6 @@ def _get_file_path_from_template(context: dict, template_type: str = 'album_path
 from mutagen import File as MutagenFile
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, TPOS, TXXX, APIC, UFID, TSRC, TBPM, TCOP, TPUB, TMED, TDOR
 from mutagen.apev2 import APEv2, APENoHeaderError
-import urllib.request
 
 def _wipe_source_tags(file_path: str) -> bool:
     return metadata_enrichment.wipe_source_tags(file_path)
@@ -15947,6 +16527,7 @@ def _enhance_file_metadata(file_path: str, context: dict, artist: dict, album_in
         runtime=metadata_runtime or _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16052,6 +16633,7 @@ def _post_process_matched_download_with_verification(context_key, context, file_
         _build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16176,6 +16758,7 @@ def _post_process_matched_download(context_key, context, file_path):
         metadata_runtime=_build_metadata_enrichment_runtime(
             mb_worker=mb_worker,
             deezer_worker=deezer_worker,
+            jiosaavn_worker=jiosaavn_worker,
             audiodb_worker=audiodb_worker,
             tidal_client=tidal_client,
             qobuz_enrichment_worker=qobuz_enrichment_worker,
@@ -16471,6 +17054,23 @@ def _db_update_artist_callback(artist_name, success, details, album_count, track
 
 def _db_update_finished_callback(total_artists, total_albums, total_tracks, successful, failed):
     global _db_update_automation_id
+    # Library extras: keep the whole-library M3U in sync with the DB. Every scan type (deep,
+    # incremental, full refresh) converges on this callback, so writing here keeps it current.
+    # Destination = the configured M3U output folder if set, else the Transfer folder. Fully
+    # guarded — a playlist write must never disturb scan completion.
+    try:
+        if config_manager.get('m3u_export.library_enabled', False):
+            from core.library.m3u_export import write_library_m3u
+            _entries = get_database().get_all_library_tracks_for_export()
+            _dest = (config_manager.get('m3u_export.library_path', '') or '').strip() \
+                or config_manager.get('soulseek.transfer_path', './Transfer')
+            _dest = docker_resolve_path(_dest)
+            _base = config_manager.get('m3u_export.entry_base_path', '') or ''
+            _written = write_library_m3u(_entries, _dest, entry_base_path=_base)
+            if _written:
+                logger.info("[library-m3u] auto-synced %d tracks -> %s", len(_entries), _written)
+    except Exception as _m3u_err:
+        logger.warning("[library-m3u] auto-sync failed: %s", _m3u_err)
     # Check for removal results from the worker
     removed_artists = 0
     removed_albums = 0
@@ -16623,7 +17223,7 @@ def _pause_workers_for_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     for name, w in workers.items():
         if w and hasattr(w, 'pause') and not getattr(w, 'paused', True):
@@ -16639,7 +17239,7 @@ def _resume_workers_after_scan():
         'mb': mb_worker, 'spotify': spotify_enrichment_worker, 'itunes': itunes_enrichment_worker,
         'deezer': deezer_worker, 'audiodb': audiodb_worker, 'discogs': discogs_worker, 'lastfm': lastfm_worker,
         'genius': genius_worker, 'tidal': tidal_enrichment_worker, 'qobuz': qobuz_enrichment_worker,
-        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker,
+        'amazon': amazon_worker, 'repair': repair_worker, 'soulid': soulid_worker, 'jiosaavn': jiosaavn_worker,
     }
     resumed = 0
     for name, w in workers.items():
@@ -20198,23 +20798,21 @@ def get_server_playlist_tracks(playlist_id):
         # exact/fuzzy passes entirely. Stale-cache safe — if the cached
         # server track no longer exists, the override is silently
         # skipped and normal matching runs.
-        from core.sync.match_overrides import resolve_durable_match_server_id, resolve_match_overrides
+        from core.sync.match_overrides import resolve_override_server_id, resolve_match_overrides
         _db_for_overrides = get_database()
         # Set of server track ids currently in this playlist — used to validate
-        # a re-resolved durable match actually exists before pairing it.
+        # a cached/durable match actually exists in this playlist before pairing it.
         _server_ids = {str(t.get('id')) for t in server_tracks if isinstance(t, dict) and t.get('id') is not None}
         _ov_profile = get_current_profile_id()
 
         def _override_lookup(src_id):
-            # 1) Fast override cache (cleared on every rescan).
-            cached = _db_for_overrides.read_sync_match_cache(src_id, active_server) or {}
-            if cached.get('server_track_id'):
-                return cached['server_track_id']
-            # 2) Durable manual library match — survives a rescan (#787), so a
-            #    Find & Add / manual match keeps pairing after a DB scan. Re-
-            #    resolves a stale id via the stored file path when needed.
-            return resolve_durable_match_server_id(
-                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids
+            # Validated fast-cache hit, else durable manual match (#787) which
+            # self-heals a stale library id via the stored file path. A cache hit
+            # that no longer points into THIS playlist must not short-circuit the
+            # durable path, or the manual match silently never applies (wolf39us).
+            return resolve_override_server_id(
+                _db_for_overrides, _ov_profile, src_id, active_server, _server_ids,
+                _db_for_overrides.read_sync_match_cache,
             )
 
         _override_pairs = resolve_match_overrides(source_tracks, server_tracks, _override_lookup)
@@ -21490,7 +22088,38 @@ def get_spotify_album_tracks(album_id):
             logger.warning(f"Hydrabase album_tracks failed for '{album_id}', falling back to Spotify: {e}")
 
     # Source override: when user clicked from a specific search tab
-    source_override = request.args.get('source', '')
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            album_data = client.get_album(album_id)
+            if not album_data:
+                return jsonify({"error": "Album not found"}), 404
+            tracks = album_data.get('tracks', [])
+            if not isinstance(tracks, list):
+                tracks = []
+            return jsonify({
+                'id': album_data['id'],
+                'name': album_data['name'],
+                'artists': album_data.get('artists', []),
+                'release_date': album_data.get('release_date', ''),
+                'total_tracks': album_data.get('total_tracks', len(tracks)),
+                'album_type': album_data.get('album_type', 'album'),
+                'images': album_data.get('images', []),
+                'tracks': tracks,
+            })
+        except Exception as e:
+            logger.error(f"JioSaavn album detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
 
     if not spotify_client or not spotify_client.is_authenticated():
         return jsonify({"error": "Spotify not authenticated."}), 401
@@ -21564,6 +22193,27 @@ def get_spotify_album_tracks(album_id):
 @app.route('/api/spotify/track/<track_id>', methods=['GET'])
 def get_spotify_track(track_id):
     """Fetches full track details including album data for a specific track."""
+    source_override = request.args.get('source', '').strip().lower()
+
+    if source_override == 'jiosaavn':
+        try:
+            from core.metadata.registry import (
+                get_jiosaavn_client,
+                experimental_source_rejected,
+            )
+            if experimental_source_rejected(source_override):
+                return jsonify({"error": "JioSaavn is not enabled"}), 503
+            client = get_jiosaavn_client()
+            if not client:
+                return jsonify({"error": "JioSaavn client unavailable"}), 503
+            track_data = client.get_track_details(track_id)
+            if not track_data:
+                return jsonify({"error": "Track not found"}), 404
+            return jsonify(track_data)
+        except Exception as e:
+            logger.error(f"JioSaavn track detail failed: {e}")
+            return jsonify({"error": str(e)}), 500
+
     # Try Hydrabase first when active and track name provided
     if _is_hydrabase_active():
         track_name = request.args.get('name', '')
@@ -23301,6 +23951,7 @@ from core.discovery.endpoints import (
     cancel_sync as _cancel_sync_core,
     delete_playlist_state as _delete_playlist_state_core,
     get_sync_status as _get_sync_status_core,
+    reconcile_sync_phase as _reconcile_sync_phase,
     get_discovery_status as _get_discovery_status_core,
     reset_playlist as _reset_playlist_core,
     get_playlist_states as _get_playlist_states_core,
@@ -27561,10 +28212,9 @@ def select_my_service_credential():
 # Selectable metadata sources (mirrors the Settings <select>).
 def _qs_metadata_sources():
     """Metadata sources offered in Connections / quick-switch UI."""
-    from core.metadata.registry import is_jiosaavn_enabled
+    from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
     sources = ['spotify', 'spotify_free', 'itunes', 'deezer', 'discogs', 'musicbrainz']
-    if is_jiosaavn_enabled():
-        sources.append('jiosaavn')
+    sources += [name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)]
     return sources
 _QS_MEDIA_SERVERS = ['plex', 'jellyfin', 'navidrome', 'soulsync']
 # Single download sources (everything the mode accepts except 'hybrid').
@@ -27651,21 +28301,13 @@ def set_active_sources():
             src = data['metadata_source']
             if src not in _qs_metadata_sources():
                 return jsonify({'success': False, 'error': 'Unknown metadata source'}), 400
-            if src == 'jiosaavn':
-                from core.metadata.registry import is_jiosaavn_enabled
-                if not is_jiosaavn_enabled():
-                    return jsonify({
-                        'success': False,
-                        'error': 'JioSaavn is not enabled — turn it on under Settings → Advanced → Experimental.',
-                    }), 400
-            # Same composite the Settings save uses: 'spotify_free' is stored as
-            # fallback_source='spotify' + metadata.spotify_free=true.
-            if src == 'spotify_free':
-                config_manager.set('metadata.fallback_source', 'spotify')
-                config_manager.set('metadata.spotify_free', True)
-            else:
-                config_manager.set('metadata.fallback_source', src)
-                config_manager.set('metadata.spotify_free', False)
+            from core.metadata.registry import apply_primary_metadata_source
+            _primary_err = apply_primary_metadata_source(
+                src,
+                config_manager.set,
+            )
+            if _primary_err:
+                return jsonify({'success': False, 'error': _primary_err}), 400
             invalidate_metadata_status_caches()
             changed.append('metadata')
 
@@ -28113,10 +28755,16 @@ def add_to_watchlist():
             return jsonify({"success": False, "error": "Missing artist_id or artist_name"}), 400
 
         database = get_database()
+        # Callers that KNOW the id's source (e.g. the Discovery Web, whose candidates carry
+        # [source, id] pairs) can pass it explicitly — numeric Deezer/iTunes ids are ambiguous and
+        # the detection below can otherwise mistake them for a library DB row id.
+        explicit_source = (data.get('source') or '').strip().lower()
+        if explicit_source not in ('spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz'):
+            explicit_source = None
         # Detect source from ID — check if it's a library DB ID first
         is_numeric_id = artist_id.isdigit()
-        source = None
-        if is_numeric_id:
+        source = explicit_source
+        if is_numeric_id and not explicit_source:
             # Could be a library DB ID, iTunes ID, Deezer ID, or Discogs ID
             # Check if this is a library DB artist and use their actual source IDs
             try:
@@ -28157,8 +28805,8 @@ def add_to_watchlist():
                         source = 'musicbrainz'
             except Exception as e:
                 logger.debug("watchlist artist source lookup failed: %s", e)
+        fallback_source = _get_metadata_fallback_source()   # always defined — image block below reads it
         if not source:
-            fallback_source = _get_metadata_fallback_source()
             source = fallback_source if is_numeric_id else 'spotify'
         success = database.add_artist_to_watchlist(artist_id, artist_name, profile_id=get_current_profile_id(), source=source)
         if success:
@@ -29106,9 +29754,10 @@ def watchlist_artist_config(artist_id):
             _watchlist_meta_sources = (
                 'spotify', 'deezer', 'itunes', 'discogs', 'musicbrainz',
             )
-            from core.metadata.registry import is_jiosaavn_enabled
-            if is_jiosaavn_enabled():
-                _watchlist_meta_sources = _watchlist_meta_sources + ('jiosaavn',)
+            from core.metadata.registry import EXPERIMENTAL_SOURCES, is_source_enabled
+            _watchlist_meta_sources = _watchlist_meta_sources + tuple(
+                name for name in EXPERIMENTAL_SOURCES if is_source_enabled(name)
+            )
             if preferred_metadata_source == '' or preferred_metadata_source not in _watchlist_meta_sources:
                 preferred_metadata_source = None
             # Follow-only toggle: default True so an older client that omits the
@@ -29554,6 +30203,20 @@ def _discover_genre_taste(database, profile_id):
     return profile
 
 
+def _discover_primary_genre(item):
+    """First genre of a discover candidate for diversity grouping — its ``genres`` may be a JSON
+    string, an already-parsed list, or missing. Returns a normalized genre string or None."""
+    g = item.get('genres')
+    if isinstance(g, str):
+        try:
+            g = json.loads(g)
+        except (ValueError, TypeError):
+            g = None
+    if isinstance(g, list) and g and isinstance(g[0], str) and g[0].strip():
+        return g[0].strip().lower()
+    return None
+
+
 @app.route('/api/discover/similar-artists', methods=['GET'])
 def get_discover_similar_artists():
     """Get all recommended similar artists (basic data, no enrichment for speed)"""
@@ -29562,12 +30225,19 @@ def get_discover_similar_artists():
         active_source = _get_active_discovery_source()
         from config.settings import config_manager
         active_server = config_manager.get_active_media_server()
+        try:
+            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
+        except (TypeError, ValueError):
+            _adv_level = 0.0
 
+        # The dial drives candidate SELECTION here (not just the re-rank below): the pool shifts from
+        # consensus picks toward obscure long-tail deep cuts as you turn it up.
         similar_artists = database.get_top_similar_artists(
             limit=200,
             profile_id=get_current_profile_id(),
             require_source=active_source,
             exclude_library_server=active_server,
+            adventurousness=_adv_level,
         )
 
         if not similar_artists:
@@ -29623,12 +30293,8 @@ def get_discover_similar_artists():
         # Re-rank: genre/tag affinity (always-on) + the adventurousness popularity penalty (dial).
         # Score from the SQL signals (occurrence primary, similarity a minor tiebreak), boosted by how
         # well the candidate's genres match your taste, then popularity-penalised by the dial. We only
-        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the SQL featured-
-        # rotation order is left untouched (no regression). Fail-soft.
-        try:
-            _adv_level = float(config_manager.get('discover.adventurousness', 0.3) or 0)
-        except (TypeError, ValueError):
-            _adv_level = 0.0
+        # re-rank when there's a reason (genre data OR dial > 0) — with neither, the fetch order is
+        # left untouched (no regression). Fail-soft. (_adv_level was read above for the fetch.)
         _pid = get_current_profile_id()
         _taste = _discover_genre_taste(database, _pid)
         _plays = database.get_play_counts_by_name(
@@ -29636,25 +30302,21 @@ def get_discover_similar_artists():
         if result_artists and (_adv_level > 0 or _taste or _plays):
             try:
                 from core.discovery.listening_recommendations import (
-                    adventurousness_weights, apply_adventurousness, genre_affinity, novelty_score)
-                _w = adventurousness_weights(_adv_level)   # dial blends genre leash + novelty weights
+                    apply_adventurous_blend, genre_affinity, novelty_score)
                 for a in result_artists:
                     _oc = float(a.get('occurrence_count') or 0)
                     _rank = min(float(a.get('similarity_rank') or 10), 10.0)
-                    _base = _oc + (10.0 - _rank) * 0.1
+                    a['_base'] = _oc + (10.0 - _rank) * 0.1              # consensus base
                     _aff = genre_affinity(a.get('genres') or [], _taste) if _taste else 0.0
-                    a['_why_genre'] = _aff   # captured for the "why" chips (built always-on below)
-                    _nov = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
-                    a['_adv_score'] = (_base * (1.0 + _w['genre'] * _aff)
-                                       * (1.0 - _w['novelty'] * (1.0 - _nov)))
-                # The genre/novelty re-rank must apply even at dial 0 (apply_adventurousness no-ops
-                # there), so sort by the boosted score first; the dial then layers its penalty on top.
-                result_artists.sort(key=lambda a: -a['_adv_score'])
-                if _adv_level > 0:
-                    result_artists = apply_adventurousness(
-                        result_artists, _adv_level, score_key='_adv_score', tiebreak_key='occurrence_count')
+                    a['_aff'] = a['_why_genre'] = _aff                    # _why_genre feeds the "why" chips
+                    a['_nov'] = novelty_score(_plays.get((a.get('artist_name') or '').strip().lower(), 0))
+                # Blend the sort axis consensus<->obscurity by the dial (scaled by genre/novelty
+                # quality). dial 0 = most-recommended first; dial 1 = least-popular (deep cuts) first.
+                result_artists = apply_adventurous_blend(
+                    result_artists, _adv_level, base_key='_base', pop_key='popularity',
+                    tiebreak_key='occurrence_count')
                 for a in result_artists:
-                    a.pop('_adv_score', None)
+                    a.pop('_base', None); a.pop('_aff', None); a.pop('_nov', None)
             except Exception as _adv_err:
                 logger.debug(f"similar-artists re-rank skipped: {_adv_err}")
 
@@ -29664,12 +30326,25 @@ def get_discover_similar_artists():
             from core.discovery.listening_recommendations import why_chips
             for a in result_artists:
                 _w = why_chips(genre_affinity=a.get('_why_genre', 0.0), popularity=a.get('popularity'),
-                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0))
+                               seed_count=len(a.get('because') or []) or int(a.get('occurrence_count') or 0),
+                               level=_adv_level)   # adaptive: "Off your usual path" on the adventurous end
                 if _w:
                     a['why'] = _w
                 a.pop('_why_genre', None)
         except Exception as _why_err:
             logger.debug(f"similar-artists why chips skipped: {_why_err}")
+
+        # Diversity: spread the shown picks across genres so one genre can't hog the row (broader
+        # discovery). No-ops on small lists. Then mark the shown set featured so the next load
+        # rotates in different deep cuts (freshness).
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+            _shown = [a.get('artist_name') for a in result_artists[:18] if a.get('artist_name')]
+            if _shown:
+                database.mark_artists_featured(_shown)
+        except Exception as _div_err:
+            logger.debug(f"similar-artists diversify/rotate skipped: {_div_err}")
 
         logger.info(
             f"[Similar Artists] {len(similar_artists)} from DB, {len(result_artists)} valid for "
@@ -29833,42 +30508,26 @@ def get_discover_listening_recommendations():
         # leaves the score untouched, and at the default dial the weights equal the old constants.
         try:
             from core.discovery.listening_recommendations import (
-                adventurousness_weights, genre_affinity, novelty_score)
-            _w = adventurousness_weights(level)
+                apply_adventurous_blend, genre_affinity, novelty_score)
             _pid = get_current_profile_id()
             taste = _discover_genre_taste(database, _pid)
             _names = [a.get('name') for a in stored]
             plays = database.get_play_counts_by_name(_names, _pid) if stored else {}
             pops = database.get_similar_artist_popularities(_names) if stored else {}  # for the "why" chips + dial
-            changed = False
             for a in stored:
                 if a.get('popularity') is None:
                     a['popularity'] = pops.get((a.get('name') or '').strip().lower())
                 aff = genre_affinity(a.get('genres') or [], taste) if taste else 0.0
-                a['_why_genre'] = aff   # captured for the "why this rec" chips
-                factor = 1.0
-                if aff > 0:
-                    factor *= (1.0 + _w['genre'] * aff)
-                nov = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
-                if nov < 1.0:
-                    factor *= (1.0 - _w['novelty'] * (1.0 - nov))
-                if factor != 1.0:
-                    a['score'] = float(a.get('score') or 0) * factor
-                    changed = True
-            if changed:
-                stored.sort(key=lambda a: -float(a.get('score') or 0))
+                a['_aff'] = a['_why_genre'] = aff   # _why_genre also feeds the "why this rec" chips
+                a['_nov'] = novelty_score(plays.get((a.get('name') or '').strip().lower(), 0))
+            # Blend the sort axis consensus<->obscurity by the dial (base = the recommendation score),
+            # so the adventurous end genuinely surfaces the least-popular on-taste picks.
+            stored = apply_adventurous_blend(
+                stored, level, base_key='score', pop_key='popularity', tiebreak_key='seed_count')
+            for a in stored:
+                a.pop('_aff', None); a.pop('_nov', None)
         except Exception as _qual_err:
             logger.debug(f"genre/novelty re-rank skipped: {_qual_err}")
-
-        # Adventurousness re-rank (aurral-style): push globally-popular picks down per the user's dial.
-        # Popularity was already enriched in the quality block above; `level` was read there too (one
-        # popularity query per request, not two). level 0 -> unchanged. Fail-soft: leaves the order.
-        if level > 0 and stored:
-            try:
-                from core.discovery.listening_recommendations import apply_adventurousness
-                stored = apply_adventurousness(stored, level)
-            except Exception as _adv_err:
-                logger.debug(f"adventurousness re-rank skipped: {_adv_err}")
 
         result_artists = []
         for a in stored:
@@ -29893,7 +30552,8 @@ def get_discover_listening_recommendations():
             try:
                 from core.discovery.listening_recommendations import why_chips
                 _why = why_chips(genre_affinity=a.get('_why_genre', 0.0),
-                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'))
+                                 popularity=a.get('popularity'), seed_count=a.get('seed_count'),
+                                 level=level)   # adaptive: "Off your usual path" on the adventurous end
                 if _why:
                     entry["why"] = _why
             except Exception as _why_err:
@@ -29907,6 +30567,13 @@ def get_discover_listening_recommendations():
             if a.get('seeds'):
                 entry["because"] = a['seeds']
             result_artists.append(entry)
+
+        # Spread the shown picks across genres (broader discovery). No-ops on small lists.
+        try:
+            from core.discovery.listening_recommendations import diversify_by_genre
+            result_artists = diversify_by_genre(result_artists, _discover_primary_genre, cap=3)
+        except Exception as _div_err:
+            logger.debug(f"listening-recs diversify skipped: {_div_err}")
 
         return jsonify({
             "success": True,
@@ -36752,6 +37419,32 @@ except Exception as e:
 # END DEEZER INTEGRATION
 # ================================================================================================
 
+# ================================================================================================
+# JIOSAAVN ENRICHMENT INTEGRATION
+# ================================================================================================
+
+jiosaavn_worker = None
+try:
+    from database.music_database import MusicDatabase
+    jiosaavn_db = MusicDatabase()
+    jiosaavn_worker = JioSaavnWorker(database=jiosaavn_db)
+    jiosaavn_worker.start()
+    if config_manager.get('jiosaavn_enrichment_paused', False):
+        jiosaavn_worker.pause()
+        logger.info("JioSaavn enrichment worker initialized (paused — restored from config)")
+    else:
+        logger.info("JioSaavn enrichment worker initialized and started")
+except Exception as e:
+    logger.error(f"JioSaavn worker initialization failed: {e}")
+    jiosaavn_worker = None
+
+# JioSaavn status / pause / resume routes are served by the
+# generic enrichment blueprint at /api/enrichment/jiosaavn/{status,pause,resume}.
+
+# ================================================================================================
+# END JIOSAAVN INTEGRATION
+# ================================================================================================
+
 amazon_worker = None
 try:
     amazon_db = MusicDatabase()
@@ -37064,6 +37757,7 @@ _init_service_search(
     discogs_worker_obj=discogs_worker,
     audiodb_worker_obj=audiodb_worker,
     amazon_worker_obj=amazon_worker,
+    jiosaavn_worker_obj=jiosaavn_worker,
 )
 
 # Qobuz status / pause / resume routes are now served by the
@@ -37744,6 +38438,20 @@ def repair_job_run(job_id):
         logger.error(f"Error running repair job {job_id}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/repair/jobs/<job_id>/stop', methods=['POST'])
+def repair_job_stop(job_id):
+    """Stop a running (or queued) job — signals its scan loop to unwind (#970)."""
+    try:
+        if repair_worker is None:
+            return jsonify({'error': 'Repair worker not initialized'}), 400
+
+        outcome = repair_worker.stop_current_job(job_id)
+        logger.info("Repair job %s stop requested via UI: %s", job_id, outcome)
+        return jsonify({'success': True, 'job_id': job_id, **outcome}), 200
+    except Exception as e:
+        logger.error(f"Error stopping repair job {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/repair/findings', methods=['GET'])
 def repair_findings_list():
     """Get paginated findings with filters"""
@@ -38081,6 +38789,15 @@ def auto_import_toggle():
 
 @app.route('/api/auto-import/settings', methods=['GET', 'POST'])
 def auto_import_settings():
+    def normalize_quality_profile_id(raw_profile_id):
+        if raw_profile_id in (None, '', 0, '0'):
+            return None
+        try:
+            profile_id = int(raw_profile_id)
+        except (TypeError, ValueError):
+            return None
+        return profile_id if profile_id > 0 else None
+
     if request.method == 'GET':
         return jsonify({
             "success": True,
@@ -38088,9 +38805,34 @@ def auto_import_settings():
             "scan_interval": config_manager.get('auto_import.scan_interval', 60),
             "confidence_threshold": config_manager.get('auto_import.confidence_threshold', 0.9),
             "auto_process": config_manager.get('auto_import.auto_process', True),
+            # Per-context quality profile override (see core/auto_import_worker.py
+            # _process_matches) — None/0 means "use the app-wide default profile",
+            # same as every other context that doesn't specify its own.
+            "quality_profile_id": normalize_quality_profile_id(config_manager.get('auto_import.quality_profile_id')),
         })
     data = request.get_json() or {}
-    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process']:
+    if 'quality_profile_id' in data:
+        raw_profile_id = data.get('quality_profile_id')
+        if raw_profile_id in (None, '', 0, '0'):
+            data['quality_profile_id'] = None
+        else:
+            profile_id = normalize_quality_profile_id(raw_profile_id)
+            if profile_id is None:
+                return jsonify({"success": False, "error": "Invalid quality profile"}), 400
+
+            try:
+                from database.music_database import MusicDatabase
+                db = MusicDatabase()
+                profile_ids = {int(profile.get('id')) for profile in db.list_quality_profiles()}
+            except Exception as e:
+                logger.error(f"Error validating Auto-Import quality profile: {e}")
+                return jsonify({"success": False, "error": str(e)}), 500
+
+            if profile_id not in profile_ids:
+                return jsonify({"success": False, "error": "Quality profile not found"}), 404
+            data['quality_profile_id'] = profile_id
+
+    for key in ['enabled', 'scan_interval', 'confidence_threshold', 'auto_process', 'quality_profile_id']:
         if key in data:
             config_manager.set(f'auto_import.{key}', data[key])
     return jsonify({"success": True})
@@ -38645,6 +39387,11 @@ _register_enrichment_services([
         config_paused_key='amazon_enrichment_paused',
     ),
     _EnrichmentService(
+        id='jiosaavn', display_name='JioSaavn',
+        worker_getter=lambda: jiosaavn_worker,
+        config_paused_key='jiosaavn_enrichment_paused',
+    ),
+    _EnrichmentService(
         id='similar_artists', display_name='Similar Artists',
         worker_getter=lambda: similar_artists_worker,
         config_paused_key='similar_artists_enrichment_paused',
@@ -38671,6 +39418,7 @@ def _emit_rate_monitor_loop():
         'deezer': 'deezer_enrichment', 'lastfm': 'lastfm', 'genius': 'genius',
         'musicbrainz': 'musicbrainz', 'audiodb': 'audiodb', 'discogs': 'discogs',
         'tidal': 'tidal_enrichment', 'qobuz': 'qobuz_enrichment', 'amazon': 'amazon_enrichment',
+        'jiosaavn': 'jiosaavn_enrichment',
     }
 
     while not globals().get('IS_SHUTTING_DOWN', False):
@@ -38727,6 +39475,7 @@ def _emit_enrichment_status_loop():
         'audiodb': lambda: audiodb_worker,
         'discogs': lambda: discogs_worker,
         'deezer': lambda: deezer_worker,
+        'jiosaavn': lambda: jiosaavn_worker,
         'spotify-enrichment': lambda: spotify_enrichment_worker,
         'itunes-enrichment': lambda: itunes_enrichment_worker,
         'lastfm-enrichment': lambda: lastfm_worker,
@@ -38954,11 +39703,57 @@ def _any_playlist_sync_running() -> bool:
         )
 
 
+def _reconcile_discovery_sync_phases():
+    """Server-side backstop for the 'syncing' -> terminal phase transition (#972).
+
+    That transition used to happen ONLY inside the get_*_sync_status HTTP poll, so
+    a socket-driven client — which never hits that endpoint (see the
+    `if (socketConnected) return` fast-path in sync-services.js) — left the server
+    stuck in 'syncing' after a sync finished: re-syncing 400'd with 'not ready for
+    sync' and a reload showed a phantom, never-progressing sync. This runs every
+    second regardless of how (or whether) the client observes progress, using the
+    SAME reconcile helper the poll uses so the activity item still fires once.
+
+    Beatport is intentionally excluded — it has its own sync-status lifecycle, not
+    the shared get_sync_status."""
+    targets = (
+        (tidal_discovery_states, "Tidal playlist", _pl_name_attr_or_unknown),
+        (deezer_discovery_states, "Deezer playlist", _pl_name_strict),
+        (qobuz_discovery_states, "Qobuz playlist", _pl_name_strict),
+        (spotify_public_discovery_states, "Spotify Link playlist", _pl_name_strict),
+        (itunes_link_discovery_states, "iTunes Link", _pl_name_strict),
+        (youtube_playlist_states, "YouTube playlist", _pl_name_safe),
+        (listenbrainz_playlist_states, "ListenBrainz playlist", _pl_name_safe),
+    )
+    for states_dict, activity_subject, name_getter in targets:
+        for state in list(states_dict.values()):
+            if state.get('phase') != 'syncing':
+                continue
+            spid = state.get('sync_playlist_id')
+            if not spid:
+                continue
+            with sync_lock:
+                sync_state = dict(sync_states.get(spid) or {})
+            try:
+                _reconcile_sync_phase(
+                    state, sync_state,
+                    activity_subject=activity_subject,
+                    playlist_name_getter=name_getter,
+                    add_activity_item=add_activity_item,
+                )
+            except Exception as e:
+                logger.debug("sync phase reconcile failed for %s: %s", spid, e)
+
+
 def _emit_sync_progress_loop():
     """Push sync progress to subscribed rooms every 1 second."""
     while not globals().get('IS_SHUTTING_DOWN', False):
         socketio.sleep(1)
         try:
+            # Reconcile stuck 'syncing' discovery states BEFORE emitting, so the
+            # sync:progress event we push already carries the terminal status.
+            _reconcile_discovery_sync_phases()
+
             with sync_lock:
                 for pid, state in list(sync_states.items()):
                     try:
