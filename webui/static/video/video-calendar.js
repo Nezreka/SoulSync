@@ -629,8 +629,18 @@
 
     function onPageShown(e) {
         if (!e || e.detail !== PAGE_ID) return;
-        if (!state.loaded) { state.scrollToNow = true; load(); }
-        else scrollToNow();  // already loaded → just re-land on "now"
+        // Re-fetch on first show, OR when the day has rolled over since we last
+        // loaded — otherwise the cached "today" stays frozen on whatever day the
+        // calendar was first opened (e.g. it keeps saying Thursday into Friday)
+        // until a full page reload.
+        var rolledOver = state.data && state.data.today && state.data.today !== isoOf(new Date());
+        if (!state.loaded || rolledOver) {
+            if (rolledOver) state.offset = 0;   // land back on the real current week
+            state.scrollToNow = true;
+            load();
+        } else {
+            scrollToNow();  // already loaded, same day → just re-land on "now"
+        }
     }
 
     function init() {
