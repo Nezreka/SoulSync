@@ -3391,17 +3391,31 @@ class RepairWorker:
             logger.warning("Path mismatch fix: missing from/to in details")
             return {'success': False, 'error': 'Missing from/to paths in finding details'}
 
+        # Prefer the authoritative ABSOLUTE paths the preview computed (#978). The
+        # from/to above are display-TRIMMED for the UI; rebuilding them from the
+        # transfer folder broke every library not rooted under transfer_path
+        # (Plex/media-server, Docker host<->container splits) — the trimmed `from`
+        # was already absolute, os.path.join returned it unchanged, and the guard
+        # then rejected it as "escapes transfer folder" ("Fix All fixes nothing").
+        # The live reorganize executor moves these _abs paths directly; do the same.
         transfer = self.transfer_folder
-        src = os.path.normpath(os.path.join(transfer, rel_from))
-        dst = os.path.normpath(os.path.join(transfer, rel_to))
+        transfer_norm = os.path.normpath(transfer) if transfer else ''
+        abs_from = details.get('from_abs') or ''
+        abs_to = details.get('to_abs') or ''
+        if abs_from and abs_to:
+            src = os.path.normpath(abs_from)
+            dst = os.path.normpath(abs_to)
+        else:
+            # Legacy finding written before _abs was persisted — reconstruct from the
+            # transfer folder and keep the safety guard (re-scan to refresh a finding
+            # whose library lives outside transfer_path).
+            src = os.path.normpath(os.path.join(transfer, rel_from))
+            dst = os.path.normpath(os.path.join(transfer, rel_to))
+            if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
+                logger.warning("Path mismatch fix: legacy finding escapes transfer folder — re-scan to refresh. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
+                return {'success': False, 'error': 'Path escapes transfer folder (legacy finding — re-scan the library to refresh)'}
 
-        logger.info("Path mismatch fix: src=%s dst=%s transfer=%s", src, dst, transfer)
-
-        # Safety: both paths must be inside transfer folder
-        transfer_norm = os.path.normpath(transfer)
-        if not src.startswith(transfer_norm + os.sep) or not dst.startswith(transfer_norm + os.sep):
-            logger.warning("Path mismatch fix: path escapes transfer folder. src=%s, dst=%s, transfer=%s", src, dst, transfer_norm)
-            return {'success': False, 'error': 'Path escapes transfer folder'}
+        logger.info("Path mismatch fix: src=%s dst=%s", src, dst)
 
         if not os.path.isfile(src):
             # Source may have been moved already — check if destination already exists
