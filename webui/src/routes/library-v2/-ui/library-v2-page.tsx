@@ -19,6 +19,7 @@ import {
   libraryV2EnabledQueryOptions,
   refreshLibraryV2,
   refreshLibraryV2Discography,
+  runRepairJob,
   setLibraryV2Monitored,
   startLibraryV2Import,
   startLibraryV2UpgradeScan,
@@ -31,6 +32,7 @@ import type {
 import { Route } from '../route';
 import { InteractiveSearchModal } from './interactive-search';
 import { QualityProfileModal } from './quality-profile-modal';
+import { RetagModal } from './retag-modal';
 import styles from './library-v2-page.module.css';
 
 interface QpTarget {
@@ -472,6 +474,92 @@ function DeleteConfirmModal({
   );
 }
 
+/** Library-wide maintenance jobs (the existing repair workers), runnable from
+ *  the artist page like Lidarr's Tasks. These scan the WHOLE library — per-
+ *  artist scoping needs job-level support and stays on the roadmap. */
+const MAINTENANCE_JOBS: Array<{ id: string; label: string; desc: string }> = [
+  {
+    id: 'metadata_gap_filler',
+    label: 'Metadata Gap Fill',
+    desc: 'Fill missing tag fields (genre, year, cover, …) from metadata providers.',
+  },
+  {
+    id: 'unknown_artist_fixer',
+    label: 'Fix Unknown Artist',
+    desc: 'Resolve tracks filed under Unknown/placeholder artists.',
+  },
+  {
+    id: 'album_tag_consistency',
+    label: 'Album Tag Consistency',
+    desc: 'Align album-level tags (album artist, year, art) across each album.',
+  },
+  {
+    id: 'library_reorganize',
+    label: 'Rename / Reorganize Files',
+    desc: 'Move files into the configured folder/name scheme (preview via Stats → Repair).',
+  },
+  {
+    id: 'library_retag',
+    label: 'Full Library Retag',
+    desc: 'Rewrite tags from library metadata across the whole library.',
+  },
+];
+
+function MaintenanceModal({ onClose }: { onClose: () => void }) {
+  const [state, setState] = useState<Record<string, 'queued' | 'error'>>({});
+  return (
+    <ModalShell title="Maintenance" onClose={onClose}>
+      <p className={styles.qpSubtitle}>
+        These jobs run <strong>library-wide</strong> in the background (progress under
+        Stats → Repair jobs).
+      </p>
+      <div className={styles.qpList}>
+        {MAINTENANCE_JOBS.map((job) => (
+          <button
+            key={job.id}
+            type="button"
+            className={styles.qpOption}
+            disabled={state[job.id] === 'queued'}
+            onClick={() => {
+              void runRepairJob(job.id)
+                .then(() => setState((s) => ({ ...s, [job.id]: 'queued' })))
+                .catch(() => setState((s) => ({ ...s, [job.id]: 'error' })));
+            }}
+          >
+            <span className={styles.qpName}>
+              {job.label}
+              {state[job.id] === 'queued' ? <span className={styles.qpCurrent}>queued</span> : null}
+              {state[job.id] === 'error' ? (
+                <span className={styles.statusWarn}>failed to queue</span>
+              ) : null}
+            </span>
+            <span className={styles.qpDesc}>{job.desc}</span>
+          </button>
+        ))}
+      </div>
+    </ModalShell>
+  );
+}
+
+/** Roadmap placeholder (kept on purpose): shows what's planned so the page
+ *  itself documents the remaining work. */
+function PlannedModal({ action, onClose }: { action: string; onClose: () => void }) {
+  return (
+    <ModalShell title={action} onClose={onClose}>
+      <p>
+        Planned, not wired yet — see <code>core/library2/STATUS.md</code> for the roadmap. It
+        will reuse the existing SoulSync machinery (single↔album dedup, manage-track moves)
+        once the lib2 write paths land.
+      </p>
+      <div className={styles.modalActions}>
+        <button type="button" className={styles.btnPrimary} onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
 // --- page root ---------------------------------------------------------------
 
 export function LibraryV2Page() {
@@ -726,6 +814,13 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
   const [modalAction, setModalAction] = useState<string | null>(null);
   const [showMonitoring, setShowMonitoring] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(false);
+  const [plannedAction, setPlannedAction] = useState<string | null>(null);
+  const [retagTarget, setRetagTarget] = useState<{
+    entity: 'artists' | 'albums';
+    id: number;
+    title: string;
+  } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     entity: 'artists' | 'albums';
     id: number;
@@ -874,11 +969,37 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             </div>
             <div className={styles.toolbarGroup}>
               <ActionButton
-                icon="retag"
+                icon="download"
                 label={upgradeScanBusy ? 'Scanning…' : 'Search Upgrades'}
                 title="Queue monitored tracks whose files are below their quality profile's cutoff"
                 busy={upgradeScanBusy}
                 onClick={() => void searchUpgrades()}
+              />
+              <ActionButton
+                icon="retag"
+                label="Preview Retag"
+                title="Compare file tags against library metadata and rewrite them"
+                onClick={() =>
+                  setRetagTarget({ entity: 'artists', id: artistId, title: artist.name })
+                }
+              />
+              <ActionButton
+                icon="organize"
+                label="Maintenance"
+                title="Run library-wide repair jobs (gap fill, unknown artist, consistency, rename)"
+                onClick={() => setShowMaintenance(true)}
+              />
+              <ActionButton
+                icon="import"
+                label="Manual Import"
+                title="Open the Import page to bring staged files into the library"
+                onClick={() => void navigate({ to: '/import' })}
+              />
+              <ActionButton
+                icon="tracks"
+                label="Manage Tracks"
+                title="Planned: single↔album moves and dedup"
+                onClick={() => setPlannedAction('Manage Tracks')}
               />
               <ActionButton
                 icon="history"
@@ -984,6 +1105,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
             }
+            onRetag={(album) =>
+              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
           />
           <AlbumGroup
             title="EPs"
@@ -995,6 +1119,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
             }
+            onRetag={(album) =>
+              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
           />
           <AlbumGroup
             title="Singles"
@@ -1005,6 +1132,9 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             onQualityProfile={setQpTarget}
             onDelete={(album) =>
               setDeleteTarget({ entity: 'albums', id: album.id, title: album.title })
+            }
+            onRetag={(album) =>
+              setRetagTarget({ entity: 'albums', id: album.id, title: album.title })
             }
           />
           {modalAction && INTERACTIVE_RE.test(modalAction) ? (
@@ -1022,6 +1152,18 @@ function ArtistDetailView({ artistId }: { artistId: number }) {
             />
           ) : null}
           {showHistory ? <HistoryModal artistId={artistId} onClose={() => setShowHistory(false)} /> : null}
+          {showMaintenance ? <MaintenanceModal onClose={() => setShowMaintenance(false)} /> : null}
+          {plannedAction ? (
+            <PlannedModal action={plannedAction} onClose={() => setPlannedAction(null)} />
+          ) : null}
+          {retagTarget ? (
+            <RetagModal
+              entity={retagTarget.entity}
+              id={retagTarget.id}
+              title={retagTarget.title}
+              onClose={() => setRetagTarget(null)}
+            />
+          ) : null}
           {deleteTarget ? (
             <DeleteConfirmModal
               entity={deleteTarget.entity}
@@ -1074,6 +1216,7 @@ function AlbumGroup({
   onAction,
   onQualityProfile,
   onDelete,
+  onRetag,
 }: {
   title: string;
   albums: LibraryV2AlbumSummary[];
@@ -1082,6 +1225,7 @@ function AlbumGroup({
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
+  onRetag: (album: LibraryV2AlbumSummary) => void;
 }) {
   const queryClient = useQueryClient();
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1128,6 +1272,7 @@ function AlbumGroup({
             onAction={onAction}
             onQualityProfile={onQualityProfile}
             onDelete={onDelete}
+            onRetag={onRetag}
           />
         ))}
       </div>
@@ -1140,11 +1285,13 @@ function AlbumBlock({
   onAction,
   onQualityProfile,
   onDelete,
+  onRetag,
 }: {
   album: LibraryV2AlbumSummary;
   onAction: (action: string) => void;
   onQualityProfile: (target: QpTarget) => void;
   onDelete: (album: LibraryV2AlbumSummary) => void;
+  onRetag: (album: LibraryV2AlbumSummary) => void;
 }) {
   const [open, setOpen] = useState(false);
   const complete = album.tracks_missing === 0 && album.track_count > 0;
@@ -1197,6 +1344,11 @@ function AlbumBlock({
                 title: album.title,
               })
             }
+          />
+          <IconActionButton
+            icon="retag"
+            title="Preview Retag"
+            onClick={() => onRetag(album)}
           />
           <IconActionButton
             icon="delete"

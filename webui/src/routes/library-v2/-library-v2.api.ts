@@ -206,6 +206,61 @@ export async function fetchLibraryV2ArtistHistory(
   return payload.history ?? [];
 }
 
+export interface LibraryV2TagDiffField {
+  field: string;
+  file_value: unknown;
+  db_value: unknown;
+  changed: boolean;
+}
+
+export interface LibraryV2TagPreviewTrack {
+  track_id: number;
+  title: string | null;
+  track_number: number | null;
+  album_id: number;
+  album_title: string | null;
+  file_path: string | null;
+  diff: LibraryV2TagDiffField[];
+  has_changes: boolean;
+  error?: string;
+}
+
+export async function fetchLibraryV2TagPreview(
+  entity: 'artists' | 'albums',
+  id: number,
+): Promise<{ tracks: LibraryV2TagPreviewTrack[]; changed_count: number; truncated: boolean }> {
+  const payload = await readJson<{
+    success: boolean;
+    tracks?: LibraryV2TagPreviewTrack[];
+    changed_count?: number;
+    truncated?: boolean;
+    error?: string;
+  }>(apiClient.get(`library/v2/${entity}/${id}/tag-preview`, { timeout: 120_000 }));
+  if (!payload.success) throw new Error(payload.error || 'Tag preview failed');
+  return {
+    tracks: payload.tracks ?? [],
+    changed_count: payload.changed_count ?? 0,
+    truncated: payload.truncated ?? false,
+  };
+}
+
+export async function writeLibraryV2Tags(trackIds: number[], embedCover = true): Promise<void> {
+  const payload = await readJson<{ success: boolean; error?: string }>(
+    apiClient.post('library/v2/tags/write', {
+      json: { track_ids: trackIds, embed_cover: embedCover },
+    }),
+  );
+  if (!payload.success) throw new Error(payload.error || 'Write tags failed');
+}
+
+/** Trigger a library-wide repair job (Stats → Repair jobs) immediately. */
+export async function runRepairJob(jobId: string): Promise<void> {
+  const payload = await readJson<{ success?: boolean; error?: string }>(
+    apiClient.post(`repair/jobs/${jobId}/run`, { json: {} }),
+  );
+  if (payload.error) throw new Error(payload.error);
+}
+
 export async function startLibraryV2UpgradeScan(): Promise<void> {
   const payload = await readJson<{ success: boolean; error?: string }>(
     apiClient.post('library/v2/upgrade-scan', { json: {} }),

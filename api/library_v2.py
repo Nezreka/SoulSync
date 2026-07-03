@@ -836,6 +836,83 @@ def register_library_v2_routes(app, *, get_database: Callable[[], Any],
         threading.Thread(target=_run, name="lib2-upgrade-scan", daemon=True).start()
         return jsonify({"success": True, "started": True})
 
+    # -- Phase C: tag preview / re-tag -----------------------------------------
+
+    @app.route("/api/library/v2/<entity>/<int:eid>/tag-preview")
+    def lib2_tag_preview(entity, eid):
+        """Diff of file tags vs lib2 metadata for an album's or artist's tracks."""
+        guard = _guard()
+        if guard:
+            return guard
+        if entity not in ("artists", "albums"):
+            return jsonify({"success": False, "error": "Unsupported entity"}), 400
+        from core.library2 import retag
+        db = get_database()
+        conn = db._get_connection()
+        try:
+            exists = conn.execute(
+                f"SELECT 1 FROM lib2_{entity} WHERE id=?", (eid,)).fetchone()
+            if not exists:
+                return jsonify({"success": False, "error": "Not found"}), 404
+            track_ids = (retag.album_track_ids(conn, eid) if entity == "albums"
+                         else retag.artist_track_ids(conn, eid))
+            truncated = len(track_ids) > retag.MAX_TRACKS
+            preview = retag.tag_preview(db, conn, track_ids)
+        finally:
+            conn.close()
+        return jsonify({
+            "success": True,
+            "tracks": preview,
+            "changed_count": sum(1 for p in preview if p.get("has_changes")),
+            "truncated": truncated,
+        })
+
+    @app.route("/api/library/v2/tags/write", methods=["POST"])
+    def lib2_write_tags():
+        """Write lib2 metadata into the given tracks' file tags (background job).
+
+        Body: ``{"track_ids": [...], "embed_cover": true}``. Poll
+        ``/api/library/v2/jobs/status`` for progress/result.
+        """
+        guard = _guard()
+        if guard:
+            return guard
+        body = request.json or {}
+        track_ids = [int(t) for t in (body.get("track_ids") or []) if t]
+        embed_cover = bool(body.get("embed_cover", True))
+        if not track_ids:
+            return jsonify({"success": False, "error": "No track_ids"}), 400
+        with _job_lock:
+            if _job_state["running"]:
+                return jsonify({"success": False, "error": "A bulk job is already running"}), 409
+            _job_state.update(running=True, kind="retag", current=0,
+                              total=len(track_ids), result=None, error=None,
+                              finished_at=None)
+
+        def _run():
+            import time as _t
+            from core.library2 import retag
+            db = get_database()
+            try:
+                conn = db._get_connection()
+                try:
+                    def _progress(_stage, current, total):
+                        _job_state.update(current=current, total=total)
+                    stats = retag.write_tags(db, conn, track_ids,
+                                             embed_cover=embed_cover,
+                                             progress=_progress)
+                    _job_state.update(result=stats)
+                finally:
+                    conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.error("Library v2 retag failed: %s", e, exc_info=True)
+                _job_state.update(error=str(e))
+            finally:
+                _job_state.update(running=False, finished_at=_t.time())
+
+        threading.Thread(target=_run, name="lib2-retag", daemon=True).start()
+        return jsonify({"success": True, "started": True})
+
     # -- refresh & scan (re-read tags into DB + bust artwork cache) -----------
 
     @app.route("/api/library/v2/<entity>/<int:eid>/refresh", methods=["POST"])

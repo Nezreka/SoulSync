@@ -1,0 +1,87 @@
+"""Phase C re-tag: lib2 → tag_writer db_data shaping, preview, batch write."""
+
+from __future__ import annotations
+
+from core.library2 import retag
+
+
+def _seed_album_with_files(conn, *, path: str | None = "/nope/track.flac"):
+    cur = conn.cursor()
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('Drake')")
+    artist_id = cur.lastrowid
+    cur.execute(
+        """INSERT INTO lib2_albums(primary_artist_id, title, year, release_date,
+               genres, expected_track_count) VALUES(?, 'Views', 2016, '2016-04-29',
+               '["rap","pop"]', 2)""", (artist_id,))
+    album_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_album_artists(album_id, artist_id) VALUES(?,?)",
+                (album_id, artist_id))
+    cur.execute(
+        """INSERT INTO lib2_tracks(album_id, title, track_number, spotify_id)
+           VALUES(?, 'One Dance', 1, 'sp1')""", (album_id,))
+    track_id = cur.lastrowid
+    cur.execute("INSERT INTO lib2_track_artists(track_id, artist_id, position) VALUES(?,?,0)",
+                (track_id, artist_id))
+    # Featured credit → artists_list should appear in db_data.
+    cur.execute("INSERT INTO lib2_artists(name) VALUES('Wizkid')")
+    feat_id = cur.lastrowid
+    cur.execute(
+        "INSERT INTO lib2_track_artists(track_id, artist_id, role, position) "
+        "VALUES(?,?, 'featured', 1)", (track_id, feat_id))
+    if path:
+        cur.execute("INSERT INTO lib2_track_files(track_id, path) VALUES(?,?)",
+                    (track_id, path))
+    conn.commit()
+    return artist_id, album_id, track_id
+
+
+def test_db_data_shape(imported_conn):
+    """The db_data handed to core/tag_writer carries lib2's full metadata."""
+    conn = imported_conn
+    _, album_id, track_id = _seed_album_with_files(conn)
+    row = retag._track_rows(conn, [track_id])[0]
+    data = retag._db_data_for_row(conn, row)
+    assert data["title"] == "One Dance"
+    assert data["album_title"] == "Views"
+    assert data["artist_name"] == "Drake"
+    assert data["track_artist"] == "Drake; Wizkid"
+    assert data["artists_list"] == ["Drake", "Wizkid"]
+    assert data["genres"] == ["rap", "pop"]
+    assert data["release_date"] == "2016-04-29"
+    assert data["track_count"] == 2
+    assert data["spotify_track_id"] == "sp1"
+
+
+def test_preview_reports_missing_file(imported_conn):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn, path=None)
+    out = retag.tag_preview(None, conn, [track_id])
+    assert len(out) == 1
+    assert out[0]["error"] == "No file"
+    assert out[0]["has_changes"] is False
+
+
+def test_preview_reports_unreadable_file(imported_conn):
+    """A path that doesn't exist yields a per-track error, never an exception."""
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)  # /nope/track.flac
+    out = retag.tag_preview(None, conn, [track_id])
+    assert len(out) == 1
+    assert out[0]["error"]
+    assert out[0]["has_changes"] is False
+
+
+def test_write_counts_unreadable_as_failed(imported_conn, legacy_db):
+    conn = imported_conn
+    _, _, track_id = _seed_album_with_files(conn)
+    stats = retag.write_tags(legacy_db, conn, [track_id], embed_cover=False)
+    assert stats["failed"] == 1
+    assert stats["written"] == 0
+    assert stats["errors"][0]["track_id"] == track_id
+
+
+def test_scope_helpers(imported_conn):
+    conn = imported_conn
+    artist_id, album_id, track_id = _seed_album_with_files(conn)
+    assert track_id in retag.album_track_ids(conn, album_id)
+    assert track_id in retag.artist_track_ids(conn, artist_id)

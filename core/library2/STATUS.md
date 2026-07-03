@@ -118,6 +118,22 @@ tests `tests/library2/`.
   and hi-res targets need positive bit-depth evidence. Informative only — the
   pipeline's real quality check remains authoritative at import time.
 
+### Phase C — tag preview / re-tag + maintenance + manual import
+- `retag.py`: per-track diff of file tags vs lib2 metadata (`core/tag_writer.read_file_tags`
+  + `build_tag_diff`) and batch write (`write_tags_to_file` with its placeholder guards).
+  Multi-artist credits from the junction (`artists_list`), source IDs embedded, cover from
+  the **lib2 artwork cache** (never a media server). API: `GET /<entity>/<id>/tag-preview`,
+  `POST /tags/write` (background job, poll `/jobs/status`).
+- UI: **Preview Retag** on the artist toolbar and per album block — Lidarr-style diff
+  table (file → library per field), per-track checkboxes, write with live progress.
+- **Maintenance** modal runs the existing library-wide repair jobs from the artist page
+  (Metadata Gap Fill, Fix Unknown Artist, Album Tag Consistency, Rename/Reorganize,
+  Full Library Retag). Honest about scope: these scan the whole library; per-artist
+  scoping needs job-level support (roadmap).
+- **Manual Import** opens the existing Import page (staging flow) — reuse, not a copy.
+- **Manage Tracks** stays as a deliberate roadmap placeholder modal (per user preference:
+  placeholders document what's left).
+
 ### Artist-page actions (every button is functional)
 - **Monitoring** modal: Monitor all / Monitor missing only / Unmonitor everything
   (background bulk job) + "future releases" (`monitor_new_items` via `/edit`).
@@ -134,12 +150,11 @@ tests `tests/library2/`.
    `watchlist_artists` / `wishlist_tracks` rows it can see. Before multi-profile use,
    pass the active `profile_id` into the import/sync path so Library v2 does not
    leak another profile's wanted/monitored state into the current view.
-2. **Phase C on lib2**: Re-Tag / Preview Re-Tag (reuse `/api/library/.../tag-preview` +
-   `write-tags-batch`), Metadata Gap Fill / Fix Unknown Artist / Album Tag Consistency
-   (scoped `RepairJob.scan`), Manual Import from staging (`core/imports/`), all → `lib2`
-   (their toolbar buttons were removed until then — no dead placeholders).
+2. **Per-artist scope for repair jobs**: the Maintenance modal runs the jobs
+   library-wide; scoping (e.g. gap-fill just this artist) needs a scope parameter in
+   the repair-job base.
 3. **Phase D actions on lib2**: single↔album move/dedup (`single_album_dedup`),
-   Manage Tracks.
+   Manage Tracks (placeholder modal documents this on the page).
 4. **Explicit monitor provenance**: if album-level monitoring must survive re-imports
    independently from track-level wishlist monitoring, add provenance/mode columns
    instead of deriving parent release flags from child tracks.
