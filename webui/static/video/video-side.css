@@ -109,8 +109,10 @@ body[data-side="video"] .status-section {
 }
 
 /* ── Shared pages: show the REAL music page on the video side ───────────── */
-/* For now Settings is shown identically (no hiding of music-only bits yet).
-   The id selector + extra attribute outrank the blanket music-page hide rule. */
+/* The shared Settings page is filtered per side: video-only groups/sections carry
+   data-video-only, music-only ones carry data-music-only (plus the per-tab rules
+   below hide whole music tabs on the video side). The id selector + extra
+   attribute outrank the blanket music-page hide rule. */
 body[data-side="video"][data-video-page="video-settings"] #settings-page {
     display: block !important;
 }
@@ -153,6 +155,13 @@ body[data-side="video"] .settings-group[data-stg="connections"]:not([data-video-
    The video-only ones (folders, video source/hybrid, video quality) replace them.
    The shared "Indexers & Downloaders" tab is NOT hidden — it's identical for both. */
 body[data-side="video"] [data-stg="downloads"]:not([data-video-only]) {
+    display: none !important;
+}
+/* The Quality tab's music sections (quality profile, import checks, conversion,
+   audio verification) are music-specific. The video side shows its OWN quality
+   sections here instead — Video Quality Profile + YouTube Quality, both moved
+   out of Downloads and carrying data-video-only. Hide every music quality bit. */
+body[data-side="video"] [data-stg="quality"]:not([data-video-only]) {
     display: none !important;
 }
 
